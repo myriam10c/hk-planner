@@ -387,11 +387,7 @@ body { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .error-state button:active { transform:scale(0.95); }
 
 /* ===== TOAST — Glass notification ===== */
-.toast { position:fixed; top:24px; left:50%; transform:translateX(-50%) translateY(-80px); background:white; color:var(--text); padding:12px 24px; border-radius:var(--radius-md); font-size:14px; font-weight:700; z-index:300; opacity:0; transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1); pointer-events:none; box-shadow:0 8px 32px rgba(0,0,0,0.12); border:1px solid rgba(0,0,0,0.08); }
-.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
-.toast.success { background:rgba(16,185,129,0.95); color:white; border-color:transparent; }
-.toast.error { background:rgba(239,68,68,0.95); color:white; border-color:transparent; }
-.toast.info { background:rgba(37,99,235,0.95); color:white; border-color:transparent; }
+/* Legacy .toast replaced by .toast-stack + .toast-item (see below) */
 .undo-toast { position:fixed; bottom:90px; left:50%; transform:translateX(-50%) translateY(80px); background:#1e1b4b; color:white; padding:12px 20px; border-radius:var(--radius-md); font-size:14px; font-weight:600; z-index:300; opacity:0; transition:all 0.3s ease; pointer-events:none; display:flex; align-items:center; gap:16px; box-shadow:0 8px 32px rgba(0,0,0,0.25); }
 .undo-toast.show { opacity:1; transform:translateX(-50%) translateY(0); pointer-events:auto; }
 .undo-toast button { background:var(--primary); color:white; border:none; border-radius:6px; padding:6px 16px; font-size:13px; font-weight:800; cursor:pointer; letter-spacing:0.5px; }
@@ -725,12 +721,66 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 .btn-sm.btn-warn { color:var(--orange,#f59e0b); }
 .dash-section { margin-bottom:20px; background:var(--card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border); }
 .dash-section h3 { font-size:14px; margin-bottom:12px; color:var(--text); }
-.heatmap-table { width:100%; border-collapse:collapse; font-size:13px; }
-.heatmap-table th { text-align:left; padding:8px 10px; font-weight:600; color:var(--text2); border-bottom:1px solid var(--border); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
-.heatmap-table td { padding:10px; border-bottom:1px solid var(--border); }
-.heatmap-name { font-weight:600; }
-.score-pill { display:inline-block; color:white; padding:2px 10px; border-radius:10px; font-weight:700; font-size:12px; min-width:36px; text-align:center; }
 .urgent { color:var(--red); font-weight:700; }
+/* Dashboard tabs */
+.dash-tabs { display:flex; gap:6px; margin-bottom:12px; padding:4px; background:var(--bg); border-radius:var(--radius-md); border:1px solid var(--border); }
+.dash-tab { flex:1; background:transparent; border:none; padding:10px 8px; border-radius:var(--radius-sm); font-size:13px; font-weight:600; color:var(--text2); cursor:pointer; transition:var(--transition); }
+.dash-tab:hover { color:var(--text); }
+.dash-tab.active { background:var(--card); color:var(--primary); box-shadow:var(--card-shadow); }
+/* Heatmap cards */
+.heatmap-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:10px; }
+@media (max-width:640px){ .heatmap-grid { grid-template-columns:1fr; } }
+.heatmap-card { padding:14px; border-radius:var(--radius-md); border:1px solid var(--border); }
+.hm-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px; }
+.hm-name { font-weight:700; font-size:13px; flex:1; line-height:1.3; }
+.hm-score { color:white; padding:4px 10px; border-radius:var(--radius-sm); font-weight:800; font-size:14px; min-width:42px; text-align:center; }
+.hm-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(60px, 1fr)); gap:8px; }
+.hm-stat { display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 4px; background:rgba(255,255,255,0.6); border-radius:var(--radius-sm); }
+.hm-stat-icon { font-size:14px; }
+.hm-stat-val { font-weight:700; font-size:14px; color:var(--text); }
+.hm-stat-val.urgent { color:var(--red); }
+.hm-stat-lbl { font-size:9px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:0.3px; }
+/* Accordion sections (extra cleaning modal) */
+.acc-section { border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden; }
+.acc-head { width:100%; display:flex; justify-content:space-between; align-items:center; background:var(--bg2); border:none; padding:12px 14px; cursor:pointer; font-family:inherit; }
+.acc-head:hover { background:var(--bg); }
+.acc-title { font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px; }
+.acc-badge { background:var(--primary-light); color:var(--primary); padding:2px 8px; border-radius:var(--radius-sm); font-size:11px; font-weight:700; }
+.acc-chevron { font-size:10px; color:var(--text2); transition:transform 0.2s; }
+.acc-chevron.open { transform:rotate(180deg); }
+.acc-body { padding:14px; display:flex; flex-direction:column; gap:12px; animation:accOpen 0.15s ease; }
+@keyframes accOpen { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:translateY(0)} }
+/* Onboarding */
+.onb-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px; }
+.onb-card { background:var(--card); border-radius:var(--radius-lg); padding:40px 24px 24px; max-width:380px; width:100%; text-align:center; box-shadow:0 24px 64px rgba(0,0,0,0.4); animation:onbPop 0.3s cubic-bezier(0.22,1,0.36,1); }
+@keyframes onbPop { from{opacity:0;transform:scale(0.9)} to{opacity:1;transform:scale(1)} }
+.onb-icon { font-size:64px; margin-bottom:18px; }
+.onb-title { font-size:22px; font-weight:800; margin-bottom:10px; color:var(--text); }
+.onb-text { font-size:14px; color:var(--text2); line-height:1.6; margin-bottom:24px; }
+.onb-dots { display:flex; justify-content:center; gap:6px; margin-bottom:24px; }
+.onb-dot { width:8px; height:8px; border-radius:50%; background:var(--border); transition:var(--transition); }
+.onb-dot.active { background:var(--primary); width:20px; border-radius:4px; }
+.onb-footer { display:flex; gap:10px; justify-content:space-between; }
+.onb-footer .btn-primary, .onb-footer .btn-secondary { flex:1; padding:12px; }
+/* Toast stack */
+.toast-stack { position:fixed; bottom:calc(90px + env(safe-area-inset-bottom)); right:16px; z-index:10000; display:flex; flex-direction:column-reverse; gap:8px; pointer-events:none; max-width:calc(100vw - 32px); }
+.toast-item { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-md); padding:10px 14px; display:flex; align-items:center; gap:10px; box-shadow:0 8px 24px rgba(0,0,0,0.12); pointer-events:auto; cursor:pointer; animation:toastSlide 0.22s cubic-bezier(0.22,1,0.36,1); max-width:320px; font-size:13px; font-weight:500; }
+@keyframes toastSlide { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
+.toast-icon { font-size:16px; }
+.toast-msg { color:var(--text); flex:1; }
+.toast-success { border-left:3px solid var(--green); }
+.toast-error { border-left:3px solid var(--red); }
+.toast-warning { border-left:3px solid var(--orange); }
+.toast-info { border-left:3px solid var(--blue); }
+/* Skeleton loaders */
+.skeleton { background:linear-gradient(90deg, var(--bg) 0%, var(--bg2) 50%, var(--bg) 100%); background-size:200% 100%; animation:skeletonPulse 1.4s ease-in-out infinite; border-radius:var(--radius-sm); }
+@keyframes skeletonPulse { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+.skel-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-md); padding:14px; margin-bottom:10px; display:flex; align-items:center; gap:12px; }
+.skel-circle { width:40px; height:40px; border-radius:50%; flex-shrink:0; }
+.skel-line { height:12px; margin:4px 0; }
+.skel-line.short { width:40%; }
+.skel-line.med { width:70%; }
+.skel-line.long { width:95%; }
 .empty { color:var(--text3); text-align:center; padding:20px; font-size:13px; }
 /* Extra cleaning modal */
 .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; display:flex; align-items:flex-start; justify-content:center; padding:50px 16px; overflow-y:auto; }
@@ -757,7 +807,6 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 </head>
 <body>
 <div class="bg-orbs"><div class="orb-3"></div><div class="orb-4"></div><div class="orb-5"></div></div><div class="bg-noise"></div><div id="app"></div><div id="cancelModal"></div>
-<div id="toast" class="toast"></div>
 <div id="modal"></div>
 <div id="cmdk" style="display:none;"></div>
 <input type="file" id="photoInput" accept="image/*" style="display:none" />
@@ -801,6 +850,8 @@ let checklistCache={},notesCache={},photosCache={};
 let currentTab='planner',filterCleaner=null;
 let dashMonth=new Date().getMonth(),dashYear=new Date().getFullYear();
 let dashData=null,dashLoading=false;
+let dashSection='ops'; // 'ops' | 'revenue' | 'properties'
+function setDashSection(s){ dashSection=s; render(); if(s==='properties') setTimeout(loadPropertyHeatmap,50); }
 let searchOpen=false;
 let cancelled={}; // {key: {reason,cancelled_by,cancelled_at}}
 let swipeState=null; // {key,startX,startY,el,swiping}
@@ -884,11 +935,65 @@ en:{
 };
 function t(key){return T.en[key]||key;}
 
-// Toast (#5)
-function toast(msg,type){
-  const el=document.getElementById('toast');
-  el.textContent=msg; el.className='toast'+(type?' '+type:'')+' show';
-  setTimeout(()=>el.classList.remove('show'),2000);
+// Toast (#5 + #11 stack)
+let toastQueue=[]; // {id, msg, type}
+let toastId=0;
+function toast(msg, type){
+  const id = ++toastId;
+  toastQueue.push({id, msg, type: type||'info'});
+  if(toastQueue.length > 3) toastQueue.shift(); // max 3
+  renderToasts();
+  setTimeout(()=>dismissToast(id), 3500);
+}
+function dismissToast(id){
+  toastQueue = toastQueue.filter(t=>t.id!==id);
+  renderToasts();
+}
+function renderToasts(){
+  let el = document.getElementById('toastStack');
+  if(!el){ el = document.createElement('div'); el.id='toastStack'; el.className='toast-stack'; document.body.appendChild(el); }
+  const iconMap = {success:'✅', error:'❌', info:'💬', warning:'⚠️'};
+  el.innerHTML = toastQueue.map(t=>
+    '<div class="toast-item toast-'+t.type+'" onclick="dismissToast('+t.id+')">'+
+      '<span class="toast-icon">'+(iconMap[t.type]||'💬')+'</span>'+
+      '<span class="toast-msg">'+esc(t.msg)+'</span>'+
+    '</div>'
+  ).join('');
+}
+
+// #10 Onboarding (cleaner first-login tutorial)
+let onboardingStep=0;
+let onboardingOpen=false;
+function openOnboarding(){ onboardingOpen=true; onboardingStep=0; renderOnboarding(); }
+function closeOnboarding(){ onboardingOpen=false; localStorage.setItem('onboardingSeen','true'); renderOnboarding(); }
+function nextOnboarding(){
+  if(onboardingStep<2){ onboardingStep++; renderOnboarding(); }
+  else closeOnboarding();
+}
+function renderOnboarding(){
+  let el = document.getElementById('onboarding');
+  if(!el){ el=document.createElement('div'); el.id='onboarding'; document.body.appendChild(el); }
+  if(!onboardingOpen){ el.innerHTML=''; return; }
+  const slides = [
+    {icon:'👋',title:'Bienvenue !',text:'Voici tes ménages du jour. Tape sur une carte pour voir le détail de la réservation.'},
+    {icon:'👆',title:'Swipe pour annuler',text:'Glisse une carte vers la droite pour signaler que le ménage ne peut pas se faire (guest encore là, pas de clé, etc.)'},
+    {icon:'⏱️',title:'Chrono & photos',text:'Démarre le chrono au début, mets en pause pendant une attente, et ajoute des photos avant/après pour attester du travail fait.'}
+  ];
+  const s = slides[onboardingStep];
+  el.innerHTML = '<div class="onb-overlay">'+
+    '<div class="onb-card">'+
+      '<div class="onb-icon">'+s.icon+'</div>'+
+      '<div class="onb-title">'+s.title+'</div>'+
+      '<div class="onb-text">'+s.text+'</div>'+
+      '<div class="onb-dots">'+
+        slides.map((_,i)=>'<span class="onb-dot'+(i===onboardingStep?' active':'')+'"></span>').join('')+
+      '</div>'+
+      '<div class="onb-footer">'+
+        '<button class="btn-secondary" onclick="closeOnboarding()">Passer</button>'+
+        '<button class="btn-primary" onclick="nextOnboarding()">'+(onboardingStep<2?'Suivant →':'C\'est parti !')+'</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
 }
 
 // Confetti (#5)
@@ -1972,6 +2077,11 @@ async function cleanerLogin(){
     if(cleanerToken) localStorage.setItem('cleanerToken',cleanerToken);
     toast('Welcome '+res.cleaner.name+'!','success');
     haptic('heavy');
+    // #10 First login onboarding
+    const hasSeenOnboarding = localStorage.getItem('onboardingSeen');
+    if(!hasSeenOnboarding){
+      setTimeout(openOnboarding, 500);
+    }
     fetchAll();
   } else {
     const errEl=document.getElementById('pinError');
@@ -2069,9 +2179,17 @@ function renderPinScreen(){
 function renderPlanner(){
   const range=getWeekRange();
   if(loading){
+    const skeletons='<div class="container">'+Array(5).fill('').map(()=>
+      '<div class="skel-card">'+
+        '<div class="skeleton skel-circle"></div>'+
+        '<div style="flex:1">'+
+          '<div class="skeleton skel-line med"></div>'+
+          '<div class="skeleton skel-line short"></div>'+
+        '</div>'+
+      '</div>').join('')+'</div>';
     document.getElementById('app').innerHTML=
       '<div class="header"><h1>Housekeeping Planner</h1>'+
-      '<div class="subtitle">Loading...</div></div><div class="loading"><div class="spinner"></div></div>'+renderBottomNav();return;
+      '<div class="subtitle">Loading...</div></div>'+skeletons+renderBottomNav();return;
   }
   if(error){
     document.getElementById('app').innerHTML=
@@ -2395,10 +2513,18 @@ function renderDashboard(){
     '<button onclick="exportCsv(\'maintenance\')" class="btn-export">💸 Export maintenance</button>'+
     '<button onclick="exportCsv(\'payroll\')" class="btn-export">👷 Export paie</button>'+
     '</div>';
-  h+='<div id="heatmapSection" class="dash-section"><h3>🗺️ Santé des propriétés</h3><div id="heatmapContent">Chargement...</div></div>';
   h+='<div class="month-selector"><button onclick="changeDashMonth(-1)">‹</button><h3>'+MONTH_NAMES[dashMonth]+' '+dashYear+'</h3><button onclick="changeDashMonth(1)">›</button></div>';
+  // #7 Dashboard tabs (Opérations / Revenus / Propriétés)
+  h+='<div class="dash-tabs">'+
+    '<button class="dash-tab'+(dashSection==='ops'?' active':'')+'" onclick="setDashSection(\'ops\')">🧹 Opérations</button>'+
+    '<button class="dash-tab'+(dashSection==='revenue'?' active':'')+'" onclick="setDashSection(\'revenue\')">💰 Revenus</button>'+
+    '<button class="dash-tab'+(dashSection==='properties'?' active':'')+'" onclick="setDashSection(\'properties\')">🏠 Propriétés</button>'+
+  '</div>';
 
-  if(dashLoading){h+='<div class="dash-card" style="text-align:center;padding:40px"><div class="spinner"></div></div>';h+='</div>'+renderBottomNav();document.getElementById('app').innerHTML=h;return;}
+  if(dashLoading){
+    const skeletons='<div>'+Array(5).fill('').map(()=>'<div class="skel-card"><div class="skeleton skel-circle"></div><div style="flex:1"><div class="skeleton skel-line med"></div><div class="skeleton skel-line short"></div></div></div>').join('')+'</div>';
+    h+=skeletons;h+='</div>'+renderBottomNav();document.getElementById('app').innerHTML=h;return;
+  }
   if(!dashData){h+='</div>'+renderBottomNav();document.getElementById('app').innerHTML=h;loadDashMonth();return;}
 
   const mRes=dashData.reservations,mDone=dashData.done,mAssign=dashData.assignments,mTimers=dashData.timers||{};
@@ -2407,52 +2533,7 @@ function renderDashboard(){
   const revDone=mRes.reduce((s,r)=>mDone[keyFor(r)]?s+getRevenueFee(r):s,0);
   const revPotential=mRes.reduce((s,r)=>s+getRevenueFee(r),0);
 
-  // Real-time KPIs from backend
-  if(dashKPIs){
-    h+='<div class="dash-card" style="border:1px solid rgba(233,69,96,0.15);overflow:hidden;position:relative">';
-    h+='<div style="position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent-gradient)"></div>';
-    h+='<h3 style="margin-bottom:14px;margin-top:4px">⚡ '+t('performance')+' KPIs</h3>';
-    h+='<div class="dash-stat-row" style="flex-wrap:wrap">';
-    h+='<div class="dash-stat" style="min-width:70px;border-left:3px solid var(--primary)"><div class="ds-num" style="color:var(--primary)">'+dashKPIs.avgCleaningTime+'<span style="font-size:11px;font-weight:600">min</span></div><div class="ds-label">'+t('avgCleanTime')+'</div></div>';
-    h+='<div class="dash-stat" style="min-width:70px;border-left:3px solid var(--orange)"><div class="ds-num" style="color:var(--orange)">'+dashKPIs.openMaintenanceTickets+'</div><div class="ds-label">'+t('openTickets')+'</div></div>';
-    h+='<div class="dash-stat" style="min-width:70px;border-left:3px solid var(--green)"><div class="ds-num" style="color:var(--green)">'+dashKPIs.resolvedThisMonth+'</div><div class="ds-label">'+t('resolvedMonth')+'</div></div>';
-    h+='<div class="dash-stat" style="min-width:70px;border-left:3px solid #6366f1"><div class="ds-num" style="color:#6366f1">'+(dashKPIs.avgResolutionHours||0)+'<span style="font-size:11px;font-weight:600">h</span></div><div class="ds-label">'+t('avgResolution')+'</div></div>';
-    h+='</div>';
-    // 7-day trend mini chart
-    if(dashKPIs.last7DaysCompletions&&dashKPIs.last7DaysCompletions.length>0){
-      h+='<div style="margin-top:14px;padding:12px;background:rgba(0,0,0,0.02);border-radius:14px"><div style="font-size:12px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:6px">📈 '+t('trend7Days')+'</div>';
-      h+='<div style="display:flex;align-items:end;gap:6px;height:60px">';
-      const maxComp=Math.max(...dashKPIs.last7DaysCompletions.map(d=>d.completions),1);
-      dashKPIs.last7DaysCompletions.forEach(d=>{
-        const pct=Math.max(6,d.completions/maxComp*100);
-        const dayLabel=new Date(d.date+'T00:00:00').toLocaleDateString('en',{weekday:'short'}).charAt(0);
-        h+='<div style="flex:1;text-align:center"><div style="height:'+pct+'%;min-height:4px;background:var(--accent-gradient);border-radius:6px 6px 0 0;transition:height 0.5s cubic-bezier(0.4,0,0.2,1);box-shadow:0 -2px 8px rgba(233,69,96,0.2)" title="'+d.date+': '+d.completions+'"></div>';
-        h+='<div style="font-size:9px;color:var(--text3);margin-top:4px;font-weight:700">'+dayLabel+'</div>';
-        h+='<div style="font-size:10px;font-weight:800">'+d.completions+'</div></div>';
-      });
-      h+='</div></div>';
-    }
-    // Cleaner leaderboard
-    if(dashKPIs.cleanerPerformance&&dashKPIs.cleanerPerformance.length>0){
-      h+='<div style="margin-top:14px"><div style="font-size:12px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:6px">🏆 '+t('cleanerLeaderboard')+'</div>';
-      const sorted=[...dashKPIs.cleanerPerformance].sort((a,b)=>b.totalCleanings-a.totalCleanings);
-      sorted.forEach((cp,i)=>{
-        const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
-        const bgColor=i===0?'var(--primary-light)':i===1?'var(--orange-light)':i===2?'var(--green-light)':'transparent';
-        h+='<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;margin-bottom:4px;background:'+bgColor+';font-size:13px;transition:all 0.2s">';
-        h+='<span style="width:24px;text-align:center;font-size:16px">'+(medal||('<span style="font-size:12px;font-weight:800;color:var(--text3)">'+(i+1)+'</span>'))+'</span>';
-        h+='<span class="cleaner-dot" style="background:'+cp.color+';width:10px;height:10px"></span>';
-        h+='<span style="flex:1;font-weight:700">'+esc(cp.name)+'</span>';
-        h+='<span style="color:var(--text2);font-weight:600">'+cp.totalCleanings+' cleanings</span>';
-        if(cp.avgTime)h+='<span style="color:var(--primary);font-weight:800;font-size:12px">~'+cp.avgTime+'min</span>';
-        h+='</div>';
-      });
-      h+='</div>';
-    }
-    h+='</div>';
-  }
-
-  // #15 Export buttons
+  // #15 Export buttons (always visible)
   h+='<div class="export-btns"><button class="export-btn" onclick="exportExcel()">📊 Export Excel</button><button class="export-btn" onclick="exportPDF()">📄 Export PDF</button>';
   if(!cleanerMode){
     // Invoice section — only past months
@@ -2464,14 +2545,8 @@ function renderDashboard(){
   }
   h+='</div>';
 
-  // Monthly Overview
-  h+='<div class="dash-card"><h3>📈 '+MONTH_NAMES[dashMonth]+' Overview</h3><div class="dash-stat-row">'+
-    '<div class="dash-stat"><div class="ds-num">'+total+'</div><div class="ds-label">Total</div></div>'+
-    '<div class="dash-stat"><div class="ds-num">'+totalDone+'</div><div class="ds-label">Done</div></div>'+
-    '<div class="dash-stat"><div class="ds-num">'+(total-totalDone)+'</div><div class="ds-label">Left</div></div>'+
-    '<div class="dash-stat"><div class="ds-num">'+totalAssigned+'</div><div class="ds-label">Assigned</div></div></div></div>';
-
-  // Extra cleanings revenue for the month
+  // Pre-compute for multiple tabs
+  const mDates=[...new Set(mRes.map(r=>r.co))].sort();
   const monthPrefix=dashYear+'-'+String(dashMonth+1).padStart(2,'0');
   const monthExtras=(extraCleanings||[]).filter(e=>String(e.cleaning_date||'').startsWith(monthPrefix));
   const extrasDone=monthExtras.filter(e=>{const k=e.reservation_key;return e.status!=='cancelled'&&(done[k]||e.status==='done');});
@@ -2479,105 +2554,167 @@ function renderDashboard(){
   const extrasBilledDone=extrasDone.reduce((s,e)=>s+Number(e.price_billed||0),0);
   const extrasBilledPending=extrasPending.reduce((s,e)=>s+Number(e.price_billed||0),0);
   const extrasCleanerCost=extrasDone.reduce((s,e)=>s+Number(e.cleaner_price||0),0);
-  if(monthExtras.length>0){
-    h+='<div class="dash-card"><h3>➕ Ménages Extras — '+MONTH_NAMES[dashMonth]+'</h3><div class="dash-stat-row">'+
-      '<div class="dash-stat"><div class="ds-num">'+monthExtras.length+'</div><div class="ds-label">Total</div></div>'+
-      '<div class="dash-stat"><div class="ds-num">'+extrasDone.length+'</div><div class="ds-label">Faits</div></div>'+
-      '<div class="dash-stat"><div class="ds-num" style="color:var(--green)">'+Math.round(extrasBilledDone)+'</div><div class="ds-label">Facturé AED (fait)</div></div>'+
-      '<div class="dash-stat"><div class="ds-num" style="color:var(--text2)">'+Math.round(extrasBilledPending)+'</div><div class="ds-label">À venir AED</div></div></div>';
-    if(extrasCleanerCost>0){
-      const margin=extrasBilledDone-extrasCleanerCost;
-      h+='<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)">'+
-        'Coût cleaners: <strong>'+Math.round(extrasCleanerCost)+' AED</strong> · '+
-        'Marge: <strong style="color:'+(margin>=0?'var(--green)':'var(--red)')+'">'+Math.round(margin)+' AED</strong>'+
-        '</div>';
+
+  // ============ TAB: OPS ============
+  if(dashSection==='ops'){
+    // Monthly Overview
+    h+='<div class="dash-card"><h3>📈 '+MONTH_NAMES[dashMonth]+' Overview</h3><div class="dash-stat-row">'+
+      '<div class="dash-stat"><div class="ds-num">'+total+'</div><div class="ds-label">Total</div></div>'+
+      '<div class="dash-stat"><div class="ds-num">'+totalDone+'</div><div class="ds-label">Done</div></div>'+
+      '<div class="dash-stat"><div class="ds-num">'+(total-totalDone)+'</div><div class="ds-label">Left</div></div>'+
+      '<div class="dash-stat"><div class="ds-num">'+totalAssigned+'</div><div class="ds-label">Assigned</div></div></div></div>';
+
+    // Real-time KPIs from backend
+    if(dashKPIs){
+      h+='<div class="dash-card" style="border:1px solid rgba(233,69,96,0.15);overflow:hidden;position:relative">';
+      h+='<div style="position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent-gradient)"></div>';
+      h+='<h3 style="margin-bottom:14px;margin-top:4px">⚡ '+t('performance')+' KPIs</h3>';
+      h+='<div class="dash-stat-row" style="flex-wrap:wrap">';
+      h+='<div class="dash-stat" style="min-width:70px;border-left:3px solid var(--primary)"><div class="ds-num" style="color:var(--primary)">'+dashKPIs.avgCleaningTime+'<span style="font-size:11px;font-weight:600">min</span></div><div class="ds-label">'+t('avgCleanTime')+'</div></div>';
+      h+='<div class="dash-stat" style="min-width:70px;border-left:3px solid var(--orange)"><div class="ds-num" style="color:var(--orange)">'+dashKPIs.openMaintenanceTickets+'</div><div class="ds-label">'+t('openTickets')+'</div></div>';
+      h+='<div class="dash-stat" style="min-width:70px;border-left:3px solid var(--green)"><div class="ds-num" style="color:var(--green)">'+dashKPIs.resolvedThisMonth+'</div><div class="ds-label">'+t('resolvedMonth')+'</div></div>';
+      h+='<div class="dash-stat" style="min-width:70px;border-left:3px solid #6366f1"><div class="ds-num" style="color:#6366f1">'+(dashKPIs.avgResolutionHours||0)+'<span style="font-size:11px;font-weight:600">h</span></div><div class="ds-label">'+t('avgResolution')+'</div></div>';
+      h+='</div>';
+      // 7-day trend mini chart
+      if(dashKPIs.last7DaysCompletions&&dashKPIs.last7DaysCompletions.length>0){
+        h+='<div style="margin-top:14px;padding:12px;background:rgba(0,0,0,0.02);border-radius:14px"><div style="font-size:12px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:6px">📈 '+t('trend7Days')+'</div>';
+        h+='<div style="display:flex;align-items:end;gap:6px;height:60px">';
+        const maxComp=Math.max(...dashKPIs.last7DaysCompletions.map(d=>d.completions),1);
+        dashKPIs.last7DaysCompletions.forEach(d=>{
+          const pct=Math.max(6,d.completions/maxComp*100);
+          const dayLabel=new Date(d.date+'T00:00:00').toLocaleDateString('en',{weekday:'short'}).charAt(0);
+          h+='<div style="flex:1;text-align:center"><div style="height:'+pct+'%;min-height:4px;background:var(--accent-gradient);border-radius:6px 6px 0 0;transition:height 0.5s cubic-bezier(0.4,0,0.2,1);box-shadow:0 -2px 8px rgba(233,69,96,0.2)" title="'+d.date+': '+d.completions+'"></div>';
+          h+='<div style="font-size:9px;color:var(--text3);margin-top:4px;font-weight:700">'+dayLabel+'</div>';
+          h+='<div style="font-size:10px;font-weight:800">'+d.completions+'</div></div>';
+        });
+        h+='</div></div>';
+      }
+      // Cleaner leaderboard
+      if(dashKPIs.cleanerPerformance&&dashKPIs.cleanerPerformance.length>0){
+        h+='<div style="margin-top:14px"><div style="font-size:12px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:6px">🏆 '+t('cleanerLeaderboard')+'</div>';
+        const sorted=[...dashKPIs.cleanerPerformance].sort((a,b)=>b.totalCleanings-a.totalCleanings);
+        sorted.forEach((cp,i)=>{
+          const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+          const bgColor=i===0?'var(--primary-light)':i===1?'var(--orange-light)':i===2?'var(--green-light)':'transparent';
+          h+='<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;margin-bottom:4px;background:'+bgColor+';font-size:13px;transition:all 0.2s">';
+          h+='<span style="width:24px;text-align:center;font-size:16px">'+(medal||('<span style="font-size:12px;font-weight:800;color:var(--text3)">'+(i+1)+'</span>'))+'</span>';
+          h+='<span class="cleaner-dot" style="background:'+cp.color+';width:10px;height:10px"></span>';
+          h+='<span style="flex:1;font-weight:700">'+esc(cp.name)+'</span>';
+          h+='<span style="color:var(--text2);font-weight:600">'+cp.totalCleanings+' cleanings</span>';
+          if(cp.avgTime)h+='<span style="color:var(--primary);font-weight:800;font-size:12px">~'+cp.avgTime+'min</span>';
+          h+='</div>';
+        });
+        h+='</div>';
+      }
+      h+='</div>';
     }
-    h+='</div>';
-  }
 
-  // Revenue with visual gauge
-  const revPct=revPotential>0?Math.round(revDone/revPotential*100):0;
-  h+='<div class="dash-card"><h3>💰 Cleaning Fees</h3>';
-  h+='<div style="display:flex;align-items:center;gap:16px;margin:10px 0">';
-  // Revenue gauge circle
-  h+='<div style="position:relative;width:80px;height:80px;flex-shrink:0">';
-  h+='<svg viewBox="0 0 36 36" style="width:80px;height:80px;transform:rotate(-90deg)">';
-  h+='<circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--border)" stroke-width="3"/>';
-  h+='<circle cx="18" cy="18" r="15.9" fill="none" stroke="url(#revGrad)" stroke-width="3" stroke-linecap="round" stroke-dasharray="'+revPct+' '+(100-revPct)+'" style="transition:stroke-dasharray 1s cubic-bezier(0.4,0,0.2,1)"/>';
-  h+='<defs><linearGradient id="revGrad"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#34d399"/></linearGradient></defs>';
-  h+='</svg>';
-  h+='<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><span style="font-size:16px;font-weight:900;color:var(--green)">'+revPct+'%</span></div></div>';
-  // Revenue numbers
-  h+='<div style="flex:1"><div style="font-size:22px;font-weight:900;color:var(--green)">'+revDone.toLocaleString()+' <span style="font-size:12px;font-weight:600">AED</span></div>';
-  h+='<div style="font-size:11px;color:var(--text3)">of '+revPotential.toLocaleString()+' AED potential</div>';
-  // Type breakdown mini
-  const revByType={};mRes.forEach(r=>{const type=getUnitType(r.listingId);if(!revByType[type])revByType[type]={count:0,rev:0};revByType[type].count++;revByType[type].rev+=getRevenueFee(r);});
-  h+='<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">';
-  const typeColors={'Studio':'var(--primary)','1 BR':'var(--orange)','2 BR':'#6366f1','3 BR':'var(--green)'};
-  Object.entries(revByType).sort((a,b)=>b[1].rev-a[1].rev).forEach(([type,d])=>{
-    h+='<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:'+(typeColors[type]||'var(--border)')+'15;color:'+(typeColors[type]||'var(--text2)')+'">'+type+': '+d.count+'×'+getCleaningFee(mRes.find(r=>getUnitType(r.listingId)===type))+'</span>';
-  });
-  h+='</div></div></div></div>';
+    // Per cleaner with chart
+    if(cleaners.length>0){
+      h+='<div class="dash-card"><h3>👥 Per Cleaner</h3><div class="chart-container"><canvas id="cleanerChart"></canvas></div>';
+      cleaners.forEach(c=>{
+        const assigned=mRes.filter(r=>mAssign[keyFor(r)]===c.id).length;
+        const cdone=mRes.filter(r=>mAssign[keyFor(r)]===c.id&&mDone[keyFor(r)]).length;
+        const cRev=mRes.filter(r=>mAssign[keyFor(r)]===c.id).reduce((s,r)=>s+getRevenueFee(r),0);
+        const cTimers=mRes.filter(r=>mAssign[keyFor(r)]===c.id&&mTimers[keyFor(r)]&&mTimers[keyFor(r)].duration_minutes).map(r=>mTimers[keyFor(r)].duration_minutes);
+        const avgTime=cTimers.length>0?Math.round(cTimers.reduce((a,b)=>a+b,0)/cTimers.length):0;
+        const pct=assigned>0?Math.round(cdone/assigned*100):0;
+        h+='<div class="cleaner-stat-row"><div class="cs-name"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+(avgTime?' <span style="font-size:10px;color:var(--text3)">~'+avgTime+'min</span>':'')+'</div>'+
+          '<div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:'+c.color+'"></div></div>'+
+          '<div class="cs-count">'+cdone+'/'+assigned+' · '+cRev.toLocaleString()+' AED</div></div>';
+      });
+      h+='</div>';
+    }
 
-  // Revenue chart (#4)
-  h+='<div class="dash-card"><h3>📉 Daily Revenue</h3><div class="chart-container"><canvas id="revenueChart"></canvas></div></div>';
-
-  // By Property Type
-  const byType={};
-  mRes.forEach(r=>{const label=getUnitType(r.listingId);if(!byType[label])byType[label]=[];byType[label].push(r);});
-  h+='<div class="dash-card"><h3>🏠 By Type</h3>';
-  for(const[type,list]of Object.entries(byType).sort((a,b)=>a[0].localeCompare(b[0]))){
-    const d=list.filter(r=>mDone[keyFor(r)]).length;
-    const rev=list.reduce((s,r)=>s+getRevenueFee(r),0);
-    const pct=list.length>0?Math.round(d/list.length*100):0;
-    h+='<div class="cleaner-stat-row"><div class="cs-name">'+type+'</div><div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:var(--primary)"></div></div><div class="cs-count">'+d+'/'+list.length+' · '+rev.toLocaleString()+' AED</div></div>';
-  }
-  h+='</div>';
-
-  // Owner Report per property (#18 - Manager only)
-  h+='<div class="dash-card"><h3>📄 Property Reports</h3><div style="font-size:11px;color:var(--text3);margin-bottom:8px">Generate per-property cleaning report PDF</div>';
-  const reportListings={};mRes.forEach(r=>{if(r.listingId&&!reportListings[r.listingId])reportListings[r.listingId]={name:r.listing,count:0};if(reportListings[r.listingId])reportListings[r.listingId].count++;});
-  Object.entries(reportListings).sort((a,b)=>b[1].count-a[1].count).forEach(([lid,info])=>{
-    h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><div style="font-size:12px;font-weight:600">'+esc(info.name)+' <span style="color:var(--text3);font-weight:400">('+info.count+')</span></div>'+
-      '<button class="export-btn" onclick="generateOwnerReport(\''+lid+'\')">📄 PDF Report</button></div>';
-  });
-  h+='</div>';
-
-  // Per cleaner with chart (#4)
-  if(cleaners.length>0){
-    h+='<div class="dash-card"><h3>👥 Per Cleaner</h3><div class="chart-container"><canvas id="cleanerChart"></canvas></div>';
-    cleaners.forEach(c=>{
-      const assigned=mRes.filter(r=>mAssign[keyFor(r)]===c.id).length;
-      const cdone=mRes.filter(r=>mAssign[keyFor(r)]===c.id&&mDone[keyFor(r)]).length;
-      const cRev=mRes.filter(r=>mAssign[keyFor(r)]===c.id).reduce((s,r)=>s+getRevenueFee(r),0);
-      // Avg timer (#12)
-      const cTimers=mRes.filter(r=>mAssign[keyFor(r)]===c.id&&mTimers[keyFor(r)]&&mTimers[keyFor(r)].duration_minutes).map(r=>mTimers[keyFor(r)].duration_minutes);
-      const avgTime=cTimers.length>0?Math.round(cTimers.reduce((a,b)=>a+b,0)/cTimers.length):0;
-      const pct=assigned>0?Math.round(cdone/assigned*100):0;
-      h+='<div class="cleaner-stat-row"><div class="cs-name"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+(avgTime?' <span style="font-size:10px;color:var(--text3)">~'+avgTime+'min</span>':'')+'</div>'+
-        '<div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:'+c.color+'"></div></div>'+
-        '<div class="cs-count">'+cdone+'/'+assigned+' · '+cRev.toLocaleString()+' AED</div></div>';
+    // Per day
+    h+='<div class="dash-card"><h3>📅 Per Day</h3>';
+    mDates.forEach(d=>{
+      const dayRes=mRes.filter(r=>r.co===d),dc=dayRes.filter(r=>mDone[keyFor(r)]).length;
+      const pct=dayRes.length>0?Math.round(dc/dayRes.length*100):0;
+      const today=new Date().toISOString().split('T')[0];
+      h+='<div class="cleaner-stat-row"><div class="cs-name">'+formatDate(d)+(d===today?' 🟢':'')+'</div>'+
+        '<div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:var(--primary)"></div></div><div class="cs-count">'+dc+'/'+dayRes.length+'</div></div>';
     });
     h+='</div>';
   }
 
-  // Per day
-  const mDates=[...new Set(mRes.map(r=>r.co))].sort();
-  h+='<div class="dash-card"><h3>📅 Per Day</h3>';
-  mDates.forEach(d=>{
-    const dayRes=mRes.filter(r=>r.co===d),dc=dayRes.filter(r=>mDone[keyFor(r)]).length;
-    const pct=dayRes.length>0?Math.round(dc/dayRes.length*100):0;
-    const today=new Date().toISOString().split('T')[0];
-    h+='<div class="cleaner-stat-row"><div class="cs-name">'+formatDate(d)+(d===today?' 🟢':'')+'</div>'+
-      '<div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:var(--primary)"></div></div><div class="cs-count">'+dc+'/'+dayRes.length+'</div></div>';
-  });
-  h+='</div></div>'+renderBottomNav();
-  document.getElementById('app').innerHTML=h;
-  setTimeout(loadPropertyHeatmap,100);
+  // ============ TAB: REVENUE ============
+  if(dashSection==='revenue'){
+    // Revenue with visual gauge
+    const revPct=revPotential>0?Math.round(revDone/revPotential*100):0;
+    h+='<div class="dash-card"><h3>💰 Cleaning Fees</h3>';
+    h+='<div style="display:flex;align-items:center;gap:16px;margin:10px 0">';
+    h+='<div style="position:relative;width:80px;height:80px;flex-shrink:0">';
+    h+='<svg viewBox="0 0 36 36" style="width:80px;height:80px;transform:rotate(-90deg)">';
+    h+='<circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--border)" stroke-width="3"/>';
+    h+='<circle cx="18" cy="18" r="15.9" fill="none" stroke="url(#revGrad)" stroke-width="3" stroke-linecap="round" stroke-dasharray="'+revPct+' '+(100-revPct)+'" style="transition:stroke-dasharray 1s cubic-bezier(0.4,0,0.2,1)"/>';
+    h+='<defs><linearGradient id="revGrad"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#34d399"/></linearGradient></defs>';
+    h+='</svg>';
+    h+='<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><span style="font-size:16px;font-weight:900;color:var(--green)">'+revPct+'%</span></div></div>';
+    h+='<div style="flex:1"><div style="font-size:22px;font-weight:900;color:var(--green)">'+revDone.toLocaleString()+' <span style="font-size:12px;font-weight:600">AED</span></div>';
+    h+='<div style="font-size:11px;color:var(--text3)">of '+revPotential.toLocaleString()+' AED potential</div>';
+    const revByType={};mRes.forEach(r=>{const type=getUnitType(r.listingId);if(!revByType[type])revByType[type]={count:0,rev:0};revByType[type].count++;revByType[type].rev+=getRevenueFee(r);});
+    h+='<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">';
+    const typeColors={'Studio':'var(--primary)','1 BR':'var(--orange)','2 BR':'#6366f1','3 BR':'var(--green)'};
+    Object.entries(revByType).sort((a,b)=>b[1].rev-a[1].rev).forEach(([type,d])=>{
+      h+='<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:'+(typeColors[type]||'var(--border)')+'15;color:'+(typeColors[type]||'var(--text2)')+'">'+type+': '+d.count+'×'+getCleaningFee(mRes.find(r=>getUnitType(r.listingId)===type))+'</span>';
+    });
+    h+='</div></div></div></div>';
 
-  // Draw charts (#4)
+    // Extra cleanings card
+    if(monthExtras.length>0){
+      h+='<div class="dash-card"><h3>➕ Ménages Extras — '+MONTH_NAMES[dashMonth]+'</h3><div class="dash-stat-row">'+
+        '<div class="dash-stat"><div class="ds-num">'+monthExtras.length+'</div><div class="ds-label">Total</div></div>'+
+        '<div class="dash-stat"><div class="ds-num">'+extrasDone.length+'</div><div class="ds-label">Faits</div></div>'+
+        '<div class="dash-stat"><div class="ds-num" style="color:var(--green)">'+Math.round(extrasBilledDone)+'</div><div class="ds-label">Facturé AED (fait)</div></div>'+
+        '<div class="dash-stat"><div class="ds-num" style="color:var(--text2)">'+Math.round(extrasBilledPending)+'</div><div class="ds-label">À venir AED</div></div></div>';
+      if(extrasCleanerCost>0){
+        const margin=extrasBilledDone-extrasCleanerCost;
+        h+='<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)">'+
+          'Coût cleaners: <strong>'+Math.round(extrasCleanerCost)+' AED</strong> · '+
+          'Marge: <strong style="color:'+(margin>=0?'var(--green)':'var(--red)')+'">'+Math.round(margin)+' AED</strong>'+
+          '</div>';
+      }
+      h+='</div>';
+    }
+
+    // Revenue chart
+    h+='<div class="dash-card"><h3>📉 Daily Revenue</h3><div class="chart-container"><canvas id="revenueChart"></canvas></div></div>';
+
+    // By Property Type
+    const byType={};
+    mRes.forEach(r=>{const label=getUnitType(r.listingId);if(!byType[label])byType[label]=[];byType[label].push(r);});
+    h+='<div class="dash-card"><h3>🏠 By Type</h3>';
+    for(const[type,list]of Object.entries(byType).sort((a,b)=>a[0].localeCompare(b[0]))){
+      const d=list.filter(r=>mDone[keyFor(r)]).length;
+      const rev=list.reduce((s,r)=>s+getRevenueFee(r),0);
+      const pct=list.length>0?Math.round(d/list.length*100):0;
+      h+='<div class="cleaner-stat-row"><div class="cs-name">'+type+'</div><div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:var(--primary)"></div></div><div class="cs-count">'+d+'/'+list.length+' · '+rev.toLocaleString()+' AED</div></div>';
+    }
+    h+='</div>';
+  }
+
+  // ============ TAB: PROPERTIES ============
+  if(dashSection==='properties'){
+    h+='<div id="heatmapSection" class="dash-section"><h3>🗺️ Santé des propriétés</h3><div id="heatmapContent">Chargement...</div></div>';
+
+    // Owner Report per property
+    h+='<div class="dash-card"><h3>📄 Property Reports</h3><div style="font-size:11px;color:var(--text3);margin-bottom:8px">Generate per-property cleaning report PDF</div>';
+    const reportListings={};mRes.forEach(r=>{if(r.listingId&&!reportListings[r.listingId])reportListings[r.listingId]={name:r.listing,count:0};if(reportListings[r.listingId])reportListings[r.listingId].count++;});
+    Object.entries(reportListings).sort((a,b)=>b[1].count-a[1].count).forEach(([lid,info])=>{
+      h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><div style="font-size:12px;font-weight:600">'+esc(info.name)+' <span style="color:var(--text3);font-weight:400">('+info.count+')</span></div>'+
+        '<button class="export-btn" onclick="generateOwnerReport(\''+lid+'\')">📄 PDF Report</button></div>';
+    });
+    h+='</div>';
+  }
+
+  h+='</div>'+renderBottomNav();
+  document.getElementById('app').innerHTML=h;
+  if(dashSection==='properties') setTimeout(loadPropertyHeatmap,100);
+
+  // Draw charts
   setTimeout(()=>{
-    // Revenue per day chart
+    // Revenue per day chart (revenue tab only)
     const revCtx=document.getElementById('revenueChart');
     if(revCtx){
       const labels=mDates.map(d=>{const dt=new Date(d+'T00:00:00');return dt.getDate()+' '+MONTHS[dt.getMonth()];});
@@ -2588,7 +2725,7 @@ function renderDashboard(){
         {label:'Earned',data:dataDone,backgroundColor:'rgba(5,150,105,0.5)',borderColor:'#059669',borderWidth:1}
       ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{font:{size:10}}}},scales:{y:{beginAtZero:true,ticks:{font:{size:9}}},x:{ticks:{font:{size:8},maxRotation:45}}}}});
     }
-    // Cleaner chart
+    // Cleaner chart (ops tab only)
     const clCtx=document.getElementById('cleanerChart');
     if(clCtx&&cleaners.length>0){
       const labels=cleaners.map(c=>c.name);
@@ -2597,6 +2734,7 @@ function renderDashboard(){
       new Chart(clCtx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}}}}});
     }
   },100);
+  return;
 }
 
 // ============ PROPERTY PROFILES ============
@@ -2796,21 +2934,26 @@ async function loadPropertyHeatmap(){
     if(r.status!=='success'){ el.innerHTML='<div class="empty">Erreur chargement</div>'; return; }
     const props=r.properties||[];
     if(props.length===0){ el.innerHTML='<div class="empty">Aucune propriété</div>'; return; }
-    el.innerHTML='<table class="heatmap-table"><thead><tr>'+
-      '<th>Propriété</th><th>Score</th><th>Tickets ouverts</th><th>Urgents</th><th>Coût total</th><th>Note guest</th>'+
-      '</tr></thead><tbody>'+
-      props.map(p=>{
-        const scoreColor=p.score>=80?'#22c55e':p.score>=60?'#f59e0b':'#ef4444';
-        return '<tr>'+
-          '<td class="heatmap-name">'+esc(p.listing_name)+'</td>'+
-          '<td><div class="score-pill" style="background:'+scoreColor+'">'+p.score+'</div></td>'+
-          '<td>'+p.open_tickets+'</td>'+
-          '<td>'+(p.urgent_tickets>0?'<span class="urgent">'+p.urgent_tickets+'</span>':'0')+'</td>'+
-          '<td>'+(p.total_cost>0?Math.round(p.total_cost)+' AED':'—')+'</td>'+
-          '<td>'+(p.avg_rating!=null?'⭐ '+p.avg_rating+' ('+p.feedback_count+')':'—')+'</td>'+
-        '</tr>';
+    el.innerHTML = '<div class="heatmap-grid">'+
+      props.map(p => {
+        const scoreColor = p.score >= 80 ? '#059669' : p.score >= 60 ? '#d97706' : '#dc2626';
+        const bgGradient = p.score >= 80 ? 'linear-gradient(135deg, rgba(5,150,105,0.08) 0%, rgba(16,185,129,0.04) 100%)'
+                         : p.score >= 60 ? 'linear-gradient(135deg, rgba(217,119,6,0.08) 0%, rgba(245,158,11,0.04) 100%)'
+                         : 'linear-gradient(135deg, rgba(220,38,38,0.1) 0%, rgba(239,68,68,0.05) 100%)';
+        return '<div class="heatmap-card" style="background:'+bgGradient+'; border-color:'+scoreColor+'40">'+
+          '<div class="hm-header">'+
+            '<div class="hm-name">'+esc(p.listing_name)+'</div>'+
+            '<div class="hm-score" style="background:'+scoreColor+'">'+p.score+'</div>'+
+          '</div>'+
+          '<div class="hm-stats">'+
+            '<div class="hm-stat"><span class="hm-stat-icon">🛠️</span><span class="hm-stat-val">'+p.open_tickets+'</span><span class="hm-stat-lbl">ouverts</span></div>'+
+            (p.urgent_tickets>0 ? '<div class="hm-stat"><span class="hm-stat-icon">🚨</span><span class="hm-stat-val urgent">'+p.urgent_tickets+'</span><span class="hm-stat-lbl">urgents</span></div>' : '')+
+            '<div class="hm-stat"><span class="hm-stat-icon">💸</span><span class="hm-stat-val">'+(p.total_cost>0?Math.round(p.total_cost):'—')+'</span><span class="hm-stat-lbl">AED</span></div>'+
+            (p.avg_rating!=null ? '<div class="hm-stat"><span class="hm-stat-icon">⭐</span><span class="hm-stat-val">'+p.avg_rating+'</span><span class="hm-stat-lbl">('+p.feedback_count+')</span></div>' : '')+
+          '</div>'+
+        '</div>';
       }).join('')+
-      '</tbody></table>';
+    '</div>';
   }catch(e){ el.innerHTML='<div class="empty">Erreur: '+e.message+'</div>'; }
 }
 function renderInventory(){
@@ -3965,6 +4108,13 @@ function openExtraModal(editingExtra){
 }
 function closeExtraModal(){ extraModalState.open=false; renderExtraModal(); }
 
+// #9 Extra modal accordion state
+let extraModalOpenSection='where'; // 'where' | 'price' | 'assign'
+function toggleExtraSection(sec){
+  extraModalOpenSection = extraModalOpenSection===sec ? null : sec;
+  renderExtraModal();
+}
+
 function renderExtraModal(){
   let el=document.getElementById('extraModal');
   if(!el){ el=document.createElement('div'); el.id='extraModal'; document.body.appendChild(el); }
@@ -3982,44 +4132,71 @@ function renderExtraModal(){
         '<button class="modal-close" onclick="closeExtraModal()">✕</button>'+
       '</div>'+
       '<div class="modal-body">'+
-        '<div class="form-row"><label>Unité <span class="req">*</span></label>'+
-          '<select id="ef-listing" onchange="extraModalState.form.listing_id=this.value;syncExtraPriceDefaults();">'+
-            '<option value="">Sélectionner...</option>'+
-            listings.map(l=>'<option value="'+esc(l.id)+'" '+(f.listing_id===l.id?'selected':'')+'>'+esc(l.name)+'</option>').join('')+
-          '</select>'+
+        // Section 1 : Où & Quand
+        '<div class="acc-section">'+
+          '<button type="button" class="acc-head" onclick="toggleExtraSection(\'where\')">'+
+            '<span class="acc-title">🏠 Où & Quand</span>'+
+            '<span class="acc-chevron'+(extraModalOpenSection==='where'?' open':'')+'">▼</span>'+
+          '</button>'+
+          (extraModalOpenSection==='where' ? '<div class="acc-body">'+
+            '<div class="form-row"><label>Unité <span class="req">*</span></label>'+
+              '<select id="ef-listing" onchange="extraModalState.form.listing_id=this.value;syncExtraPriceDefaults();">'+
+                '<option value="">Sélectionner...</option>'+
+                listings.map(l=>'<option value="'+esc(l.id)+'" '+(f.listing_id===l.id?'selected':'')+'>'+esc(l.name)+'</option>').join('')+
+              '</select>'+
+            '</div>'+
+            '<div class="form-row"><label>Date <span class="req">*</span></label>'+
+              '<input type="date" id="ef-date" value="'+esc(f.cleaning_date)+'" onchange="extraModalState.form.cleaning_date=this.value">'+
+            '</div>'+
+            '<div class="form-row"><label>Type</label>'+
+              '<select id="ef-label" onchange="extraModalState.form.label=this.value">'+
+                '<option value="" '+(!f.label?'selected':'')+'>— Choisir —</option>'+
+                '<option value="Mid-stay" '+(f.label==='Mid-stay'?'selected':'')+'>Mid-stay</option>'+
+                '<option value="Owner turnover" '+(f.label==='Owner turnover'?'selected':'')+'>Owner turnover</option>'+
+                '<option value="Deep clean" '+(f.label==='Deep clean'?'selected':'')+'>Deep clean</option>'+
+                '<option value="Post-construction" '+(f.label==='Post-construction'?'selected':'')+'>Post-construction</option>'+
+                '<option value="Other" '+(f.label==='Other'?'selected':'')+'>Autre</option>'+
+              '</select>'+
+            '</div>'+
+            '<div class="form-row"><label>Nom du guest / Client</label>'+
+              '<input type="text" id="ef-guest" value="'+esc(f.guest_name)+'" oninput="extraModalState.form.guest_name=this.value" placeholder="Facultatif">'+
+            '</div>'+
+          '</div>' : '')+
         '</div>'+
-        '<div class="form-row"><label>Date <span class="req">*</span></label>'+
-          '<input type="date" id="ef-date" value="'+esc(f.cleaning_date)+'" onchange="extraModalState.form.cleaning_date=this.value">'+
+        // Section 2 : Prix
+        '<div class="acc-section">'+
+          '<button type="button" class="acc-head" onclick="toggleExtraSection(\'price\')">'+
+            '<span class="acc-title">💰 Prix '+(f.price_billed?'<span class="acc-badge">'+esc(String(f.price_billed))+' AED</span>':'')+'</span>'+
+            '<span class="acc-chevron'+(extraModalOpenSection==='price'?' open':'')+'">▼</span>'+
+          '</button>'+
+          (extraModalOpenSection==='price' ? '<div class="acc-body">'+
+            '<div class="form-grid">'+
+              '<div class="form-row"><label>Prix facturé (AED) <span class="req">*</span></label>'+
+                '<input type="number" step="1" id="ef-price" value="'+esc(String(f.price_billed))+'" oninput="extraModalState.form.price_billed=this.value" placeholder="250">'+
+              '</div>'+
+              '<div class="form-row"><label>Prix cleaner (AED)</label>'+
+                '<input type="number" step="1" id="ef-cleanerprice" value="'+esc(String(f.cleaner_price))+'" oninput="extraModalState.form.cleaner_price=this.value" placeholder="Défaut unité">'+
+              '</div>'+
+            '</div>'+
+          '</div>' : '')+
         '</div>'+
-        '<div class="form-row"><label>Type</label>'+
-          '<select id="ef-label" onchange="extraModalState.form.label=this.value">'+
-            '<option value="" '+(!f.label?'selected':'')+'>— Choisir —</option>'+
-            '<option value="Mid-stay" '+(f.label==='Mid-stay'?'selected':'')+'>Mid-stay</option>'+
-            '<option value="Owner turnover" '+(f.label==='Owner turnover'?'selected':'')+'>Owner turnover</option>'+
-            '<option value="Deep clean" '+(f.label==='Deep clean'?'selected':'')+'>Deep clean</option>'+
-            '<option value="Post-construction" '+(f.label==='Post-construction'?'selected':'')+'>Post-construction</option>'+
-            '<option value="Other" '+(f.label==='Other'?'selected':'')+'>Autre</option>'+
-          '</select>'+
-        '</div>'+
-        '<div class="form-row"><label>Nom du guest / Client</label>'+
-          '<input type="text" id="ef-guest" value="'+esc(f.guest_name)+'" oninput="extraModalState.form.guest_name=this.value" placeholder="Facultatif">'+
-        '</div>'+
-        '<div class="form-grid">'+
-          '<div class="form-row"><label>Prix facturé (AED) <span class="req">*</span></label>'+
-            '<input type="number" step="1" id="ef-price" value="'+esc(String(f.price_billed))+'" oninput="extraModalState.form.price_billed=this.value" placeholder="250">'+
-          '</div>'+
-          '<div class="form-row"><label>Prix cleaner (AED)</label>'+
-            '<input type="number" step="1" id="ef-cleanerprice" value="'+esc(String(f.cleaner_price))+'" oninput="extraModalState.form.cleaner_price=this.value" placeholder="Défaut unité">'+
-          '</div>'+
-        '</div>'+
-        '<div class="form-row"><label>Cleaner assigné</label>'+
-          '<select id="ef-cleaner" onchange="extraModalState.form.assigned_cleaner_id=this.value">'+
-            '<option value="">— Non assigné —</option>'+
-            cleanersList.map(c=>'<option value="'+c.id+'" '+(String(f.assigned_cleaner_id)===String(c.id)?'selected':'')+'>'+esc(c.name)+'</option>').join('')+
-          '</select>'+
-        '</div>'+
-        '<div class="form-row"><label>Notes</label>'+
-          '<textarea id="ef-notes" rows="2" oninput="extraModalState.form.notes=this.value" placeholder="Infos facultatives">'+esc(f.notes)+'</textarea>'+
+        // Section 3 : Assignation & Notes
+        '<div class="acc-section">'+
+          '<button type="button" class="acc-head" onclick="toggleExtraSection(\'assign\')">'+
+            '<span class="acc-title">👤 Assignation & Notes</span>'+
+            '<span class="acc-chevron'+(extraModalOpenSection==='assign'?' open':'')+'">▼</span>'+
+          '</button>'+
+          (extraModalOpenSection==='assign' ? '<div class="acc-body">'+
+            '<div class="form-row"><label>Cleaner assigné</label>'+
+              '<select id="ef-cleaner" onchange="extraModalState.form.assigned_cleaner_id=this.value">'+
+                '<option value="">— Non assigné —</option>'+
+                cleanersList.map(c=>'<option value="'+c.id+'" '+(String(f.assigned_cleaner_id)===String(c.id)?'selected':'')+'>'+esc(c.name)+'</option>').join('')+
+              '</select>'+
+            '</div>'+
+            '<div class="form-row"><label>Notes</label>'+
+              '<textarea id="ef-notes" rows="2" oninput="extraModalState.form.notes=this.value" placeholder="Infos facultatives">'+esc(f.notes)+'</textarea>'+
+            '</div>'+
+          '</div>' : '')+
         '</div>'+
       '</div>'+
       '<div class="modal-footer">'+
