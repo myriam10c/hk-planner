@@ -33,32 +33,6 @@
   --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%);
   --success-gradient: linear-gradient(135deg, #059669 0%, #10b981 100%);
 }
-[data-theme="dark"] {
-  --bg: #0f1117; --bg2: #151821; --bg3: #1a1d27;
-  --text: #e4e4e7; --text2: #a1a1aa; --text3: #71717a;
-  --border: #2a2e3a;
-  --primary: #a78bfa; --primary-dark: #8b5cf6; --primary-light: rgba(167,139,250,0.12);
-  --green: #22c55e; --green-light: rgba(34,197,94,0.12);
-  --orange: #f59e0b; --orange-light: rgba(245,158,11,0.12);
-  --red: #ef4444; --red-light: rgba(239,68,68,0.12);
-  --blue: #60a5fa; --blue-light: rgba(96,165,250,0.12);
-  --header-bg: #151821;
-  --card-shadow: 0 1px 3px rgba(0,0,0,0.4);
-  --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.5);
-  --glass: #1a1d27; --glass-border: #2a2e3a;
-  --nav-bg: #151821; --nav-border: #2a2e3a;
-  --accent-gradient: linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%);
-  --success-gradient: linear-gradient(135deg, #22c55e 0%, #4ade80 100%);
-}
-[data-theme="dark"] body { background:var(--bg); color:var(--text); }
-[data-theme="dark"] .header { background:var(--header-bg); }
-[data-theme="dark"] .bottom-nav { background:var(--nav-bg); border-top-color:var(--nav-border); }
-[data-theme="dark"] .search-bar input,
-[data-theme="dark"] .date-btn,
-[data-theme="dark"] .cleaner-chip,
-[data-theme="dark"] .checkout-card,
-[data-theme="dark"] .progress-bar { background:var(--glass); color:var(--text); }
-[data-theme="dark"] .day-header { background:var(--bg2); }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding-bottom:80px; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; overflow-x:hidden; }
 
@@ -723,7 +697,6 @@ let checklistCache={},notesCache={},photosCache={};
 let currentTab='planner',filterCleaner=null;
 let dashMonth=new Date().getMonth(),dashYear=new Date().getFullYear();
 let dashData=null,dashLoading=false;
-let darkMode=false;
 let searchOpen=false;
 let cancelled={}; // {key: {reason,cancelled_by,cancelled_at}}
 let swipeState=null; // {key,startX,startY,el,swiping}
@@ -806,14 +779,6 @@ en:{
 }
 };
 function t(key){return T.en[key]||key;}
-
-/* Dark mode */
-function toggleDark(){
-  darkMode = !darkMode;
-  localStorage.setItem('darkMode', darkMode);
-  document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-  render();
-}
 
 // Toast (#5)
 function toast(msg,type){
@@ -1790,7 +1755,6 @@ function setTab(t){currentTab=t;render();if(t==='dashboard'){if(!dashData)loadDa
 function setSelectedDate(d){selectedDate=d;pendingKey=null;render();}
 function changeWeek(dir){weekOffset+=dir;selectedDate='all';pendingKey=null;fetchAll();}
 function setFilterCleaner(id){filterCleaner=filterCleaner===id?null:id;render();}
-function toggleDark(){}
 function toggleSearch(){searchOpen=!searchOpen;search='';render();if(searchOpen)setTimeout(()=>{const el=document.getElementById('headerSearchInput');if(el)el.focus();},100);}
 
 // #6 Cleaner PIN login (Phase 1: hashed PIN + session token)
@@ -1922,7 +1886,6 @@ function renderPlanner(){
   h+='<div style="flex:1"></div>';
   h+='<div class="header-actions">';
   if(cleanerMode) h+='<button class="icon-btn" onclick="cleanerLogout()" title="Logout">🚪</button>';
-  h+='<button class="icon-btn" onclick="toggleDark()" title="Dark mode">'+(darkMode?'☀️':'🌙')+'</button>';
   h+='<button class="icon-btn" onclick="toggleSearch()" title="Search">🔍</button>';
   // Menu button with auto-assign
   if(!cleanerMode&&cleaners.length>0){
@@ -2194,9 +2157,7 @@ async function loadDashMonth(){
 function changeDashMonth(dir){dashMonth+=dir;if(dashMonth>11){dashMonth=0;dashYear++;}if(dashMonth<0){dashMonth=11;dashYear--;}loadDashMonth();}
 
 function renderDashboard(){
-  let h='<div class="header"><div class="header-top"><h1>📊 Dashboard</h1><div class="header-actions">'+
-    '<button class="icon-btn" onclick="toggleDark()" title="Dark mode">'+(darkMode?'☀️':'🌙')+'</button>'+
-    '</div></div></div>';
+  let h='<div class="header"><div class="header-top"><h1>📊 Dashboard</h1></div></div>';
   h+='<div class="container">';
   h+='<div style="margin-bottom:16px; display:flex; gap:8px; flex-wrap:wrap;">'+
     '<button onclick="exportCsv(\'cleanings\')" class="btn-export">📥 Export ménages</button>'+
@@ -3548,13 +3509,6 @@ async function generateInvoice(){
 }
 
 // ============ INIT ============
-// Dark mode : restore preference or fall back to OS setting
-{
-  const stored = localStorage.getItem('darkMode');
-  if (stored === null) darkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  else darkMode = stored === 'true';
-  document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-}
 initSwipe();
 fetchAll();
 setInterval(fetchAll,5*60*1000);
