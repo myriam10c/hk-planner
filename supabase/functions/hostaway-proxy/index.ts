@@ -346,7 +346,7 @@ Deno.serve(async (req: Request) => {
       const { data: cleaner } = await sb.from("cleaners").select("name, notification_topic").eq("id", cleaner_id).single();
       if (!cleaner) return jsonResp({ error: "cleaner not found" }, 404);
       if (!cleaner.notification_topic) return jsonResp({ error: "no topic set" }, 400);
-      await sendNtfyPush(cleaner.notification_topic, "HK Planner — Test", `Bonjour ${cleaner.name} ! Les notifications fonctionnent bien 🎉`, "default", "white_check_mark");
+      await sendNtfyPush(cleaner.notification_topic, "HK Planner — Test", `Hi ${cleaner.name}! Notifications are working 🎉`, "default", "white_check_mark");
       return jsonResp({ status: "success" });
     }
     if (action === "regenerateTopic" && req.method === "POST") {
@@ -466,7 +466,7 @@ Deno.serve(async (req: Request) => {
         // ntfy push
         const { data: cl } = await sb.from("cleaners").select("notification_topic").eq("id", cleaner_id).single();
         if (cl?.notification_topic) {
-          await sendNtfyPush(cl.notification_topic, "Nouveau ménage assigné", `Réservation: ${reservation_key}`, "default", "broom");
+          await sendNtfyPush(cl.notification_topic, "New cleaning assigned", `Reservation: ${reservation_key}`, "default", "broom");
         }
       } else {
         const { error } = await sb.from("cleaning_assignments").delete().eq("reservation_key", reservation_key);
@@ -507,7 +507,7 @@ Deno.serve(async (req: Request) => {
         const cid = Number(cidStr);
         const { data: cl } = await sb.from("cleaners").select("notification_topic, name").eq("id", cid).single();
         if (cl?.notification_topic) {
-          await sendNtfyPush(cl.notification_topic, `${keys.length} ménage${keys.length>1?'s':''} assigné${keys.length>1?'s':''}`, keys.map(k=>`• ${k}`).join('\n'), "default", "broom");
+          await sendNtfyPush(cl.notification_topic, `${keys.length} cleaning${keys.length>1?'s':''} assigned`, keys.map(k=>`• ${k}`).join('\n'), "default", "broom");
         }
       }
       return jsonResp({ status: "success", assigned });
@@ -1235,7 +1235,7 @@ Deno.serve(async (req: Request) => {
         msg += '\nTotal: ' + tasks.length + ' cleanings. Good luck! \uD83D\uDCAA';
         // ntfy push : résumé du jour
         if (c.notification_topic) {
-          await sendNtfyPush(c.notification_topic, `${tasks.length} ménage${tasks.length>1?'s':''} aujourd'hui`, tasks.map((r:any)=>`• ${r.listing} (${r.guest})`).join('\n'), "high", "broom,chart_with_upwards_trend");
+          await sendNtfyPush(c.notification_topic, `${tasks.length} cleaning${tasks.length>1?'s':''} today`, tasks.map((r:any)=>`• ${r.listing} (${r.guest})`).join('\n'), "high", "broom,chart_with_upwards_trend");
         }
         const phone = c.phone ? c.phone.replace(/[^0-9+]/g, '') : null;
         const waLink = phone ? 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg) : null;
@@ -1663,8 +1663,8 @@ Deno.serve(async (req: Request) => {
         const { data: cl } = await sb.from("cleaners").select("notification_topic, name").eq("id", assigned_cleaner_id).single();
         if (cl?.notification_topic) {
           await sendNtfyPush(cl.notification_topic,
-            `Ménage extra assigné`,
-            `${label || 'Extra'} — ${listing_id} le ${cleaning_date}` + (price_billed ? `\nFacturé: ${price_billed} AED` : ''),
+            `Extra cleaning assigned`,
+            `${label || 'Extra'} — ${listing_id} on ${cleaning_date}` + (price_billed ? `\nBilled: ${price_billed} AED` : ''),
             "default", "broom,sparkles");
         }
       }

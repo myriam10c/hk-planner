@@ -835,10 +835,10 @@ let weekOffset=0,lastUpdate=null,pendingKey=null;
 function relativeSync(ts){
   if(!ts) return '';
   const sec = Math.round((Date.now() - ts.getTime())/1000);
-  if(sec < 10) return "à l'instant";
-  if(sec < 60) return `il y a ${sec}s`;
-  if(sec < 3600) return `il y a ${Math.round(sec/60)} min`;
-  return `il y a ${Math.round(sec/3600)} h`;
+  if(sec < 10) return "just now";
+  if(sec < 60) return `${sec}s ago`;
+  if(sec < 3600) return `${Math.round(sec/60)} min ago`;
+  return `${Math.round(sec/3600)} h ago`;
 }
 function haptic(type='light'){
   try {
@@ -975,9 +975,9 @@ function renderOnboarding(){
   if(!el){ el=document.createElement('div'); el.id='onboarding'; document.body.appendChild(el); }
   if(!onboardingOpen){ el.innerHTML=''; return; }
   const slides = [
-    {icon:'👋',title:'Bienvenue !',text:'Voici tes ménages du jour. Tape sur une carte pour voir le détail de la réservation.'},
-    {icon:'👆',title:'Swipe pour annuler',text:'Glisse une carte vers la droite pour signaler que le ménage ne peut pas se faire (guest encore là, pas de clé, etc.)'},
-    {icon:'⏱️',title:'Chrono & photos',text:'Démarre le chrono au début, mets en pause pendant une attente, et ajoute des photos avant/après pour attester du travail fait.'}
+    {icon:'👋',title:'Welcome!',text:'Here are your cleanings for today. Tap a card to see the reservation details.'},
+    {icon:'👆',title:'Swipe to cancel',text:'Swipe a card to the right to report that the cleaning can\'t be done (guest still there, no key, etc.)'},
+    {icon:'⏱️',title:'Timer & photos',text:'Start the timer, pause during waits, and add before/after photos to prove the job is done.'}
   ];
   const s = slides[onboardingStep];
   el.innerHTML = '<div class="onb-overlay">'+
@@ -989,8 +989,8 @@ function renderOnboarding(){
         slides.map((_,i)=>'<span class="onb-dot'+(i===onboardingStep?' active':'')+'"></span>').join('')+
       '</div>'+
       '<div class="onb-footer">'+
-        '<button class="btn-secondary" onclick="closeOnboarding()">Passer</button>'+
-        '<button class="btn-primary" onclick="nextOnboarding()">'+(onboardingStep<2?'Suivant →':'C\'est parti !')+'</button>'+
+        '<button class="btn-secondary" onclick="closeOnboarding()">Skip</button>'+
+        '<button class="btn-primary" onclick="nextOnboarding()">'+(onboardingStep<2?'Next →':'Let\'s go!')+'</button>'+
       '</div>'+
     '</div>'+
   '</div>';
@@ -1439,11 +1439,11 @@ async function pauseTimer(key){
   try{
     await api('pauseTimer',{body:{reservation_key:key}});
     if(timers[key])timers[key].paused_at=new Date().toISOString();
-    toast('Pause ⏸️','success');
+    toast('Paused ⏸️','success');
     haptic('light');
     render();
     fetchAll();
-  }catch(e){toast('Pause échouée','error');}
+  }catch(e){toast('Pause failed','error');}
 }
 async function resumeTimer(key){
   try{
@@ -1454,11 +1454,11 @@ async function resumeTimer(key){
       timers[key].pause_count=(timers[key].pause_count||0)+1;
       timers[key].paused_at=null;
     }
-    toast('Reprise ▶️','success');
+    toast('Resumed ▶️','success');
     haptic('light');
     render();
     fetchAll();
-  }catch(e){toast('Reprise échouée','error');}
+  }catch(e){toast('Resume failed','error');}
 }
 function showDoneAfterStop(key,label,mins){
   const ov=document.createElement('div');ov.className='confirm-overlay';
@@ -2039,18 +2039,18 @@ function renderMoreMenu(){
   if(!moreOpen){ el.innerHTML=''; return; }
   const items=[
     {id:'inventory',icon:'📦',label:'Inventory',color:'#2563eb'},
-    {id:'properties',icon:'🏠',label:'Propriétés',color:'#7c3aed'},
-    {id:'recurring',icon:'🔁',label:'Récurrents',color:'#d97706'},
+    {id:'properties',icon:'🏠',label:'Properties',color:'#7c3aed'},
+    {id:'recurring',icon:'🔁',label:'Recurring',color:'#d97706'},
     {id:'issues',icon:'⚠️',label:'Issues',color:'#dc2626'},
-    {id:'history',icon:'📜',label:'Historique',color:'#059669'},
-    {id:'calendar',icon:'📅',label:'Calendrier',color:'#0891b2'},
+    {id:'history',icon:'📜',label:'History',color:'#059669'},
+    {id:'calendar',icon:'📅',label:'Calendar',color:'#0891b2'},
     {id:'stats',icon:'📈',label:'Stats',color:'#be185d'},
   ];
   el.innerHTML=`
   <div class="more-overlay" onclick="if(event.target===this)closeMoreMenu()">
     <div class="more-sheet">
       <div class="more-handle"></div>
-      <div class="more-title">Plus d'écrans</div>
+      <div class="more-title">More screens</div>
       <div class="more-grid">
         ${items.map(i=>`<button class="more-item" onclick="closeMoreMenu();setTab('${i.id}')">
           <span class="more-icon" style="background:${i.color}20;color:${i.color}">${i.icon}</span>
@@ -2155,7 +2155,7 @@ function renderBottomNav(){
       {id:'dashboard',icon:'📊',label:t('dashboard')},
       {id:'maintenance',icon:'🔧',label:'Maint.'},
       {id:'settings',icon:'⚙️',label:t('settings')},
-      {id:'__more',icon:'⋯',label:'Plus'},
+      {id:'__more',icon:'⋯',label:'More'},
     ];
   }else if(cleanerMode.role==='maintenance'){
     // Maintenance view
@@ -2214,9 +2214,9 @@ function renderPlanner(){
   h+='<div style="flex:1"></div>';
   h+='<div class="header-actions">';
   if(cleanerMode) h+='<button class="icon-btn" onclick="cleanerLogout()" title="Logout">🚪</button>';
-  h+='<button class="cmdk-trigger" onclick="openCmdk()" title="Recherche globale (⌘K)">⌘K</button>';
+  h+='<button class="cmdk-trigger" onclick="openCmdk()" title="Global search (⌘K)">⌘K</button>';
   h+='<button class="icon-btn" onclick="toggleSearch()" title="Search">🔍</button>';
-  if(!cleanerMode){ h+='<button class="icon-btn" onclick="openExtraModal()" title="Ajouter un ménage extra" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">➕</button>'; }
+  if(!cleanerMode){ h+='<button class="icon-btn" onclick="openExtraModal()" title="Add extra cleaning" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">➕</button>'; }
   // Menu button with auto-assign
   if(!cleanerMode&&cleaners.length>0){
     const una=RESERVATIONS.filter(r=>!assignments[keyFor(r)]).length;
@@ -2266,9 +2266,9 @@ function renderPlanner(){
   const sortedDates=Object.keys(grouped).sort();
   if(sortedDates.length===0){
     if(search||filterCleaner!==0||selectedDate!=='all'){
-      h+='<div class="empty-hero"><div class="empty-hero-icon">🔍</div><div class="empty-hero-title">Aucun résultat</div><div class="empty-hero-sub">Essaie de changer de filtre ou de date.</div><button class="btn-primary" onclick="search=\'\';filterCleaner=0;setSelectedDate(\'all\')">Réinitialiser</button></div>';
+      h+='<div class="empty-hero"><div class="empty-hero-icon">🔍</div><div class="empty-hero-title">No results</div><div class="empty-hero-sub">Try changing the filter or date.</div><button class="btn-primary" onclick="search=\'\';filterCleaner=0;setSelectedDate(\'all\')">Reset</button></div>';
     } else {
-      h+='<div class="empty-hero"><div class="empty-hero-icon">🎉</div><div class="empty-hero-title">Pas de ménages cette semaine</div><div class="empty-hero-sub">Profite ! Ou regarde la semaine suivante.</div>'+(!cleanerMode?'<button class="btn-primary" onclick="changeWeek(1)">Semaine suivante →</button>':'')+'</div>';
+      h+='<div class="empty-hero"><div class="empty-hero-icon">🎉</div><div class="empty-hero-title">No cleanings this week</div><div class="empty-hero-sub">Enjoy the break! Or check next week.</div>'+(!cleanerMode?'<button class="btn-primary" onclick="changeWeek(1)">Next week →</button>':'')+'</div>';
     }
   }
 
@@ -2366,7 +2366,7 @@ function renderPlanner(){
         const elapsed=Math.max(0,Math.round((Date.now()-new Date(timer.started_at).getTime()-pauseSec*1000)/60000));
         const safeTimerId=key.replace(/[^a-zA-Z0-9]/g,'');
         if(isPaused){
-          h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge paused" style="background:var(--orange-light,rgba(245,158,11,0.12));color:var(--orange,#f59e0b);font-size:11px;padding:2px 8px">⏸️ '+elapsed+'min · en pause</span></div>';
+          h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge paused" style="background:var(--orange-light,rgba(245,158,11,0.12));color:var(--orange,#f59e0b);font-size:11px;padding:2px 8px">⏸️ '+elapsed+'min · paused</span></div>';
         }else{
           h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge running" style="animation:pulse 2s infinite;font-size:11px;padding:2px 8px">⏱ '+elapsed+'min</span></div>';
         }
@@ -2383,7 +2383,7 @@ function renderPlanner(){
       if(isCancelled){
         h+='<button class="card-cta restore" onclick="event.stopPropagation();toggleCancel(\''+sk+'\')">Restore</button>';
       }else if(isPaused){
-        h+='<button class="card-cta resume" onclick="event.stopPropagation();resumeTimer(\''+sk+'\')" title="Reprendre">▶</button>';
+        h+='<button class="card-cta resume" onclick="event.stopPropagation();resumeTimer(\''+sk+'\')" title="Resume">▶</button>';
         h+='<button class="card-cta stop" onclick="event.stopPropagation();stopTimer(\''+sk+'\')">Stop</button>';
       }else if(isRunning){
         h+='<button class="card-cta pause" onclick="event.stopPropagation();pauseTimer(\''+sk+'\')" title="Pause">⏸</button>';
@@ -2509,16 +2509,16 @@ function renderDashboard(){
   let h='<div class="header"><div class="header-top"><h1>📊 Dashboard</h1>'+(syncD?'<div style="flex:1"></div><span class="sync-indicator">📡 '+syncD+'</span>':'')+'</div></div>';
   h+='<div class="container">';
   h+='<div style="margin-bottom:16px; display:flex; gap:8px; flex-wrap:wrap;">'+
-    '<button onclick="exportCsv(\'cleanings\')" class="btn-export">📥 Export ménages</button>'+
+    '<button onclick="exportCsv(\'cleanings\')" class="btn-export">📥 Export cleanings</button>'+
     '<button onclick="exportCsv(\'maintenance\')" class="btn-export">💸 Export maintenance</button>'+
-    '<button onclick="exportCsv(\'payroll\')" class="btn-export">👷 Export paie</button>'+
+    '<button onclick="exportCsv(\'payroll\')" class="btn-export">👷 Export payroll</button>'+
     '</div>';
   h+='<div class="month-selector"><button onclick="changeDashMonth(-1)">‹</button><h3>'+MONTH_NAMES[dashMonth]+' '+dashYear+'</h3><button onclick="changeDashMonth(1)">›</button></div>';
-  // #7 Dashboard tabs (Opérations / Revenus / Propriétés)
+  // #7 Dashboard tabs (Operations / Revenue / Properties)
   h+='<div class="dash-tabs">'+
-    '<button class="dash-tab'+(dashSection==='ops'?' active':'')+'" onclick="setDashSection(\'ops\')">🧹 Opérations</button>'+
-    '<button class="dash-tab'+(dashSection==='revenue'?' active':'')+'" onclick="setDashSection(\'revenue\')">💰 Revenus</button>'+
-    '<button class="dash-tab'+(dashSection==='properties'?' active':'')+'" onclick="setDashSection(\'properties\')">🏠 Propriétés</button>'+
+    '<button class="dash-tab'+(dashSection==='ops'?' active':'')+'" onclick="setDashSection(\'ops\')">🧹 Operations</button>'+
+    '<button class="dash-tab'+(dashSection==='revenue'?' active':'')+'" onclick="setDashSection(\'revenue\')">💰 Revenue</button>'+
+    '<button class="dash-tab'+(dashSection==='properties'?' active':'')+'" onclick="setDashSection(\'properties\')">🏠 Properties</button>'+
   '</div>';
 
   if(dashLoading){
@@ -2663,16 +2663,16 @@ function renderDashboard(){
 
     // Extra cleanings card
     if(monthExtras.length>0){
-      h+='<div class="dash-card"><h3>➕ Ménages Extras — '+MONTH_NAMES[dashMonth]+'</h3><div class="dash-stat-row">'+
+      h+='<div class="dash-card"><h3>➕ Extra Cleanings — '+MONTH_NAMES[dashMonth]+'</h3><div class="dash-stat-row">'+
         '<div class="dash-stat"><div class="ds-num">'+monthExtras.length+'</div><div class="ds-label">Total</div></div>'+
-        '<div class="dash-stat"><div class="ds-num">'+extrasDone.length+'</div><div class="ds-label">Faits</div></div>'+
-        '<div class="dash-stat"><div class="ds-num" style="color:var(--green)">'+Math.round(extrasBilledDone)+'</div><div class="ds-label">Facturé AED (fait)</div></div>'+
-        '<div class="dash-stat"><div class="ds-num" style="color:var(--text2)">'+Math.round(extrasBilledPending)+'</div><div class="ds-label">À venir AED</div></div></div>';
+        '<div class="dash-stat"><div class="ds-num">'+extrasDone.length+'</div><div class="ds-label">Done</div></div>'+
+        '<div class="dash-stat"><div class="ds-num" style="color:var(--green)">'+Math.round(extrasBilledDone)+'</div><div class="ds-label">Billed AED (done)</div></div>'+
+        '<div class="dash-stat"><div class="ds-num" style="color:var(--text2)">'+Math.round(extrasBilledPending)+'</div><div class="ds-label">Upcoming AED</div></div></div>';
       if(extrasCleanerCost>0){
         const margin=extrasBilledDone-extrasCleanerCost;
         h+='<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)">'+
-          'Coût cleaners: <strong>'+Math.round(extrasCleanerCost)+' AED</strong> · '+
-          'Marge: <strong style="color:'+(margin>=0?'var(--green)':'var(--red)')+'">'+Math.round(margin)+' AED</strong>'+
+          'Cleaner cost: <strong>'+Math.round(extrasCleanerCost)+' AED</strong> · '+
+          'Margin: <strong style="color:'+(margin>=0?'var(--green)':'var(--red)')+'">'+Math.round(margin)+' AED</strong>'+
           '</div>';
       }
       h+='</div>';
@@ -2696,7 +2696,7 @@ function renderDashboard(){
 
   // ============ TAB: PROPERTIES ============
   if(dashSection==='properties'){
-    h+='<div id="heatmapSection" class="dash-section"><h3>🗺️ Santé des propriétés</h3><div id="heatmapContent">Chargement...</div></div>';
+    h+='<div id="heatmapSection" class="dash-section"><h3>🗺️ Property health</h3><div id="heatmapContent">Loading...</div></div>';
 
     // Owner Report per property
     h+='<div class="dash-card"><h3>📄 Property Reports</h3><div style="font-size:11px;color:var(--text3);margin-bottom:8px">Generate per-property cleaning report PDF</div>';
@@ -2815,16 +2815,16 @@ function renderSettings(){
     const topic=c.notification_topic;
     const ntfyLink=topic?'https://ntfy.sh/'+topic:null;
     h+='<div class="cleaner-notif-section">'+
-      '<div class="cleaner-notif-label">🔔 Notifications push</div>'+
+      '<div class="cleaner-notif-label">🔔 Push notifications</div>'+
       (topic
         ? '<div class="cleaner-notif-topic">Topic: <code>'+esc(topic)+'</code></div>'+
           '<div class="cleaner-notif-actions">'+
-          '<a href="'+ntfyLink+'" target="_blank" class="btn-sm">📱 Ouvrir dans ntfy</a>'+
+          '<a href="'+ntfyLink+'" target="_blank" class="btn-sm">📱 Open in ntfy</a>'+
           '<button onclick="testNotification('+c.id+')" class="btn-sm">🔔 Test</button>'+
-          '<button onclick="regenerateTopic('+c.id+')" class="btn-sm btn-warn">🔄 Régénérer</button>'+
+          '<button onclick="regenerateTopic('+c.id+')" class="btn-sm btn-warn">🔄 Regenerate</button>'+
           '</div>'+
-          '<div class="cleaner-notif-help">Installe l\'app <strong>ntfy</strong> sur iPhone/Android, ajoute le topic ci-dessus, et reçois les assignations en push.</div>'
-        : '<div class="cleaner-notif-help">Topic pas encore généré — sauvegarde le cleaner pour générer.</div>'
+          '<div class="cleaner-notif-help">Install the <strong>ntfy</strong> app on iPhone/Android, add the topic above, and receive assignments as push notifications.</div>'
+        : '<div class="cleaner-notif-help">Topic not generated yet — save the cleaner to generate.</div>'
       )+
       '</div>';
   });
@@ -2885,7 +2885,7 @@ function renderHistory(){
   let h='<div class="header"><div class="header-top"><h1>📜 History</h1><div class="header-actions"></div></div></div>';
   h+='<div class="container">';
   if(!historyLogs){h+='<div class="loading"><div class="spinner"></div></div></div>'+renderBottomNav();document.getElementById('app').innerHTML=h;loadHistory();return;}
-  if(historyLogs.length===0){h+='<div class="empty-hero"><div class="empty-hero-icon">📜</div><div class="empty-hero-title">Historique vide</div><div class="empty-hero-sub">Dès qu\'une action est réalisée (ménage fait, timer, note), elle apparaîtra ici.</div></div>';}
+  if(historyLogs.length===0){h+='<div class="empty-hero"><div class="empty-hero-icon">📜</div><div class="empty-hero-title">No activity yet</div><div class="empty-hero-sub">As soon as an action happens (cleaning done, timer, note), it will appear here.</div></div>';}
   else{
     h+='<div class="settings-panel"><h3>Recent Activity</h3>';
     historyLogs.forEach(log=>{
@@ -2917,13 +2917,13 @@ async function saveInventoryItem(id,name,qty,minQty,unit,listingId){
 // ntfy push notifications
 async function testNotification(cleanerId){
   const r=await api('testNotification',{body:{cleaner_id:cleanerId}});
-  if(r.status==='success') toast('Notif envoyée ✅','success');
-  else toast(r.error||'Erreur','error');
+  if(r.status==='success') toast('Notification sent ✅','success');
+  else toast(r.error||'Error','error');
 }
 async function regenerateTopic(cleanerId){
-  if(!confirm('Régénérer le topic ? L\'ancien sera invalidé.')) return;
+  if(!confirm('Regenerate topic? The old one will be invalidated.')) return;
   const r=await api('regenerateTopic',{body:{cleaner_id:cleanerId}});
-  if(r.status==='success'){ toast('Topic régénéré','success'); fetchAll(); }
+  if(r.status==='success'){ toast('Topic regenerated','success'); fetchAll(); }
 }
 // Property heatmap
 async function loadPropertyHeatmap(){
@@ -2931,9 +2931,9 @@ async function loadPropertyHeatmap(){
   if(!el) return;
   try{
     const r=await api('getPropertyHeatmap');
-    if(r.status!=='success'){ el.innerHTML='<div class="empty">Erreur chargement</div>'; return; }
+    if(r.status!=='success'){ el.innerHTML='<div class="empty">Loading error</div>'; return; }
     const props=r.properties||[];
-    if(props.length===0){ el.innerHTML='<div class="empty">Aucune propriété</div>'; return; }
+    if(props.length===0){ el.innerHTML='<div class="empty">No properties</div>'; return; }
     el.innerHTML = '<div class="heatmap-grid">'+
       props.map(p => {
         const scoreColor = p.score >= 80 ? '#059669' : p.score >= 60 ? '#d97706' : '#dc2626';
@@ -2946,15 +2946,15 @@ async function loadPropertyHeatmap(){
             '<div class="hm-score" style="background:'+scoreColor+'">'+p.score+'</div>'+
           '</div>'+
           '<div class="hm-stats">'+
-            '<div class="hm-stat"><span class="hm-stat-icon">🛠️</span><span class="hm-stat-val">'+p.open_tickets+'</span><span class="hm-stat-lbl">ouverts</span></div>'+
-            (p.urgent_tickets>0 ? '<div class="hm-stat"><span class="hm-stat-icon">🚨</span><span class="hm-stat-val urgent">'+p.urgent_tickets+'</span><span class="hm-stat-lbl">urgents</span></div>' : '')+
+            '<div class="hm-stat"><span class="hm-stat-icon">🛠️</span><span class="hm-stat-val">'+p.open_tickets+'</span><span class="hm-stat-lbl">open</span></div>'+
+            (p.urgent_tickets>0 ? '<div class="hm-stat"><span class="hm-stat-icon">🚨</span><span class="hm-stat-val urgent">'+p.urgent_tickets+'</span><span class="hm-stat-lbl">urgent</span></div>' : '')+
             '<div class="hm-stat"><span class="hm-stat-icon">💸</span><span class="hm-stat-val">'+(p.total_cost>0?Math.round(p.total_cost):'—')+'</span><span class="hm-stat-lbl">AED</span></div>'+
             (p.avg_rating!=null ? '<div class="hm-stat"><span class="hm-stat-icon">⭐</span><span class="hm-stat-val">'+p.avg_rating+'</span><span class="hm-stat-lbl">('+p.feedback_count+')</span></div>' : '')+
           '</div>'+
         '</div>';
       }).join('')+
     '</div>';
-  }catch(e){ el.innerHTML='<div class="empty">Erreur: '+e.message+'</div>'; }
+  }catch(e){ el.innerHTML='<div class="empty">Error: '+e.message+'</div>'; }
 }
 function renderInventory(){
   let h='<div class="header"><div class="header-top"><h1>📦 Inventory</h1><div class="header-actions"></div></div></div>';
@@ -2976,9 +2976,9 @@ function renderInventory(){
   // Items
   h+='<div class="settings-panel"><h3>📋 Stock Items ('+inventoryItems.length+')</h3>';
   if(inventoryItems.length===0){
-    h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">📦</div><div class="empty-hero-title">Inventaire vide</div><div class="empty-hero-sub">Ajoute ton premier article ci-dessous pour suivre ton stock.</div></div>';
+    h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">📦</div><div class="empty-hero-title">Empty inventory</div><div class="empty-hero-sub">Add your first item below to start tracking stock.</div></div>';
   } else if(!inventoryAlerts || inventoryAlerts.length===0){
-    h+='<div class="empty-hero" style="padding:20px 20px 10px"><div class="empty-hero-icon">👌</div><div class="empty-hero-title">Stock au top</div><div class="empty-hero-sub">Aucune alerte de stock bas pour l\'instant.</div></div>';
+    h+='<div class="empty-hero" style="padding:20px 20px 10px"><div class="empty-hero-icon">👌</div><div class="empty-hero-title">All stocked up</div><div class="empty-hero-sub">No low-stock alerts for now.</div></div>';
   }
   inventoryItems.forEach(item=>{
     const low=item.current_qty<=item.min_qty;
@@ -3021,7 +3021,7 @@ function renderIssues(){
   // Open issues
   const openIssues=issues.filter(i=>i.status!=='resolved');
   h+='<div class="settings-panel"><h3>🔴 Open Issues ('+openIssues.length+')</h3>';
-  if(openIssues.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">✨</div><div class="empty-hero-title">Tout est propre !</div><div class="empty-hero-sub">Aucun problème ouvert. Beau travail d\'équipe.</div></div>';
+  if(openIssues.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">✨</div><div class="empty-hero-title">All clear!</div><div class="empty-hero-sub">No open issues. Nice teamwork.</div></div>';
   openIssues.forEach(issue=>{
     h+='<div class="issue-card '+issue.severity+'">';
     h+='<div class="issue-header"><div class="issue-title">'+esc(issue.title)+'</div><span class="issue-severity '+issue.severity+'">'+issue.severity+'</span></div>';
@@ -3068,7 +3068,7 @@ function renderRecurring(){
   // Task list
   const today=new Date().toISOString().split('T')[0];
   h+='<div class="settings-panel"><h3>📋 Scheduled Tasks ('+recurringTasks.length+')</h3>';
-  if(recurringTasks.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">🔁</div><div class="empty-hero-title">Aucune tâche récurrente</div><div class="empty-hero-sub">Automatise les ménages profonds, changements de filtres, etc. Remplis le formulaire ci-dessus.</div></div>';
+  if(recurringTasks.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">🔁</div><div class="empty-hero-title">No recurring tasks</div><div class="empty-hero-sub">Automate deep cleans, filter changes, etc. Fill in the form above.</div></div>';
   recurringTasks.forEach(task=>{
     const dueDate=task.next_due_at?task.next_due_at.split('T')[0]:null;
     let dueClass='upcoming',dueLabel='';
@@ -3445,8 +3445,8 @@ function renderMtTickets(isManager){
     h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
     if(toShow.length===0){
       const hasFilter = mtFilterStatus||mtFilterCat||mtSearch.trim();
-      if(hasFilter){ h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">🔍</div><div class="empty-hero-title">Aucun ticket</div><div class="empty-hero-sub">Aucun ticket ne correspond à ce filtre.</div></div>'; }
-      else { h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">🛠️</div><div class="empty-hero-title">Zéro ticket ouvert</div><div class="empty-hero-sub">Toutes les propriétés sont en bon état. 🔧</div></div>'; }
+      if(hasFilter){ h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">🔍</div><div class="empty-hero-title">No tickets</div><div class="empty-hero-sub">No ticket matches this filter.</div></div>'; }
+      else { h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">🛠️</div><div class="empty-hero-title">All clear — no open tickets</div><div class="empty-hero-sub">All properties are in good shape. 🔧</div></div>'; }
     }
     toShow.forEach(t=>{
       h+=renderMtTicketCard(t,allProps,isManager,mtExpandedTicket===t.id);
@@ -3803,7 +3803,7 @@ async function exportCsv(type){
   a.click();
   a.remove();
   URL.revokeObjectURL(dlUrl);
-  toast('Export téléchargé','success');
+  toast('Export downloaded','success');
 }
 
 function exportExcel(){
@@ -3994,10 +3994,10 @@ function cmdkSearch(q){
   const query=q.toLowerCase().trim();
   if(!query){cmdkResults=[];renderCmdk();return;}
   const res=[];
-  // Réservations
+  // Reservations
   (RESERVATIONS||[]).forEach(r=>{
     if((r.guest||'').toLowerCase().includes(query)||(r.listing||'').toLowerCase().includes(query)){
-      res.push({group:'Réservations',icon:'🏠',title:r.guest||'Guest',meta:(r.listing||'')+' · '+(r.co||''),onClick:()=>{selectedDate=r.co;currentTab='planner';closeCmdk();render();}});
+      res.push({group:'Reservations',icon:'🏠',title:r.guest||'Guest',meta:(r.listing||'')+' · '+(r.co||''),onClick:()=>{selectedDate=r.co;currentTab='planner';closeCmdk();render();}});
     }
   });
   // Cleaners
@@ -4021,13 +4021,13 @@ function cmdkSearch(q){
   // Equipment
   (equipment||[]).forEach(e=>{
     if((e.name||'').toLowerCase().includes(query)||(e.brand||'').toLowerCase().includes(query)){
-      res.push({group:'Équipement',icon:'🛠️',title:e.name||'Equipment',meta:(e.brand||'')+(e.model?' '+e.model:''),onClick:()=>{currentTab='maintenance';mtSubTab='equipment';closeCmdk();render();}});
+      res.push({group:'Equipment',icon:'🛠️',title:e.name||'Equipment',meta:(e.brand||'')+(e.model?' '+e.model:''),onClick:()=>{currentTab='maintenance';mtSubTab='equipment';closeCmdk();render();}});
     }
   });
-  // Propriétés
+  // Properties
   Object.entries(listingPrices||{}).forEach(([id,l])=>{
     if((((l.listing_name||'')+' '+id)).toLowerCase().includes(query)){
-      res.push({group:'Propriétés',icon:'🏘️',title:l.listing_name||id,meta:(l.bedrooms||0)+' BR · '+((l.custom_price||l.price)||0)+' AED',onClick:()=>{currentTab='properties';closeCmdk();render();}});
+      res.push({group:'Properties',icon:'🏘️',title:l.listing_name||id,meta:(l.bedrooms||0)+' BR · '+((l.custom_price||l.price)||0)+' AED',onClick:()=>{currentTab='properties';closeCmdk();render();}});
     }
   });
   cmdkResults=res.slice(0,30);
@@ -4048,12 +4048,12 @@ function renderCmdk(){
   });
   let html='<div class="cmdk-overlay" onclick="if(event.target===this)closeCmdk()">';
   html+='<div class="cmdk-box" onclick="event.stopPropagation()">';
-  html+='<input id="cmdkInput" class="cmdk-input" placeholder="Rechercher un guest, cleaner, propriété, ticket..." value="'+esc(cmdkQuery)+'" oninput="cmdkSearch(this.value)" onkeydown="cmdkKeyDown(event)" />';
+  html+='<input id="cmdkInput" class="cmdk-input" placeholder="Search for guest, cleaner, property, ticket..." value="'+esc(cmdkQuery)+'" oninput="cmdkSearch(this.value)" onkeydown="cmdkKeyDown(event)" />';
   html+='<div class="cmdk-results">';
   if(cmdkQuery && cmdkResults.length===0){
-    html+='<div class="cmdk-empty">Aucun résultat pour "'+esc(cmdkQuery)+'"</div>';
+    html+='<div class="cmdk-empty">No results for "'+esc(cmdkQuery)+'"</div>';
   } else if(!cmdkQuery){
-    html+='<div class="cmdk-empty">Tape pour rechercher dans toute l\'app<br>Réservations, cleaners, tickets, vendors, équipement, propriétés...</div>';
+    html+='<div class="cmdk-empty">Type to search across the app<br>Reservations, cleaners, tickets, vendors, equipment, properties...</div>';
   } else {
     Object.entries(groups).forEach(([g,items])=>{
       html+='<div class="cmdk-group"><div class="cmdk-group-title">'+esc(g)+'</div>';
@@ -4066,7 +4066,7 @@ function renderCmdk(){
     });
   }
   html+='</div>';
-  html+='<div class="cmdk-hint"><span><kbd>↑</kbd><kbd>↓</kbd> naviguer · <kbd>Enter</kbd> sélectionner</span><span><kbd>Esc</kbd> fermer</span></div>';
+  html+='<div class="cmdk-hint"><span><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> select</span><span><kbd>Esc</kbd> close</span></div>';
   html+='</div></div>';
   el.innerHTML=html;
 }
@@ -4128,20 +4128,20 @@ function renderExtraModal(){
   el.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeExtraModal()">'+
     '<div class="modal-box">'+
       '<div class="modal-header">'+
-        '<div class="modal-title">'+(isEdit?'✏️ Modifier':'➕ Ajouter')+' un ménage extra</div>'+
+        '<div class="modal-title">'+(isEdit?'✏️ Edit':'➕ Add')+' extra cleaning</div>'+
         '<button class="modal-close" onclick="closeExtraModal()">✕</button>'+
       '</div>'+
       '<div class="modal-body">'+
-        // Section 1 : Où & Quand
+        // Section 1 : Where & When
         '<div class="acc-section">'+
           '<button type="button" class="acc-head" onclick="toggleExtraSection(\'where\')">'+
-            '<span class="acc-title">🏠 Où & Quand</span>'+
+            '<span class="acc-title">🏠 Where & When</span>'+
             '<span class="acc-chevron'+(extraModalOpenSection==='where'?' open':'')+'">▼</span>'+
           '</button>'+
           (extraModalOpenSection==='where' ? '<div class="acc-body">'+
-            '<div class="form-row"><label>Unité <span class="req">*</span></label>'+
+            '<div class="form-row"><label>Unit <span class="req">*</span></label>'+
               '<select id="ef-listing" onchange="extraModalState.form.listing_id=this.value;syncExtraPriceDefaults();">'+
-                '<option value="">Sélectionner...</option>'+
+                '<option value="">Select...</option>'+
                 listings.map(l=>'<option value="'+esc(l.id)+'" '+(f.listing_id===l.id?'selected':'')+'>'+esc(l.name)+'</option>').join('')+
               '</select>'+
             '</div>'+
@@ -4150,59 +4150,59 @@ function renderExtraModal(){
             '</div>'+
             '<div class="form-row"><label>Type</label>'+
               '<select id="ef-label" onchange="extraModalState.form.label=this.value">'+
-                '<option value="" '+(!f.label?'selected':'')+'>— Choisir —</option>'+
+                '<option value="" '+(!f.label?'selected':'')+'>— Choose —</option>'+
                 '<option value="Mid-stay" '+(f.label==='Mid-stay'?'selected':'')+'>Mid-stay</option>'+
                 '<option value="Owner turnover" '+(f.label==='Owner turnover'?'selected':'')+'>Owner turnover</option>'+
                 '<option value="Deep clean" '+(f.label==='Deep clean'?'selected':'')+'>Deep clean</option>'+
                 '<option value="Post-construction" '+(f.label==='Post-construction'?'selected':'')+'>Post-construction</option>'+
-                '<option value="Other" '+(f.label==='Other'?'selected':'')+'>Autre</option>'+
+                '<option value="Other" '+(f.label==='Other'?'selected':'')+'>Other</option>'+
               '</select>'+
             '</div>'+
-            '<div class="form-row"><label>Nom du guest / Client</label>'+
-              '<input type="text" id="ef-guest" value="'+esc(f.guest_name)+'" oninput="extraModalState.form.guest_name=this.value" placeholder="Facultatif">'+
+            '<div class="form-row"><label>Guest / Client name</label>'+
+              '<input type="text" id="ef-guest" value="'+esc(f.guest_name)+'" oninput="extraModalState.form.guest_name=this.value" placeholder="Optional">'+
             '</div>'+
           '</div>' : '')+
         '</div>'+
-        // Section 2 : Prix
+        // Section 2 : Price
         '<div class="acc-section">'+
           '<button type="button" class="acc-head" onclick="toggleExtraSection(\'price\')">'+
-            '<span class="acc-title">💰 Prix '+(f.price_billed?'<span class="acc-badge">'+esc(String(f.price_billed))+' AED</span>':'')+'</span>'+
+            '<span class="acc-title">💰 Price '+(f.price_billed?'<span class="acc-badge">'+esc(String(f.price_billed))+' AED</span>':'')+'</span>'+
             '<span class="acc-chevron'+(extraModalOpenSection==='price'?' open':'')+'">▼</span>'+
           '</button>'+
           (extraModalOpenSection==='price' ? '<div class="acc-body">'+
             '<div class="form-grid">'+
-              '<div class="form-row"><label>Prix facturé (AED) <span class="req">*</span></label>'+
+              '<div class="form-row"><label>Price billed (AED) <span class="req">*</span></label>'+
                 '<input type="number" step="1" id="ef-price" value="'+esc(String(f.price_billed))+'" oninput="extraModalState.form.price_billed=this.value" placeholder="250">'+
               '</div>'+
-              '<div class="form-row"><label>Prix cleaner (AED)</label>'+
-                '<input type="number" step="1" id="ef-cleanerprice" value="'+esc(String(f.cleaner_price))+'" oninput="extraModalState.form.cleaner_price=this.value" placeholder="Défaut unité">'+
+              '<div class="form-row"><label>Cleaner rate (AED)</label>'+
+                '<input type="number" step="1" id="ef-cleanerprice" value="'+esc(String(f.cleaner_price))+'" oninput="extraModalState.form.cleaner_price=this.value" placeholder="Unit default">'+
               '</div>'+
             '</div>'+
           '</div>' : '')+
         '</div>'+
-        // Section 3 : Assignation & Notes
+        // Section 3 : Assignment & Notes
         '<div class="acc-section">'+
           '<button type="button" class="acc-head" onclick="toggleExtraSection(\'assign\')">'+
-            '<span class="acc-title">👤 Assignation & Notes</span>'+
+            '<span class="acc-title">👤 Assignment & Notes</span>'+
             '<span class="acc-chevron'+(extraModalOpenSection==='assign'?' open':'')+'">▼</span>'+
           '</button>'+
           (extraModalOpenSection==='assign' ? '<div class="acc-body">'+
-            '<div class="form-row"><label>Cleaner assigné</label>'+
+            '<div class="form-row"><label>Assigned cleaner</label>'+
               '<select id="ef-cleaner" onchange="extraModalState.form.assigned_cleaner_id=this.value">'+
-                '<option value="">— Non assigné —</option>'+
+                '<option value="">— Unassigned —</option>'+
                 cleanersList.map(c=>'<option value="'+c.id+'" '+(String(f.assigned_cleaner_id)===String(c.id)?'selected':'')+'>'+esc(c.name)+'</option>').join('')+
               '</select>'+
             '</div>'+
             '<div class="form-row"><label>Notes</label>'+
-              '<textarea id="ef-notes" rows="2" oninput="extraModalState.form.notes=this.value" placeholder="Infos facultatives">'+esc(f.notes)+'</textarea>'+
+              '<textarea id="ef-notes" rows="2" oninput="extraModalState.form.notes=this.value" placeholder="Optional info">'+esc(f.notes)+'</textarea>'+
             '</div>'+
           '</div>' : '')+
         '</div>'+
       '</div>'+
       '<div class="modal-footer">'+
-        (isEdit?'<button class="btn-danger" onclick="deleteExtra('+f.id+')">🗑 Supprimer</button>':'')+
-        '<button class="btn-secondary" onclick="closeExtraModal()">Annuler</button>'+
-        '<button class="btn-primary" onclick="saveExtra()">'+(isEdit?'💾 Enregistrer':'➕ Créer')+'</button>'+
+        (isEdit?'<button class="btn-danger" onclick="deleteExtra('+f.id+')">🗑 Delete</button>':'')+
+        '<button class="btn-secondary" onclick="closeExtraModal()">Cancel</button>'+
+        '<button class="btn-primary" onclick="saveExtra()">'+(isEdit?'💾 Save':'➕ Create')+'</button>'+
       '</div>'+
     '</div>'+
   '</div>';
@@ -4215,14 +4215,14 @@ function syncExtraPriceDefaults(){
   if(l){
     const val = l.custom_price || l.price;
     const el = document.getElementById('ef-cleanerprice');
-    if(el && !extraModalState.form.cleaner_price) el.placeholder = 'Défaut unité: '+val+' AED';
+    if(el && !extraModalState.form.cleaner_price) el.placeholder = 'Unit default: '+val+' AED';
   }
 }
 
 async function saveExtra(){
   const f = extraModalState.form;
-  if(!f.listing_id || !f.cleaning_date){ toast('Unité et date obligatoires','error'); return; }
-  if(!f.price_billed){ toast('Prix facturé obligatoire','error'); return; }
+  if(!f.listing_id || !f.cleaning_date){ toast('Unit and date required','error'); return; }
+  if(!f.price_billed){ toast('Billed price required','error'); return; }
   const payload = {
     listing_id: f.listing_id,
     cleaning_date: f.cleaning_date,
@@ -4241,24 +4241,24 @@ async function saveExtra(){
     r = await api('addExtraCleaning', {body: payload});
   }
   if(r.status === 'success'){
-    toast(extraModalState.editing?'Ménage modifié':'Ménage extra ajouté ✨','success');
+    toast(extraModalState.editing?'Cleaning updated':'Extra cleaning added ✨','success');
     haptic('light');
     closeExtraModal();
     fetchAll();
   } else {
-    toast(r.error || 'Erreur','error');
+    toast(r.error || 'Error','error');
   }
 }
 
 async function deleteExtra(id){
-  if(!confirm('Supprimer ce ménage extra ?')) return;
+  if(!confirm('Delete this extra cleaning?')) return;
   const r = await api('deleteExtraCleaning', {body: {id}});
   if(r.status === 'success'){
-    toast('Supprimé','success');
+    toast('Deleted','success');
     closeExtraModal();
     fetchAll();
   } else {
-    toast(r.error || 'Erreur','error');
+    toast(r.error || 'Error','error');
   }
 }
 
