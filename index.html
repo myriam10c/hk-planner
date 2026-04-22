@@ -213,6 +213,30 @@ body { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .card-cta.restore { background:var(--red-light); color:var(--red); border:1px solid rgba(220,38,38,0.1); }
 .card-cta.undo { background:var(--bg); color:var(--text3); font-size:11px; padding:5px 12px; }
 .card-cta.done-direct { background:var(--green-light); color:var(--green); font-size:11px; padding:5px 12px; }
+.card-cta.pause { background:var(--orange-light,rgba(245,158,11,0.12)); color:var(--orange,#f59e0b); padding:8px 12px; margin-right:4px; }
+.card-cta.resume { background:var(--primary); color:white; padding:8px 12px; margin-right:4px; }
+.btn-timer { background:var(--primary); color:white; border:none; padding:8px 14px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; margin-right:6px; }
+.btn-timer-stop { background:var(--red,#ef4444); color:white; border:none; padding:8px 14px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+.timer-running { display:inline-block; background:var(--blue-light,rgba(96,165,250,0.12)); color:var(--blue,#3b82f6); padding:4px 10px; border-radius:6px; font-weight:600; margin-right:6px; font-size:12px; }
+.timer-paused { display:inline-block; background:var(--orange-light,rgba(245,158,11,0.12)); color:var(--orange,#f59e0b); padding:4px 10px; border-radius:6px; font-weight:600; margin-right:6px; font-size:12px; }
+.timer-done { color:var(--green,#22c55e); font-weight:600; font-size:12px; }
+.cmdk-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:flex-start; justify-content:center; padding-top:15vh; }
+.cmdk-box { background:var(--card,#fff); border-radius:14px; width:90%; max-width:600px; box-shadow:0 24px 64px rgba(0,0,0,0.3); overflow:hidden; border:1px solid var(--border,#e0e0e0); }
+.cmdk-input { width:100%; border:none; outline:none; padding:18px 20px; font-size:16px; background:transparent; color:var(--text,#1a1a2e); border-bottom:1px solid var(--border,#e5e7eb); box-sizing:border-box; }
+.cmdk-results { max-height:50vh; overflow-y:auto; padding:8px 0; }
+.cmdk-group { padding:4px 0; }
+.cmdk-group-title { font-size:11px; color:var(--text3,#888); padding:6px 20px 4px; text-transform:uppercase; letter-spacing:0.8px; font-weight:700; }
+.cmdk-item { padding:10px 20px; cursor:pointer; display:flex; align-items:center; gap:12px; font-size:14px; color:var(--text,#1a1a2e); }
+.cmdk-item:hover, .cmdk-item.active { background:var(--primary-light,rgba(124,58,237,0.08)); }
+.cmdk-item .icon { font-size:16px; width:22px; text-align:center; }
+.cmdk-item .title { flex:1; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cmdk-item .meta { font-size:11px; color:var(--text3,#888); flex-shrink:0; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cmdk-empty { padding:30px 20px; text-align:center; color:var(--text3,#888); font-size:13px; }
+.cmdk-hint { padding:8px 20px; font-size:11px; color:var(--text3,#888); border-top:1px solid var(--border,#e5e7eb); display:flex; justify-content:space-between; }
+.cmdk-hint kbd { background:var(--bg2,#f5f5f7); border:1px solid var(--border,#e5e7eb); border-radius:4px; padding:1px 6px; font-family:inherit; font-size:10px; }
+.cmdk-trigger { background:var(--bg2,#f5f5f7); color:var(--text3,#888); border:1px solid var(--border,#e5e7eb); border-radius:6px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; margin-right:4px; }
+.cmdk-trigger:hover { background:var(--primary-light); color:var(--primary); }
+@media (max-width:600px){ .cmdk-trigger { display:none; } }
 
 /* Confirm message */
 .confirm-msg { font-size:11px; color:var(--orange); font-weight:700; margin-top:4px; padding-left:18px; }
@@ -672,6 +696,7 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 <div class="bg-orbs"><div class="orb-3"></div><div class="orb-4"></div><div class="orb-5"></div></div><div class="bg-noise"></div><div id="app"></div><div id="cancelModal"></div>
 <div id="toast" class="toast"></div>
 <div id="modal"></div>
+<div id="cmdk" style="display:none;"></div>
 <input type="file" id="photoInput" accept="image/*" style="display:none" />
 
 <script>
@@ -1172,15 +1197,46 @@ function startTimer(key){
 function stopTimer(key){
   const r=RESERVATIONS.find(x=>x.co+'_'+x.guest===key);
   const label=r?r.listing:'this cleaning';
-  const started=timers[key]&&timers[key].started_at?Math.round((Date.now()-new Date(timers[key].started_at).getTime())/60000):0;
+  const t=timers[key];
+  let started=0;
+  if(t&&t.started_at){
+    const pauseSec=(t.total_pause_seconds||0)+(t.paused_at?Math.round((Date.now()-new Date(t.paused_at).getTime())/1000):0);
+    started=Math.max(0,Math.round((Date.now()-new Date(t.started_at).getTime()-pauseSec*1000)/60000));
+  }
   confirmAction('⏹ Stop Timer','Stop timer for '+label+'? ('+started+' min elapsed)',async()=>{
     const res=await api('stopTimer',{body:{reservation_key:key}});
     if(res.status==='success'){
-      timers[key].finished_at=new Date().toISOString();timers[key].duration_minutes=res.duration_minutes;render();
+      timers[key].finished_at=new Date().toISOString();timers[key].duration_minutes=res.duration_minutes;
+      if(res.pause_count!=null)timers[key].pause_count=res.pause_count;
+      timers[key].paused_at=null;
+      render();
       // Propose "Mark as done?" popup
       showDoneAfterStop(key,label,res.duration_minutes);
     }
   });
+}
+async function pauseTimer(key){
+  try{
+    await api('pauseTimer',{body:{reservation_key:key}});
+    if(timers[key])timers[key].paused_at=new Date().toISOString();
+    toast('Pause ⏸️','success');
+    render();
+    fetchAll();
+  }catch(e){toast('Pause échouée','error');}
+}
+async function resumeTimer(key){
+  try{
+    await api('resumeTimer',{body:{reservation_key:key}});
+    if(timers[key]&&timers[key].paused_at){
+      const pauseSec=Math.max(0,Math.round((Date.now()-new Date(timers[key].paused_at).getTime())/1000));
+      timers[key].total_pause_seconds=(timers[key].total_pause_seconds||0)+pauseSec;
+      timers[key].pause_count=(timers[key].pause_count||0)+1;
+      timers[key].paused_at=null;
+    }
+    toast('Reprise ▶️','success');
+    render();
+    fetchAll();
+  }catch(e){toast('Reprise échouée','error');}
 }
 function showDoneAfterStop(key,label,mins){
   const ov=document.createElement('div');ov.className='confirm-overlay';
@@ -1886,6 +1942,7 @@ function renderPlanner(){
   h+='<div style="flex:1"></div>';
   h+='<div class="header-actions">';
   if(cleanerMode) h+='<button class="icon-btn" onclick="cleanerLogout()" title="Logout">🚪</button>';
+  h+='<button class="cmdk-trigger" onclick="openCmdk()" title="Recherche globale (⌘K)">⌘K</button>';
   h+='<button class="icon-btn" onclick="toggleSearch()" title="Search">🔍</button>';
   // Menu button with auto-assign
   if(!cleanerMode&&cleaners.length>0){
@@ -1978,6 +2035,7 @@ function renderPlanner(){
       const bedrooms=getBedroomsForListing(r.listingId);
       const isCancelled=!!cancelled[key];
       const isRunning=timer&&timer.started_at&&!timer.finished_at;
+      const isPaused=isRunning&&timer.paused_at;
       const isFinished=timer&&timer.finished_at;
 
       // Determine card status for data-status attribute
@@ -2023,13 +2081,20 @@ function renderPlanner(){
         h+='<div class="card-row-3"><span class="next-guest '+nc+'" style="margin:0;padding:2px 8px;font-size:10px">'+nl+' '+esc(r.nextGuest.guest)+(r.nextGuest.checkInTime!=null?' '+formatTime(r.nextGuest.checkInTime):'')+'</span></div>';
       }
 
-      // Timer display (if running or finished)
+      // Timer display (if running, paused or finished)
       if(isRunning){
-        const elapsed=Math.round((Date.now()-new Date(timer.started_at).getTime())/60000);
+        const pauseSec=(timer.total_pause_seconds||0)+(timer.paused_at?Math.round((Date.now()-new Date(timer.paused_at).getTime())/1000):0);
+        const elapsed=Math.max(0,Math.round((Date.now()-new Date(timer.started_at).getTime()-pauseSec*1000)/60000));
         const safeTimerId=key.replace(/[^a-zA-Z0-9]/g,'');
-        h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge running" style="animation:pulse 2s infinite;font-size:11px;padding:2px 8px">⏱ '+elapsed+'min</span></div>';
+        if(isPaused){
+          h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge paused" style="background:var(--orange-light,rgba(245,158,11,0.12));color:var(--orange,#f59e0b);font-size:11px;padding:2px 8px">⏸️ '+elapsed+'min · en pause</span></div>';
+        }else{
+          h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge running" style="animation:pulse 2s infinite;font-size:11px;padding:2px 8px">⏱ '+elapsed+'min</span></div>';
+        }
       }else if(isFinished){
-        h+='<div class="card-row-timer"><span class="timer-badge done" style="background:var(--green-light);color:var(--green);font-size:11px;padding:2px 8px">✅ '+timer.duration_minutes+'min</span></div>';
+        const pCnt=timer.pause_count||0;
+        const pInfo=pCnt>0?' · '+pCnt+' pause'+(pCnt>1?'s':''):'';
+        h+='<div class="card-row-timer"><span class="timer-badge done" style="background:var(--green-light);color:var(--green);font-size:11px;padding:2px 8px">✅ '+timer.duration_minutes+'min'+pInfo+'</span></div>';
       }
 
       h+='</div>'; // end card-main
@@ -2038,7 +2103,11 @@ function renderPlanner(){
       h+='<div class="card-cta-col">';
       if(isCancelled){
         h+='<button class="card-cta restore" onclick="event.stopPropagation();toggleCancel(\''+sk+'\')">Restore</button>';
+      }else if(isPaused){
+        h+='<button class="card-cta resume" onclick="event.stopPropagation();resumeTimer(\''+sk+'\')" title="Reprendre">▶</button>';
+        h+='<button class="card-cta stop" onclick="event.stopPropagation();stopTimer(\''+sk+'\')">Stop</button>';
       }else if(isRunning){
+        h+='<button class="card-cta pause" onclick="event.stopPropagation();pauseTimer(\''+sk+'\')" title="Pause">⏸</button>';
         h+='<button class="card-cta stop" onclick="event.stopPropagation();stopTimer(\''+sk+'\')">Stop</button>';
       }else if(isDone){
         h+='<button class="card-cta undo" onclick="event.stopPropagation();markDone(\''+sk+'\')">Undo</button>';
@@ -3517,6 +3586,106 @@ setInterval(()=>{if(currentTab==='planner')render();},60000);
 // Check upcoming checkouts every 30 min
 setInterval(checkUpcomingCheckouts,30*60*1000);
 setTimeout(checkUpcomingCheckouts,10000);
+
+// ======================= Global search (Cmd+K) =======================
+let cmdkOpen=false, cmdkQuery='', cmdkIndex=0, cmdkResults=[];
+
+function openCmdk(){
+  cmdkOpen=true; cmdkQuery=''; cmdkIndex=0; cmdkResults=[];
+  renderCmdk();
+  setTimeout(()=>{const el=document.getElementById('cmdkInput');if(el)el.focus();},50);
+}
+function closeCmdk(){ cmdkOpen=false; renderCmdk(); }
+function cmdkSearch(q){
+  cmdkQuery=q; cmdkIndex=0;
+  const query=q.toLowerCase().trim();
+  if(!query){cmdkResults=[];renderCmdk();return;}
+  const res=[];
+  // Réservations
+  (RESERVATIONS||[]).forEach(r=>{
+    if((r.guest||'').toLowerCase().includes(query)||(r.listing||'').toLowerCase().includes(query)){
+      res.push({group:'Réservations',icon:'🏠',title:r.guest||'Guest',meta:(r.listing||'')+' · '+(r.co||''),onClick:()=>{selectedDate=r.co;currentTab='planner';closeCmdk();render();}});
+    }
+  });
+  // Cleaners
+  (cleaners||[]).forEach(c=>{
+    if((c.name||'').toLowerCase().includes(query)){
+      res.push({group:'Cleaners',icon:'👤',title:c.name,meta:c.role||'cleaner',onClick:()=>{currentTab='settings';filterCleaner=c.id;closeCmdk();render();}});
+    }
+  });
+  // Maintenance tickets
+  (maintenanceTickets||[]).forEach(t=>{
+    if((t.title||'').toLowerCase().includes(query)||(t.description||'').toLowerCase().includes(query)){
+      res.push({group:'Maintenance',icon:'🔧',title:t.title||'Ticket',meta:'#'+t.id+' · '+(t.status||''),onClick:()=>{currentTab='maintenance';mtSubTab='tickets';closeCmdk();render();}});
+    }
+  });
+  // Vendors
+  (vendors||[]).forEach(v=>{
+    if((v.name||'').toLowerCase().includes(query)){
+      res.push({group:'Vendors',icon:'🏢',title:v.name,meta:v.specialty||'',onClick:()=>{currentTab='maintenance';mtSubTab='vendors';closeCmdk();render();}});
+    }
+  });
+  // Equipment
+  (equipment||[]).forEach(e=>{
+    if((e.name||'').toLowerCase().includes(query)||(e.brand||'').toLowerCase().includes(query)){
+      res.push({group:'Équipement',icon:'🛠️',title:e.name||'Equipment',meta:(e.brand||'')+(e.model?' '+e.model:''),onClick:()=>{currentTab='maintenance';mtSubTab='equipment';closeCmdk();render();}});
+    }
+  });
+  // Propriétés
+  Object.entries(listingPrices||{}).forEach(([id,l])=>{
+    if((((l.listing_name||'')+' '+id)).toLowerCase().includes(query)){
+      res.push({group:'Propriétés',icon:'🏘️',title:l.listing_name||id,meta:(l.bedrooms||0)+' BR · '+((l.custom_price||l.price)||0)+' AED',onClick:()=>{currentTab='properties';closeCmdk();render();}});
+    }
+  });
+  cmdkResults=res.slice(0,30);
+  renderCmdk();
+}
+function cmdkSelect(i){
+  if(cmdkResults[i]&&cmdkResults[i].onClick){cmdkResults[i].onClick();}
+}
+function renderCmdk(){
+  const el=document.getElementById('cmdk');
+  if(!el)return;
+  if(!cmdkOpen){el.style.display='none';el.innerHTML='';return;}
+  el.style.display='block';
+  const groups={};
+  cmdkResults.forEach((r,i)=>{
+    if(!groups[r.group]){groups[r.group]=[];}
+    groups[r.group].push(Object.assign({},r,{_idx:i}));
+  });
+  let html='<div class="cmdk-overlay" onclick="if(event.target===this)closeCmdk()">';
+  html+='<div class="cmdk-box" onclick="event.stopPropagation()">';
+  html+='<input id="cmdkInput" class="cmdk-input" placeholder="Rechercher un guest, cleaner, propriété, ticket..." value="'+esc(cmdkQuery)+'" oninput="cmdkSearch(this.value)" onkeydown="cmdkKeyDown(event)" />';
+  html+='<div class="cmdk-results">';
+  if(cmdkQuery && cmdkResults.length===0){
+    html+='<div class="cmdk-empty">Aucun résultat pour "'+esc(cmdkQuery)+'"</div>';
+  } else if(!cmdkQuery){
+    html+='<div class="cmdk-empty">Tape pour rechercher dans toute l\'app<br>Réservations, cleaners, tickets, vendors, équipement, propriétés...</div>';
+  } else {
+    Object.entries(groups).forEach(([g,items])=>{
+      html+='<div class="cmdk-group"><div class="cmdk-group-title">'+esc(g)+'</div>';
+      items.forEach(r=>{
+        html+='<div class="cmdk-item'+(r._idx===cmdkIndex?' active':'')+'" onclick="cmdkSelect('+r._idx+')">';
+        html+='<span class="icon">'+r.icon+'</span><span class="title">'+esc(r.title)+'</span><span class="meta">'+esc(r.meta||'')+'</span>';
+        html+='</div>';
+      });
+      html+='</div>';
+    });
+  }
+  html+='</div>';
+  html+='<div class="cmdk-hint"><span><kbd>↑</kbd><kbd>↓</kbd> naviguer · <kbd>Enter</kbd> sélectionner</span><span><kbd>Esc</kbd> fermer</span></div>';
+  html+='</div></div>';
+  el.innerHTML=html;
+}
+function cmdkKeyDown(e){
+  if(e.key==='Escape'){e.preventDefault();closeCmdk();return;}
+  if(e.key==='ArrowDown'){e.preventDefault();cmdkIndex=Math.min(cmdkResults.length-1,cmdkIndex+1);renderCmdk();setTimeout(()=>{const el=document.getElementById('cmdkInput');if(el){el.focus();try{el.setSelectionRange(el.value.length,el.value.length);}catch(_){}}},10);return;}
+  if(e.key==='ArrowUp'){e.preventDefault();cmdkIndex=Math.max(0,cmdkIndex-1);renderCmdk();setTimeout(()=>{const el=document.getElementById('cmdkInput');if(el){el.focus();try{el.setSelectionRange(el.value.length,el.value.length);}catch(_){}}},10);return;}
+  if(e.key==='Enter'){e.preventDefault();cmdkSelect(cmdkIndex);return;}
+}
+document.addEventListener('keydown',(e)=>{
+  if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){e.preventDefault();if(cmdkOpen)closeCmdk();else openCmdk();}
+});
 
 // PWA Service Worker Registration
 if('serviceWorker' in navigator){

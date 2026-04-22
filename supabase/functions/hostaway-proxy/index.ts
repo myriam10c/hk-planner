@@ -537,9 +537,45 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { reservation_key, cleaner_id } = body;
       if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
-      const { error } = await sb.from("cleaning_timer").upsert({ reservation_key, cleaner_id: cleaner_id || null, started_at: new Date().toISOString(), finished_at: null, duration_minutes: null }, { onConflict: "reservation_key" });
+      const { error } = await sb.from("cleaning_timer").upsert({
+        reservation_key, cleaner_id: cleaner_id || null,
+        started_at: new Date().toISOString(),
+        finished_at: null, duration_minutes: null,
+        paused_at: null, total_pause_seconds: 0, pause_count: 0,
+      }, { onConflict: "reservation_key" });
       if (error) throw error;
       await addLog(sb, reservation_key, "timer_started", null, { cleaner_id });
+      return jsonResp({ status: "success" });
+    }
+    if (action === "pauseTimer" && req.method === "POST") {
+      const body = await req.json();
+      const { reservation_key } = body;
+      if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
+      const { data: t } = await sb.from("cleaning_timer").select("*").eq("reservation_key", reservation_key).single();
+      if (!t || !t.started_at) return jsonResp({ error: "Timer not started" }, 400);
+      if (t.finished_at) return jsonResp({ error: "Timer already stopped" }, 400);
+      if (t.paused_at) return jsonResp({ error: "Timer already paused" }, 400);
+      const { error } = await sb.from("cleaning_timer").update({ paused_at: new Date().toISOString() }).eq("reservation_key", reservation_key);
+      if (error) throw error;
+      await addLog(sb, reservation_key, "timer_paused", null);
+      return jsonResp({ status: "success" });
+    }
+    if (action === "resumeTimer" && req.method === "POST") {
+      const body = await req.json();
+      const { reservation_key } = body;
+      if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
+      const { data: t } = await sb.from("cleaning_timer").select("*").eq("reservation_key", reservation_key).single();
+      if (!t || !t.paused_at) return jsonResp({ error: "Timer not paused" }, 400);
+      if (t.finished_at) return jsonResp({ error: "Timer already stopped" }, 400);
+      const pauseMs = Date.now() - new Date(t.paused_at).getTime();
+      const pauseSec = Math.max(0, Math.round(pauseMs / 1000));
+      const newTotal = (t.total_pause_seconds || 0) + pauseSec;
+      const newCount = (t.pause_count || 0) + 1;
+      const { error } = await sb.from("cleaning_timer").update({
+        paused_at: null, total_pause_seconds: newTotal, pause_count: newCount
+      }).eq("reservation_key", reservation_key);
+      if (error) throw error;
+      await addLog(sb, reservation_key, "timer_resumed", null, { pause_seconds: pauseSec });
       return jsonResp({ status: "success" });
     }
     if (action === "stopTimer" && req.method === "POST") {
@@ -548,12 +584,27 @@ Deno.serve(async (req: Request) => {
       if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
       const { data: timer } = await sb.from("cleaning_timer").select("*").eq("reservation_key", reservation_key).single();
       if (!timer || !timer.started_at) return jsonResp({ error: "Timer not started" }, 400);
+      const now = Date.now();
       const started = new Date(timer.started_at).getTime();
-      const duration = Math.round((Date.now() - started) / 60000);
-      const { error } = await sb.from("cleaning_timer").update({ finished_at: new Date().toISOString(), duration_minutes: duration }).eq("reservation_key", reservation_key);
+      let totalPauseSec = timer.total_pause_seconds || 0;
+      let pauseCount = timer.pause_count || 0;
+      if (timer.paused_at) {
+        const pauseMs = now - new Date(timer.paused_at).getTime();
+        totalPauseSec += Math.max(0, Math.round(pauseMs / 1000));
+        pauseCount += 1;
+      }
+      const effectiveMs = now - started - totalPauseSec * 1000;
+      const duration = Math.max(0, Math.round(effectiveMs / 60000));
+      const { error } = await sb.from("cleaning_timer").update({
+        finished_at: new Date().toISOString(),
+        duration_minutes: duration,
+        paused_at: null,
+        total_pause_seconds: totalPauseSec,
+        pause_count: pauseCount,
+      }).eq("reservation_key", reservation_key);
       if (error) throw error;
-      await addLog(sb, reservation_key, "timer_stopped", null, { duration_minutes: duration });
-      return jsonResp({ status: "success", duration_minutes: duration });
+      await addLog(sb, reservation_key, "timer_stopped", null, { duration_minutes: duration, pause_count: pauseCount, pause_seconds: totalPauseSec });
+      return jsonResp({ status: "success", duration_minutes: duration, pause_count: pauseCount });
     }
     if (action === "getTimers") {
       const { data, error } = await sb.from("cleaning_timer").select("*");
