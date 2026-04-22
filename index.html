@@ -203,8 +203,24 @@ button:focus-visible, .icon-btn:focus-visible, [role="button"]:focus-visible { o
 .nav-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:8px 4px; cursor:pointer; color:var(--text3); font-size:10px; font-weight:600; transition:var(--transition); gap:3px; border:none; background:none; border-radius:14px; position:relative; }
 .nav-item:active { transform:scale(0.92); }
 .nav-item.active { color:var(--primary); background:rgba(124,58,237,0.15); }
-.nav-item .nav-icon { font-size:20px; line-height:1; transition:var(--transition); }
+.nav-item .nav-icon { font-size:20px; line-height:1; transition:var(--transition); display:inline-flex; align-items:center; justify-content:center; }
 .nav-item.active .nav-icon { transform:scale(1.1); }
+
+/* ===== SVG ICONS (Lucide inline) ===== */
+svg { flex-shrink:0; vertical-align:middle; }
+.nav-item svg, .icon-btn svg { display:block; }
+.icon-lg svg { width:22px; height:22px; }
+.icon-sm svg { width:14px; height:14px; }
+.dash-tab svg { margin-right:4px; vertical-align:-3px; }
+h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
+.empty-hero-icon svg { color:var(--primary); opacity:0.7; }
+.toast-success .toast-icon svg { color:var(--green); }
+.toast-error .toast-icon svg { color:var(--red); }
+.toast-warning .toast-icon svg { color:var(--orange); }
+.toast-info .toast-icon svg { color:var(--blue); }
+.onb-icon svg { color:var(--primary); }
+.hm-stat-icon svg { vertical-align:-2px; }
+.acc-title svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 
 /* ===== CONTAINER ===== */
 #app { position:relative; z-index:1; }
@@ -266,7 +282,7 @@ button:focus-visible, .icon-btn:focus-visible, [role="button"]:focus-visible { o
 
 /* ===== EMPTY HERO ===== */
 .empty-hero { text-align:center; padding:60px 20px; }
-.empty-hero-icon { font-size:64px; margin-bottom:16px; opacity:0.9; }
+.empty-hero-icon { font-size:64px; margin-bottom:16px; opacity:0.9; display:flex; justify-content:center; align-items:center; }
 .empty-hero-title { font-size:18px; font-weight:700; color:var(--text); margin-bottom:6px; }
 .empty-hero-sub { font-size:14px; color:var(--text2); margin-bottom:20px; }
 .empty-hero .btn-primary { background:var(--primary); color:white; border:none; padding:10px 20px; border-radius:var(--radius-md); font-weight:600; font-size:13px; cursor:pointer; }
@@ -917,6 +933,59 @@ window.addEventListener('unhandledrejection', (e) => {
 const API='https://dqjnqvbxfwtvrjwnnmns.supabase.co/functions/v1/hostaway-proxy';
 const APP_SHARED_SECRET='0RicFT1AZL0NDyH1M2ZWhbUvworsGOx38UhNNwFVF8dmP8SC-TRXfaoyQbR5pdn0';
 const DAYS={0:'Sun',1:'Mon',2:'Tue',3:'Wed',4:'Thu',5:'Fri',6:'Sat'};
+// ===== ICONS (Lucide SVGs, inline) =====
+const ICONS_SVG = {
+  clipboard:   '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>',
+  chart:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>',
+  wrench:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+  settings:    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  more:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>',
+  alertTriangle: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  trending:    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
+  history:     '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>',
+  package:     '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+  home:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+  repeat:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+  calendar:    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  search:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  plus:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  logout:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+  refresh:     '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+  check:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  checkCircle: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+  xCircle:     '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+  star:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+  dollar:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+  user:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  trash:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
+  play:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+  pause:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>',
+  stop:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>',
+  clock:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  download:    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  camera:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+  mapPin:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+  partyPopper: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.8 11.3 2 22l10.7-3.79"/><path d="M4 3h.01"/><path d="M22 8h.01"/><path d="M15 2h.01"/><path d="M22 20h.01"/><path d="M22 2 11 13"/><path d="M11 6.5c2.5-1 5-1 7 0 1.5.7 2.4 1.7 3 3"/><path d="M6.5 11c-1 2.5-1 5 0 7 .7 1.5 1.7 2.4 3 3"/></svg>',
+  sparkles:    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>',
+  bell:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+  broom:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 12 4-4a2.83 2.83 0 0 0-4-4l-4 4"/><path d="M8.5 8.5 4 13c-.5.5-.5 2 0 2.5l4 4c.5.5 2 .5 2.5 0l4.5-4.5"/><path d="M12 9v12"/><path d="m5 14 5 5"/></svg>',
+  map:         '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>',
+  wave:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>',
+  fingerUp:    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>',
+  siren:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a5 5 0 0 1 10 0v2H7Z"/><path d="M12 2v4"/><path d="M4.93 6.93l2.83 2.83"/><path d="M2 14h4"/><path d="M19.07 6.93l-2.83 2.83"/><path d="M22 14h-4"/></svg>',
+  wallet:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12c0 1.1.9 2 2 2h14v-4"/><path d="M18 12a2 2 0 0 0-2 2c0 1.1.9 2 2 2h4v-4h-4z"/></svg>',
+  info:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+  timer:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="15" y2="11"/><circle cx="12" cy="14" r="8"/></svg>',
+  msgSquare:   '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+};
+function icon(name, size){
+  let svg = ICONS_SVG[name];
+  if(!svg) return '';
+  if(size && size !== 20){
+    svg = svg.replace('width="20"', 'width="'+size+'"').replace('height="20"', 'height="'+size+'"');
+  }
+  return svg;
+}
 const MONTHS={0:'Jan',1:'Feb',2:'Mar',3:'Apr',4:'May',5:'Jun',6:'Jul',7:'Aug',8:'Sep',9:'Oct',10:'Nov',11:'Dec'};
 const MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -1046,10 +1115,10 @@ function dismissToast(id){
 function renderToasts(){
   let el = document.getElementById('toastStack');
   if(!el){ el = document.createElement('div'); el.id='toastStack'; el.className='toast-stack'; document.body.appendChild(el); }
-  const iconMap = {success:'✅', error:'❌', info:'💬', warning:'⚠️'};
+  const iconMap = {success:icon('checkCircle',16), error:icon('xCircle',16), info:icon('info',16), warning:icon('alertTriangle',16)};
   el.innerHTML = toastQueue.map(t=>
     '<div class="toast-item toast-'+t.type+'" onclick="dismissToast('+t.id+')">'+
-      '<span class="toast-icon">'+(iconMap[t.type]||'💬')+'</span>'+
+      '<span class="toast-icon">'+(iconMap[t.type]||iconMap.info)+'</span>'+
       '<span class="toast-msg">'+esc(t.msg)+'</span>'+
     '</div>'
   ).join('');
@@ -1069,9 +1138,9 @@ function renderOnboarding(){
   if(!el){ el=document.createElement('div'); el.id='onboarding'; document.body.appendChild(el); }
   if(!onboardingOpen){ el.innerHTML=''; return; }
   const slides = [
-    {icon:'👋',title:'Welcome!',text:'Here are your cleanings for today. Tap a card to see the reservation details.'},
-    {icon:'👆',title:'Swipe to cancel',text:'Swipe a card to the right to report that the cleaning can\'t be done (guest still there, no key, etc.)'},
-    {icon:'⏱️',title:'Timer & photos',text:'Start the timer, pause during waits, and add before/after photos to prove the job is done.'}
+    {icon:icon('wave',56),title:'Welcome!',text:'Here are your cleanings for today. Tap a card to see the reservation details.'},
+    {icon:icon('fingerUp',56),title:'Swipe to cancel',text:'Swipe a card to the right to report that the cleaning can\'t be done (guest still there, no key, etc.)'},
+    {icon:icon('timer',56),title:'Timer & photos',text:'Start the timer, pause during waits, and add before/after photos to prove the job is done.'}
   ];
   const s = slides[onboardingStep];
   el.innerHTML = '<div class="onb-overlay">'+
@@ -2167,13 +2236,13 @@ function renderMoreMenu(){
   if(!el){ el=document.createElement('div'); el.id='moreMenu'; document.body.appendChild(el); }
   if(!moreOpen){ el.innerHTML=''; return; }
   const items=[
-    {id:'inventory',icon:'📦',label:'Inventory',color:'#2563eb'},
-    {id:'properties',icon:'🏠',label:'Properties',color:'#7c3aed'},
-    {id:'recurring',icon:'🔁',label:'Recurring',color:'#d97706'},
-    {id:'issues',icon:'⚠️',label:'Issues',color:'#dc2626'},
-    {id:'history',icon:'📜',label:'History',color:'#059669'},
-    {id:'calendar',icon:'📅',label:'Calendar',color:'#0891b2'},
-    {id:'stats',icon:'📈',label:'Stats',color:'#be185d'},
+    {id:'inventory',icon:icon('package',22),label:'Inventory',color:'#2563eb'},
+    {id:'properties',icon:icon('home',22),label:'Properties',color:'#7c3aed'},
+    {id:'recurring',icon:icon('repeat',22),label:'Recurring',color:'#d97706'},
+    {id:'issues',icon:icon('alertTriangle',22),label:'Issues',color:'#dc2626'},
+    {id:'history',icon:icon('history',22),label:'History',color:'#059669'},
+    {id:'calendar',icon:icon('calendar',22),label:'Calendar',color:'#0891b2'},
+    {id:'stats',icon:icon('trending',22),label:'Stats',color:'#be185d'},
   ];
   el.innerHTML=`
   <div class="more-overlay" onclick="if(event.target===this)closeMoreMenu()">
@@ -2280,21 +2349,21 @@ function renderBottomNav(){
   if(!cleanerMode){
     // Manager view
     tabs=[
-      {id:'planner',icon:'📋',label:t('planner')},
-      {id:'dashboard',icon:'📊',label:t('dashboard')},
-      {id:'maintenance',icon:'🔧',label:'Maint.'},
-      {id:'settings',icon:'⚙️',label:t('settings')},
-      {id:'__more',icon:'⋯',label:'More'},
+      {id:'planner',icon:icon('clipboard',22),label:t('planner')},
+      {id:'dashboard',icon:icon('chart',22),label:t('dashboard')},
+      {id:'maintenance',icon:icon('wrench',22),label:'Maint.'},
+      {id:'settings',icon:icon('settings',22),label:t('settings')},
+      {id:'__more',icon:icon('more',22),label:'More'},
     ];
   }else if(cleanerMode.role==='maintenance'){
     // Maintenance view
-    tabs=[{id:'maintenance',icon:'🔧',label:'Maintenance'},{id:'issues',icon:'⚠️',label:t('issues')},{id:'history',icon:'📜',label:t('history')}];
+    tabs=[{id:'maintenance',icon:icon('wrench',22),label:'Maintenance'},{id:'issues',icon:icon('alertTriangle',22),label:t('issues')},{id:'history',icon:icon('history',22),label:t('history')}];
   }else{
     // Cleaner view (default)
-    tabs=[{id:'planner',icon:'📋',label:t('myTasks')},{id:'issues',icon:'⚠️',label:t('issues')},{id:'stats',icon:'📈',label:t('stats')},{id:'history',icon:'📜',label:t('history')}];
+    tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'issues',icon:icon('alertTriangle',22),label:t('issues')},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')}];
   }
-  return '<nav class="bottom-nav">'+tabs.map(t=>
-    '<button class="nav-item'+(currentTab===t.id?' active':'')+'" onclick="setTab(\''+t.id+'\')"><span class="nav-icon">'+t.icon+'</span>'+t.label+'</button>'
+  return '<nav class="bottom-nav">'+tabs.map(tab=>
+    '<button class="nav-item'+(currentTab===tab.id?' active':'')+'" onclick="setTab(\''+tab.id+'\')" aria-label="'+tab.label+'"><span class="nav-icon">'+tab.icon+'</span>'+tab.label+'</button>'
   ).join('')+'</nav>';
 }
 
@@ -2342,10 +2411,10 @@ function renderPlanner(){
   h+='<h1>'+(cleanerMode?'👋 '+esc(cleanerMode.name):selectedDate==='all'?rangeLabel:'<span style="font-weight:500;color:var(--text2)">'+rangeLabel+'</span>')+'</h1>';
   h+='<div style="flex:1"></div>';
   h+='<div class="header-actions">';
-  if(cleanerMode) h+='<button class="icon-btn" onclick="cleanerLogout()" title="Logout" aria-label="Logout">🚪</button>';
+  if(cleanerMode) h+='<button class="icon-btn" onclick="cleanerLogout()" title="Logout" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='<button class="cmdk-trigger" onclick="openCmdk()" title="Global search (⌘K)" aria-label="Open global search">⌘K</button>';
-  h+='<button class="icon-btn" onclick="toggleSearch()" title="Search" aria-label="Search">🔍</button>';
-  if(!cleanerMode){ h+='<button class="icon-btn" onclick="openExtraModal()" title="Add extra cleaning" aria-label="Add extra cleaning" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">➕</button>'; }
+  h+='<button class="icon-btn" onclick="toggleSearch()" title="Search" aria-label="Search">'+icon('search',18)+'</button>';
+  if(!cleanerMode){ h+='<button class="icon-btn" onclick="openExtraModal()" title="Add extra cleaning" aria-label="Add extra cleaning" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">'+icon('plus',18)+'</button>'; }
   // Menu button with auto-assign
   if(!cleanerMode&&cleaners.length>0){
     const una=RESERVATIONS.filter(r=>!assignments[keyFor(r)]).length;
@@ -2395,9 +2464,9 @@ function renderPlanner(){
   const sortedDates=Object.keys(grouped).sort();
   if(sortedDates.length===0){
     if(search||filterCleaner!==0||selectedDate!=='all'){
-      h+='<div class="empty-hero"><div class="empty-hero-icon">🔍</div><div class="empty-hero-title">No results</div><div class="empty-hero-sub">Try changing the filter or date.</div><button class="btn-primary" onclick="search=\'\';filterCleaner=0;setSelectedDate(\'all\')">Reset</button></div>';
+      h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No results</div><div class="empty-hero-sub">Try changing the filter or date.</div><button class="btn-primary" onclick="search=\'\';filterCleaner=0;setSelectedDate(\'all\')">Reset</button></div>';
     } else {
-      h+='<div class="empty-hero"><div class="empty-hero-icon">🎉</div><div class="empty-hero-title">No cleanings this week</div><div class="empty-hero-sub">Enjoy the break! Or check next week.</div>'+(!cleanerMode?'<button class="btn-primary" onclick="changeWeek(1)">Next week →</button>':'')+'</div>';
+      h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('partyPopper',56)+'</div><div class="empty-hero-title">No cleanings this week</div><div class="empty-hero-sub">Enjoy the break! Or check next week.</div>'+(!cleanerMode?'<button class="btn-primary" onclick="changeWeek(1)">Next week →</button>':'')+'</div>';
     }
   }
 
@@ -2495,14 +2564,14 @@ function renderPlanner(){
         const elapsed=Math.max(0,Math.round((Date.now()-new Date(timer.started_at).getTime()-pauseSec*1000)/60000));
         const safeTimerId=key.replace(/[^a-zA-Z0-9]/g,'');
         if(isPaused){
-          h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge paused" style="background:var(--orange-light,rgba(245,158,11,0.12));color:var(--orange,#f59e0b);font-size:11px;padding:2px 8px">⏸️ '+elapsed+'min · paused</span></div>';
+          h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge paused" style="background:var(--orange-light,rgba(245,158,11,0.12));color:var(--orange,#f59e0b);font-size:11px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px">'+icon('pause',12)+' '+elapsed+'min · paused</span></div>';
         }else{
-          h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge running" style="animation:pulse 2s infinite;font-size:11px;padding:2px 8px">⏱ '+elapsed+'min</span></div>';
+          h+='<div class="card-row-timer"><span id="timer_'+safeTimerId+'" class="timer-badge running" style="animation:pulse 2s infinite;font-size:11px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px">'+icon('clock',12)+' '+elapsed+'min</span></div>';
         }
       }else if(isFinished){
         const pCnt=timer.pause_count||0;
         const pInfo=pCnt>0?' · '+pCnt+' pause'+(pCnt>1?'s':''):'';
-        h+='<div class="card-row-timer"><span class="timer-badge done" style="background:var(--green-light);color:var(--green);font-size:11px;padding:2px 8px">✅ '+timer.duration_minutes+'min'+pInfo+'</span></div>';
+        h+='<div class="card-row-timer"><span class="timer-badge done" style="background:var(--green-light);color:var(--green);font-size:11px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px">'+icon('check',12)+' '+timer.duration_minutes+'min'+pInfo+'</span></div>';
       }
 
       h+='</div>'; // end card-main
@@ -2512,10 +2581,10 @@ function renderPlanner(){
       if(isCancelled){
         h+='<button class="card-cta restore" onclick="event.stopPropagation();toggleCancel(\''+sk+'\')">Restore</button>';
       }else if(isPaused){
-        h+='<button class="card-cta resume" onclick="event.stopPropagation();resumeTimer(\''+sk+'\')" title="Resume">▶</button>';
+        h+='<button class="card-cta resume" onclick="event.stopPropagation();resumeTimer(\''+sk+'\')" title="Resume">'+icon('play',14)+'</button>';
         h+='<button class="card-cta stop" onclick="event.stopPropagation();stopTimer(\''+sk+'\')">Stop</button>';
       }else if(isRunning){
-        h+='<button class="card-cta pause" onclick="event.stopPropagation();pauseTimer(\''+sk+'\')" title="Pause">⏸</button>';
+        h+='<button class="card-cta pause" onclick="event.stopPropagation();pauseTimer(\''+sk+'\')" title="Pause">'+icon('pause',14)+'</button>';
         h+='<button class="card-cta stop" onclick="event.stopPropagation();stopTimer(\''+sk+'\')">Stop</button>';
       }else if(isDone){
         h+='<button class="card-cta undo" onclick="event.stopPropagation();markDone(\''+sk+'\')">Undo</button>';
@@ -2523,10 +2592,10 @@ function renderPlanner(){
         h+='<button class="card-cta assign" onclick="event.stopPropagation();showAssignPicker(\''+sk+'\')">Assign</button>';
       }else if(isFinished){
         // Timer was stopped → show Done button
-        h+='<button class="card-cta done-direct" onclick="event.stopPropagation();markDone(\''+sk+'\')">✓ Done</button>';
+        h+='<button class="card-cta done-direct" onclick="event.stopPropagation();markDone(\''+sk+'\')">'+icon('check',14)+' Done</button>';
       }else{
         // No timer or not started → only Start
-        h+='<button class="card-cta start" onclick="event.stopPropagation();startTimer(\''+sk+'\')">▶ Start</button>';
+        h+='<button class="card-cta start" onclick="event.stopPropagation();startTimer(\''+sk+'\')" style="display:inline-flex;align-items:center;gap:4px">'+icon('play',14)+' Start</button>';
       }
       h+='</div>'; // end card-cta-col
 
@@ -2667,15 +2736,15 @@ function renderDashboard(){
   let h='<div class="header"><div class="header-top"><h1>📊 Dashboard</h1>'+(syncD?'<div style="flex:1"></div><span class="sync-indicator">📡 '+syncD+'</span>':'')+'</div></div>';
   h+='<div class="container">';
   h+='<div style="margin-bottom:16px; display:flex; gap:8px; flex-wrap:wrap;">'+
-    '<button onclick="exportCsv(\'cleanings\')" class="btn-export">📥 Export cleanings</button>'+
-    '<button onclick="exportCsv(\'maintenance\')" class="btn-export">💸 Export maintenance</button>'+
+    '<button onclick="exportCsv(\'cleanings\')" class="btn-export">'+icon('download',16)+' Export cleanings</button>'+
+    '<button onclick="exportCsv(\'maintenance\')" class="btn-export">'+icon('dollar',16)+' Export maintenance</button>'+
     '</div>';
   h+='<div class="month-selector"><button onclick="changeDashMonth(-1)">‹</button><h3>'+MONTH_NAMES[dashMonth]+' '+dashYear+'</h3><button onclick="changeDashMonth(1)">›</button></div>';
   // #7 Dashboard tabs (Operations / Revenue / Properties)
   h+='<div class="dash-tabs">'+
-    '<button class="dash-tab'+(dashSection==='ops'?' active':'')+'" onclick="setDashSection(\'ops\')">🧹 Operations</button>'+
-    '<button class="dash-tab'+(dashSection==='revenue'?' active':'')+'" onclick="setDashSection(\'revenue\')">💰 Revenue</button>'+
-    '<button class="dash-tab'+(dashSection==='properties'?' active':'')+'" onclick="setDashSection(\'properties\')">🏠 Properties</button>'+
+    '<button class="dash-tab'+(dashSection==='ops'?' active':'')+'" onclick="setDashSection(\'ops\')">'+icon('broom',16)+' Operations</button>'+
+    '<button class="dash-tab'+(dashSection==='revenue'?' active':'')+'" onclick="setDashSection(\'revenue\')">'+icon('wallet',16)+' Revenue</button>'+
+    '<button class="dash-tab'+(dashSection==='properties'?' active':'')+'" onclick="setDashSection(\'properties\')">'+icon('home',16)+' Properties</button>'+
   '</div>';
 
   if(dashLoading){
@@ -2716,7 +2785,7 @@ function renderDashboard(){
   if(dashSection==='ops'){
     h+='<div class="dash-grid">';
     // Monthly Overview
-    h+='<div class="dash-card"><h3>📈 '+MONTH_NAMES[dashMonth]+' Overview</h3><div class="dash-stat-row">'+
+    h+='<div class="dash-card"><h3>'+icon('trending',18)+' '+MONTH_NAMES[dashMonth]+' Overview</h3><div class="dash-stat-row">'+
       '<div class="dash-stat"><div class="ds-num">'+total+'</div><div class="ds-label">Total</div></div>'+
       '<div class="dash-stat"><div class="ds-num">'+totalDone+'</div><div class="ds-label">Done</div></div>'+
       '<div class="dash-stat"><div class="ds-num">'+(total-totalDone)+'</div><div class="ds-label">Left</div></div>'+
@@ -2802,7 +2871,7 @@ function renderDashboard(){
     h+='<div class="dash-grid">';
     // Revenue with visual gauge
     const revPct=revPotential>0?Math.round(revDone/revPotential*100):0;
-    h+='<div class="dash-card"><h3>💰 Cleaning Fees</h3>';
+    h+='<div class="dash-card"><h3>'+icon('dollar',18)+' Cleaning Fees</h3>';
     h+='<div style="display:flex;align-items:center;gap:16px;margin:10px 0">';
     h+='<div style="position:relative;width:80px;height:80px;flex-shrink:0">';
     h+='<svg viewBox="0 0 36 36" style="width:80px;height:80px;transform:rotate(-90deg)">';
@@ -2823,7 +2892,7 @@ function renderDashboard(){
 
     // Extra cleanings card
     if(monthExtras.length>0){
-      h+='<div class="dash-card"><h3>➕ Extra Cleanings — '+MONTH_NAMES[dashMonth]+'</h3><div class="dash-stat-row">'+
+      h+='<div class="dash-card"><h3>'+icon('plus',18)+' Extra Cleanings — '+MONTH_NAMES[dashMonth]+'</h3><div class="dash-stat-row">'+
         '<div class="dash-stat"><div class="ds-num">'+monthExtras.length+'</div><div class="ds-label">Total</div></div>'+
         '<div class="dash-stat"><div class="ds-num">'+extrasDone.length+'</div><div class="ds-label">Done</div></div>'+
         '<div class="dash-stat"><div class="ds-num" style="color:var(--green)">'+Math.round(extrasBilledDone)+'</div><div class="ds-label">Billed AED (done)</div></div>'+
@@ -2856,7 +2925,7 @@ function renderDashboard(){
     // Revenue per cleaner
     const revenuePerCleaner=computeRevenuePerCleaner(dashYear+'-'+String(dashMonth+1).padStart(2,'0'));
     if(revenuePerCleaner.length>0){
-      h+='<div class="dash-card"><h3>👤 Revenue per cleaner</h3>'+
+      h+='<div class="dash-card"><h3>'+icon('user',18)+' Revenue per cleaner</h3>'+
         '<table class="rev-cleaner-table">'+
           '<thead><tr>'+
             '<th>Cleaner</th><th>Cleanings</th><th>Revenue</th><th>Cost</th><th>Margin</th>'+
@@ -2880,7 +2949,7 @@ function renderDashboard(){
 
   // ============ TAB: PROPERTIES ============
   if(dashSection==='properties'){
-    h+='<div id="heatmapSection" class="dash-section"><h3>🗺️ Property health</h3><div id="heatmapContent">Loading...</div></div>';
+    h+='<div id="heatmapSection" class="dash-section"><h3>'+icon('map',18)+' Property health</h3><div id="heatmapContent">Loading...</div></div>';
     h+='<div class="dash-grid">';
     // Owner Report per property
     h+='<div class="dash-card"><h3>📄 Property Reports</h3><div style="font-size:11px;color:var(--text3);margin-bottom:8px">Generate per-property cleaning report PDF</div>';
@@ -3056,7 +3125,7 @@ function renderHistory(){
   let h='<div class="header"><div class="header-top"><h1>📜 History</h1><div class="header-actions"></div></div></div>';
   h+='<div class="container">';
   if(!historyLogs){h+='<div class="loading"><div class="spinner"></div></div></div>'+renderBottomNav();document.getElementById('app').innerHTML=h;loadHistory();return;}
-  if(historyLogs.length===0){h+='<div class="empty-hero"><div class="empty-hero-icon">📜</div><div class="empty-hero-title">No activity yet</div><div class="empty-hero-sub">As soon as an action happens (cleaning done, timer, note), it will appear here.</div></div>';}
+  if(historyLogs.length===0){h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('history',56)+'</div><div class="empty-hero-title">No activity yet</div><div class="empty-hero-sub">As soon as an action happens (cleaning done, timer, note), it will appear here.</div></div>';}
   else{
     h+='<div class="settings-panel"><h3>Recent Activity</h3>';
     historyLogs.forEach(log=>{
@@ -3106,9 +3175,9 @@ async function loadPropertyHeatmap(){
             '<div class="hm-score" style="background:'+scoreColor+'">'+p.score+'</div>'+
           '</div>'+
           '<div class="hm-stats">'+
-            '<div class="hm-stat"><span class="hm-stat-icon">🛠️</span><span class="hm-stat-val">'+p.open_tickets+'</span><span class="hm-stat-lbl">open</span></div>'+
-            (p.urgent_tickets>0 ? '<div class="hm-stat"><span class="hm-stat-icon">🚨</span><span class="hm-stat-val urgent">'+p.urgent_tickets+'</span><span class="hm-stat-lbl">urgent</span></div>' : '')+
-            '<div class="hm-stat"><span class="hm-stat-icon">💸</span><span class="hm-stat-val">'+(p.total_cost>0?Math.round(p.total_cost):'—')+'</span><span class="hm-stat-lbl">AED</span></div>'+
+            '<div class="hm-stat"><span class="hm-stat-icon">'+icon('wrench',14)+'</span><span class="hm-stat-val">'+p.open_tickets+'</span><span class="hm-stat-lbl">open</span></div>'+
+            (p.urgent_tickets>0 ? '<div class="hm-stat"><span class="hm-stat-icon">'+icon('siren',14)+'</span><span class="hm-stat-val urgent">'+p.urgent_tickets+'</span><span class="hm-stat-lbl">urgent</span></div>' : '')+
+            '<div class="hm-stat"><span class="hm-stat-icon">'+icon('dollar',14)+'</span><span class="hm-stat-val">'+(p.total_cost>0?Math.round(p.total_cost):'—')+'</span><span class="hm-stat-lbl">AED</span></div>'+
             (p.avg_rating!=null ? '<div class="hm-stat"><span class="hm-stat-icon">⭐</span><span class="hm-stat-val">'+p.avg_rating+'</span><span class="hm-stat-lbl">('+p.feedback_count+')</span></div>' : '')+
           '</div>'+
         '</div>';
@@ -3136,9 +3205,9 @@ function renderInventory(){
   // Items
   h+='<div class="settings-panel"><h3>📋 Stock Items ('+inventoryItems.length+')</h3>';
   if(inventoryItems.length===0){
-    h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">📦</div><div class="empty-hero-title">Empty inventory</div><div class="empty-hero-sub">Add your first item below to start tracking stock.</div></div>';
+    h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('package',56)+'</div><div class="empty-hero-title">Empty inventory</div><div class="empty-hero-sub">Add your first item below to start tracking stock.</div></div>';
   } else if(!inventoryAlerts || inventoryAlerts.length===0){
-    h+='<div class="empty-hero" style="padding:20px 20px 10px"><div class="empty-hero-icon">👌</div><div class="empty-hero-title">All stocked up</div><div class="empty-hero-sub">No low-stock alerts for now.</div></div>';
+    h+='<div class="empty-hero" style="padding:20px 20px 10px"><div class="empty-hero-icon">'+icon('checkCircle',56)+'</div><div class="empty-hero-title">All stocked up</div><div class="empty-hero-sub">No low-stock alerts for now.</div></div>';
   }
   inventoryItems.forEach(item=>{
     const low=item.current_qty<=item.min_qty;
@@ -3181,7 +3250,7 @@ function renderIssues(){
   // Open issues
   const openIssues=issues.filter(i=>i.status!=='resolved');
   h+='<div class="settings-panel"><h3>🔴 Open Issues ('+openIssues.length+')</h3>';
-  if(openIssues.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">✨</div><div class="empty-hero-title">All clear!</div><div class="empty-hero-sub">No open issues. Nice teamwork.</div></div>';
+  if(openIssues.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">'+icon('sparkles',56)+'</div><div class="empty-hero-title">All clear!</div><div class="empty-hero-sub">No open issues. Nice teamwork.</div></div>';
   openIssues.forEach(issue=>{
     h+='<div class="issue-card '+issue.severity+'">';
     h+='<div class="issue-header"><div class="issue-title">'+esc(issue.title)+'</div><span class="issue-severity '+issue.severity+'">'+issue.severity+'</span></div>';
@@ -3228,7 +3297,7 @@ function renderRecurring(){
   // Task list
   const today=new Date().toISOString().split('T')[0];
   h+='<div class="settings-panel"><h3>📋 Scheduled Tasks ('+recurringTasks.length+')</h3>';
-  if(recurringTasks.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">🔁</div><div class="empty-hero-title">No recurring tasks</div><div class="empty-hero-sub">Automate deep cleans, filter changes, etc. Fill in the form above.</div></div>';
+  if(recurringTasks.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">'+icon('repeat',56)+'</div><div class="empty-hero-title">No recurring tasks</div><div class="empty-hero-sub">Automate deep cleans, filter changes, etc. Fill in the form above.</div></div>';
   recurringTasks.forEach(task=>{
     const dueDate=task.next_due_at?task.next_due_at.split('T')[0]:null;
     let dueClass='upcoming',dueLabel='';
@@ -3329,8 +3398,8 @@ function renderCleanerStats(){
   });
   const avgScore=scoreCount>0?Math.round(totalScore/scoreCount):0;
 
-  let h='<div class="header"><div class="header-top"><h1>📈 '+t('myPerformance')+'</h1><div class="header-actions">'+renderLangSelector()+
-    '<button class="icon-btn" onclick="cleanerLogout()" title="'+t('logout')+'" aria-label="Logout">🚪</button>'+
+  let h='<div class="header"><div class="header-top"><h1>'+icon('trending',18)+' '+t('myPerformance')+'</h1><div class="header-actions">'+renderLangSelector()+
+    '<button class="icon-btn" onclick="cleanerLogout()" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>'+
     '</div></div></div>';
   h+='<div class="container">';
 
@@ -3374,9 +3443,9 @@ function renderMaintenance(){
   const isManager=!cleanerMode;
   const isTechnician=cleanerMode&&cleanerMode.role==='maintenance';
 
-  let h='<div class="header"><div class="header-top"><h1>🔧 Maintenance</h1><div class="header-actions">'+renderLangSelector()+
+  let h='<div class="header"><div class="header-top"><h1>'+icon('wrench',18)+' Maintenance</h1><div class="header-actions">'+renderLangSelector()+
     ''+
-    (cleanerMode?'<button class="icon-btn" onclick="cleanerLogout()" title="'+t('logout')+'" aria-label="Logout">🚪</button>':'')+'</div></div></div>';
+    (cleanerMode?'<button class="icon-btn" onclick="cleanerLogout()" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>':'')+'</div></div></div>';
   h+='<div class="container">';
 
   if(isManager){
@@ -3605,8 +3674,8 @@ function renderMtTickets(isManager){
     h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
     if(toShow.length===0){
       const hasFilter = mtFilterStatus||mtFilterCat||mtSearch.trim();
-      if(hasFilter){ h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">🔍</div><div class="empty-hero-title">No tickets</div><div class="empty-hero-sub">No ticket matches this filter.</div></div>'; }
-      else { h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">🛠️</div><div class="empty-hero-title">All clear — no open tickets</div><div class="empty-hero-sub">All properties are in good shape. 🔧</div></div>'; }
+      if(hasFilter){ h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No tickets</div><div class="empty-hero-sub">No ticket matches this filter.</div></div>'; }
+      else { h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('wrench',56)+'</div><div class="empty-hero-title">All clear — no open tickets</div><div class="empty-hero-sub">All properties are in good shape.</div></div>'; }
     }
     toShow.forEach(t=>{
       h+=renderMtTicketCard(t,allProps,isManager,mtExpandedTicket===t.id);
@@ -4295,7 +4364,7 @@ function renderExtraModal(){
         // Section 1 : Where & When
         '<div class="acc-section">'+
           '<button type="button" class="acc-head" onclick="toggleExtraSection(\'where\')">'+
-            '<span class="acc-title">🏠 Where & When</span>'+
+            '<span class="acc-title">'+icon('home',16)+' Where & When</span>'+
             '<span class="acc-chevron'+(extraModalOpenSection==='where'?' open':'')+'">▼</span>'+
           '</button>'+
           (extraModalOpenSection==='where' ? '<div class="acc-body">'+
@@ -4326,7 +4395,7 @@ function renderExtraModal(){
         // Section 2 : Price
         '<div class="acc-section">'+
           '<button type="button" class="acc-head" onclick="toggleExtraSection(\'price\')">'+
-            '<span class="acc-title">💰 Price '+(f.price_billed?'<span class="acc-badge">'+esc(String(f.price_billed))+' AED</span>':'')+'</span>'+
+            '<span class="acc-title">'+icon('wallet',16)+' Price '+(f.price_billed?'<span class="acc-badge">'+esc(String(f.price_billed))+' AED</span>':'')+'</span>'+
             '<span class="acc-chevron'+(extraModalOpenSection==='price'?' open':'')+'">▼</span>'+
           '</button>'+
           (extraModalOpenSection==='price' ? '<div class="acc-body">'+
@@ -4343,7 +4412,7 @@ function renderExtraModal(){
         // Section 3 : Assignment & Notes
         '<div class="acc-section">'+
           '<button type="button" class="acc-head" onclick="toggleExtraSection(\'assign\')">'+
-            '<span class="acc-title">👤 Assignment & Notes</span>'+
+            '<span class="acc-title">'+icon('user',16)+' Assignment & Notes</span>'+
             '<span class="acc-chevron'+(extraModalOpenSection==='assign'?' open':'')+'">▼</span>'+
           '</button>'+
           (extraModalOpenSection==='assign' ? '<div class="acc-body">'+
