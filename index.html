@@ -2386,6 +2386,30 @@ function renderDashboard(){
     '<div class="dash-stat"><div class="ds-num">'+(total-totalDone)+'</div><div class="ds-label">Left</div></div>'+
     '<div class="dash-stat"><div class="ds-num">'+totalAssigned+'</div><div class="ds-label">Assigned</div></div></div></div>';
 
+  // Extra cleanings revenue for the month
+  const monthPrefix=dashYear+'-'+String(dashMonth+1).padStart(2,'0');
+  const monthExtras=(extraCleanings||[]).filter(e=>String(e.cleaning_date||'').startsWith(monthPrefix));
+  const extrasDone=monthExtras.filter(e=>{const k=e.reservation_key;return e.status!=='cancelled'&&(done[k]||e.status==='done');});
+  const extrasPending=monthExtras.filter(e=>e.status==='pending'&&!done[e.reservation_key]);
+  const extrasBilledDone=extrasDone.reduce((s,e)=>s+Number(e.price_billed||0),0);
+  const extrasBilledPending=extrasPending.reduce((s,e)=>s+Number(e.price_billed||0),0);
+  const extrasCleanerCost=extrasDone.reduce((s,e)=>s+Number(e.cleaner_price||0),0);
+  if(monthExtras.length>0){
+    h+='<div class="dash-card"><h3>➕ Ménages Extras — '+MONTH_NAMES[dashMonth]+'</h3><div class="dash-stat-row">'+
+      '<div class="dash-stat"><div class="ds-num">'+monthExtras.length+'</div><div class="ds-label">Total</div></div>'+
+      '<div class="dash-stat"><div class="ds-num">'+extrasDone.length+'</div><div class="ds-label">Faits</div></div>'+
+      '<div class="dash-stat"><div class="ds-num" style="color:var(--green)">'+Math.round(extrasBilledDone)+'</div><div class="ds-label">Facturé AED (fait)</div></div>'+
+      '<div class="dash-stat"><div class="ds-num" style="color:var(--text2)">'+Math.round(extrasBilledPending)+'</div><div class="ds-label">À venir AED</div></div></div>';
+    if(extrasCleanerCost>0){
+      const margin=extrasBilledDone-extrasCleanerCost;
+      h+='<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)">'+
+        'Coût cleaners: <strong>'+Math.round(extrasCleanerCost)+' AED</strong> · '+
+        'Marge: <strong style="color:'+(margin>=0?'var(--green)':'var(--red)')+'">'+Math.round(margin)+' AED</strong>'+
+        '</div>';
+    }
+    h+='</div>';
+  }
+
   // Revenue with visual gauge
   const revPct=revPotential>0?Math.round(revDone/revPotential*100):0;
   h+='<div class="dash-card"><h3>💰 Cleaning Fees</h3>';
