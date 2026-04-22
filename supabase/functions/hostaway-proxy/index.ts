@@ -1350,7 +1350,7 @@ Deno.serve(async (req: Request) => {
 
     // ==================== BULK LOAD ====================
     if (action === "getAllData") {
-      const [doneRes, assignRes, cleanerRes, templateRes, listingRes, timerRes, issueRes, recurRes, ticketRes, vendorRes, equipRes, prevRes, profileRes, cancelledRes] = await Promise.all([
+      const [doneRes, assignRes, cleanerRes, templateRes, listingRes, timerRes, issueRes, recurRes, ticketRes, vendorRes, equipRes, prevRes, profileRes, cancelledRes, extraRes] = await Promise.all([
         sb.from("menage_done").select("reservation_key, done"),
         sb.from("cleaning_assignments").select("reservation_key, cleaner_id"),
         sb.from("cleaners").select("*").eq("is_active", true).order("name"),
@@ -1365,6 +1365,7 @@ Deno.serve(async (req: Request) => {
         sb.from("preventive_maintenance").select("*").eq("is_active", true).order("next_due_at"),
         sb.from("property_profiles").select("*"),
         sb.from("cleaning_cancelled").select("reservation_key, reason, cancelled_by, cancelled_at"),
+        sb.from("extra_cleanings").select("*").gte("cleaning_date", new Date(Date.now() - 30*86400000).toISOString().split('T')[0]).lte("cleaning_date", new Date(Date.now() + 60*86400000).toISOString().split('T')[0]).order("cleaning_date"),
       ]);
       const cancelledMap: Record<string, any> = {};
       (cancelledRes.data || []).forEach((r: any) => { cancelledMap[r.reservation_key] = { reason: r.reason, cancelled_by: r.cancelled_by, cancelled_at: r.cancelled_at }; });
@@ -1387,6 +1388,7 @@ Deno.serve(async (req: Request) => {
         equipment: equipRes.data || [], preventiveMaintenance: prevRes.data || [],
         propertyProfiles: profileMap,
         cancelled: cancelledMap,
+        extraCleanings: extraRes.data || [],
       });
     }
 
@@ -1537,8 +1539,32 @@ Deno.serve(async (req: Request) => {
           cancel_reason: cancelMap[t.reservation_key]?.reason || '',
         };
       });
+      // Récupérer aussi les extras pour la période
+      let qExtra = sb.from("extra_cleanings").select("*").order("cleaning_date", { ascending: false });
+      if (month) qExtra = qExtra.gte("cleaning_date", month + "-01").lt("cleaning_date", nextMonthISO(month));
+      const extraCsvRes = await qExtra;
+      const extraRows = (extraCsvRes.data || []).map((e: any) => ({
+        checkout_date: e.cleaning_date,
+        guest_name: e.guest_name || e.label || 'Extra',
+        cleaner: (() => {
+          const a = assignMap[e.reservation_key];
+          return a ? (cleanerMap[a] || a) : '';
+        })(),
+        started_at: '',
+        finished_at: '',
+        duration_minutes: '',
+        done: doneMap[e.reservation_key]?.done ? 'yes' : 'no',
+        done_at: doneMap[e.reservation_key]?.updated_at || '',
+        cancelled: e.status === 'cancelled' ? 'yes' : 'no',
+        cancel_reason: '',
+        source: 'extra',
+        label: e.label || '',
+        price_billed: e.price_billed ?? '',
+      }));
+      const hostawayRows = rows.map((r: any) => ({ ...r, source: 'hostaway', label: '', price_billed: '' }));
+      const allRows = [...hostawayRows, ...extraRows].sort((a: any, b: any) => (b.checkout_date || '').localeCompare(a.checkout_date || ''));
       const filename = `cleanings_${month || 'all'}.csv`;
-      return csvResponse(filename, arrayToCsv(rows));
+      return csvResponse(filename, arrayToCsv(allRows));
     }
 
     if (action === "exportMaintenanceCsv") {
@@ -1605,6 +1631,96 @@ Deno.serve(async (req: Request) => {
         avg_minutes_per_cleaning: c.cleanings_completed > 0 ? Math.round(c.total_minutes / c.cleanings_completed) : 0,
       }));
       return csvResponse(`payroll_${month}.csv`, arrayToCsv(rows));
+    }
+
+    // ========== EXTRA CLEANINGS (hors Hostaway) ==========
+    if (action === "addExtraCleaning" && req.method === "POST") {
+      const body = await req.json();
+      const { listing_id, cleaning_date, label, guest_name, price_billed, cleaner_price, notes, assigned_cleaner_id, created_by } = body;
+      if (!listing_id || !cleaning_date) return jsonResp({ error: "listing_id and cleaning_date required" }, 400);
+
+      // Generate unique reservation_key
+      const rand = Math.random().toString(36).substring(2, 10);
+      const reservation_key = `extra_${cleaning_date}_${rand}`;
+
+      const { data, error } = await sb.from("extra_cleanings").insert({
+        reservation_key, listing_id, cleaning_date,
+        label: label || null,
+        guest_name: guest_name || null,
+        price_billed: price_billed ?? null,
+        cleaner_price: cleaner_price ?? null,
+        notes: notes || null,
+        created_by: created_by || null,
+        status: 'pending',
+      }).select().single();
+      if (error) throw error;
+
+      if (assigned_cleaner_id) {
+        await sb.from("cleaning_assignments").upsert({
+          reservation_key, cleaner_id: assigned_cleaner_id, assigned_at: new Date().toISOString(),
+        }, { onConflict: "reservation_key" });
+        // Notification ntfy au cleaner
+        const { data: cl } = await sb.from("cleaners").select("notification_topic, name").eq("id", assigned_cleaner_id).single();
+        if (cl?.notification_topic) {
+          await sendNtfyPush(cl.notification_topic,
+            `Ménage extra assigné`,
+            `${label || 'Extra'} — ${listing_id} le ${cleaning_date}` + (price_billed ? `\nFacturé: ${price_billed} AED` : ''),
+            "default", "broom,sparkles");
+        }
+      }
+      await addLog(sb, reservation_key, "extra_created", created_by, { listing_id, label, price_billed, assigned_cleaner_id });
+      return jsonResp({ status: "success", extra: data });
+    }
+
+    if (action === "updateExtraCleaning" && req.method === "POST") {
+      const body = await req.json();
+      const { id, label, guest_name, price_billed, cleaner_price, notes, status, cleaning_date, listing_id } = body;
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      const upd: any = {};
+      if (label !== undefined) upd.label = label;
+      if (guest_name !== undefined) upd.guest_name = guest_name;
+      if (price_billed !== undefined) upd.price_billed = price_billed;
+      if (cleaner_price !== undefined) upd.cleaner_price = cleaner_price;
+      if (notes !== undefined) upd.notes = notes;
+      if (status !== undefined) upd.status = status;
+      if (cleaning_date !== undefined) upd.cleaning_date = cleaning_date;
+      if (listing_id !== undefined) upd.listing_id = listing_id;
+      const { error } = await sb.from("extra_cleanings").update(upd).eq("id", id);
+      if (error) throw error;
+      return jsonResp({ status: "success" });
+    }
+
+    if (action === "deleteExtraCleaning" && req.method === "POST") {
+      const body = await req.json();
+      const { id } = body;
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      // Fetch key to cleanup related rows
+      const { data: ec } = await sb.from("extra_cleanings").select("reservation_key").eq("id", id).single();
+      const key = ec?.reservation_key;
+      const { error } = await sb.from("extra_cleanings").delete().eq("id", id);
+      if (error) throw error;
+      // Cleanup workflow rows
+      if (key) {
+        await sb.from("cleaning_assignments").delete().eq("reservation_key", key);
+        await sb.from("menage_done").delete().eq("reservation_key", key);
+        await sb.from("cleaning_timer").delete().eq("reservation_key", key);
+        await sb.from("cleaning_cancelled").delete().eq("reservation_key", key);
+        await sb.from("checklist_progress").delete().eq("reservation_key", key);
+      }
+      return jsonResp({ status: "success" });
+    }
+
+    if (action === "getExtraCleanings") {
+      const startDate = url.searchParams.get("startDate");
+      const endDate = url.searchParams.get("endDate");
+      const listing = url.searchParams.get("listingId");
+      let q = sb.from("extra_cleanings").select("*").order("cleaning_date", { ascending: true });
+      if (startDate) q = q.gte("cleaning_date", startDate);
+      if (endDate) q = q.lte("cleaning_date", endDate);
+      if (listing) q = q.eq("listing_id", listing);
+      const { data, error } = await q;
+      if (error) throw error;
+      return jsonResp({ status: "success", extras: data || [] });
     }
 
     return jsonResp({ error: "Unknown action" }, 400);

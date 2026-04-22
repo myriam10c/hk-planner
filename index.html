@@ -708,6 +708,27 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 .score-pill { display:inline-block; color:white; padding:2px 10px; border-radius:10px; font-weight:700; font-size:12px; min-width:36px; text-align:center; }
 .urgent { color:var(--red); font-weight:700; }
 .empty { color:var(--text3); text-align:center; padding:20px; font-size:13px; }
+/* Extra cleaning modal */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; display:flex; align-items:flex-start; justify-content:center; padding:50px 16px; overflow-y:auto; }
+.modal-box { background:var(--card,#fff); border-radius:14px; width:100%; max-width:500px; box-shadow:0 24px 64px rgba(0,0,0,0.3); overflow:hidden; border:1px solid var(--border,#e0e0e0); }
+.modal-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border); }
+.modal-title { font-weight:700; font-size:16px; }
+.modal-close { background:transparent; border:none; font-size:20px; cursor:pointer; color:var(--text2); padding:4px 10px; border-radius:6px; }
+.modal-close:hover { background:var(--bg2); }
+.modal-body { padding:16px 20px; display:flex; flex-direction:column; gap:12px; }
+.modal-footer { display:flex; gap:8px; justify-content:flex-end; padding:12px 20px; border-top:1px solid var(--border); background:var(--bg2); }
+.form-row { display:flex; flex-direction:column; gap:4px; }
+.form-row label { font-size:12px; font-weight:600; color:var(--text2); }
+.form-row .req { color:var(--red); }
+.form-row input, .form-row select, .form-row textarea { padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; background:var(--card); color:var(--text); font-family:inherit; outline:none; }
+.form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); }
+.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.btn-primary { background:var(--primary); color:white; border:none; padding:10px 18px; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px; }
+.btn-primary:hover { filter:brightness(1.05); }
+.btn-secondary { background:var(--card2,#f5f5f7); color:var(--text); border:1px solid var(--border); padding:10px 18px; border-radius:8px; font-weight:500; cursor:pointer; font-size:14px; }
+.btn-danger { background:transparent; color:var(--red); border:1px solid var(--red); padding:10px 18px; border-radius:8px; font-weight:500; cursor:pointer; font-size:14px; margin-right:auto; }
+.btn-danger:hover { background:var(--red); color:white; }
+.badge-extra { display:inline-block; background:var(--primary-light,rgba(124,58,237,0.1)); color:var(--primary,#7c3aed); padding:2px 8px; border-radius:8px; font-size:10px; font-weight:700; margin-left:6px; text-transform:uppercase; letter-spacing:0.4px; vertical-align:middle; }
 </style>
 </head>
 <body>
@@ -734,6 +755,9 @@ const MONTH_NAMES=['January','February','March','April','May','June','July','Aug
 
 // State
 let RESERVATIONS=[],dates=[],selectedDate='all',search='',done={},loading=true,error=null;
+let extraCleanings=[];
+let extraModalState={open:false,editing:null,form:{}};
+function keyFor(r){ return r._reservationKey || (r.co + '_' + r.guest); }
 let weekOffset=0,lastUpdate=null,pendingKey=null;
 let cleaners=[],assignments={},templates=[],expandedKey=null,listingPrices={},timers={};
 let checklistCache={},notesCache={},photosCache={};
@@ -887,16 +911,42 @@ async function fetchAll(){
       checkInTime:r.checkInTime,checkOutTime:r.checkOutTime,nextGuest:r.nextGuest||null,
       cleaningFee:r.cleaningFee||0
     })).sort((a,b)=>a.co.localeCompare(b.co));
-    dates=[];const seen={};RESERVATIONS.forEach(r=>{if(!seen[r.co]){seen[r.co]=true;dates.push(r.co);}});dates.sort();
     done=allRes.done||{};assignments=allRes.assignments||{};cleaners=allRes.cleaners||[];templates=allRes.templates||{};listingPrices=allRes.listingPrices||{};timers=allRes.timers||{};
     cancelled=allRes.cancelled||{};
+    extraCleanings=allRes.extraCleanings||[];
+    // Inject extras into RESERVATIONS as pseudo-reservations so the full workflow applies
+    const extrasAsRes=(extraCleanings||[])
+      .filter(e=>e.status!=='cancelled')
+      .filter(e=>{
+        // Only include extras within the current visible week range
+        return e.cleaning_date>=startDate && e.cleaning_date<=endDate;
+      })
+      .map(e=>({
+        co:e.cleaning_date,
+        guest:e.guest_name||e.label||'Extra',
+        listing:(listingPrices[e.listing_id]?.listing_name)||e.listing_id,
+        listingId:e.listing_id,
+        channel:'',
+        phone:'',
+        numberOfGuests:0,
+        cleaningFee:e.cleaner_price||0,
+        price_billed:e.price_billed,
+        status:'confirmed',
+        _isExtra:true,
+        _extraId:e.id,
+        _extraLabel:e.label,
+        _extraNotes:e.notes,
+        _reservationKey:e.reservation_key,
+      }));
+    RESERVATIONS=RESERVATIONS.concat(extrasAsRes).sort((a,b)=>a.co.localeCompare(b.co));
+    dates=[];const seen={};RESERVATIONS.forEach(r=>{if(!seen[r.co]){seen[r.co]=true;dates.push(r.co);}});dates.sort();
     issues=allRes.issues||[];recurringTasks=allRes.recurringTasks||[];
     maintenanceTickets=allRes.maintenanceTickets||[];vendors=allRes.vendors||[];equipment=allRes.equipment||[];preventiveMaint=allRes.preventiveMaintenance||[];
     propertyProfiles=allRes.propertyProfiles||{};
     // Compute estimated times from timer history
     estimatedTimes={};
     Object.entries(timers).forEach(([k,t])=>{if(t&&t.duration_minutes){
-      const parts=k.split('_');const lid=RESERVATIONS.find(r=>r.co+'_'+r.guest===k);
+      const parts=k.split('_');const lid=RESERVATIONS.find(r=>keyFor(r)===k);
       if(lid&&lid.listingId){if(!estimatedTimes[lid.listingId])estimatedTimes[lid.listingId]=[];estimatedTimes[lid.listingId].push(t.duration_minutes);}
     }});
     // Load auto-send config
@@ -966,6 +1016,14 @@ function getCleanerById(id){return cleaners.find(c=>c.id===id);}
 function handleCardClick(key,e){
   if(e&&(e.target.closest('.card-cta')||e.target.closest('.card-detail')||e.target.closest('.cleaner-tap')))return;
   if(cancelled[key])return;
+  // Extra cleanings → manager opens edit modal, cleaner expands normally
+  if(!cleanerMode){
+    const r=RESERVATIONS.find(x=>keyFor(x)===key);
+    if(r&&r._isExtra){
+      const extra=(extraCleanings||[]).find(ec=>ec.id===r._extraId);
+      if(extra){ openExtraModal(extra); return; }
+    }
+  }
   // Tap = expand/collapse details
   expandedKey=expandedKey===key?null:key;
   if(expandedKey)loadDetail(key);
@@ -991,7 +1049,7 @@ async function markDone(key){
       savingDone=false;
       const date=key.split('_')[0];
       const dayRes=RESERVATIONS.filter(r=>r.co===date);
-      if(dayRes.length>0&&dayRes.every(r=>done[r.co+'_'+r.guest]))confetti();
+      if(dayRes.length>0&&dayRes.every(r=>done[keyFor(r)]))confetti();
     },5000);
   }else{
     // Direct undo (from Undo button)
@@ -1165,7 +1223,7 @@ function showAssignPicker(rkey){
       '<span class="picker-name" style="color:var(--red)">✕ Unassign</span></div>';
   }
   cleaners.forEach(c=>{
-    const cnt=RESERVATIONS.filter(r=>assignments[r.co+'_'+r.guest]===c.id).length;
+    const cnt=RESERVATIONS.filter(r=>assignments[keyFor(r)]===c.id).length;
     const isCurrent=currentAssign===c.id;
     ph+='<div class="assign-picker-item" style="'+(isCurrent?'background:var(--primary-light);border-radius:8px':'')+'" onclick="assignCleaner(\''+esc(rkey)+'\','+c.id+');this.closest(\'.assign-picker-overlay\').remove()">'+
       '<div class="picker-dot" style="background:'+c.color+'"></div>'+
@@ -1186,7 +1244,7 @@ async function assignCleaner(rkey,cid){
 
 // #7 Auto-assign
 async function autoAssign(){
-  const unassigned=RESERVATIONS.filter(r=>!assignments[r.co+'_'+r.guest]).map(r=>({key:r.co+'_'+r.guest,listingId:r.listingId}));
+  const unassigned=RESERVATIONS.filter(r=>!assignments[keyFor(r)]).map(r=>({key:keyFor(r),listingId:r.listingId}));
   if(unassigned.length===0){toast('All already assigned!');return;}
   toast('Auto-assigning '+unassigned.length+'...');
   const res=await api('autoAssign',{body:{reservations:unassigned}});
@@ -1204,7 +1262,7 @@ function confirmAction(title,msg,onConfirm){
   ov.addEventListener('click',(e)=>{if(e.target===ov)ov.remove();});
 }
 function startTimer(key){
-  const r=RESERVATIONS.find(x=>x.co+'_'+x.guest===key);
+  const r=RESERVATIONS.find(x=>keyFor(x)===key);
   const label=r?r.listing:'this cleaning';
   confirmAction('▶ Start Timer','Start the timer for '+label+'?',async()=>{
     const cid=assignments[key]||null;
@@ -1213,7 +1271,7 @@ function startTimer(key){
   });
 }
 function stopTimer(key){
-  const r=RESERVATIONS.find(x=>x.co+'_'+x.guest===key);
+  const r=RESERVATIONS.find(x=>keyFor(x)===key);
   const label=r?r.listing:'this cleaning';
   const t=timers[key];
   let started=0;
@@ -1310,7 +1368,7 @@ function chooseWa(type,url){
 }
 function setWaPref(pref){waPreference=pref;if(pref)localStorage.setItem('waPreference',pref);else localStorage.removeItem('waPreference');render();}
 function sendDailyWhatsApp(cleaner){
-  const cRes=RESERVATIONS.filter(r=>assignments[r.co+'_'+r.guest]===cleaner.id&&isToday(r.co));
+  const cRes=RESERVATIONS.filter(r=>assignments[keyFor(r)]===cleaner.id&&isToday(r.co));
   if(cRes.length===0){toast('No tasks today for '+cleaner.name);return;}
   let msg='🏠 Hey '+cleaner.name+'! Your cleanings for today:\n\n';
   cRes.forEach((r,i)=>{msg+=(i+1)+'. '+r.listing+' ('+r.guest+')\n';});
@@ -1481,7 +1539,7 @@ async function deleteRecurringTask(id){
 
 // Smart scheduling (#5 improved) — balances workload + estimated time
 async function smartAssign(){
-  const unassigned=RESERVATIONS.filter(r=>!assignments[r.co+'_'+r.guest]);
+  const unassigned=RESERVATIONS.filter(r=>!assignments[keyFor(r)]);
   if(unassigned.length===0){toast('All already assigned!');return;}
   if(cleaners.length===0){toast('Add cleaners first','error');return;}
   toast('Smart assigning '+unassigned.length+'...');
@@ -1490,7 +1548,7 @@ async function smartAssign(){
   let assignedCount=0;
   for(const[date,dateRes]of Object.entries(byDate)){
     // Count existing assignments per cleaner for this date
-    const load={};cleaners.forEach(c=>{load[c.id]=RESERVATIONS.filter(r=>r.co===date&&assignments[r.co+'_'+r.guest]===c.id).length;});
+    const load={};cleaners.forEach(c=>{load[c.id]=RESERVATIONS.filter(r=>r.co===date&&assignments[keyFor(r)]===c.id).length;});
     // Sort by estimated time (heaviest first) for better balancing
     dateRes.sort((a,b)=>(getEstTime(b.listingId)||60)-(getEstTime(a.listingId)||60));
     for(const r of dateRes){
@@ -1500,7 +1558,7 @@ async function smartAssign(){
         const aAvg=getCleanerAvgTime(a.id),bAvg=getCleanerAvgTime(b.id);
         return(aAvg||999)-(bAvg||999);
       })[0];
-      const key=r.co+'_'+r.guest;
+      const key=keyFor(r);
       assignments[key]=best.id;load[best.id]++;assignedCount++;
       api('assignCleaner',{body:{reservation_key:key,cleaner_id:best.id}});
     }
@@ -1527,7 +1585,7 @@ function notifyNewAssignment(listing,cleaner){
 }
 function checkUpcomingCheckouts(){
   const now=new Date(),today=now.toISOString().split('T')[0];
-  const todayRes=RESERVATIONS.filter(r=>r.co===today&&!done[r.co+'_'+r.guest]);
+  const todayRes=RESERVATIONS.filter(r=>r.co===today&&!done[keyFor(r)]);
   if(todayRes.length>0&&notifPermission==='granted'){
     new Notification('Housekeeping Planner',{body:todayRes.length+' cleanings remaining today!',icon:'⚠️'});
   }
@@ -1816,15 +1874,15 @@ function getFiltered(){
   let list=RESERVATIONS;
   if(selectedDate!=='all')list=list.filter(r=>r.co===selectedDate);
   if(search.trim()){const q=search.toLowerCase();list=list.filter(r=>r.guest.toLowerCase().includes(q)||r.listing.toLowerCase().includes(q));}
-  if(filterCleaner===-1)list=list.filter(r=>!assignments[r.co+'_'+r.guest]);
-  else if(filterCleaner)list=list.filter(r=>assignments[r.co+'_'+r.guest]===filterCleaner);
+  if(filterCleaner===-1)list=list.filter(r=>!assignments[keyFor(r)]);
+  else if(filterCleaner)list=list.filter(r=>assignments[keyFor(r)]===filterCleaner);
   // #6 Cleaner mode: only show assigned to me
-  if(cleanerMode)list=list.filter(r=>assignments[r.co+'_'+r.guest]===cleanerMode.id);
+  if(cleanerMode)list=list.filter(r=>assignments[keyFor(r)]===cleanerMode.id);
   return list;
 }
 
-function countByDate(d){return RESERVATIONS.filter(r=>r.co===d&&!cancelled[r.co+'_'+r.guest]).length;}
-function countDoneForDate(d){return RESERVATIONS.filter(r=>r.co===d&&done[r.co+'_'+r.guest]&&!cancelled[r.co+'_'+r.guest]).length;}
+function countByDate(d){return RESERVATIONS.filter(r=>r.co===d&&!cancelled[keyFor(r)]).length;}
+function countDoneForDate(d){return RESERVATIONS.filter(r=>r.co===d&&done[keyFor(r)]&&!cancelled[keyFor(r)]).length;}
 function setTab(t){currentTab=t;render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}}
 function setSelectedDate(d){selectedDate=d;pendingKey=null;render();}
 function changeWeek(dir){weekOffset+=dir;selectedDate='all';pendingKey=null;fetchAll();}
@@ -1944,8 +2002,8 @@ function renderPlanner(){
   }
   const filtered=getFiltered();
   const grouped={};filtered.forEach(r=>{if(!grouped[r.co])grouped[r.co]=[];grouped[r.co].push(r);});
-  const totalCancelled=RESERVATIONS.filter(r=>cancelled[r.co+'_'+r.guest]).length;
-  const totalDone=RESERVATIONS.filter(r=>done[r.co+'_'+r.guest]&&!cancelled[r.co+'_'+r.guest]).length;
+  const totalCancelled=RESERVATIONS.filter(r=>cancelled[keyFor(r)]).length;
+  const totalDone=RESERVATIONS.filter(r=>done[keyFor(r)]&&!cancelled[keyFor(r)]).length;
   const total=RESERVATIONS.length-totalCancelled;
   const ut=lastUpdate?lastUpdate.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'';
 
@@ -1962,9 +2020,10 @@ function renderPlanner(){
   if(cleanerMode) h+='<button class="icon-btn" onclick="cleanerLogout()" title="Logout">🚪</button>';
   h+='<button class="cmdk-trigger" onclick="openCmdk()" title="Recherche globale (⌘K)">⌘K</button>';
   h+='<button class="icon-btn" onclick="toggleSearch()" title="Search">🔍</button>';
+  if(!cleanerMode){ h+='<button class="icon-btn" onclick="openExtraModal()" title="Ajouter un ménage extra" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">➕</button>'; }
   // Menu button with auto-assign
   if(!cleanerMode&&cleaners.length>0){
-    const una=RESERVATIONS.filter(r=>!assignments[r.co+'_'+r.guest]).length;
+    const una=RESERVATIONS.filter(r=>!assignments[keyFor(r)]).length;
     if(una>0) h+='<button class="icon-btn" onclick="autoAssign()" title="Auto-assign '+una+'" style="background:var(--primary-light);color:var(--primary);border-color:var(--primary);font-size:13px">⚡</button>';
   }
   h+='</div>';
@@ -1991,10 +2050,10 @@ function renderPlanner(){
     h+='<div class="cleaner-filter">';
     h+='<div class="cleaner-chip'+(filterCleaner===0?' active':'')+'" onclick="setFilterCleaner(0)">All</div>';
     cleaners.forEach(c=>{
-      const cnt=RESERVATIONS.filter(r=>assignments[r.co+'_'+r.guest]===c.id).length;
+      const cnt=RESERVATIONS.filter(r=>assignments[keyFor(r)]===c.id).length;
       h+='<div class="cleaner-chip'+(filterCleaner===c.id?' active':'')+'" onclick="setFilterCleaner('+c.id+')"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
     });
-    const una=RESERVATIONS.filter(r=>!assignments[r.co+'_'+r.guest]).length;
+    const una=RESERVATIONS.filter(r=>!assignments[keyFor(r)]).length;
     if(una>0) h+='<div class="cleaner-chip'+(filterCleaner===-1?' active':'')+'" onclick="setFilterCleaner(-1)">Unassigned '+una+'</div>';
     h+='</div>';
   }
@@ -2013,14 +2072,14 @@ function renderPlanner(){
 
   sortedDates.forEach(date=>{
     const items=grouped[date];
-    const activeItems=items.filter(r=>!cancelled[r.co+'_'+r.guest]);
-    const dc=activeItems.filter(r=>done[r.co+'_'+r.guest]).length;
+    const activeItems=items.filter(r=>!cancelled[keyFor(r)]);
+    const dc=activeItems.filter(r=>done[keyFor(r)]).length;
     const cancelledCnt=items.length-activeItems.length;
     h+='<div class="day-section"><div class="day-header"><span class="day-title">📅 '+formatDate(date)+'</span>'+
       '<span class="day-count">'+(dc===activeItems.length&&activeItems.length>0?'✓ Complete':activeItems.length+' cleaning'+(activeItems.length>1?'s':'')+(cancelledCnt?' <span style="color:var(--red);font-size:10px">+'+cancelledCnt+' cancelled</span>':''))+'</span></div>';
     // Sort items: urgency first (urgent→warning→unassigned→todo→running→done→cancelled), then by building
     const urgencyOrder=(r)=>{
-      const key=r.co+'_'+r.guest;
+      const key=keyFor(r);
       if(cancelled[key])return 7;
       if(done[key])return 6;
       const timer=timers[key],isRunning=timer&&timer.started_at&&!timer.finished_at;
@@ -2045,7 +2104,7 @@ function renderPlanner(){
         h+='<div style="font-size:10px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;padding:6px 4px 2px;display:flex;align-items:center;gap:6px"><span>🏢</span>'+esc(bldg)+'</div>';
         lastBuilding=bldg;
       }
-      const key=r.co+'_'+r.guest,sk=esc(key);
+      const key=keyFor(r),sk=esc(key);
       const isDone=done[key],isPending=pendingKey===key,isExp=expandedKey===key;
       const cleaner=assignments[key]?getCleanerById(assignments[key]):null;
       const timer=timers[key];
@@ -2080,7 +2139,7 @@ function renderPlanner(){
       const estTime=getEstTime(r.listingId);
       h+='<div class="card-row-1">';
       h+='<div class="status-dot '+cardStatus+'"></div>';
-      h+='<div class="listing-name">'+esc(r.listing)+'</div>';
+      h+='<div class="listing-name">'+esc(r.listing)+(r._isExtra?' <span class="badge-extra">➕ '+esc(r._extraLabel||'EXTRA')+(r.price_billed?' · '+r.price_billed+' AED':'')+'</span>':'')+'</div>';
       if(coT) h+='<span class="tag-pill" style="margin-left:auto;flex-shrink:0">'+coT+'</span>';
       h+='</div>';
 
@@ -2258,9 +2317,9 @@ function renderDashboard(){
   if(!dashData){h+='</div>'+renderBottomNav();document.getElementById('app').innerHTML=h;loadDashMonth();return;}
 
   const mRes=dashData.reservations,mDone=dashData.done,mAssign=dashData.assignments,mTimers=dashData.timers||{};
-  const total=mRes.length,totalDone=mRes.filter(r=>mDone[r.co+'_'+r.guest]).length;
-  const totalAssigned=mRes.filter(r=>mAssign[r.co+'_'+r.guest]).length;
-  const revDone=mRes.reduce((s,r)=>mDone[r.co+'_'+r.guest]?s+getRevenueFee(r):s,0);
+  const total=mRes.length,totalDone=mRes.filter(r=>mDone[keyFor(r)]).length;
+  const totalAssigned=mRes.filter(r=>mAssign[keyFor(r)]).length;
+  const revDone=mRes.reduce((s,r)=>mDone[keyFor(r)]?s+getRevenueFee(r):s,0);
   const revPotential=mRes.reduce((s,r)=>s+getRevenueFee(r),0);
 
   // Real-time KPIs from backend
@@ -2359,7 +2418,7 @@ function renderDashboard(){
   mRes.forEach(r=>{const label=getUnitType(r.listingId);if(!byType[label])byType[label]=[];byType[label].push(r);});
   h+='<div class="dash-card"><h3>🏠 By Type</h3>';
   for(const[type,list]of Object.entries(byType).sort((a,b)=>a[0].localeCompare(b[0]))){
-    const d=list.filter(r=>mDone[r.co+'_'+r.guest]).length;
+    const d=list.filter(r=>mDone[keyFor(r)]).length;
     const rev=list.reduce((s,r)=>s+getRevenueFee(r),0);
     const pct=list.length>0?Math.round(d/list.length*100):0;
     h+='<div class="cleaner-stat-row"><div class="cs-name">'+type+'</div><div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:var(--primary)"></div></div><div class="cs-count">'+d+'/'+list.length+' · '+rev.toLocaleString()+' AED</div></div>';
@@ -2379,11 +2438,11 @@ function renderDashboard(){
   if(cleaners.length>0){
     h+='<div class="dash-card"><h3>👥 Per Cleaner</h3><div class="chart-container"><canvas id="cleanerChart"></canvas></div>';
     cleaners.forEach(c=>{
-      const assigned=mRes.filter(r=>mAssign[r.co+'_'+r.guest]===c.id).length;
-      const cdone=mRes.filter(r=>mAssign[r.co+'_'+r.guest]===c.id&&mDone[r.co+'_'+r.guest]).length;
-      const cRev=mRes.filter(r=>mAssign[r.co+'_'+r.guest]===c.id).reduce((s,r)=>s+getRevenueFee(r),0);
+      const assigned=mRes.filter(r=>mAssign[keyFor(r)]===c.id).length;
+      const cdone=mRes.filter(r=>mAssign[keyFor(r)]===c.id&&mDone[keyFor(r)]).length;
+      const cRev=mRes.filter(r=>mAssign[keyFor(r)]===c.id).reduce((s,r)=>s+getRevenueFee(r),0);
       // Avg timer (#12)
-      const cTimers=mRes.filter(r=>mAssign[r.co+'_'+r.guest]===c.id&&mTimers[r.co+'_'+r.guest]&&mTimers[r.co+'_'+r.guest].duration_minutes).map(r=>mTimers[r.co+'_'+r.guest].duration_minutes);
+      const cTimers=mRes.filter(r=>mAssign[keyFor(r)]===c.id&&mTimers[keyFor(r)]&&mTimers[keyFor(r)].duration_minutes).map(r=>mTimers[keyFor(r)].duration_minutes);
       const avgTime=cTimers.length>0?Math.round(cTimers.reduce((a,b)=>a+b,0)/cTimers.length):0;
       const pct=assigned>0?Math.round(cdone/assigned*100):0;
       h+='<div class="cleaner-stat-row"><div class="cs-name"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+(avgTime?' <span style="font-size:10px;color:var(--text3)">~'+avgTime+'min</span>':'')+'</div>'+
@@ -2397,7 +2456,7 @@ function renderDashboard(){
   const mDates=[...new Set(mRes.map(r=>r.co))].sort();
   h+='<div class="dash-card"><h3>📅 Per Day</h3>';
   mDates.forEach(d=>{
-    const dayRes=mRes.filter(r=>r.co===d),dc=dayRes.filter(r=>mDone[r.co+'_'+r.guest]).length;
+    const dayRes=mRes.filter(r=>r.co===d),dc=dayRes.filter(r=>mDone[keyFor(r)]).length;
     const pct=dayRes.length>0?Math.round(dc/dayRes.length*100):0;
     const today=new Date().toISOString().split('T')[0];
     h+='<div class="cleaner-stat-row"><div class="cs-name">'+formatDate(d)+(d===today?' 🟢':'')+'</div>'+
@@ -2414,7 +2473,7 @@ function renderDashboard(){
     if(revCtx){
       const labels=mDates.map(d=>{const dt=new Date(d+'T00:00:00');return dt.getDate()+' '+MONTHS[dt.getMonth()];});
       const dataRev=mDates.map(d=>mRes.filter(r=>r.co===d).reduce((s,r)=>s+getRevenueFee(r),0));
-      const dataDone=mDates.map(d=>mRes.filter(r=>r.co===d&&mDone[r.co+'_'+r.guest]).reduce((s,r)=>s+getRevenueFee(r),0));
+      const dataDone=mDates.map(d=>mRes.filter(r=>r.co===d&&mDone[keyFor(r)]).reduce((s,r)=>s+getRevenueFee(r),0));
       new Chart(revCtx,{type:'bar',data:{labels,datasets:[
         {label:'Potential',data:dataRev,backgroundColor:'rgba(124,58,237,0.25)',borderColor:'#7c3aed',borderWidth:1},
         {label:'Earned',data:dataDone,backgroundColor:'rgba(5,150,105,0.5)',borderColor:'#059669',borderWidth:1}
@@ -2424,7 +2483,7 @@ function renderDashboard(){
     const clCtx=document.getElementById('cleanerChart');
     if(clCtx&&cleaners.length>0){
       const labels=cleaners.map(c=>c.name);
-      const data=cleaners.map(c=>mRes.filter(r=>mAssign[r.co+'_'+r.guest]===c.id).length);
+      const data=cleaners.map(c=>mRes.filter(r=>mAssign[keyFor(r)]===c.id).length);
       const colors=cleaners.map(c=>c.color);
       new Chart(clCtx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}}}}});
     }
@@ -2812,7 +2871,7 @@ function renderCalendar(){
   for(let d=1;d<=daysInMonth;d++){
     const dateStr=calYear+'-'+String(calMonth+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const dayRes=calRes[dateStr]||[];
-    const dayDone=dayRes.filter(r=>done[r.co+'_'+r.guest]).length;
+    const dayDone=dayRes.filter(r=>done[keyFor(r)]).length;
     const isT=dateStr===today;
 
     h+='<div class="cal-day'+(isT?' today':'')+'" onclick="selectedDate=\''+dateStr+'\';setTab(\'planner\')">';
@@ -2822,7 +2881,7 @@ function renderCalendar(){
       if(dayDone>0)h+='<div class="cal-done-count">✓'+dayDone+'</div>';
       h+='<div class="cal-dots">';
       dayRes.slice(0,5).forEach(r=>{
-        const cl=assignments[r.co+'_'+r.guest]?getCleanerById(assignments[r.co+'_'+r.guest]):null;
+        const cl=assignments[keyFor(r)]?getCleanerById(assignments[keyFor(r)]):null;
         h+='<div class="cal-dot" style="background:'+(cl?cl.color:'var(--text3)')+'"></div>';
       });
       if(dayRes.length>5)h+='<div style="font-size:8px;color:var(--text3)">+'+( dayRes.length-5)+'</div>';
@@ -2838,9 +2897,9 @@ function renderCalendar(){
 function renderCleanerStats(){
   if(!cleanerMode)return;
   const cid=cleanerMode.id;
-  const myRes=RESERVATIONS.filter(r=>assignments[r.co+'_'+r.guest]===cid);
-  const myDone=myRes.filter(r=>done[r.co+'_'+r.guest]);
-  const myTimers=myRes.filter(r=>timers[r.co+'_'+r.guest]&&timers[r.co+'_'+r.guest].duration_minutes).map(r=>timers[r.co+'_'+r.guest].duration_minutes);
+  const myRes=RESERVATIONS.filter(r=>assignments[keyFor(r)]===cid);
+  const myDone=myRes.filter(r=>done[keyFor(r)]);
+  const myTimers=myRes.filter(r=>timers[keyFor(r)]&&timers[keyFor(r)].duration_minutes).map(r=>timers[keyFor(r)].duration_minutes);
   const avgTime=myTimers.length>0?Math.round(myTimers.reduce((a,b)=>a+b,0)/myTimers.length):0;
   const fastestTime=myTimers.length>0?Math.min(...myTimers):0;
   const completionRate=myRes.length>0?Math.round(myDone.length/myRes.length*100):0;
@@ -2848,7 +2907,7 @@ function renderCleanerStats(){
   // Compute quality scores
   let totalScore=0,scoreCount=0;
   myDone.forEach(r=>{
-    const key=r.co+'_'+r.guest;
+    const key=keyFor(r);
     if(checklistCache[key]){const s=getQualityScore(key,r);totalScore+=s;scoreCount++;}
   });
   const avgScore=scoreCount>0?Math.round(totalScore/scoreCount):0;
@@ -2877,7 +2936,7 @@ function renderCleanerStats(){
   // Recent cleanings
   h+='<div class="settings-panel"><h3>'+t('recentActivity')+'</h3>';
   myRes.slice(0,10).forEach(r=>{
-    const key=r.co+'_'+r.guest;
+    const key=keyFor(r);
     const isDone=done[key];
     const timer=timers[key];
     h+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">';
@@ -3404,7 +3463,7 @@ function generateOwnerReport(listingId){
   if(mRes.length===0){toast('No data for this property','error');return;}
 
   const listingName=mRes[0].listing||'Property #'+listingId;
-  const total=mRes.length,totalDone=mRes.filter(r=>mDone[r.co+'_'+r.guest]).length;
+  const total=mRes.length,totalDone=mRes.filter(r=>mDone[keyFor(r)]).length;
   const revTotal=mRes.reduce((s,r)=>s+getRevenueFee(r),0);
 
   // Header
@@ -3422,7 +3481,7 @@ function generateOwnerReport(listingId){
   doc.text('Total Cleaning Fees: '+revTotal.toLocaleString()+' AED',14,y);y+=7;
 
   // Avg cleaning time
-  const tList=mRes.filter(r=>mTimers[r.co+'_'+r.guest]&&mTimers[r.co+'_'+r.guest].duration_minutes).map(r=>mTimers[r.co+'_'+r.guest].duration_minutes);
+  const tList=mRes.filter(r=>mTimers[keyFor(r)]&&mTimers[keyFor(r)].duration_minutes).map(r=>mTimers[keyFor(r)].duration_minutes);
   const avgT=tList.length>0?Math.round(tList.reduce((a,b)=>a+b,0)/tList.length):0;
   if(avgT>0){doc.text('Average Cleaning Time: '+avgT+' minutes',14,y);y+=7;}
   y+=5;
@@ -3436,7 +3495,7 @@ function generateOwnerReport(listingId){
   doc.setTextColor(0,0,0);
   mRes.sort((a,b)=>a.co.localeCompare(b.co)).forEach(r=>{
     if(y>275){doc.addPage();y=20;}
-    const key=r.co+'_'+r.guest;
+    const key=keyFor(r);
     const cl=mAssign[key]?getCleanerById(mAssign[key]):null;
     const timer=mTimers[key];
     doc.text(r.co,14,y);
@@ -3490,9 +3549,9 @@ function exportExcel(){
   if(!dashData||!dashData.reservations.length){toast('No data to export','error');return;}
   const mRes=dashData.reservations,mDone=dashData.done,mAssign=dashData.assignments;
   const rows=mRes.map(r=>{
-    const cl=mAssign[r.co+'_'+r.guest]?getCleanerById(mAssign[r.co+'_'+r.guest]):null;
+    const cl=mAssign[keyFor(r)]?getCleanerById(mAssign[keyFor(r)]):null;
     return{Date:r.co,Guest:r.guest,Listing:r.listing,Type:getUnitType(r.listingId),
-      'Cleaning Fee':getRevenueFee(r),Status:mDone[r.co+'_'+r.guest]?'Done':'Pending',Cleaner:cl?cl.name:'Unassigned'};
+      'Cleaning Fee':getRevenueFee(r),Status:mDone[keyFor(r)]?'Done':'Pending',Cleaner:cl?cl.name:'Unassigned'};
   });
   const ws=XLSX.utils.json_to_sheet(rows);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Cleanings');
@@ -3505,9 +3564,9 @@ function exportPDF(){
   const{jsPDF}=window.jspdf;
   const doc=new jsPDF();
   const mRes=dashData.reservations,mDone=dashData.done;
-  const total=mRes.length,totalDone=mRes.filter(r=>mDone[r.co+'_'+r.guest]).length;
+  const total=mRes.length,totalDone=mRes.filter(r=>mDone[keyFor(r)]).length;
   const revPotential=mRes.reduce((s,r)=>s+getRevenueFee(r),0);
-  const revDone=mRes.reduce((s,r)=>mDone[r.co+'_'+r.guest]?s+getRevenueFee(r):s,0);
+  const revDone=mRes.reduce((s,r)=>mDone[keyFor(r)]?s+getRevenueFee(r):s,0);
 
   doc.setFontSize(18);doc.text('Housekeeping Report — '+MONTH_NAMES[dashMonth]+' '+dashYear,14,22);
   doc.setFontSize(11);
@@ -3523,7 +3582,7 @@ function exportPDF(){
     if(y>280){doc.addPage();y=20;}
     doc.text(r.co,14,y);doc.text(r.guest.substring(0,25),40,y);
     doc.text(r.listing.substring(0,30),90,y);doc.text(getRevenueFee(r)+' AED',150,y);
-    doc.text(mDone[r.co+'_'+r.guest]?'Done':'Pending',170,y);y+=5;
+    doc.text(mDone[keyFor(r)]?'Done':'Pending',170,y);y+=5;
   });
   doc.save('cleanings_'+MONTH_NAMES[dashMonth]+'_'+dashYear+'.pdf');
   toast('PDF exported ✓','success');
@@ -3557,7 +3616,7 @@ async function generateInvoice(){
   // Only completed cleanings (exclude ownerStay from invoice)
   const valid=['new','modified','confirmed','reserved'];
   const mRes=allRes.filter(r=>valid.includes(r.status));
-  const doneRes=mRes.filter(r=>allDone[r.co+'_'+r.guest]).sort((a,b)=>a.co.localeCompare(b.co));
+  const doneRes=mRes.filter(r=>allDone[keyFor(r)]).sort((a,b)=>a.co.localeCompare(b.co));
   if(!doneRes.length){toast('No completed cleanings to invoice','error');return;}
 
   const{jsPDF}=window.jspdf;
@@ -3759,6 +3818,153 @@ function cmdkKeyDown(e){
 document.addEventListener('keydown',(e)=>{
   if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){e.preventDefault();if(cmdkOpen)closeCmdk();else openCmdk();}
 });
+
+// ==================== EXTRA CLEANINGS MODAL ====================
+function openExtraModal(editingExtra){
+  extraModalState.open=true;
+  extraModalState.editing=editingExtra||null;
+  extraModalState.form = editingExtra ? {
+    id: editingExtra.id,
+    listing_id: editingExtra.listing_id,
+    cleaning_date: editingExtra.cleaning_date,
+    label: editingExtra.label||'',
+    guest_name: editingExtra.guest_name||'',
+    price_billed: editingExtra.price_billed||'',
+    cleaner_price: editingExtra.cleaner_price||'',
+    notes: editingExtra.notes||'',
+    assigned_cleaner_id: (assignments||{})[editingExtra.reservation_key]||'',
+  } : {
+    listing_id: '',
+    cleaning_date: new Date().toISOString().split('T')[0],
+    label: '',
+    guest_name: '',
+    price_billed: '',
+    cleaner_price: '',
+    notes: '',
+    assigned_cleaner_id: '',
+  };
+  renderExtraModal();
+}
+function closeExtraModal(){ extraModalState.open=false; renderExtraModal(); }
+
+function renderExtraModal(){
+  let el=document.getElementById('extraModal');
+  if(!el){ el=document.createElement('div'); el.id='extraModal'; document.body.appendChild(el); }
+  if(!extraModalState.open){ el.innerHTML=''; return; }
+  const f=extraModalState.form;
+  const isEdit = !!extraModalState.editing;
+  const listings = Object.entries(listingPrices||{})
+    .map(([id,l])=>({id, name:l.listing_name||id, price:l.custom_price||l.price}))
+    .sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const cleanersList = (cleaners||[]).filter(c => c.is_active!==false && (c.role||'cleaner')==='cleaner');
+  el.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeExtraModal()">'+
+    '<div class="modal-box">'+
+      '<div class="modal-header">'+
+        '<div class="modal-title">'+(isEdit?'✏️ Modifier':'➕ Ajouter')+' un ménage extra</div>'+
+        '<button class="modal-close" onclick="closeExtraModal()">✕</button>'+
+      '</div>'+
+      '<div class="modal-body">'+
+        '<div class="form-row"><label>Unité <span class="req">*</span></label>'+
+          '<select id="ef-listing" onchange="extraModalState.form.listing_id=this.value;syncExtraPriceDefaults();">'+
+            '<option value="">Sélectionner...</option>'+
+            listings.map(l=>'<option value="'+esc(l.id)+'" '+(f.listing_id===l.id?'selected':'')+'>'+esc(l.name)+'</option>').join('')+
+          '</select>'+
+        '</div>'+
+        '<div class="form-row"><label>Date <span class="req">*</span></label>'+
+          '<input type="date" id="ef-date" value="'+esc(f.cleaning_date)+'" onchange="extraModalState.form.cleaning_date=this.value">'+
+        '</div>'+
+        '<div class="form-row"><label>Type</label>'+
+          '<select id="ef-label" onchange="extraModalState.form.label=this.value">'+
+            '<option value="" '+(!f.label?'selected':'')+'>— Choisir —</option>'+
+            '<option value="Mid-stay" '+(f.label==='Mid-stay'?'selected':'')+'>Mid-stay</option>'+
+            '<option value="Owner turnover" '+(f.label==='Owner turnover'?'selected':'')+'>Owner turnover</option>'+
+            '<option value="Deep clean" '+(f.label==='Deep clean'?'selected':'')+'>Deep clean</option>'+
+            '<option value="Post-construction" '+(f.label==='Post-construction'?'selected':'')+'>Post-construction</option>'+
+            '<option value="Other" '+(f.label==='Other'?'selected':'')+'>Autre</option>'+
+          '</select>'+
+        '</div>'+
+        '<div class="form-row"><label>Nom du guest / Client</label>'+
+          '<input type="text" id="ef-guest" value="'+esc(f.guest_name)+'" oninput="extraModalState.form.guest_name=this.value" placeholder="Facultatif">'+
+        '</div>'+
+        '<div class="form-grid">'+
+          '<div class="form-row"><label>Prix facturé (AED) <span class="req">*</span></label>'+
+            '<input type="number" step="1" id="ef-price" value="'+esc(String(f.price_billed))+'" oninput="extraModalState.form.price_billed=this.value" placeholder="250">'+
+          '</div>'+
+          '<div class="form-row"><label>Prix cleaner (AED)</label>'+
+            '<input type="number" step="1" id="ef-cleanerprice" value="'+esc(String(f.cleaner_price))+'" oninput="extraModalState.form.cleaner_price=this.value" placeholder="Défaut unité">'+
+          '</div>'+
+        '</div>'+
+        '<div class="form-row"><label>Cleaner assigné</label>'+
+          '<select id="ef-cleaner" onchange="extraModalState.form.assigned_cleaner_id=this.value">'+
+            '<option value="">— Non assigné —</option>'+
+            cleanersList.map(c=>'<option value="'+c.id+'" '+(String(f.assigned_cleaner_id)===String(c.id)?'selected':'')+'>'+esc(c.name)+'</option>').join('')+
+          '</select>'+
+        '</div>'+
+        '<div class="form-row"><label>Notes</label>'+
+          '<textarea id="ef-notes" rows="2" oninput="extraModalState.form.notes=this.value" placeholder="Infos facultatives">'+esc(f.notes)+'</textarea>'+
+        '</div>'+
+      '</div>'+
+      '<div class="modal-footer">'+
+        (isEdit?'<button class="btn-danger" onclick="deleteExtra('+f.id+')">🗑 Supprimer</button>':'')+
+        '<button class="btn-secondary" onclick="closeExtraModal()">Annuler</button>'+
+        '<button class="btn-primary" onclick="saveExtra()">'+(isEdit?'💾 Enregistrer':'➕ Créer')+'</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function syncExtraPriceDefaults(){
+  const lid = extraModalState.form.listing_id;
+  if(!lid) return;
+  const l = listingPrices[lid];
+  if(l){
+    const val = l.custom_price || l.price;
+    const el = document.getElementById('ef-cleanerprice');
+    if(el && !extraModalState.form.cleaner_price) el.placeholder = 'Défaut unité: '+val+' AED';
+  }
+}
+
+async function saveExtra(){
+  const f = extraModalState.form;
+  if(!f.listing_id || !f.cleaning_date){ toast('Unité et date obligatoires','error'); return; }
+  if(!f.price_billed){ toast('Prix facturé obligatoire','error'); return; }
+  const payload = {
+    listing_id: f.listing_id,
+    cleaning_date: f.cleaning_date,
+    label: f.label || null,
+    guest_name: f.guest_name || null,
+    price_billed: f.price_billed ? Number(f.price_billed) : null,
+    cleaner_price: f.cleaner_price ? Number(f.cleaner_price) : null,
+    notes: f.notes || null,
+    assigned_cleaner_id: f.assigned_cleaner_id ? Number(f.assigned_cleaner_id) : null,
+    created_by: cleanerMode?cleanerMode.name:'Manager',
+  };
+  let r;
+  if(extraModalState.editing){
+    r = await api('updateExtraCleaning', {body: {id: f.id, ...payload}});
+  } else {
+    r = await api('addExtraCleaning', {body: payload});
+  }
+  if(r.status === 'success'){
+    toast(extraModalState.editing?'Ménage modifié':'Ménage extra ajouté ✨','success');
+    closeExtraModal();
+    fetchAll();
+  } else {
+    toast(r.error || 'Erreur','error');
+  }
+}
+
+async function deleteExtra(id){
+  if(!confirm('Supprimer ce ménage extra ?')) return;
+  const r = await api('deleteExtraCleaning', {body: {id}});
+  if(r.status === 'success'){
+    toast('Supprimé','success');
+    closeExtraModal();
+    fetchAll();
+  } else {
+    toast(r.error || 'Erreur','error');
+  }
+}
 
 // PWA Service Worker Registration
 if('serviceWorker' in navigator){
