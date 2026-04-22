@@ -178,25 +178,6 @@ async function getPhotoUrl(sb: any, path: string | null): Promise<string | null>
   return data.signedUrl;
 }
 
-// ========== ntfy push ==========
-async function sendNtfyPush(topic: string | null | undefined, title: string, message: string, priority = "default", tags = "") {
-  if (!topic || typeof topic !== "string" || topic.length < 3) return;
-  try {
-    await fetch(`https://ntfy.sh/${topic}`, {
-      method: "POST",
-      headers: { "Title": title, "Priority": priority, "Tags": tags, "Content-Type": "text/plain; charset=utf-8" },
-      body: message,
-    });
-  } catch (e) {
-    console.log(`[ntfy] send error: ${e}`);
-  }
-}
-
-function generateNotificationTopic(cleanerId: number): string {
-  const rand = Math.random().toString(36).substring(2, 10);
-  return `hk-${cleanerId}-${rand}`;
-}
-
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get("origin");
   const CORS_HEADERS = corsHeaders(origin);
@@ -327,36 +308,9 @@ Deno.serve(async (req: Request) => {
 
     // ==================== CLEANERS ====================
     if (action === "getCleaners") {
-      let { data, error } = await sb.from("cleaners").select("*").eq("is_active", true).order("name");
+      const { data, error } = await sb.from("cleaners").select("*").eq("is_active", true).order("name");
       if (error) throw error;
-      // Auto-génération des topics manquants
-      for (const c of data || []) {
-        if (!c.notification_topic) {
-          const topic = generateNotificationTopic(c.id);
-          await sb.from("cleaners").update({ notification_topic: topic }).eq("id", c.id);
-          c.notification_topic = topic;
-        }
-      }
       return jsonResp({ status: "success", cleaners: data });
-    }
-    if (action === "testNotification" && req.method === "POST") {
-      const body = await req.json();
-      const { cleaner_id } = body;
-      if (!cleaner_id) return jsonResp({ error: "cleaner_id required" }, 400);
-      const { data: cleaner } = await sb.from("cleaners").select("name, notification_topic").eq("id", cleaner_id).single();
-      if (!cleaner) return jsonResp({ error: "cleaner not found" }, 404);
-      if (!cleaner.notification_topic) return jsonResp({ error: "no topic set" }, 400);
-      await sendNtfyPush(cleaner.notification_topic, "HK Planner — Test", `Hi ${cleaner.name}! Notifications are working 🎉`, "default", "white_check_mark");
-      return jsonResp({ status: "success" });
-    }
-    if (action === "regenerateTopic" && req.method === "POST") {
-      const body = await req.json();
-      const { cleaner_id } = body;
-      if (!cleaner_id) return jsonResp({ error: "cleaner_id required" }, 400);
-      const topic = generateNotificationTopic(Number(cleaner_id));
-      const { error } = await sb.from("cleaners").update({ notification_topic: topic }).eq("id", cleaner_id);
-      if (error) throw error;
-      return jsonResp({ status: "success", topic });
     }
     if (action === "saveCleaner" && req.method === "POST") {
       const body = await req.json();
@@ -463,11 +417,6 @@ Deno.serve(async (req: Request) => {
         const { error } = await sb.from("cleaning_assignments").upsert({ reservation_key, cleaner_id, assigned_at: new Date().toISOString() }, { onConflict: "reservation_key" });
         if (error) throw error;
         await addLog(sb, reservation_key, "assigned", actor, { cleaner_id });
-        // ntfy push
-        const { data: cl } = await sb.from("cleaners").select("notification_topic").eq("id", cleaner_id).single();
-        if (cl?.notification_topic) {
-          await sendNtfyPush(cl.notification_topic, "New cleaning assigned", `Reservation: ${reservation_key}`, "default", "broom");
-        }
       } else {
         const { error } = await sb.from("cleaning_assignments").delete().eq("reservation_key", reservation_key);
         if (error) throw error;
@@ -489,7 +438,6 @@ Deno.serve(async (req: Request) => {
       cls.forEach((c: any) => { load[c.id] = 0; });
       Object.values(existingMap).forEach((cid: number) => { if (load[cid] !== undefined) load[cid]++; });
       let assigned = 0;
-      const assignedByCleaner: Record<number, string[]> = {};
       for (const r of reservations) {
         if (existingMap[r.key]) continue;
         let minLoad = Infinity, minId = cls[0].id;
@@ -498,16 +446,6 @@ Deno.serve(async (req: Request) => {
         if (!error) {
           load[minId]++; assigned++;
           await addLog(sb, r.key, "auto_assigned", "system", { cleaner_id: minId });
-          if (!assignedByCleaner[minId]) assignedByCleaner[minId] = [];
-          assignedByCleaner[minId].push(r.key);
-        }
-      }
-      // ntfy : résumé groupé par cleaner
-      for (const [cidStr, keys] of Object.entries(assignedByCleaner)) {
-        const cid = Number(cidStr);
-        const { data: cl } = await sb.from("cleaners").select("notification_topic, name").eq("id", cid).single();
-        if (cl?.notification_topic) {
-          await sendNtfyPush(cl.notification_topic, `${keys.length} cleaning${keys.length>1?'s':''} assigned`, keys.map(k=>`• ${k}`).join('\n'), "default", "broom");
         }
       }
       return jsonResp({ status: "success", assigned });
@@ -1233,10 +1171,6 @@ Deno.serve(async (req: Request) => {
         let msg = '\uD83C\uDFE0 Hey ' + c.name + '! Your cleanings for today:\n\n';
         tasks.forEach((r: any, i: number) => { msg += (i + 1) + '. ' + r.listing + ' (' + r.guest + ')\n'; });
         msg += '\nTotal: ' + tasks.length + ' cleanings. Good luck! \uD83D\uDCAA';
-        // ntfy push : résumé du jour
-        if (c.notification_topic) {
-          await sendNtfyPush(c.notification_topic, `${tasks.length} cleaning${tasks.length>1?'s':''} today`, tasks.map((r:any)=>`• ${r.listing} (${r.guest})`).join('\n'), "high", "broom,chart_with_upwards_trend");
-        }
         const phone = c.phone ? c.phone.replace(/[^0-9+]/g, '') : null;
         const waLink = phone ? 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg) : null;
         notified.push({ cleaner: c.name, phone: c.phone, tasks: tasks.length, message: msg, waLink, autoSendEnabled });
@@ -1592,46 +1526,6 @@ Deno.serve(async (req: Request) => {
       return csvResponse(filename, arrayToCsv(rows));
     }
 
-    if (action === "exportPayrollCsv") {
-      const month = url.searchParams.get("month"); // YYYY-MM requis
-      if (!month) return jsonResp({ error: "month=YYYY-MM required" }, 400);
-      const monthEnd = nextMonthISO(month);
-      const [timerRes, cleanerRes, assignRes, doneRes] = await Promise.all([
-        sb.from("cleaning_timer").select("reservation_key, cleaner_id, started_at, duration_minutes").gte("started_at", month + "-01").lt("started_at", monthEnd),
-        sb.from("cleaners").select("id, name, is_active"),
-        sb.from("cleaning_assignments").select("reservation_key, cleaner_id"),
-        sb.from("menage_done").select("reservation_key, done, updated_at").eq("done", true).gte("updated_at", month + "-01").lt("updated_at", monthEnd),
-      ]);
-      const assignMap: Record<string, number> = {};
-      (assignRes.data || []).forEach((a: any) => { assignMap[a.reservation_key] = a.cleaner_id; });
-      // Stats par cleaner
-      const byCleaner: Record<number, any> = {};
-      (cleanerRes.data || []).forEach((c: any) => {
-        byCleaner[c.id] = { id: c.id, name: c.name, cleanings_completed: 0, total_minutes: 0, session_count: 0 };
-      });
-      (doneRes.data || []).forEach((d: any) => {
-        const cid = assignMap[d.reservation_key];
-        if (cid && byCleaner[cid]) byCleaner[cid].cleanings_completed++;
-      });
-      (timerRes.data || []).forEach((t: any) => {
-        const cid = t.cleaner_id;
-        if (cid && byCleaner[cid] && t.duration_minutes) {
-          byCleaner[cid].total_minutes += Number(t.duration_minutes);
-          byCleaner[cid].session_count++;
-        }
-      });
-      const rows = Object.values(byCleaner).map((c: any) => ({
-        cleaner_id: c.id,
-        cleaner_name: c.name,
-        month,
-        cleanings_completed: c.cleanings_completed,
-        timer_sessions: c.session_count,
-        total_minutes: c.total_minutes,
-        total_hours: Math.round(c.total_minutes / 60 * 10) / 10,
-        avg_minutes_per_cleaning: c.cleanings_completed > 0 ? Math.round(c.total_minutes / c.cleanings_completed) : 0,
-      }));
-      return csvResponse(`payroll_${month}.csv`, arrayToCsv(rows));
-    }
 
     // ========== EXTRA CLEANINGS (hors Hostaway) ==========
     if (action === "addExtraCleaning" && req.method === "POST") {
@@ -1659,14 +1553,6 @@ Deno.serve(async (req: Request) => {
         await sb.from("cleaning_assignments").upsert({
           reservation_key, cleaner_id: assigned_cleaner_id, assigned_at: new Date().toISOString(),
         }, { onConflict: "reservation_key" });
-        // Notification ntfy au cleaner
-        const { data: cl } = await sb.from("cleaners").select("notification_topic, name").eq("id", assigned_cleaner_id).single();
-        if (cl?.notification_topic) {
-          await sendNtfyPush(cl.notification_topic,
-            `Extra cleaning assigned`,
-            `${label || 'Extra'} — ${listing_id} on ${cleaning_date}` + (price_billed ? `\nBilled: ${price_billed} AED` : ''),
-            "default", "broom,sparkles");
-        }
       }
       await addLog(sb, reservation_key, "extra_created", created_by, { listing_id, label, price_billed, assigned_cleaner_id });
       return jsonResp({ status: "success", extra: data });

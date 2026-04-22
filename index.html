@@ -805,16 +805,14 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
   .date-btn .day-num { font-size:14px; }
   .cleaner-chip { padding:3px 8px; font-size:9px; border-radius:14px; }
 }
-.cleaner-notif-section { margin-top:12px; padding-top:12px; border-top:1px dashed var(--border); }
-.cleaner-notif-label { font-size:12px; font-weight:700; color:var(--text2); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; }
-.cleaner-notif-topic { font-size:13px; margin-bottom:8px; }
-.cleaner-notif-topic code { background:var(--bg2,#f5f5f7); padding:2px 8px; border-radius:4px; font-family:ui-monospace,SFMono-Regular,monospace; font-size:12px; }
-.cleaner-notif-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
-.cleaner-notif-help { font-size:11px; color:var(--text3); line-height:1.5; }
-.btn-sm { background:var(--card2,#f5f5f7); border:1px solid var(--border,#e0e0e0); color:var(--text); padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer; text-decoration:none; display:inline-block; }
-.btn-sm:hover { background:var(--primary-light,rgba(124,58,237,0.08)); }
-.btn-sm.btn-warn { color:var(--orange,#f59e0b); }
 .dash-section { margin-bottom:20px; background:var(--card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border); }
+.rev-cleaner-table { width:100%; border-collapse:collapse; font-size:13px; }
+.rev-cleaner-table th { text-align:left; padding:8px 10px; font-weight:600; color:var(--text2); border-bottom:1px solid var(--border); font-size:var(--fs-xs,10px); text-transform:uppercase; letter-spacing:0.5px; }
+.rev-cleaner-table td { padding:10px; border-bottom:1px solid var(--border); }
+.rev-cleaner-table td.rev-num { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+.rev-cleaner-table td.rev-muted { color:var(--text2); font-weight:500; }
+.rev-name { display:flex; align-items:center; gap:8px; font-weight:600; }
+.rev-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
 .dash-section h3 { font-size:14px; margin-bottom:12px; color:var(--text); }
 .urgent { color:var(--red); font-weight:700; }
 /* Dashboard tabs */
@@ -1216,6 +1214,40 @@ function getCleaningFee(r){
 }
 // Dashboard revenue: exact Hostaway fee (no fallback — matches rental activity)
 function getRevenueFee(r){return r.cleaningFee||0;}
+// Revenue per cleaner (dashboard): month='YYYY-MM'
+function computeRevenuePerCleaner(month){
+  const monthPrefix=month;
+  const byCleaner={};
+  (cleaners||[]).forEach(c=>{
+    byCleaner[c.id]={id:c.id,name:c.name,color:c.color,role:c.role,cleanings:0,revenueAED:0,costAED:0};
+  });
+  (RESERVATIONS||[]).forEach(r=>{
+    const key=keyFor(r);
+    if(!(r.co||'').startsWith(monthPrefix)) return;
+    if(!done[key]) return;
+    const cid=assignments[key];
+    if(!cid||!byCleaner[cid]) return;
+    byCleaner[cid].cleanings++;
+    byCleaner[cid].revenueAED+=Number(r.cleaningFee||0);
+    const l=listingPrices[r.listingId];
+    if(l) byCleaner[cid].costAED+=Number(l.custom_price||l.price||0);
+  });
+  (extraCleanings||[]).forEach(e=>{
+    if(!String(e.cleaning_date||'').startsWith(monthPrefix)) return;
+    const isDone=e.status==='done'||done[e.reservation_key];
+    if(!isDone) return;
+    const cid=assignments[e.reservation_key];
+    if(!cid||!byCleaner[cid]) return;
+    byCleaner[cid].cleanings++;
+    byCleaner[cid].revenueAED+=Number(e.price_billed||0);
+    const defaultCost=(()=>{const l=listingPrices[e.listing_id];return l?Number(l.custom_price||l.price||0):0;})();
+    byCleaner[cid].costAED+=Number(e.cleaner_price||defaultCost);
+  });
+  return Object.values(byCleaner)
+    .filter(c=>c.cleanings>0)
+    .map(c=>({...c,marginAED:c.revenueAED-c.costAED}))
+    .sort((a,b)=>b.revenueAED-a.revenueAED);
+}
 function getBedroomsForListing(lid){return(lid&&listingPrices[lid])?listingPrices[lid].bedrooms:0;}
 function getUnitType(lid){
   if(lid&&listingPrices[lid]&&listingPrices[lid].unit_type){
@@ -1461,7 +1493,7 @@ function showAssignPicker(rkey){
       '<div class="picker-dot" style="background:var(--text3)"></div>'+
       '<span class="picker-name" style="color:var(--red)">✕ Unassign</span></div>';
   }
-  cleaners.forEach(c=>{
+  cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
     const cnt=RESERVATIONS.filter(r=>assignments[keyFor(r)]===c.id).length;
     const isCurrent=currentAssign===c.id;
     ph+='<div class="assign-picker-item" style="'+(isCurrent?'background:var(--primary-light);border-radius:8px':'')+'" onclick="assignCleaner(\''+esc(rkey)+'\','+c.id+');this.closest(\'.assign-picker-overlay\').remove()">'+
@@ -1783,19 +1815,20 @@ async function deleteRecurringTask(id){
 async function smartAssign(){
   const unassigned=RESERVATIONS.filter(r=>!assignments[keyFor(r)]);
   if(unassigned.length===0){toast('All already assigned!');return;}
-  if(cleaners.length===0){toast('Add cleaners first','error');return;}
+  const assignable=cleaners.filter(c=>(c.role||'cleaner')==='cleaner');
+  if(assignable.length===0){toast('Add cleaners first','error');return;}
   toast('Smart assigning '+unassigned.length+'...');
   // Group by date
   const byDate={};unassigned.forEach(r=>{if(!byDate[r.co])byDate[r.co]=[];byDate[r.co].push(r);});
   let assignedCount=0;
   for(const[date,dateRes]of Object.entries(byDate)){
     // Count existing assignments per cleaner for this date
-    const load={};cleaners.forEach(c=>{load[c.id]=RESERVATIONS.filter(r=>r.co===date&&assignments[keyFor(r)]===c.id).length;});
+    const load={};assignable.forEach(c=>{load[c.id]=RESERVATIONS.filter(r=>r.co===date&&assignments[keyFor(r)]===c.id).length;});
     // Sort by estimated time (heaviest first) for better balancing
     dateRes.sort((a,b)=>(getEstTime(b.listingId)||60)-(getEstTime(a.listingId)||60));
     for(const r of dateRes){
       // Pick cleaner with lowest load, tie-break by fastest avg time
-      const best=cleaners.slice().sort((a,b)=>{
+      const best=assignable.slice().sort((a,b)=>{
         if(load[a.id]!==load[b.id])return load[a.id]-load[b.id];
         const aAvg=getCleanerAvgTime(a.id),bAvg=getCleanerAvgTime(b.id);
         return(aAvg||999)-(bAvg||999);
@@ -2341,7 +2374,7 @@ function renderPlanner(){
   if(!cleanerMode&&cleaners.length>0){
     h+='<div class="cleaner-filter">';
     h+='<div class="cleaner-chip'+(filterCleaner===0?' active':'')+'" role="button" tabindex="0" aria-label="Show all cleaners" onclick="setFilterCleaner(0)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(0);}">All</div>';
-    cleaners.forEach(c=>{
+    cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
       const cnt=RESERVATIONS.filter(r=>assignments[keyFor(r)]===c.id).length;
       h+='<div class="cleaner-chip'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" onclick="setFilterCleaner('+c.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner('+c.id+');}"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
     });
@@ -2636,7 +2669,6 @@ function renderDashboard(){
   h+='<div style="margin-bottom:16px; display:flex; gap:8px; flex-wrap:wrap;">'+
     '<button onclick="exportCsv(\'cleanings\')" class="btn-export">📥 Export cleanings</button>'+
     '<button onclick="exportCsv(\'maintenance\')" class="btn-export">💸 Export maintenance</button>'+
-    '<button onclick="exportCsv(\'payroll\')" class="btn-export">👷 Export payroll</button>'+
     '</div>';
   h+='<div class="month-selector"><button onclick="changeDashMonth(-1)">‹</button><h3>'+MONTH_NAMES[dashMonth]+' '+dashYear+'</h3><button onclick="changeDashMonth(1)">›</button></div>';
   // #7 Dashboard tabs (Operations / Revenue / Properties)
@@ -2820,6 +2852,29 @@ function renderDashboard(){
       h+='<div class="cleaner-stat-row"><div class="cs-name">'+type+'</div><div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:var(--primary)"></div></div><div class="cs-count">'+d+'/'+list.length+' · '+rev.toLocaleString()+' AED</div></div>';
     }
     h+='</div>';
+
+    // Revenue per cleaner
+    const revenuePerCleaner=computeRevenuePerCleaner(dashYear+'-'+String(dashMonth+1).padStart(2,'0'));
+    if(revenuePerCleaner.length>0){
+      h+='<div class="dash-card"><h3>👤 Revenue per cleaner</h3>'+
+        '<table class="rev-cleaner-table">'+
+          '<thead><tr>'+
+            '<th>Cleaner</th><th>Cleanings</th><th>Revenue</th><th>Cost</th><th>Margin</th>'+
+          '</tr></thead>'+
+          '<tbody>'+
+            revenuePerCleaner.map(c=>{
+              const marginColor=c.marginAED>=0?'var(--green)':'var(--red)';
+              return '<tr>'+
+                '<td class="rev-name"><span class="rev-dot" style="background:'+(c.color||'#888')+'"></span>'+esc(c.name)+'</td>'+
+                '<td>'+c.cleanings+'</td>'+
+                '<td class="rev-num">'+Math.round(c.revenueAED)+' AED</td>'+
+                '<td class="rev-num rev-muted">'+Math.round(c.costAED)+' AED</td>'+
+                '<td class="rev-num" style="color:'+marginColor+'">'+(c.marginAED>=0?'+':'')+Math.round(c.marginAED)+' AED</td>'+
+              '</tr>';
+            }).join('')+
+          '</tbody>'+
+        '</table></div>';
+    }
     h+='</div>'; // end dash-grid
   }
 
@@ -2942,22 +2997,6 @@ function renderSettings(){
     h+='</select>'+
       '<button onclick="sendDailyWhatsApp('+JSON.stringify(c).replace(/"/g,'&quot;')+')" title="Send WhatsApp">📱</button>'+
       '<button onclick="deleteCleaner('+c.id+')" title="Remove">🗑</button></div>';
-    // ntfy push notifications panel
-    const topic=c.notification_topic;
-    const ntfyLink=topic?'https://ntfy.sh/'+topic:null;
-    h+='<div class="cleaner-notif-section">'+
-      '<div class="cleaner-notif-label">🔔 Push notifications</div>'+
-      (topic
-        ? '<div class="cleaner-notif-topic">Topic: <code>'+esc(topic)+'</code></div>'+
-          '<div class="cleaner-notif-actions">'+
-          '<a href="'+ntfyLink+'" target="_blank" class="btn-sm">📱 Open in ntfy</a>'+
-          '<button onclick="testNotification('+c.id+')" class="btn-sm">🔔 Test</button>'+
-          '<button onclick="regenerateTopic('+c.id+')" class="btn-sm btn-warn">🔄 Regenerate</button>'+
-          '</div>'+
-          '<div class="cleaner-notif-help">Install the <strong>ntfy</strong> app on iPhone/Android, add the topic above, and receive assignments as push notifications.</div>'
-        : '<div class="cleaner-notif-help">Topic not generated yet — save the cleaner to generate.</div>'
-      )+
-      '</div>';
   });
   h+='<div class="add-form">'+
     '<input id="newName" placeholder="Name"/>'+
@@ -3045,17 +3084,6 @@ async function loadInventory(){
 async function saveInventoryItem(id,name,qty,minQty,unit,listingId){
   await api('saveInventoryItem',{body:{id:id||undefined,listing_id:listingId||null,item_name:name,current_qty:Number(qty),min_qty:Number(minQty),unit}});
   inventoryItems=null;loadInventory();toast('Saved ✓','success');
-}
-// ntfy push notifications
-async function testNotification(cleanerId){
-  const r=await api('testNotification',{body:{cleaner_id:cleanerId}});
-  if(r.status==='success') toast('Notification sent ✅','success');
-  else toast(r.error||'Error','error');
-}
-async function regenerateTopic(cleanerId){
-  if(!confirm('Regenerate topic? The old one will be invalidated.')) return;
-  const r=await api('regenerateTopic',{body:{cleaner_id:cleanerId}});
-  if(r.status==='success'){ toast('Topic regenerated','success'); fetchAll(); }
 }
 // Property heatmap
 async function loadPropertyHeatmap(){
@@ -3193,7 +3221,7 @@ function renderRecurring(){
   const seen2={};RESERVATIONS.forEach(r=>{if(!seen2[r.listingId]){seen2[r.listingId]=true;h+='<option value="'+r.listingId+'">'+esc(r.listing)+'</option>';}});
   h+='</select></div>';
   h+='<select id="recCleaner"><option value="">Unassigned</option>';
-  cleaners.forEach(c=>{h+='<option value="'+c.id+'">'+esc(c.name)+'</option>';});
+  cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{h+='<option value="'+c.id+'">'+esc(c.name)+'</option>';});
   h+='</select>';
   h+='<button class="issue-submit" onclick="saveRecurringTask()">Add Task</button></div>';
 
@@ -3920,7 +3948,7 @@ function generateOwnerReport(listingId){
 // CSV exports via backend (Feature 1)
 async function exportCsv(type){
   const month = String(dashYear) + '-' + String(dashMonth + 1).padStart(2,'0'); // YYYY-MM en cours
-  const actionMap = { cleanings:'exportCleaningsCsv', maintenance:'exportMaintenanceCsv', payroll:'exportPayrollCsv' };
+  const actionMap = { cleanings:'exportCleaningsCsv', maintenance:'exportMaintenanceCsv' };
   const action = actionMap[type];
   if(!action) return;
   const url = API + '?action=' + action + '&month=' + month;
