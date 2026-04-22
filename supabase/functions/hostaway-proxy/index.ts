@@ -178,6 +178,25 @@ async function getPhotoUrl(sb: any, path: string | null): Promise<string | null>
   return data.signedUrl;
 }
 
+// ========== ntfy push ==========
+async function sendNtfyPush(topic: string | null | undefined, title: string, message: string, priority = "default", tags = "") {
+  if (!topic || typeof topic !== "string" || topic.length < 3) return;
+  try {
+    await fetch(`https://ntfy.sh/${topic}`, {
+      method: "POST",
+      headers: { "Title": title, "Priority": priority, "Tags": tags, "Content-Type": "text/plain; charset=utf-8" },
+      body: message,
+    });
+  } catch (e) {
+    console.log(`[ntfy] send error: ${e}`);
+  }
+}
+
+function generateNotificationTopic(cleanerId: number): string {
+  const rand = Math.random().toString(36).substring(2, 10);
+  return `hk-${cleanerId}-${rand}`;
+}
+
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get("origin");
   const CORS_HEADERS = corsHeaders(origin);
@@ -308,9 +327,36 @@ Deno.serve(async (req: Request) => {
 
     // ==================== CLEANERS ====================
     if (action === "getCleaners") {
-      const { data, error } = await sb.from("cleaners").select("*").eq("is_active", true).order("name");
+      let { data, error } = await sb.from("cleaners").select("*").eq("is_active", true).order("name");
       if (error) throw error;
+      // Auto-génération des topics manquants
+      for (const c of data || []) {
+        if (!c.notification_topic) {
+          const topic = generateNotificationTopic(c.id);
+          await sb.from("cleaners").update({ notification_topic: topic }).eq("id", c.id);
+          c.notification_topic = topic;
+        }
+      }
       return jsonResp({ status: "success", cleaners: data });
+    }
+    if (action === "testNotification" && req.method === "POST") {
+      const body = await req.json();
+      const { cleaner_id } = body;
+      if (!cleaner_id) return jsonResp({ error: "cleaner_id required" }, 400);
+      const { data: cleaner } = await sb.from("cleaners").select("name, notification_topic").eq("id", cleaner_id).single();
+      if (!cleaner) return jsonResp({ error: "cleaner not found" }, 404);
+      if (!cleaner.notification_topic) return jsonResp({ error: "no topic set" }, 400);
+      await sendNtfyPush(cleaner.notification_topic, "HK Planner — Test", `Bonjour ${cleaner.name} ! Les notifications fonctionnent bien 🎉`, "default", "white_check_mark");
+      return jsonResp({ status: "success" });
+    }
+    if (action === "regenerateTopic" && req.method === "POST") {
+      const body = await req.json();
+      const { cleaner_id } = body;
+      if (!cleaner_id) return jsonResp({ error: "cleaner_id required" }, 400);
+      const topic = generateNotificationTopic(Number(cleaner_id));
+      const { error } = await sb.from("cleaners").update({ notification_topic: topic }).eq("id", cleaner_id);
+      if (error) throw error;
+      return jsonResp({ status: "success", topic });
     }
     if (action === "saveCleaner" && req.method === "POST") {
       const body = await req.json();
@@ -417,6 +463,11 @@ Deno.serve(async (req: Request) => {
         const { error } = await sb.from("cleaning_assignments").upsert({ reservation_key, cleaner_id, assigned_at: new Date().toISOString() }, { onConflict: "reservation_key" });
         if (error) throw error;
         await addLog(sb, reservation_key, "assigned", actor, { cleaner_id });
+        // ntfy push
+        const { data: cl } = await sb.from("cleaners").select("notification_topic").eq("id", cleaner_id).single();
+        if (cl?.notification_topic) {
+          await sendNtfyPush(cl.notification_topic, "Nouveau ménage assigné", `Réservation: ${reservation_key}`, "default", "broom");
+        }
       } else {
         const { error } = await sb.from("cleaning_assignments").delete().eq("reservation_key", reservation_key);
         if (error) throw error;
@@ -438,12 +489,26 @@ Deno.serve(async (req: Request) => {
       cls.forEach((c: any) => { load[c.id] = 0; });
       Object.values(existingMap).forEach((cid: number) => { if (load[cid] !== undefined) load[cid]++; });
       let assigned = 0;
+      const assignedByCleaner: Record<number, string[]> = {};
       for (const r of reservations) {
         if (existingMap[r.key]) continue;
         let minLoad = Infinity, minId = cls[0].id;
         for (const c of cls) { if (load[c.id] < minLoad) { minLoad = load[c.id]; minId = c.id; } }
         const { error } = await sb.from("cleaning_assignments").upsert({ reservation_key: r.key, cleaner_id: minId, assigned_at: new Date().toISOString() }, { onConflict: "reservation_key" });
-        if (!error) { load[minId]++; assigned++; await addLog(sb, r.key, "auto_assigned", "system", { cleaner_id: minId }); }
+        if (!error) {
+          load[minId]++; assigned++;
+          await addLog(sb, r.key, "auto_assigned", "system", { cleaner_id: minId });
+          if (!assignedByCleaner[minId]) assignedByCleaner[minId] = [];
+          assignedByCleaner[minId].push(r.key);
+        }
+      }
+      // ntfy : résumé groupé par cleaner
+      for (const [cidStr, keys] of Object.entries(assignedByCleaner)) {
+        const cid = Number(cidStr);
+        const { data: cl } = await sb.from("cleaners").select("notification_topic, name").eq("id", cid).single();
+        if (cl?.notification_topic) {
+          await sendNtfyPush(cl.notification_topic, `${keys.length} ménage${keys.length>1?'s':''} assigné${keys.length>1?'s':''}`, keys.map(k=>`• ${k}`).join('\n'), "default", "broom");
+        }
       }
       return jsonResp({ status: "success", assigned });
     }
@@ -1168,6 +1233,10 @@ Deno.serve(async (req: Request) => {
         let msg = '\uD83C\uDFE0 Hey ' + c.name + '! Your cleanings for today:\n\n';
         tasks.forEach((r: any, i: number) => { msg += (i + 1) + '. ' + r.listing + ' (' + r.guest + ')\n'; });
         msg += '\nTotal: ' + tasks.length + ' cleanings. Good luck! \uD83D\uDCAA';
+        // ntfy push : résumé du jour
+        if (c.notification_topic) {
+          await sendNtfyPush(c.notification_topic, `${tasks.length} ménage${tasks.length>1?'s':''} aujourd'hui`, tasks.map((r:any)=>`• ${r.listing} (${r.guest})`).join('\n'), "high", "broom,chart_with_upwards_trend");
+        }
         const phone = c.phone ? c.phone.replace(/[^0-9+]/g, '') : null;
         const waLink = phone ? 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg) : null;
         notified.push({ cleaner: c.name, phone: c.phone, tasks: tasks.length, message: msg, waLink, autoSendEnabled });
@@ -1319,6 +1388,83 @@ Deno.serve(async (req: Request) => {
         propertyProfiles: profileMap,
         cancelled: cancelledMap,
       });
+    }
+
+    // ========== PROPERTY HEATMAP ==========
+    if (action === "getPropertyHeatmap") {
+      const [ticketsRes, costsRes, timerRes, assignRes, feedbackRes, listingRes] = await Promise.all([
+        sb.from("maintenance_tickets").select("id, listing_id, status, priority, created_at, resolved_at"),
+        sb.from("maintenance_costs").select("listing_id, amount"),
+        sb.from("cleaning_timer").select("reservation_key, duration_minutes").not("duration_minutes", "is", null),
+        sb.from("cleaning_assignments").select("reservation_key, cleaner_id"),
+        sb.from("guest_feedback").select("listing_id, rating"),
+        sb.from("listing_config").select("listing_id, listing_name, bedrooms, price, custom_price"),
+      ]);
+      const byListing: Record<string, any> = {};
+      (listingRes.data || []).forEach((l: any) => {
+        byListing[l.listing_id] = {
+          listing_id: l.listing_id,
+          listing_name: l.listing_name || l.listing_id,
+          bedrooms: l.bedrooms,
+          price: l.custom_price || l.price,
+          open_tickets: 0,
+          urgent_tickets: 0,
+          total_tickets: 0,
+          avg_resolution_hours: null,
+          total_cost: 0,
+          avg_rating: null,
+          feedback_count: 0,
+          avg_cleaning_minutes: null,
+          cleaning_count: 0,
+          score: 100,
+        };
+      });
+      const resolvedDurations: Record<string, number[]> = {};
+      (ticketsRes.data || []).forEach((t: any) => {
+        const lid = t.listing_id;
+        if (!lid || !byListing[lid]) return;
+        byListing[lid].total_tickets++;
+        if (['open','assigned','in_progress','waiting_parts'].includes(t.status)) {
+          byListing[lid].open_tickets++;
+          if (['urgent','high'].includes(t.priority)) byListing[lid].urgent_tickets++;
+        }
+        if (t.resolved_at && t.created_at) {
+          const hours = (new Date(t.resolved_at).getTime() - new Date(t.created_at).getTime()) / 3600000;
+          if (!resolvedDurations[lid]) resolvedDurations[lid] = [];
+          resolvedDurations[lid].push(hours);
+        }
+      });
+      Object.entries(resolvedDurations).forEach(([lid, arr]) => {
+        if (byListing[lid] && arr.length > 0) {
+          byListing[lid].avg_resolution_hours = Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+        }
+      });
+      (costsRes.data || []).forEach((c: any) => {
+        if (c.listing_id && byListing[c.listing_id]) byListing[c.listing_id].total_cost += Number(c.amount || 0);
+      });
+      const fbByListing: Record<string, number[]> = {};
+      (feedbackRes.data || []).forEach((f: any) => {
+        const lid = f.listing_id;
+        if (!lid || !byListing[lid] || f.rating == null) return;
+        if (!fbByListing[lid]) fbByListing[lid] = [];
+        fbByListing[lid].push(Number(f.rating));
+      });
+      Object.entries(fbByListing).forEach(([lid, arr]) => {
+        if (byListing[lid] && arr.length > 0) {
+          byListing[lid].avg_rating = Math.round(arr.reduce((a, b) => a + b, 0) / arr.length * 10) / 10;
+          byListing[lid].feedback_count = arr.length;
+        }
+      });
+      Object.values(byListing).forEach((l: any) => {
+        let s = 100;
+        s -= l.open_tickets * 5;
+        s -= l.urgent_tickets * 10;
+        s -= Math.floor(l.total_cost / 500);
+        if (l.avg_rating != null && l.avg_rating < 4) s -= Math.round((4 - l.avg_rating) * 10);
+        l.score = Math.max(0, Math.min(100, s));
+      });
+      const properties = Object.values(byListing).sort((a: any, b: any) => a.score - b.score);
+      return jsonResp({ status: "success", properties });
     }
 
     // ========== CSV EXPORTS ==========

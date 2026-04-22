@@ -690,6 +690,28 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
   .container { max-width:1000px; padding:8px 20px; }
   .bottom-nav { max-width:500px; left:50%; transform:translateX(-50%); right:auto; width:calc(100% - 24px); }
 }
+.cleaner-notif-section { margin-top:12px; padding-top:12px; border-top:1px dashed var(--border); }
+.cleaner-notif-label { font-size:12px; font-weight:700; color:var(--text2); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; }
+.cleaner-notif-topic { font-size:13px; margin-bottom:8px; }
+.cleaner-notif-topic code { background:var(--bg2,#f5f5f7); padding:2px 8px; border-radius:4px; font-family:ui-monospace,SFMono-Regular,monospace; font-size:12px; }
+.cleaner-notif-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+.cleaner-notif-help { font-size:11px; color:var(--text3); line-height:1.5; }
+.btn-sm { background:var(--card2,#f5f5f7); border:1px solid var(--border,#e0e0e0); color:var(--text); padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer; text-decoration:none; display:inline-block; }
+.btn-sm:hover { background:var(--primary-light,rgba(124,58,237,0.08)); }
+.btn-sm.btn-warn { color:var(--orange,#f59e0b); }
+.dash-section { margin-bottom:20px; background:var(--card); border-radius:12px; padding:16px; border:1px solid var(--border); }
+.dash-section h3 { font-size:14px; margin-bottom:12px; color:var(--text); }
+.heatmap-table { width:100%; border-collapse:collapse; font-size:13px; }
+.heatmap-table th { text-align:left; padding:8px 10px; font-weight:600; color:var(--text2); border-bottom:1px solid var(--border); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
+.heatmap-table td { padding:10px; border-bottom:1px solid var(--border); }
+.heatmap-name { font-weight:600; }
+.score-pill { display:inline-block; color:white; padding:2px 10px; border-radius:10px; font-weight:700; font-size:12px; min-width:36px; text-align:center; }
+.urgent { color:var(--red); font-weight:700; }
+.empty { color:var(--text3); text-align:center; padding:20px; font-size:13px; }
+.shopping-list { display:flex; flex-direction:column; gap:8px; }
+.shop-item { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--bg2); border-radius:8px; }
+.shop-name { font-weight:600; font-size:14px; }
+.shop-stock { font-size:12px; color:var(--text2); margin-top:2px; }
 </style>
 </head>
 <body>
@@ -2233,6 +2255,7 @@ function renderDashboard(){
     '<button onclick="exportCsv(\'maintenance\')" class="btn-export">💸 Export maintenance</button>'+
     '<button onclick="exportCsv(\'payroll\')" class="btn-export">👷 Export paie</button>'+
     '</div>';
+  h+='<div id="heatmapSection" class="dash-section"><h3>🗺️ Santé des propriétés</h3><div id="heatmapContent">Chargement...</div></div>';
   h+='<div class="month-selector"><button onclick="changeDashMonth(-1)">‹</button><h3>'+MONTH_NAMES[dashMonth]+' '+dashYear+'</h3><button onclick="changeDashMonth(1)">›</button></div>';
 
   if(dashLoading){h+='<div class="dash-card" style="text-align:center;padding:40px"><div class="spinner"></div></div>';h+='</div>'+renderBottomNav();document.getElementById('app').innerHTML=h;return;}
@@ -2386,6 +2409,7 @@ function renderDashboard(){
   });
   h+='</div></div>'+renderBottomNav();
   document.getElementById('app').innerHTML=h;
+  setTimeout(loadPropertyHeatmap,100);
 
   // Draw charts (#4)
   setTimeout(()=>{
@@ -2485,6 +2509,22 @@ function renderSettings(){
     h+='</select>'+
       '<button onclick="sendDailyWhatsApp('+JSON.stringify(c).replace(/"/g,'&quot;')+')" title="Send WhatsApp">📱</button>'+
       '<button onclick="deleteCleaner('+c.id+')" title="Remove">🗑</button></div>';
+    // ntfy push notifications panel
+    const topic=c.notification_topic;
+    const ntfyLink=topic?'https://ntfy.sh/'+topic:null;
+    h+='<div class="cleaner-notif-section">'+
+      '<div class="cleaner-notif-label">🔔 Notifications push</div>'+
+      (topic
+        ? '<div class="cleaner-notif-topic">Topic: <code>'+esc(topic)+'</code></div>'+
+          '<div class="cleaner-notif-actions">'+
+          '<a href="'+ntfyLink+'" target="_blank" class="btn-sm">📱 Ouvrir dans ntfy</a>'+
+          '<button onclick="testNotification('+c.id+')" class="btn-sm">🔔 Test</button>'+
+          '<button onclick="regenerateTopic('+c.id+')" class="btn-sm btn-warn">🔄 Régénérer</button>'+
+          '</div>'+
+          '<div class="cleaner-notif-help">Installe l\'app <strong>ntfy</strong> sur iPhone/Android, ajoute le topic ci-dessus, et reçois les assignations en push.</div>'
+        : '<div class="cleaner-notif-help">Topic pas encore généré — sauvegarde le cleaner pour générer.</div>'
+      )+
+      '</div>';
   });
   h+='<div class="add-form">'+
     '<input id="newName" placeholder="Name"/>'+
@@ -2572,10 +2612,67 @@ async function saveInventoryItem(id,name,qty,minQty,unit,listingId){
   await api('saveInventoryItem',{body:{id:id||undefined,listing_id:listingId||null,item_name:name,current_qty:Number(qty),min_qty:Number(minQty),unit}});
   inventoryItems=null;loadInventory();toast('Saved ✓','success');
 }
+// ntfy push notifications
+async function testNotification(cleanerId){
+  const r=await api('testNotification',{body:{cleaner_id:cleanerId}});
+  if(r.status==='success') toast('Notif envoyée ✅','success');
+  else toast(r.error||'Erreur','error');
+}
+async function regenerateTopic(cleanerId){
+  if(!confirm('Régénérer le topic ? L\'ancien sera invalidé.')) return;
+  const r=await api('regenerateTopic',{body:{cleaner_id:cleanerId}});
+  if(r.status==='success'){ toast('Topic régénéré','success'); fetchAll(); }
+}
+// Property heatmap
+async function loadPropertyHeatmap(){
+  const el=document.getElementById('heatmapContent');
+  if(!el) return;
+  try{
+    const r=await api('getPropertyHeatmap');
+    if(r.status!=='success'){ el.innerHTML='<div class="empty">Erreur chargement</div>'; return; }
+    const props=r.properties||[];
+    if(props.length===0){ el.innerHTML='<div class="empty">Aucune propriété</div>'; return; }
+    el.innerHTML='<table class="heatmap-table"><thead><tr>'+
+      '<th>Propriété</th><th>Score</th><th>Tickets ouverts</th><th>Urgents</th><th>Coût total</th><th>Note guest</th>'+
+      '</tr></thead><tbody>'+
+      props.map(p=>{
+        const scoreColor=p.score>=80?'#22c55e':p.score>=60?'#f59e0b':'#ef4444';
+        return '<tr>'+
+          '<td class="heatmap-name">'+esc(p.listing_name)+'</td>'+
+          '<td><div class="score-pill" style="background:'+scoreColor+'">'+p.score+'</div></td>'+
+          '<td>'+p.open_tickets+'</td>'+
+          '<td>'+(p.urgent_tickets>0?'<span class="urgent">'+p.urgent_tickets+'</span>':'0')+'</td>'+
+          '<td>'+(p.total_cost>0?Math.round(p.total_cost)+' AED':'—')+'</td>'+
+          '<td>'+(p.avg_rating!=null?'⭐ '+p.avg_rating+' ('+p.feedback_count+')':'—')+'</td>'+
+        '</tr>';
+      }).join('')+
+      '</tbody></table>';
+  }catch(e){ el.innerHTML='<div class="empty">Erreur: '+e.message+'</div>'; }
+}
+// Shopping list (restock)
+function renderShoppingList(){
+  const lowStock=(inventoryItems||[]).filter(i=>(i.current_qty||0)<=(i.min_qty||1));
+  if(lowStock.length===0) return '<div class="empty">Stock OK partout 🎉</div>';
+  return '<div class="shopping-list">'+
+    lowStock.map(i=>{
+      const amzUrl='https://www.amazon.ae/s?k='+encodeURIComponent(i.item_name);
+      return '<div class="shop-item">'+
+        '<div class="shop-info">'+
+          '<div class="shop-name">'+esc(i.item_name)+'</div>'+
+          '<div class="shop-stock">'+(i.current_qty||0)+' / '+(i.min_qty||1)+' '+(i.unit||'pcs')+' — '+esc(i.listing_id||'all')+'</div>'+
+        '</div>'+
+        '<a href="'+amzUrl+'" target="_blank" class="btn-sm">🛒 Amazon</a>'+
+      '</div>';
+    }).join('')+
+  '</div>';
+}
 function renderInventory(){
   let h='<div class="header"><div class="header-top"><h1>📦 Inventory</h1><div class="header-actions"></div></div></div>';
   h+='<div class="container">';
   if(!inventoryItems){h+='<div class="loading"><div class="spinner"></div></div></div>'+renderBottomNav();document.getElementById('app').innerHTML=h;loadInventory();return;}
+
+  // Shopping list (restock)
+  h+='<div class="dash-section"><h3>🛒 À racheter ('+((inventoryItems||[]).filter(i=>(i.current_qty||0)<=(i.min_qty||1)).length)+')</h3>'+renderShoppingList()+'</div>';
 
   // Alerts
   if(inventoryAlerts&&inventoryAlerts.length>0){
