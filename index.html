@@ -2774,9 +2774,9 @@ function renderDashboard(){
   // #15 Export buttons (always visible)
   h+='<div class="export-btns"><button class="export-btn" onclick="exportExcel()">📊 Export Excel</button><button class="export-btn" onclick="exportPDF()">📄 Export PDF</button>';
   if(!cleanerMode){
-    // Invoice section — only past months
+    // Invoice section — current + 12 previous months
     const now=new Date();const curM=now.getMonth(),curY=now.getFullYear();
-    let invOpts='';
+    let invOpts='<option value="'+curY+'-'+curM+'">'+MONTH_NAMES[curM]+' '+curY+' (in progress)</option>';
     for(let i=0;i<12;i++){let m=curM-1-i,yr=curY;if(m<0){m+=12;yr--;}invOpts+='<option value="'+yr+'-'+m+'">'+MONTH_NAMES[m]+' '+yr+'</option>';}
     h+='<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><select id="invoiceMonthSel" style="flex:1;padding:8px 10px;border:1px solid var(--primary);border-radius:10px;font-size:12px;font-weight:600;background:var(--primary-light);color:var(--primary);outline:none">'+invOpts+'</select>';
     h+='<button class="export-btn" onclick="generateInvoice()" style="background:var(--primary-light);border-color:var(--primary);color:var(--primary);white-space:nowrap">🧾 Invoice</button></div>';
@@ -4099,29 +4099,36 @@ async function generateInvoice(){
   if(!sel){toast('Select a month','error');return;}
   const[invYear,invMonth]=sel.value.split('-').map(Number);
 
-  // Block if month not finished
+  // Allow current month (partial) and past months. Legacy block removed
+  // so the user can summarize done cleanings any time (e.g. mid-month).
   const now=new Date();
   const endOfMonth=new Date(invYear,invMonth+1,0,23,59,59);
-  if(now<=endOfMonth){toast('Month not finished yet','error');return;}
+  const isCurrentMonth=now<=endOfMonth;
 
-  // Fetch data for selected month
+  // Fetch data for selected month (uses auth helper so X-App-Secret is included)
   toast('Loading data…','info');
   const startDate=invYear+'-'+String(invMonth+1).padStart(2,'0')+'-01';
   const lastDay=new Date(invYear,invMonth+1,0).getDate();
   const endDate=invYear+'-'+String(invMonth+1).padStart(2,'0')+'-'+String(lastDay).padStart(2,'0');
   let invData;
   try{
-    const resp=await fetch(API+'?action=checkouts&startDate='+startDate+'&endDate='+endDate);
-    invData=await resp.json();
+    invData=await api('checkouts',{params:{startDate,endDate}});
   }catch(e){toast('Failed to load data','error');return;}
-  const allRes=invData.reservations||[];
+  if(invData && invData.error){toast('Auth error loading invoice data','error');return;}
+  // Backend returns reservations with checkOut/checkIn — normalize to the
+  // co/ci shape the rest of the app uses, so keyFor/getRevenueFee/etc work.
+  const allRes=(invData.reservations||[]).map(r=>({
+    ...r,
+    co: r.checkOut,
+    ci: r.checkIn,
+  }));
   const allDone=invData.done||{};
   if(!allRes.length){toast('No reservations for this month','error');return;}
 
   // Only completed cleanings (exclude ownerStay from invoice)
   const valid=['new','modified','confirmed','reserved'];
   const mRes=allRes.filter(r=>valid.includes(r.status));
-  const doneRes=mRes.filter(r=>allDone[keyFor(r)]).sort((a,b)=>a.co.localeCompare(b.co));
+  const doneRes=mRes.filter(r=>allDone[keyFor(r)]).sort((a,b)=>(a.co||'').localeCompare(b.co||''));
   if(!doneRes.length){toast('No completed cleanings to invoice','error');return;}
 
   const{jsPDF}=window.jspdf;
@@ -4137,7 +4144,7 @@ async function generateInvoice(){
   doc.rect(0,0,210,38,'F');
   doc.setTextColor(255,255,255);
   doc.setFontSize(22);doc.setFont(undefined,'bold');
-  doc.text('INVOICE',14,18);
+  doc.text(isCurrentMonth?'INVOICE (IN PROGRESS)':'INVOICE',14,18);
   doc.setFontSize(9);doc.setFont(undefined,'normal');
   doc.text(companyName,14,26);
   doc.text(invoiceNum,196,14,{align:'right'});
@@ -4154,7 +4161,7 @@ async function generateInvoice(){
   doc.setFont(undefined,'normal');doc.setFontSize(10);
   doc.text('Completed cleanings: '+doneRes.length,18,y+7);
   doc.text('Total amount: '+totalAmount.toLocaleString()+' AED',18,y+13);
-  doc.text('Period: 01 — '+(new Date(dashYear,dashMonth+1,0).getDate())+' '+monthLabel,110,y+7);
+  doc.text('Period: 01 — '+lastDay+' '+monthLabel,110,y+7);
 
   // ---- Table header ----
   y=78;
