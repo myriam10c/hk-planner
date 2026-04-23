@@ -2061,10 +2061,6 @@ async function updateTicketStatus(id,status,extras){
   const body={id,status,actor:cleanerMode?cleanerMode.name:'Manager',...(extras||{})};
   await api('updateTicket',{body});toast('Updated ✓','success');await refreshMaintenance();
 }
-async function reopenTicket(id){
-  if(!confirm('Reopen this ticket?'))return;
-  await updateTicketStatus(id,'open');
-}
 function showMtModal(html,onClose){
   const ov=document.createElement('div');ov.className='mt-modal-overlay';
   ov.innerHTML='<div class="mt-modal">'+html+'</div>';
@@ -3608,7 +3604,7 @@ function renderMtTickets(isManager){
   h+='<div class="settings-panel" style="padding-bottom:8px">';
   h+='<input type="text" class="mt-search" placeholder="🔍 Search tickets…" value="'+esc(mtSearch)+'" oninput="mtSearch=this.value;render()" />';
   h+='<div class="mt-filters">';
-  [['all_open','All Open'],['open','Open'],['in_progress','In Progress'],['waiting_parts','Waiting']].forEach(([val,label])=>{
+  [['all_open','All Open'],['open','Open'],['in_progress','In Progress'],['waiting_parts','Waiting'],['resolved','Resolved']].forEach(([val,label])=>{
     h+='<div class="mt-filter-chip'+(mtFilterStatus===val?' active':'')+'" onclick="setMtFilter(\'status\',\''+val+'\')">'+label+'</div>';
   });
   h+='</div><div class="mt-filters">';
@@ -3624,10 +3620,11 @@ function renderMtTickets(isManager){
   h+='</div>';
 
   // === Filter logic ===
-  let toShow=maintenanceTickets;
+  // When "Resolved" filter is active, show resolvedTickets instead of open ones.
+  let toShow = mtFilterStatus==='resolved' ? resolvedTickets : maintenanceTickets;
   if(!isManager&&cleanerMode){toShow=toShow.filter(t=>t.assigned_technician_id===cleanerMode.id);}
   if(mtFilterStatus==='urgent_stat'){toShow=toShow.filter(t=>t.priority==='urgent');}
-  else if(mtFilterStatus&&mtFilterStatus!=='all_open'){toShow=toShow.filter(t=>t.status===mtFilterStatus);}
+  else if(mtFilterStatus && mtFilterStatus!=='all_open' && mtFilterStatus!=='resolved'){toShow=toShow.filter(t=>t.status===mtFilterStatus);}
   if(mtFilterCat){toShow=toShow.filter(t=>t.category===mtFilterCat);}
   if(mtSearch.trim()){const q=mtSearch.toLowerCase();toShow=toShow.filter(t=>(t.title||'').toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q));}
 
