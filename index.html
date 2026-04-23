@@ -3653,14 +3653,16 @@ function renderMtTickets(isManager){
           h+='<div class="mt-tl-item"><div class="mt-tl-dot" style="background:#3b82f6"></div>Created<div class="mt-tl-date">'+new Date(t.created_at).toLocaleString()+'</div></div>';
           if(t.started_at)h+='<div class="mt-tl-item"><div class="mt-tl-dot" style="background:#f97316"></div>Started<div class="mt-tl-date">'+new Date(t.started_at).toLocaleString()+'</div></div>';
           h+='</div>';
+          // Board view actions — mirror the List view: Resolve always visible,
+          // no Assign button, Reopen shown on resolved tickets.
           h+='<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">';
-          if(isManager){
-            if(t.status==='open')h+='<button onclick="updateTicketStatus('+t.id+',\'assigned\')" style="background:var(--orange);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Assign</button>';
-            if(['open','assigned'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
-            if(['in_progress','waiting_parts'].includes(t.status))h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
+          const kbResolved = t.status==='resolved';
+          if(!kbResolved){
+            h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer">✓ Resolve</button>';
+            if(t.status!=='in_progress')h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 10px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
+            if(t.status!=='waiting_parts')h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 10px;font-size:10px;font-weight:600;cursor:pointer">Need Parts</button>';
           }else{
-            if(t.status==='assigned')h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
-            if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
+            h+='<button onclick="reopenTicket('+t.id+')" style="background:var(--orange);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer">↺ Reopen</button>';
           }
           h+='<button onclick="viewTicketComments('+t.id+')" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">💬</button>';
           h+='</div></div>';
