@@ -814,9 +814,20 @@ Deno.serve(async (req: Request) => {
       else if (status_filter !== "all") query = query.eq("status", status_filter);
       if (listingId) query = query.eq("listing_id", listingId);
       if (techId) query = query.eq("assigned_technician_id", Number(techId));
-      const { data, error } = await query;
-      if (error) throw error;
-      return jsonResp({ status: "success", tickets: data });
+      const [ticketsRes, listingsRes] = await Promise.all([
+        query,
+        sb.from("listing_config").select("listing_id, listing_name")
+      ]);
+      if (ticketsRes.error) throw ticketsRes.error;
+      const listingMap: Record<string, string> = {};
+      (listingsRes.data || []).forEach((l: any) => {
+        if (l.listing_id && l.listing_name) listingMap[String(l.listing_id)] = l.listing_name;
+      });
+      const tickets = (ticketsRes.data || []).map((t: any) => ({
+        ...t,
+        listing_name: t.listing_id ? (listingMap[String(t.listing_id)] || null) : null,
+      }));
+      return jsonResp({ status: "success", tickets });
     }
     if (action === "createTicket" && req.method === "POST") {
       const body = await req.json();

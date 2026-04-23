@@ -3497,7 +3497,7 @@ function setMtStatFilter(val){mtFilterStatus=mtFilterStatus===val?'all_open':val
 
 function renderMtTicketCard(t,allProps,isManager,expanded){
   const sla=getSLAStatus(t);
-  const prop=allProps.find(p=>String(p.id)===String(t.listing_id));
+  const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
   const isResolved=t.status==='resolved';
   const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
   let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+'" onclick="toggleMtExpand('+t.id+')">';
@@ -3508,7 +3508,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   h+='</div>';
   // Line 2: property + category icon
   h+='<div style="display:flex;gap:8px;align-items:center;font-size:11px;margin-bottom:6px">';
-  if(prop)h+='<span style="color:var(--text2)">🏠 '+esc(prop.name)+'</span>';
+  h+='<span style="color:var(--text2)">🏠 '+(propName?esc(propName):'<em style="color:var(--text3)">No property</em>')+'</span>';
   h+='<span class="mt-cat">'+(CAT_ICONS[t.category]||'🔨')+' '+t.category+'</span>';
   h+='</div>';
   // Line 3: status badge + SLA countdown (big)
@@ -3638,10 +3638,10 @@ function renderMtTickets(isManager){
       if(colTickets.length===0){h+='<div style="font-size:11px;color:var(--text3);text-align:center;padding:20px 0">No tickets</div>';}
       colTickets.forEach(t=>{
         const sla=getSLAStatus(t);
-        const prop=allProps.find(p=>String(p.id)===String(t.listing_id));
+        const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
         h+='<div class="mt-kb-card '+t.priority+'" onclick="toggleMtExpand('+t.id+')">';
         h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><strong style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.title)+'</strong><span class="mt-pri-badge '+t.priority+'">'+t.priority+'</span></div>';
-        if(prop)h+='<div style="font-size:10px;color:var(--text2);margin-bottom:4px">🏠 '+esc(prop.name)+'</div>';
+        h+='<div style="font-size:10px;color:var(--text2);margin-bottom:4px">🏠 '+(propName?esc(propName):'<em style="color:var(--text3)">No property</em>')+'</div>';
         if(t.sla_deadline)h+='<div style="margin-bottom:4px"><span class="mt-sla '+sla.cls+'" style="font-size:9px">'+sla.label+'</span></div>';
         const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
         if(tech)h+='<div style="font-size:10px;color:var(--text3)">👤 '+esc(tech.name)+'</div>';
