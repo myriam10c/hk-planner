@@ -4105,16 +4105,20 @@ async function generateInvoice(){
   const endOfMonth=new Date(invYear,invMonth+1,0,23,59,59);
   const isCurrentMonth=now<=endOfMonth;
 
-  // Fetch data for selected month (uses auth helper so X-App-Secret is included)
+  // Fetch data for selected month. The checkouts endpoint only returns
+  // reservations (no done map), so fetch getDone in parallel and intersect.
   toast('Loading data…','info');
   const startDate=invYear+'-'+String(invMonth+1).padStart(2,'0')+'-01';
   const lastDay=new Date(invYear,invMonth+1,0).getDate();
   const endDate=invYear+'-'+String(invMonth+1).padStart(2,'0')+'-'+String(lastDay).padStart(2,'0');
-  let invData;
+  let invData, doneData;
   try{
-    invData=await api('checkouts',{params:{startDate,endDate}});
+    [invData, doneData] = await Promise.all([
+      api('checkouts',{params:{startDate,endDate}}),
+      api('getDone'),
+    ]);
   }catch(e){toast('Failed to load data','error');return;}
-  if(invData && invData.error){toast('Auth error loading invoice data','error');return;}
+  if((invData && invData.error) || (doneData && doneData.error)){toast('Auth error loading invoice data','error');return;}
   // Backend returns reservations with checkOut/checkIn — normalize to the
   // co/ci shape the rest of the app uses, so keyFor/getRevenueFee/etc work.
   const allRes=(invData.reservations||[]).map(r=>({
@@ -4122,7 +4126,7 @@ async function generateInvoice(){
     co: r.checkOut,
     ci: r.checkIn,
   }));
-  const allDone=invData.done||{};
+  const allDone=doneData.done||{};
   if(!allRes.length){toast('No reservations for this month','error');return;}
 
   // Only completed cleanings (exclude ownerStay from invoice)
