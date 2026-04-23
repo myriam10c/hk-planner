@@ -2061,6 +2061,10 @@ async function updateTicketStatus(id,status,extras){
   const body={id,status,actor:cleanerMode?cleanerMode.name:'Manager',...(extras||{})};
   await api('updateTicket',{body});toast('Updated ✓','success');await refreshMaintenance();
 }
+async function reopenTicket(id){
+  if(!confirm('Reopen this ticket?'))return;
+  await updateTicketStatus(id,'open');
+}
 function showMtModal(html,onClose){
   const ov=document.createElement('div');ov.className='mt-modal-overlay';
   ov.innerHTML='<div class="mt-modal">'+html+'</div>';
@@ -3521,6 +3525,8 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   h+='<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+new Date(t.created_at).toLocaleDateString()+' · '+esc(t.reported_by||'')+'</span>';
   if(!isResolved){
     h+='<button onclick="event.stopPropagation();resolveTicket('+t.id+')" title="Mark resolved" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">✓</button>';
+  }else{
+    h+='<button onclick="event.stopPropagation();reopenTicket('+t.id+')" title="Reopen ticket" style="background:var(--orange);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">↺</button>';
   }
   h+='</div>';
 
@@ -3539,11 +3545,14 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     if(t.assigned_vendor_id){const v=vendors.find(x=>x.id===t.assigned_vendor_id);if(v)h+='<div style="font-size:11px;color:var(--text2);margin-bottom:8px">📞 Vendor: '+esc(v.name)+'</div>';}
     // Actions — simplified: big Resolve button is the primary action, always available.
     // Removed "Assign" (ops team works on open tickets directly; no assignment workflow).
+    // Reopen button appears on resolved tickets so mistakes can be undone.
     h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
     if(!isResolved){
       h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;flex:1;min-width:120px">✓ Resolve</button>';
       if(t.status!=='in_progress')h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:10px 14px;font-size:12px;font-weight:600;cursor:pointer">Start</button>';
       if(t.status!=='waiting_parts')h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:8px;padding:10px 14px;font-size:12px;font-weight:600;cursor:pointer">Need Parts</button>';
+    }else{
+      h+='<button onclick="reopenTicket('+t.id+')" style="background:var(--orange);color:white;border:none;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;flex:1;min-width:120px">↺ Reopen</button>';
     }
     h+='<button onclick="viewTicketComments('+t.id+')" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:8px;padding:10px 12px;font-size:12px;font-weight:600;cursor:pointer">💬</button>';
     h+='</div>';
