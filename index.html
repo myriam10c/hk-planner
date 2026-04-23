@@ -3516,10 +3516,12 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   h+='<span class="mt-status '+t.status+'">'+t.status.replace(/_/g,' ').toUpperCase()+'</span>';
   if(t.sla_deadline)h+='<span class="mt-sla-big '+sla.cls+'">'+sla.label+'</span>';
   h+='</div>';
-  // Line 4: assigned technician + date
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text3)">';
-  h+='<span>'+(tech?'👤 '+esc(tech.name):'Unassigned')+'</span>';
-  h+='<span>'+new Date(t.created_at).toLocaleDateString()+' · '+esc(t.reported_by||'')+'</span>';
+  // Line 4: date + reporter + inline quick-resolve (one click, no expand needed)
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text3);gap:8px">';
+  h+='<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+new Date(t.created_at).toLocaleDateString()+' · '+esc(t.reported_by||'')+'</span>';
+  if(!isResolved){
+    h+='<button onclick="event.stopPropagation();resolveTicket('+t.id+')" title="Mark resolved" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">✓</button>';
+  }
   h+='</div>';
 
   // Expanded: timeline + actions
@@ -3535,23 +3537,16 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     h+='</div>';
     // Vendor info
     if(t.assigned_vendor_id){const v=vendors.find(x=>x.id===t.assigned_vendor_id);if(v)h+='<div style="font-size:11px;color:var(--text2);margin-bottom:8px">📞 Vendor: '+esc(v.name)+'</div>';}
-    // Actions
-    if(isManager){
-      h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
-      if(t.status==='open')h+='<button onclick="updateTicketStatus('+t.id+',\'assigned\')" style="background:var(--orange);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Assign</button>';
-      if(['open','assigned'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
-      if(['assigned','in_progress'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Waiting Parts</button>';
-      if(['in_progress','waiting_parts'].includes(t.status))h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Resolve</button>';
-      h+='<button onclick="viewTicketComments('+t.id+')" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer">💬</button>';
-      h+='</div>';
-    }else{
-      h+='<div style="display:flex;gap:6px;margin-top:8px">';
-      if(t.status==='assigned')h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
-      if(t.status==='in_progress')h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Need Parts</button>';
-      if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Resolve</button>';
-      h+='<button onclick="viewTicketComments('+t.id+')" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer">💬</button>';
-      h+='</div>';
+    // Actions — simplified: big Resolve button is the primary action, always available.
+    // Removed "Assign" (ops team works on open tickets directly; no assignment workflow).
+    h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
+    if(!isResolved){
+      h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;flex:1;min-width:120px">✓ Resolve</button>';
+      if(t.status!=='in_progress')h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:10px 14px;font-size:12px;font-weight:600;cursor:pointer">Start</button>';
+      if(t.status!=='waiting_parts')h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:8px;padding:10px 14px;font-size:12px;font-weight:600;cursor:pointer">Need Parts</button>';
     }
+    h+='<button onclick="viewTicketComments('+t.id+')" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:8px;padding:10px 12px;font-size:12px;font-weight:600;cursor:pointer">💬</button>';
+    h+='</div>';
     h+='</div>';
   }
   h+='</div>';
@@ -3604,7 +3599,7 @@ function renderMtTickets(isManager){
   h+='<div class="settings-panel" style="padding-bottom:8px">';
   h+='<input type="text" class="mt-search" placeholder="🔍 Search tickets…" value="'+esc(mtSearch)+'" oninput="mtSearch=this.value;render()" />';
   h+='<div class="mt-filters">';
-  [['all_open','All Open'],['open','Open'],['assigned','Assigned'],['in_progress','In Progress'],['waiting_parts','Waiting']].forEach(([val,label])=>{
+  [['all_open','All Open'],['open','Open'],['in_progress','In Progress'],['waiting_parts','Waiting']].forEach(([val,label])=>{
     h+='<div class="mt-filter-chip'+(mtFilterStatus===val?' active':'')+'" onclick="setMtFilter(\'status\',\''+val+'\')">'+label+'</div>';
   });
   h+='</div><div class="mt-filters">';
