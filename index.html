@@ -820,6 +820,18 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
   .date-btn { padding:4px 8px; min-width:48px; border-radius:10px; }
   .date-btn .day-num { font-size:14px; }
   .cleaner-chip { padding:3px 8px; font-size:9px; border-radius:14px; }
+  /* Re-pin the sidebar nav to the left edge. The 768px rule above sets
+     left:50% + transform:translateX(-50%) which wins over the earlier
+     1024px block due to source order. Undo those properties here. */
+  .bottom-nav {
+    left:0 !important;
+    right:auto !important;
+    transform:none !important;
+    width:200px !important;
+    max-width:none !important;
+  }
+  /* Body padding to account for fixed left sidebar. */
+  body { padding-bottom:0 !important; padding-left:200px; }
 }
 .dash-section { margin-bottom:20px; background:var(--card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border); }
 .rev-cleaner-table { width:100%; border-collapse:collapse; font-size:13px; }
