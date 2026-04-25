@@ -2774,6 +2774,9 @@ function renderDashboard(){
   // #15 Export buttons (always visible)
   h+='<div class="export-btns"><button class="export-btn" onclick="exportExcel()">📊 Export Excel</button><button class="export-btn" onclick="exportPDF()">📄 Export PDF</button>';
   if(!cleanerMode){
+    h+='<button class="export-btn" onclick="exportMaintenanceAnalytics()" style="background:#fff7ed;border-color:#f97316;color:#c2410c">🔧 Issues Analytics</button>';
+  }
+  if(!cleanerMode){
     // Invoice section — current + 12 previous months
     const now=new Date();const curM=now.getMonth(),curY=now.getFullYear();
     let invOpts='<option value="'+curY+'-'+curM+'">'+MONTH_NAMES[curM]+' '+curY+' (in progress)</option>';
@@ -4091,6 +4094,202 @@ function exportPDF(){
   });
   doc.save('cleanings_'+MONTH_NAMES[dashMonth]+'_'+dashYear+'.pdf');
   toast('PDF exported ✓','success');
+}
+
+// ============ MAINTENANCE ANALYTICS EXPORT (Manager only) ============
+async function exportMaintenanceAnalytics(){
+  toast('Loading maintenance data…','info');
+  let ticketsRes, costsRes;
+  try{
+    [ticketsRes, costsRes] = await Promise.all([
+      api('getMaintenanceTickets',{params:{status:'all'}}),
+      api('getMaintenanceCosts'),
+    ]);
+  }catch(e){toast('Failed to load','error');return;}
+  if((ticketsRes && ticketsRes.error) || (costsRes && costsRes.error)){toast('Auth error','error');return;}
+  const tickets = ticketsRes.tickets || [];
+  const costs = costsRes.costs || costsRes.data || [];
+  if(!tickets.length){toast('No maintenance tickets to export','error');return;}
+
+  // Index costs by ticket_id for join
+  const costsByTicket = {};
+  costs.forEach(c => {
+    const tid = c.ticket_id;
+    if(!tid) return;
+    costsByTicket[tid] = (costsByTicket[tid] || 0) + Number(c.amount || 0);
+  });
+
+  // Normalize title for recurrence grouping (strip apt prefix + lowercase + drop fillers)
+  const norm = s => {
+    if(!s) return '';
+    let t = String(s).toLowerCase();
+    if(t.includes(' — ')) t = t.split(' — ',2)[1] || t;
+    t = t.replace(/[^\w\s]/g,' ').replace(/\s+/g,' ').trim();
+    const fillers = ['is','are','was','were','the','a','an','in','on','at','to','for','of','with','not','no','service','needed','required'];
+    return t.split(' ').filter(w => w && !fillers.includes(w)).join(' ');
+  };
+
+  const hoursBetween = (a, b) => {
+    if(!a || !b) return null;
+    return (new Date(b) - new Date(a)) / 3600000;
+  };
+
+  const fmtH = h => h == null ? '' : h < 24 ? h.toFixed(1)+'h' : (h/24).toFixed(1)+'d';
+
+  // ===== Sheet: All Tickets =====
+  const ticketsRows = tickets.map(t => {
+    const cost = costsByTicket[t.id] || 0;
+    const resolutionH = t.resolved_at ? hoursBetween(t.created_at, t.resolved_at) : null;
+    const slaH = t.sla_deadline ? hoursBetween(t.created_at, t.sla_deadline) : null;
+    const slaMet = (t.resolved_at && t.sla_deadline) ? (new Date(t.resolved_at) <= new Date(t.sla_deadline) ? 'Yes' : 'No') : (t.sla_deadline && new Date() > new Date(t.sla_deadline) ? 'Breached' : '');
+    return {
+      ID: t.id,
+      Listing: t.listing_name || t.listing_id || '',
+      ListingId: t.listing_id || '',
+      Title: t.title || '',
+      Category: t.category || '',
+      Priority: t.priority || '',
+      Status: t.status || '',
+      Source: t.source || '',
+      'Reported By': t.reported_by || '',
+      Created: (t.created_at || '').substring(0,16).replace('T',' '),
+      Started: t.started_at ? t.started_at.substring(0,16).replace('T',' ') : '',
+      Resolved: t.resolved_at ? t.resolved_at.substring(0,16).replace('T',' ') : '',
+      'Resolution Time': fmtH(resolutionH),
+      'SLA Hours': slaH ? slaH.toFixed(0)+'h' : '',
+      'SLA Met': slaMet,
+      'Cost (AED)': cost || '',
+      'Estimated Cost (AED)': t.estimated_cost || '',
+      'Resolution Notes': t.resolution_notes || '',
+    };
+  });
+
+  // ===== Sheet: Recurring Issues =====
+  const groups = {};
+  tickets.forEach(t => {
+    const key = norm(t.title);
+    if(!key) return;
+    if(!groups[key]) groups[key] = { issue: key, count: 0, listings: new Set(), titles: new Set(), totalCost: 0, openCount: 0, resolvedCount: 0 };
+    groups[key].count++;
+    if(t.listing_name) groups[key].listings.add(t.listing_name);
+    else if(t.listing_id) groups[key].listings.add(String(t.listing_id));
+    groups[key].titles.add(t.title);
+    groups[key].totalCost += costsByTicket[t.id] || 0;
+    if(t.status === 'resolved' || t.status === 'closed') groups[key].resolvedCount++;
+    else groups[key].openCount++;
+  });
+  const recurringRows = Object.values(groups)
+    .filter(g => g.count >= 2)
+    .sort((a,b) => b.count - a.count)
+    .map(g => ({
+      'Issue (normalized)': g.issue,
+      Occurrences: g.count,
+      'Open Now': g.openCount,
+      Resolved: g.resolvedCount,
+      'Distinct Listings': g.listings.size,
+      'Listings Affected': [...g.listings].slice(0,10).join(', '),
+      'Title Variants': [...g.titles].slice(0,5).join(' | '),
+      'Total Cost (AED)': g.totalCost || '',
+    }));
+
+  // ===== Sheet: By Apartment =====
+  const apts = {};
+  tickets.forEach(t => {
+    const key = t.listing_name || (t.listing_id ? '#'+t.listing_id : '(no listing)');
+    if(!apts[key]) apts[key] = { listing: key, total: 0, open: 0, resolved: 0, urgent: 0, totalCost: 0, totalResolutionH: 0, resolvedWithTime: 0 };
+    apts[key].total++;
+    if(t.status === 'resolved' || t.status === 'closed') apts[key].resolved++;
+    else apts[key].open++;
+    if(t.priority === 'urgent') apts[key].urgent++;
+    apts[key].totalCost += costsByTicket[t.id] || 0;
+    if(t.resolved_at && t.created_at){
+      const h = hoursBetween(t.created_at, t.resolved_at);
+      if(h != null){ apts[key].totalResolutionH += h; apts[key].resolvedWithTime++; }
+    }
+  });
+  const aptRows = Object.values(apts)
+    .sort((a,b) => b.total - a.total)
+    .map(a => ({
+      Listing: a.listing,
+      'Total Tickets': a.total,
+      Open: a.open,
+      Resolved: a.resolved,
+      'Urgent (any time)': a.urgent,
+      'Avg Resolution': a.resolvedWithTime ? fmtH(a.totalResolutionH / a.resolvedWithTime) : '',
+      'Total Cost (AED)': a.totalCost || '',
+    }));
+
+  // ===== Sheet: By Category =====
+  const cats = {};
+  tickets.forEach(t => {
+    const c = t.category || 'general';
+    if(!cats[c]) cats[c] = { category: c, total: 0, open: 0, resolved: 0, totalCost: 0, totalResolutionH: 0, resolvedWithTime: 0, slaMet: 0, slaBreached: 0 };
+    cats[c].total++;
+    if(t.status === 'resolved' || t.status === 'closed') cats[c].resolved++;
+    else cats[c].open++;
+    cats[c].totalCost += costsByTicket[t.id] || 0;
+    if(t.resolved_at && t.created_at){
+      const h = hoursBetween(t.created_at, t.resolved_at);
+      if(h != null){ cats[c].totalResolutionH += h; cats[c].resolvedWithTime++; }
+      if(t.sla_deadline){
+        if(new Date(t.resolved_at) <= new Date(t.sla_deadline)) cats[c].slaMet++; else cats[c].slaBreached++;
+      }
+    }
+  });
+  const catRows = Object.values(cats)
+    .sort((a,b) => b.total - a.total)
+    .map(c => ({
+      Category: c.category,
+      'Total Tickets': c.total,
+      Open: c.open,
+      Resolved: c.resolved,
+      'Avg Resolution': c.resolvedWithTime ? fmtH(c.totalResolutionH / c.resolvedWithTime) : '',
+      'SLA Met': c.slaMet,
+      'SLA Breached': c.slaBreached,
+      'SLA Rate': (c.slaMet+c.slaBreached) ? Math.round(100*c.slaMet/(c.slaMet+c.slaBreached))+'%' : '',
+      'Total Cost (AED)': c.totalCost || '',
+      'Avg Cost / Ticket (AED)': c.total ? Math.round(c.totalCost / c.total) : '',
+    }));
+
+  // ===== Sheet: Summary KPIs =====
+  const total = tickets.length;
+  const openCount = tickets.filter(t => t.status !== 'resolved' && t.status !== 'closed').length;
+  const resolvedCount = total - openCount;
+  const totalCost = Object.values(costsByTicket).reduce((s,v) => s+v, 0);
+  const allResolutionH = tickets.filter(t => t.resolved_at && t.created_at).map(t => hoursBetween(t.created_at, t.resolved_at));
+  const avgResolutionH = allResolutionH.length ? allResolutionH.reduce((s,v)=>s+v,0)/allResolutionH.length : 0;
+  const slaCompare = tickets.filter(t => t.resolved_at && t.sla_deadline);
+  const slaMetCount = slaCompare.filter(t => new Date(t.resolved_at) <= new Date(t.sla_deadline)).length;
+  const summaryRows = [
+    { Metric:'Total Tickets', Value: total },
+    { Metric:'Open / In Progress', Value: openCount },
+    { Metric:'Resolved / Closed', Value: resolvedCount },
+    { Metric:'Total Cost Logged (AED)', Value: totalCost.toLocaleString() },
+    { Metric:'Average Resolution Time', Value: fmtH(avgResolutionH) },
+    { Metric:'SLA Met (resolved tickets)', Value: slaCompare.length ? slaMetCount+' / '+slaCompare.length+' ('+Math.round(100*slaMetCount/slaCompare.length)+'%)' : 'n/a' },
+    { Metric:'Distinct Listings Affected', Value: new Set(tickets.map(t => t.listing_id).filter(Boolean)).size },
+    { Metric:'Recurring Issue Patterns (≥2 occurrences)', Value: recurringRows.length },
+    { Metric:'Most Common Category', Value: catRows[0] ? catRows[0].Category+' ('+catRows[0]['Total Tickets']+')' : 'n/a' },
+    { Metric:'Listing With Most Tickets', Value: aptRows[0] ? aptRows[0].Listing+' ('+aptRows[0]['Total Tickets']+')' : 'n/a' },
+    { Metric:'Report Generated', Value: new Date().toLocaleString() },
+  ];
+
+  // Build workbook
+  const wb = XLSX.utils.book_new();
+  const sheets = [
+    ['Summary', summaryRows],
+    ['Recurring Issues', recurringRows],
+    ['By Apartment', aptRows],
+    ['By Category', catRows],
+    ['All Tickets', ticketsRows],
+  ];
+  sheets.forEach(([name, rows]) => {
+    const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ Note:'No data' }]);
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  });
+  const fname = 'maintenance_analytics_'+new Date().toISOString().substring(0,10)+'.xlsx';
+  XLSX.writeFile(wb, fname);
+  toast('Analytics exported ✓ ('+sheets.length+' sheets)','success');
 }
 
 // ============ INVOICE (Manager only) ============
