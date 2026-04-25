@@ -1868,6 +1868,158 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 }
 .sv-save:hover { background: var(--bg-3); border-color: var(--border-strong); border-style: solid; color: var(--text); }
 .sv-save svg { width: 12px; height: 12px; }
+
+/* ===== DESKTOP S3: View toggle (Cards / Table) ===== */
+.view-toggle {
+  display: inline-flex;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+.vt-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: var(--transition-fast);
+  font-family: inherit;
+}
+.vt-btn:hover { color: var(--text); }
+.vt-btn.active { background: var(--card); color: var(--text); box-shadow: var(--shadow-xs); }
+
+/* ===== DESKTOP S3: Compact table ===== */
+.compact-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  margin-bottom: 16px;
+}
+.compact-table th {
+  background: var(--bg-2);
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: var(--fw-semibold);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+.compact-table th:hover { background: var(--bg-3); color: var(--text); }
+.compact-table th.sorted { color: var(--primary); }
+.compact-table th.sorted::after { content: ' ↓'; opacity: 0.6; }
+.compact-table th.sorted.asc::after { content: ' ↑'; }
+.compact-table tr { transition: var(--transition-fast); cursor: pointer; }
+.compact-table tbody tr:hover { background: var(--bg-2); }
+.compact-table tr.selected { background: var(--primary-light); }
+.compact-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--text);
+  vertical-align: middle;
+}
+.compact-table tbody tr:last-child td { border-bottom: none; }
+.compact-table td.muted { color: var(--text-3); }
+.compact-table td.right { text-align: right; }
+.compact-table .row-cleaner-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+.compact-table .row-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.compact-table .row-status.done { background: var(--green-light); color: var(--green); }
+.compact-table .row-status.cancelled { background: var(--red-light); color: var(--red); }
+.compact-table .row-status.pending { background: var(--bg-3); color: var(--text-2); }
+.compact-table .row-status.urgent { background: var(--red-light); color: var(--red); }
+.compact-table .row-status.high { background: var(--orange-light); color: var(--orange); }
+.compact-table .row-status.medium { background: var(--bg-3); color: var(--text-2); }
+.compact-table .row-status.low { background: var(--bg-3); color: var(--text-3); }
+.compact-table .row-status.open { background: var(--bg-3); color: var(--text-2); }
+.compact-table .row-status.assigned { background: var(--primary-light); color: var(--primary); }
+.compact-table .row-status.in_progress { background: var(--orange-light); color: var(--orange); }
+.compact-table .row-status.waiting_parts { background: var(--orange-light); color: var(--orange); }
+.compact-table .row-status.resolved { background: var(--green-light); color: var(--green); }
+
+/* ===== DESKTOP S3: Right-click context menu ===== */
+.ctxmenu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+}
+.ctxmenu {
+  position: fixed;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  min-width: 220px;
+  z-index: 9999;
+  animation: ctxFadeIn 0.12s ease-out;
+}
+@keyframes ctxFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.ctxmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  transition: var(--transition-fast);
+}
+.ctxmenu-item:hover { background: var(--bg-2); }
+.ctxmenu-item.danger { color: var(--red); }
+.ctxmenu-item.danger:hover { background: var(--red-light); }
+.ctxmenu-item svg { flex-shrink: 0; color: var(--text-3); }
+.ctxmenu-item.danger svg { color: var(--red); }
+.ctxmenu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
+}
+
+/* ===== DESKTOP S3: Drag & drop reassign ===== */
+@media (min-width: 1024px) {
+  body.dragging { cursor: grabbing; }
+  body.dragging .checkout-card,
+  body.dragging .mt-card,
+  body.dragging .compact-table tr { cursor: grabbing; opacity: 0.7; }
+  .drop-target {
+    transition: var(--transition-fast);
+  }
+  .drop-target.drop-hover {
+    background: var(--primary-light-strong, var(--primary-light)) !important;
+    border-color: var(--primary) !important;
+    transform: scale(1.05);
+  }
+}
 </style>
 </head>
 <body>
@@ -2108,6 +2260,267 @@ let mtSelectMode=false;
 let mtSelected=new Set(); // ticket ids
 let recurringIssues=[];
 let mtComments={};
+
+// === DESKTOP S3: View toggle (cards <-> table), context menu, drag-drop ===
+let plannerViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('plannerViewMode')) || 'cards'; // 'cards' | 'table'
+let mtViewModeUI = (typeof localStorage !== 'undefined' && localStorage.getItem('mtViewModeUI')) || 'cards'; // 'cards' | 'table'
+function setPlannerViewMode(m){ plannerViewMode = m; try{ localStorage.setItem('plannerViewMode', m); }catch(e){} render(); }
+function setMtViewModeUI(m){ mtViewModeUI = m; try{ localStorage.setItem('mtViewModeUI', m); }catch(e){} render(); }
+
+let tableSortPlanner = { col: 'co', asc: true };
+let tableSortMt = { col: 'created_at', asc: false };
+function setSortPlanner(col){
+  if(tableSortPlanner.col === col) tableSortPlanner.asc = !tableSortPlanner.asc;
+  else { tableSortPlanner.col = col; tableSortPlanner.asc = true; }
+  render();
+}
+function setSortMt(col){
+  if(tableSortMt.col === col) tableSortMt.asc = !tableSortMt.asc;
+  else { tableSortMt.col = col; tableSortMt.asc = false; }
+  render();
+}
+
+function renderViewToggle(currentMode, setterName){
+  if(typeof isDesktop !== 'function' || !isDesktop()) return '';
+  return '<div class="view-toggle">'+
+    '<button class="vt-btn'+(currentMode==='cards'?' active':'')+'" onclick="'+setterName+'(\'cards\')">'+icon('clipboard',13)+' Cards</button>'+
+    '<button class="vt-btn'+(currentMode==='table'?' active':'')+'" onclick="'+setterName+'(\'table\')">'+icon('chart',13)+' Table</button>'+
+  '</div>';
+}
+
+function renderPlannerTable(items){
+  if(!items || items.length === 0) return '<div class="empty-hero"><div class="empty-hero-icon">'+icon('clipboard',56)+'</div><div class="empty-hero-title">No cleanings</div><div class="empty-hero-sub">Try changing filters or week.</div></div>';
+  const col = tableSortPlanner.col;
+  const asc = tableSortPlanner.asc;
+  const sorted = [...items].sort((a,b)=>{
+    let av,bv;
+    if(col === 'co'){ av=a.co||''; bv=b.co||''; }
+    else if(col === 'guest'){ av=(a.guest||'').toLowerCase(); bv=(b.guest||'').toLowerCase(); }
+    else if(col === 'listing'){ av=(a.listing||'').toLowerCase(); bv=(b.listing||'').toLowerCase(); }
+    else if(col === 'status'){
+      const sa = done[keyFor(a)] ? 'a-done' : cancelled[keyFor(a)] ? 'b-cancelled' : 'c-pending';
+      const sb = done[keyFor(b)] ? 'a-done' : cancelled[keyFor(b)] ? 'b-cancelled' : 'c-pending';
+      av=sa; bv=sb;
+    }
+    else if(col === 'cleaner'){
+      const ca = assignments[keyFor(a)]; const cb = assignments[keyFor(b)];
+      const cna = ca ? (((cleaners||[]).find(c=>c.id===ca)||{}).name||'') : '';
+      const cnb = cb ? (((cleaners||[]).find(c=>c.id===cb)||{}).name||'') : '';
+      av=cna.toLowerCase(); bv=cnb.toLowerCase();
+    }
+    else { av=''; bv=''; }
+    if(av < bv) return asc ? -1 : 1;
+    if(av > bv) return asc ? 1 : -1;
+    return 0;
+  });
+  let h = '<table class="compact-table">';
+  h += '<thead><tr>';
+  const cols = [
+    {k:'co', l:'Date'},
+    {k:'guest', l:'Guest'},
+    {k:'listing', l:'Property'},
+    {k:'cleaner', l:'Cleaner'},
+    {k:'status', l:'Status'},
+  ];
+  cols.forEach(c => {
+    const cls = (tableSortPlanner.col === c.k) ? ('sorted'+(tableSortPlanner.asc?' asc':'')) : '';
+    h += '<th class="'+cls+'" onclick="setSortPlanner(\''+c.k+'\')">'+esc(c.l)+'</th>';
+  });
+  h += '</tr></thead><tbody>';
+  sorted.forEach(r => {
+    const k = keyFor(r);
+    const sk = esc(k);
+    const isDone = !!done[k];
+    const isCancelled = !!cancelled[k];
+    const cId = assignments[k];
+    const cleaner = cId ? (cleaners||[]).find(c => c.id === cId) : null;
+    const isSelected = (expandedKey === k);
+    h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" onclick="toggleExpand(\''+sk+'\',event)">';
+    h += '<td class="muted">'+esc(r.co||'')+'</td>';
+    h += '<td><strong>'+esc(r.guest||'Guest')+'</strong>'+(r._isExtra?' <span class="badge badge-primary" style="font-size:9px;padding:1px 6px">EXTRA</span>':'')+'</td>';
+    h += '<td class="muted">'+esc(r.listing||'')+'</td>';
+    h += '<td>';
+    if(cleaner) h += '<span class="row-cleaner-dot" style="background:'+(cleaner.color||'#888')+'"></span>'+esc(cleaner.name);
+    else h += '<span class="muted">Unassigned</span>';
+    h += '</td>';
+    h += '<td>';
+    if(isCancelled) h += '<span class="row-status cancelled">Cancelled</span>';
+    else if(isDone) h += '<span class="row-status done">Done</span>';
+    else h += '<span class="row-status pending">Pending</span>';
+    h += '</td>';
+    h += '</tr>';
+  });
+  h += '</tbody></table>';
+  return h;
+}
+
+function renderMtTable(tickets){
+  if(!tickets || tickets.length === 0) return '<div class="empty-hero"><div class="empty-hero-icon">'+icon('wrench',56)+'</div><div class="empty-hero-title">All clear</div><div class="empty-hero-sub">No open tickets matching this filter.</div></div>';
+  const col = tableSortMt.col;
+  const asc = tableSortMt.asc;
+  const sorted = [...tickets].sort((a,b)=>{
+    let av,bv;
+    if(col === 'created_at'){ av=a.created_at||''; bv=b.created_at||''; }
+    else if(col === 'title'){ av=(a.title||'').toLowerCase(); bv=(b.title||'').toLowerCase(); }
+    else if(col === 'priority'){ const order={urgent:0,high:1,medium:2,low:3}; av=(order[a.priority]!=null?order[a.priority]:9); bv=(order[b.priority]!=null?order[b.priority]:9); }
+    else if(col === 'status'){ av=a.status||''; bv=b.status||''; }
+    else if(col === 'category'){ av=a.category||''; bv=b.category||''; }
+    else if(col === 'listing_name'){ av=(a.listing_name||a.listing_id||'').toString().toLowerCase(); bv=(b.listing_name||b.listing_id||'').toString().toLowerCase(); }
+    else { av=''; bv=''; }
+    if(av < bv) return asc ? -1 : 1;
+    if(av > bv) return asc ? 1 : -1;
+    return 0;
+  });
+  let h = '<table class="compact-table">';
+  h += '<thead><tr>';
+  const cols = [
+    {k:'created_at', l:'Created'},
+    {k:'title', l:'Title'},
+    {k:'listing_name', l:'Property'},
+    {k:'category', l:'Category'},
+    {k:'priority', l:'Priority'},
+    {k:'status', l:'Status'},
+  ];
+  cols.forEach(c => {
+    const cls = (tableSortMt.col === c.k) ? ('sorted'+(tableSortMt.asc?' asc':'')) : '';
+    h += '<th class="'+cls+'" onclick="setSortMt(\''+c.k+'\')">'+esc(c.l)+'</th>';
+  });
+  h += '</tr></thead><tbody>';
+  sorted.forEach(t => {
+    const isSelected = (mtExpandedTicket === t.id);
+    h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="toggleMtExpand('+t.id+')">';
+    h += '<td class="muted">'+(t.created_at?new Date(t.created_at).toLocaleDateString():'')+'</td>';
+    h += '<td><strong>'+esc(t.title||'')+'</strong></td>';
+    h += '<td class="muted">'+esc(t.listing_name||t.listing_id||'—')+'</td>';
+    h += '<td class="muted">'+esc(t.category||'')+'</td>';
+    h += '<td><span class="row-status '+(t.priority||'medium')+'">'+esc(t.priority||'medium')+'</span></td>';
+    h += '<td><span class="row-status '+(t.status||'open')+'">'+esc((t.status||'open').replace(/_/g,' '))+'</span></td>';
+    h += '</tr>';
+  });
+  h += '</tbody></table>';
+  return h;
+}
+
+// === Right-click context menu ===
+let contextMenuState = { open: false, x: 0, y: 0, id: null, type: null };
+
+function showCardContextMenu(e, id, type){
+  if(typeof isDesktop !== 'function' || !isDesktop()) return;
+  e.preventDefault();
+  contextMenuState.open = true;
+  contextMenuState.x = e.clientX;
+  contextMenuState.y = e.clientY;
+  contextMenuState.id = id;
+  contextMenuState.type = type;
+  renderContextMenu();
+}
+
+function closeContextMenu(){
+  contextMenuState.open = false;
+  renderContextMenu();
+}
+
+function renderContextMenu(){
+  let el = document.getElementById('contextMenu');
+  if(!el){ el = document.createElement('div'); el.id = 'contextMenu'; document.body.appendChild(el); }
+  if(!contextMenuState.open){ el.innerHTML = ''; return; }
+  const { x, y, id, type } = contextMenuState;
+  let items = [];
+  if(type === 'cleaning'){
+    const isDone = !!done[id];
+    items = [
+      isDone ? { label: 'Mark undone', icon: 'refresh', action: 'markDone(\''+id+'\');closeContextMenu()' }
+             : { label: 'Mark done', icon: 'check', action: 'markDone(\''+id+'\');closeContextMenu()' },
+      cleanerMode ? null : { label: 'Assign cleaner…', icon: 'user', action: 'closeContextMenu();showAssignPicker(\''+id+'\')' },
+      { label: 'View details', icon: 'clipboard', action: 'closeContextMenu();toggleExpand(\''+id+'\',event)' },
+      { divider: true },
+      cleanerMode || cancelled[id] ? null : { label: 'Cancel cleaning', icon: 'xCircle', danger: true, action: 'closeContextMenu();(typeof toggleCancel===\'function\'?toggleCancel(\''+id+'\'):null)' },
+    ].filter(Boolean);
+  } else if(type === 'ticket'){
+    const tid = Number(id);
+    items = [
+      { label: 'Assign / Reassign…', icon: 'user', action: 'closeContextMenu();openAssignPicker('+tid+')' },
+      { label: 'Add comment…', icon: 'msgSquare', action: 'closeContextMenu();mtExpandedTicket='+tid+';render();setTimeout(function(){var i=document.getElementById(\'mtCmtInput-'+tid+'\');if(i)i.focus();},100)' },
+      { label: 'Mark in progress', icon: 'play', action: 'closeContextMenu();updateTicketStatus('+tid+',\'in_progress\')' },
+      { label: 'Resolve…', icon: 'check', action: 'closeContextMenu();resolveTicket('+tid+')' },
+      { divider: true },
+      { label: 'View details', icon: 'clipboard', action: 'closeContextMenu();toggleMtExpand('+tid+')' },
+    ];
+  }
+  const menuW = 220, menuH = items.length * 36 + 12;
+  const left = Math.min(x, window.innerWidth - menuW - 10);
+  const top = Math.min(y, window.innerHeight - menuH - 10);
+  let html = '<div class="ctxmenu-overlay" onclick="closeContextMenu()"></div>';
+  html += '<div class="ctxmenu" style="left:'+left+'px;top:'+top+'px">';
+  items.forEach(it => {
+    if(it.divider){ html += '<div class="ctxmenu-divider"></div>'; }
+    else { html += '<button class="ctxmenu-item'+(it.danger?' danger':'')+'" onclick="event.stopPropagation();'+it.action+'">'+icon(it.icon,14)+'<span>'+esc(it.label)+'</span></button>'; }
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape' && contextMenuState.open){ closeContextMenu(); }
+});
+
+// === Drag & drop reassign ===
+let dragState = { id: null, type: null };
+
+function onDragStart(e, id, type){
+  if(typeof isDesktop !== 'function' || !isDesktop()) return;
+  dragState.id = id;
+  dragState.type = type;
+  try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(id)); } catch(err){}
+  document.body.classList.add('dragging');
+}
+
+function onDragEnd(){
+  document.body.classList.remove('dragging');
+  document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-hover'));
+  dragState = { id: null, type: null };
+}
+
+function onDragOver(e){
+  if(!dragState.id) return;
+  e.preventDefault();
+  try { e.dataTransfer.dropEffect = 'move'; } catch(err){}
+  e.currentTarget.classList.add('drop-hover');
+}
+
+function onDragLeave(e){
+  e.currentTarget.classList.remove('drop-hover');
+}
+
+async function onDropOnCleaner(e, cleanerId){
+  e.preventDefault();
+  e.currentTarget.classList.remove('drop-hover');
+  const { id, type } = dragState;
+  if(!id) { onDragEnd(); return; }
+  if(type === 'cleaning'){
+    if(cleanerId == null && typeof showAssignPicker === 'function'){
+      showAssignPicker(id);
+    } else {
+      try {
+        await api('assignCleaner',{body:{reservation_key:id, cleaner_id:cleanerId, actor:cleanerMode?cleanerMode.name:'Manager'}});
+        toast('Reassigned ✓','success');
+        haptic('medium');
+        if(typeof fetchAll === 'function') fetchAll();
+      } catch(err){ toast('Error','error'); }
+    }
+  } else if(type === 'ticket'){
+    try {
+      await api('updateTicket',{body:{id:Number(id), assigned_technician_id:cleanerId, assigned_vendor_id:null, status:'assigned', actor:cleanerMode?cleanerMode.name:'Manager'}});
+      toast('Reassigned ✓','success');
+      haptic('medium');
+      if(typeof refreshMaintenance === 'function') refreshMaintenance();
+    } catch(err){ toast('Error','error'); }
+  }
+  onDragEnd();
+}
+
+document.addEventListener('dragend', onDragEnd);
+
 let autoSendCleaners=true;
 let propertyProfiles={};
 let dashKPIs=null,dashKPIsLoading=false;
@@ -3752,10 +4165,10 @@ function renderPlanner(){
     h+='<div class="cleaner-chip'+(filterCleaner===0?' active':'')+'" role="button" tabindex="0" aria-label="Show all cleaners" onclick="setFilterCleaner(0)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(0);}">All</div>';
     cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
       const cnt=RESERVATIONS.filter(r=>assignments[keyFor(r)]===c.id).length;
-      h+='<div class="cleaner-chip'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" onclick="setFilterCleaner('+c.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner('+c.id+');}"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
+      h+='<div class="cleaner-chip drop-target'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,'+c.id+')" onclick="setFilterCleaner('+c.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner('+c.id+');}"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
     });
     const una=RESERVATIONS.filter(r=>!assignments[keyFor(r)]).length;
-    if(una>0) h+='<div class="cleaner-chip'+(filterCleaner===-1?' active':'')+'" role="button" tabindex="0" aria-label="Show unassigned cleanings" onclick="setFilterCleaner(-1)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(-1);}">Unassigned '+una+'</div>';
+    if(una>0) h+='<div class="cleaner-chip drop-target'+(filterCleaner===-1?' active':'')+'" role="button" tabindex="0" aria-label="Show unassigned cleanings" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,null)" onclick="setFilterCleaner(-1)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(-1);}">Unassigned '+una+'</div>';
     h+='</div>';
   }
   h+='</div>';
@@ -3769,6 +4182,9 @@ function renderPlanner(){
   if(!cleanerMode) h+=renderSavedViewsBar();
   h+=renderNotifBanner();
 
+  // S3: Desktop view toggle (Cards / Table)
+  h+=renderViewToggle(plannerViewMode, 'setPlannerViewMode');
+
   const sortedDates=Object.keys(grouped).sort();
   if(sortedDates.length===0){
     if(search||filterCleaner!==0||selectedDate!=='all'){
@@ -3778,6 +4194,10 @@ function renderPlanner(){
     }
   }
 
+  // S3: Table view (desktop only) — flat list, sortable
+  if(plannerViewMode==='table' && isDesktop() && sortedDates.length>0){
+    h+=renderPlannerTable(filtered);
+  } else {
   sortedDates.forEach(date=>{
     const items=grouped[date];
     const activeItems=items.filter(r=>!cancelled[keyFor(r)]);
@@ -3837,7 +4257,7 @@ function renderPlanner(){
       // Cleaner color for left border
       const cleanerColor=isCancelled?'var(--red)':(cleaner?cleaner.color:(urgency==='urgent'?'var(--red)':urgency==='warning'?'var(--orange)':'transparent'));
 
-      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" onclick="handleCardClick(\''+sk+'\',event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleCardClick(\''+sk+'\',event);}">';
+      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" onclick="handleCardClick(\''+sk+'\',event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleCardClick(\''+sk+'\',event);}">';
       h+='<div class="swipe-cancel-bg"><span class="swipe-cancel-icon">'+(isCancelled?'↩️':'🚫')+'</span></div>';
 
       // Card content wrapper
@@ -3929,6 +4349,7 @@ function renderPlanner(){
     });
     h+='</div>';
   });
+  } // end else (cards branch — S3)
   h+='</div>'; // end planner-main
   let _asideContent = '';
   if(isDesktop() && expandedKey){
@@ -5095,7 +5516,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
   const isResolved=t.status==='resolved';
   const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
-  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
+  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
   if(mtSelectMode){
     h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" onclick="event.stopPropagation();toggleMtSelected('+t.id+')"></div>';
   }
@@ -5326,16 +5747,24 @@ function renderMtTickets(isManager){
     h+='</div>';
   }else{
     // === List view ===
-    h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
-    if(toShow.length===0){
-      const hasFilter = mtFilterStatus||mtFilterCat||mtSearch.trim();
-      if(hasFilter){ h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No tickets</div><div class="empty-hero-sub">No ticket matches this filter.</div></div>'; }
-      else { h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('wrench',56)+'</div><div class="empty-hero-title">All clear — no open tickets</div><div class="empty-hero-sub">All properties are in good shape.</div></div>'; }
+    // S3: Desktop view toggle (Cards / Table)
+    h+=renderViewToggle(mtViewModeUI, 'setMtViewModeUI');
+    if(mtViewModeUI==='table' && isDesktop()){
+      h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
+      h+=renderMtTable(toShow);
+      h+='</div>';
+    } else {
+      h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
+      if(toShow.length===0){
+        const hasFilter = mtFilterStatus||mtFilterCat||mtSearch.trim();
+        if(hasFilter){ h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No tickets</div><div class="empty-hero-sub">No ticket matches this filter.</div></div>'; }
+        else { h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('wrench',56)+'</div><div class="empty-hero-title">All clear — no open tickets</div><div class="empty-hero-sub">All properties are in good shape.</div></div>'; }
+      }
+      toShow.forEach(t=>{
+        h+=renderMtTicketCard(t,allProps,isManager,mtExpandedTicket===t.id);
+      });
+      h+='</div>';
     }
-    toShow.forEach(t=>{
-      h+=renderMtTicketCard(t,allProps,isManager,mtExpandedTicket===t.id);
-    });
-    h+='</div>';
   }
   if(mtSelectMode && mtSelected.size > 0){
     h += '<div class="mt-bulk-bar">';
