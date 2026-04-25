@@ -1257,8 +1257,113 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 }
 .mt-insight-title svg { color: var(--orange); }
 .mt-insight-list { display:flex; flex-direction:column; gap:6px; }
-.mt-insight-item { font-size: var(--fs-sm); color: var(--text-2); display:flex; align-items:center; gap:8px; }
+.mt-insight-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+}
+.mt-insight-item:hover {
+  background: var(--bg-2);
+  border-color: var(--orange);
+}
+.mt-insight-item strong { color: var(--text); font-weight: var(--fw-semibold); }
+.mt-insight-arrow {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-md);
+  transition: var(--transition-fast);
+}
+.mt-insight-item:hover .mt-insight-arrow { color: var(--orange); transform: translateX(2px); }
 .mt-insight-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+
+/* Inline comment count badge on ticket card */
+.mt-cmt-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 6px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: var(--transition-fast);
+}
+.mt-cmt-btn:hover { background: var(--bg-2); border-color: var(--border-strong); color: var(--text); }
+.mt-cmt-btn svg { width: 12px; height: 12px; }
+
+/* Inline comments section in expanded ticket card */
+.mt-cmt-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.mt-cmt-header {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.mt-cmt-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  padding: 8px 0 12px;
+}
+.mt-cmt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.mt-cmt-item {
+  background: var(--bg-2);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+}
+.mt-cmt-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+.mt-cmt-meta strong {
+  color: var(--text-2);
+  font-weight: var(--fw-semibold);
+}
+.mt-cmt-text {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  line-height: 1.4;
+}
+.mt-cmt-add {
+  display: flex;
+  gap: 6px;
+}
+.mt-cmt-add input {
+  flex: 1;
+  padding: 7px 10px;
+  font-size: var(--fs-sm);
+  border-radius: var(--radius-md);
+}
 
 /* ===== PROPERTY PROFILES ===== */
 .settings-panel label { display:block; margin-bottom:4px; font-weight:600; font-size:11px; }
@@ -1515,6 +1620,7 @@ let mtFilterStatus='all_open',mtFilterCat='',mtFilterProp='',mtSearch='';
 let mtViewMode='list'; // 'list' or 'board'
 let mtExpandedTicket=null;
 let recurringIssues=[];
+let mtComments={};
 let autoSendCleaners=true;
 let propertyProfiles={};
 let dashKPIs=null,dashKPIsLoading=false;
@@ -2755,6 +2861,79 @@ async function refreshMaintenance(){
   ]);
   maintenanceTickets=tRes.tickets||[];vendors=vRes.vendors||[];equipment=eRes.equipment||[];preventiveMaint=pRes.schedules||[];
   resolvedTickets=rRes.tickets||[];recurringIssues=riRes.recurring||[];
+  await loadAllTicketComments();
+  render();
+}
+
+async function loadAllTicketComments(){
+  const ids=(maintenanceTickets||[]).map(t=>t.id);
+  if(ids.length===0){mtComments={};return;}
+  const results=await Promise.all(ids.map(id=>
+    api('getTicketComments',{params:{ticketId:id}}).catch(()=>({comments:[]}))
+  ));
+  mtComments={};
+  ids.forEach((id,i)=>{mtComments[id]=(results[i]&&results[i].comments)||[];});
+}
+
+async function submitInlineComment(ticketId){
+  const inp=document.getElementById('mtCmtInput-'+ticketId);
+  if(!inp)return;
+  const txt=inp.value.trim();
+  if(!txt){toast('Write a comment','error');return;}
+  inp.value='';
+  await api('addTicketComment',{body:{
+    ticket_id:ticketId,
+    author:cleanerMode?cleanerMode.name:'Manager',
+    comment:txt
+  }});
+  toast('Comment added ✓','success');
+  haptic('light');
+  const r=await api('getTicketComments',{params:{ticketId}});
+  mtComments[ticketId]=r.comments||[];
+  render();
+}
+
+function openInsightAction(count,listingId,category,listingName){
+  const _lid=String(listingId||'').replace(/'/g,"\\'");
+  const _cat=String(category||'').replace(/'/g,"\\'");
+  const _ln=String(listingName||'').replace(/'/g,"\\'");
+  const html='<h3>'+icon('alertTriangle',18)+' Recurring issue detected</h3>'+
+    '<div style="margin-bottom:14px">'+
+    '<div style="font-family:var(--font-serif);font-size:var(--fs-lg);font-weight:500;margin-bottom:4px">'+esc(listingName)+'</div>'+
+    '<div style="font-size:var(--fs-sm);color:var(--text-2)">'+
+    '<strong>'+count+' '+esc(category)+' tickets</strong> reported in the last 90 days. '+
+    'Consider scheduling preventive maintenance.</div>'+
+    '</div>'+
+    '<div style="display:flex;flex-direction:column;gap:8px">'+
+    '<button class="btn-primary" onclick="closeMtModal();createPreventiveFromInsight(\''+_lid+'\',\''+_cat+'\',\''+_ln+'\')">'+
+    icon('plus',14)+' Create preventive task</button>'+
+    '<button class="btn-secondary" onclick="closeMtModal();showRelatedTickets(\''+_lid+'\',\''+_cat+'\')">'+
+    icon('clipboard',14)+' Show related tickets</button>'+
+    '</div>'+
+    '<div class="modal-actions" style="margin-top:14px"><button class="btn-ghost" onclick="closeMtModal()">Cancel</button></div>';
+  showMtModal(html);
+}
+
+async function createPreventiveFromInsight(listingId,category,listingName){
+  const taskName=prompt('Preventive task name:',category.charAt(0).toUpperCase()+category.slice(1)+' inspection');
+  if(!taskName)return;
+  const days=prompt('Frequency (days):','90');
+  const freq=Number(days)||90;
+  await api('savePreventiveMaintenance',{body:{
+    task_name:taskName,
+    listing_id:listingId||null,
+    category,
+    frequency_days:freq
+  }});
+  toast('Preventive task created ✓','success');
+  haptic('medium');
+  await refreshMaintenance();
+}
+
+function showRelatedTickets(listingId,category){
+  mtFilterCat=category;
+  mtFilterStatus='all_open';
+  toast('Filtered to '+category+' tickets at this property','info');
   render();
 }
 function mtPhotoUpload(){
@@ -4152,9 +4331,14 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   if(t.sla_deadline)h+='<span class="mt-sla-big '+sla.cls+'">'+sla.label+'</span>';
   h+='</div>';
   // Line 4: assigned technician + date
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text3)">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text3);gap:8px">';
   h+='<span>'+(tech?'👤 '+esc(tech.name):'Unassigned')+'</span>';
+  h+='<div style="display:flex;align-items:center;gap:8px">';
+  const _cmtCount=(mtComments[t.id]||[]).length;
+  const _cmtLabel=_cmtCount>0?icon('msgSquare',12)+' '+_cmtCount:icon('msgSquare',12);
+  h+='<button class="mt-cmt-btn" onclick="event.stopPropagation();toggleMtExpand('+t.id+')" title="Comments">'+_cmtLabel+'</button>';
   h+='<span>'+new Date(t.created_at).toLocaleDateString()+' · '+esc(t.reported_by||'')+'</span>';
+  h+='</div>';
   h+='</div>';
 
   // Expanded: timeline + actions
@@ -4178,16 +4362,35 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
       if(['open','assigned'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
       if(['assigned','in_progress'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Waiting Parts</button>';
       if(['in_progress','waiting_parts'].includes(t.status))h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Resolve</button>';
-      h+='<button onclick="viewTicketComments('+t.id+')" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer">💬</button>';
       h+='</div>';
     }else{
       h+='<div style="display:flex;gap:6px;margin-top:8px">';
       if(t.status==='assigned')h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
       if(t.status==='in_progress')h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Need Parts</button>';
       if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Resolve</button>';
-      h+='<button onclick="viewTicketComments('+t.id+')" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer">💬</button>';
       h+='</div>';
     }
+    // Inline comments section
+    const cmts=mtComments[t.id]||[];
+    h+='<div class="mt-cmt-section">';
+    h+='<div class="mt-cmt-header">'+icon('msgSquare',14)+' Comments <span style="color:var(--text-3);font-weight:400">'+cmts.length+'</span></div>';
+    if(cmts.length===0){
+      h+='<div class="mt-cmt-empty">No comments yet.</div>';
+    }else{
+      h+='<div class="mt-cmt-list">';
+      cmts.forEach(c=>{
+        h+='<div class="mt-cmt-item">';
+        h+='<div class="mt-cmt-meta"><strong>'+esc(c.author||'Unknown')+'</strong> &middot; '+new Date(c.created_at).toLocaleString()+'</div>';
+        h+='<div class="mt-cmt-text">'+esc(c.comment)+'</div>';
+        h+='</div>';
+      });
+      h+='</div>';
+    }
+    h+='<div class="mt-cmt-add">';
+    h+='<input type="text" id="mtCmtInput-'+t.id+'" placeholder="Add a comment…" onkeydown="if(event.key===\'Enter\'){event.stopPropagation();submitInlineComment('+t.id+')}" onclick="event.stopPropagation()" />';
+    h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();submitInlineComment('+t.id+')">Send</button>';
+    h+='</div>';
+    h+='</div>';
     h+='</div>';
   }
   h+='</div>';
@@ -4219,10 +4422,14 @@ function renderMtTickets(isManager){
     h+='<div class="mt-insight-list">';
     recurringIssues.slice(0,3).forEach(ri=>{
       const lname=(Object.values(listingPrices||{}).find(l=>String(l.listing_id||'')===String(ri.listing_id))||{}).listing_name || (listingPrices&&listingPrices[ri.listing_id]&&listingPrices[ri.listing_id].listing_name) || ri.listing_id || 'Unknown';
-      h+='<div class="mt-insight-item">';
+      const _lid=String(ri.listing_id||'').replace(/'/g,"\\'");
+      const _cat=String(ri.category||'').replace(/'/g,"\\'");
+      const _ln=String(lname).replace(/'/g,"\\'");
+      h+='<button class="mt-insight-item" onclick="openInsightAction('+ri.count+',\''+_lid+'\',\''+_cat+'\',\''+_ln+'\')">';
       h+='<span class="mt-insight-dot" style="background:var(--orange)"></span>';
-      h+='<strong>'+esc(lname)+'</strong> &middot; '+esc(ri.category)+' &middot; <strong>'+ri.count+'&times;</strong> in 90 days';
-      h+='</div>';
+      h+='<span><strong>'+esc(lname)+'</strong> &middot; '+esc(ri.category)+' &middot; <strong>'+ri.count+'&times;</strong> in 90 days</span>';
+      h+='<span class="mt-insight-arrow">&rarr;</span>';
+      h+='</button>';
     });
     h+='</div></div>';
   }
