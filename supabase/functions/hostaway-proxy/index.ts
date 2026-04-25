@@ -504,12 +504,9 @@ Deno.serve(async (req: Request) => {
     if (action === "getPhoto") {
       const photoId = url.searchParams.get("id");
       if (!photoId) return jsonResp({ error: "id required" }, 400);
-      const { data, error } = await sb.from("cleaning_photos").select("photo_data, photo_path, photo_type").eq("id", Number(photoId)).single();
+      const { data, error } = await sb.from("cleaning_photos").select("photo_path, photo_type").eq("id", Number(photoId)).single();
       if (error) throw error;
-      let photoField = data.photo_data ?? null;
-      if (data.photo_path) {
-        photoField = await getPhotoUrl(sb, data.photo_path);
-      }
+      const photoField = data.photo_path ? await getPhotoUrl(sb, data.photo_path) : null;
       return jsonResp({ status: "success", photo: { photo_data: photoField, photo_type: data.photo_type } });
     }
     if (action === "addPhoto" && req.method === "POST") {
@@ -525,12 +522,12 @@ Deno.serve(async (req: Request) => {
 
       // Upload photo vers bucket
       const path = await uploadPhotoDataUrl(sb, photo_data, "cleaning_photos", "photo_data", inserted.id);
-      if (path) {
-        await sb.from("cleaning_photos").update({ photo_path: path }).eq("id", inserted.id);
-      } else {
-        // Fallback : stocker en base64 si upload échoue (meilleur que perdre la photo)
-        await sb.from("cleaning_photos").update({ photo_data }).eq("id", inserted.id);
+      if (!path) {
+        await sb.from("cleaning_photos").delete().eq("id", inserted.id);
+        return jsonResp({ error: "photo upload failed" }, 500);
       }
+      await sb.from("cleaning_photos").update({ photo_path: path }).eq("id", inserted.id);
+      // Note: legacy fallback to photo_data column removed (column dropped). If upload fails, photo is lost — return error to client.
       await addLog(sb, reservation_key, "photo_added", author);
       return jsonResp({ status: "success" });
     }
@@ -699,7 +696,7 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await sb.from("cleaning_issues").insert({
         reservation_key: reservation_key || null, listing_id: listing_id || null,
         reported_by: reported_by || null, cleaner_id: cleaner_id || null,
-        title, description: description || null, photo_data: photo_data || null,
+        title, description: description || null,
         severity: severity || "medium",
       }).select().single();
       if (error) throw error;
@@ -707,7 +704,7 @@ Deno.serve(async (req: Request) => {
       if (photo_data) {
         const issuePath = await uploadPhotoDataUrl(sb, photo_data, "cleaning_issues", "photo_data", data.id);
         if (issuePath) {
-          await sb.from("cleaning_issues").update({ photo_path: issuePath, photo_data: null }).eq("id", data.id);
+          await sb.from("cleaning_issues").update({ photo_path: issuePath }).eq("id", data.id);
         }
       }
       // Auto-create maintenance ticket if flagged
@@ -871,8 +868,8 @@ Deno.serve(async (req: Request) => {
       if (resolution_notes) upd.resolution_notes = resolution_notes;
       if (resolution_photo) {
         const rp = await uploadPhotoDataUrl(sb, resolution_photo, "maintenance_tickets", "resolution_photo", id);
-        if (rp) { upd.resolution_photo_path = rp; upd.resolution_photo = null; }
-        else upd.resolution_photo = resolution_photo; // fallback
+        if (rp) upd.resolution_photo_path = rp;
+        // Note: legacy fallback to resolution_photo column removed (column dropped).
       }
       if (actual_cost !== undefined) upd.actual_cost = actual_cost;
       const { error } = await sb.from("maintenance_tickets").update(upd).eq("id", id);
@@ -966,10 +963,8 @@ Deno.serve(async (req: Request) => {
         const p = await uploadPhotoDataUrl(sb, receipt_photo, "maintenance_costs", "receipt_photo", costRow.id);
         if (p) {
           await sb.from("maintenance_costs").update({ receipt_photo_path: p }).eq("id", costRow.id);
-        } else {
-          // Fallback
-          await sb.from("maintenance_costs").update({ receipt_photo }).eq("id", costRow.id);
         }
+        // Note: legacy fallback to receipt_photo column removed.
       }
       return jsonResp({ status: "success" });
     }
@@ -1062,11 +1057,11 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { ticket_id, author, comment, photo_data } = body;
       if (!ticket_id || !comment) return jsonResp({ error: "ticket_id and comment required" }, 400);
-      const { data, error } = await sb.from("ticket_comments").insert({ ticket_id, author: author || null, comment, photo_data: photo_data || null }).select().single();
+      const { data, error } = await sb.from("ticket_comments").insert({ ticket_id, author: author || null, comment }).select().single();
       if (error) throw error;
       if (photo_data) {
         const p = await uploadPhotoDataUrl(sb, photo_data, "ticket_comments", "photo_data", data.id);
-        if (p) await sb.from("ticket_comments").update({ photo_path: p, photo_data: null }).eq("id", data.id);
+        if (p) await sb.from("ticket_comments").update({ photo_path: p }).eq("id", data.id);
       }
       return jsonResp({ status: "success", comment: data });
     }
