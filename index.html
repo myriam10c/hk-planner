@@ -1189,6 +1189,19 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 .mt-advanced-toggle { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--text2); cursor:pointer; margin:8px 0; padding:6px 0; }
 .mt-advanced-toggle:hover { color:var(--primary); }
 .mt-advanced-section { overflow:hidden; transition:max-height 0.3s ease; }
+.ap-list { display:flex; flex-direction:column; gap:4px; max-height:240px; overflow-y:auto; }
+.ap-item { display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--card); cursor:pointer; transition:var(--transition-fast); font-family:inherit; text-align:left; width:100%; }
+.ap-item:hover { background:var(--bg-2); border-color:var(--border-strong); }
+.ap-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.ap-name { font-size:var(--fs-md); font-weight:var(--fw-medium); color:var(--text); flex:1; }
+.ap-role { font-size:var(--fs-xs); color:var(--text-3); text-transform:capitalize; }
+.mt-smart-preview { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-md); padding:10px 14px; margin-bottom:8px; font-size:var(--fs-sm); color:var(--text-2); display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.mt-smart-preview .label { font-size:var(--fs-xs); color:var(--text-3); text-transform:uppercase; letter-spacing:0.04em; font-weight:var(--fw-semibold); }
+.mt-smart-preview .chip-cat { background:var(--card); border:1px solid var(--border); padding:2px 10px; border-radius:var(--radius-pill); font-weight:600; color:var(--text); display:inline-flex; align-items:center; gap:4px; }
+.mt-smart-preview .chip-pri-urgent { color:var(--red); border-color:var(--red); }
+.mt-smart-preview .chip-pri-high { color:var(--orange); border-color:var(--orange); }
+.mt-smart-preview .chip-pri-medium { color:var(--text-2); }
+.mt-smart-preview .chip-pri-low { color:var(--text-3); }
 .mt-photo-preview { width:100%; max-height:120px; object-fit:cover; border-radius:10px; margin-bottom:10px; }
 .equip-condition { font-size:9px; font-weight:800; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:0.3px; }
 .equip-condition.excellent,.equip-condition.good { background:var(--green-light); color:var(--green); }
@@ -2501,27 +2514,150 @@ const CAT_ICONS={ac:'❄️',plumbing:'🔧',electrical:'⚡',appliance:'🏭',s
 const SPEC_ICONS={plumbing:'🔧',electrical:'⚡',ac:'❄️',appliance:'🏭',handyman:'🔨',pest_control:'🐛',painting:'🎨'};
 
 // Maintenance ticket functions
+const MT_KEYWORDS = {
+  plumbing: ['leak','plumb','pipe','drain','sink','toilet','faucet','tap','water','flood','wet'],
+  electrical: ['electr','power','outlet','plug','switch','wire','breaker','short'],
+  ac: ['ac','aircon','air con','cool','heat','climat','temp','cold','hot air'],
+  appliance: ['fridge','oven','microwave','washer','dishwasher','dryer','tv','remote','appliance'],
+  structural: ['wall','door','window','floor','ceiling','tile','crack','hole','damage','broken','bed'],
+  pest: ['ant','roach','cockroach','rat','mouse','bug','pest','insect'],
+  painting: ['paint','scuff','mark','stain']
+};
+const MT_PRIORITY_KEYWORDS = {
+  urgent: ['urgent','emergency','flood','smoke','fire','gas','danger','asap','immediately'],
+  high: ['leak','broken','no power','no water','can\'t','cannot','not working','stuck'],
+  low: ['cosmetic','minor','small','tiny','later','low']
+};
+function classifyMt(desc){
+  const lower=(desc||'').toLowerCase();
+  let category='general';
+  for(const [cat,kws] of Object.entries(MT_KEYWORDS)){
+    if(kws.some(kw=>lower.includes(kw))){category=cat;break;}
+  }
+  let priority='medium';
+  for(const [pri,kws] of Object.entries(MT_PRIORITY_KEYWORDS)){
+    if(kws.some(kw=>lower.includes(kw))){priority=pri;break;}
+  }
+  return {category,priority};
+}
+function updateMtSmartPreview(){
+  const el=document.getElementById('mtSmartPreview');
+  const ta=document.getElementById('mtDesc');
+  if(!el||!ta)return;
+  const desc=ta.value.trim();
+  if(desc.length<8){el.style.display='none';return;}
+  const {category,priority}=classifyMt(desc);
+  const catIcon=(CAT_ICONS&&CAT_ICONS[category])||'🔨';
+  el.style.display='flex';
+  el.innerHTML='<span class="label">Auto-tagged:</span>'+
+    '<span class="chip-cat">'+catIcon+' '+category+'</span>'+
+    '<span class="chip-cat chip-pri-'+priority+'">'+priority+'</span>';
+}
 async function createMaintenanceTicket(){
   const desc=document.getElementById('mtDesc').value.trim();
   const listingId=document.getElementById('mtListing').value;
   if(!desc){toast('Enter a description','error');return;}
-  // Auto-generate title from first words
   const title=desc.length>50?desc.substring(0,50)+'…':desc;
-  // Advanced fields (manager only)
-  const catEl=document.getElementById('mtCategory');
-  const priEl=document.getElementById('mtPriority');
-  const vendorEl=document.getElementById('mtVendor');
-  const techEl=document.getElementById('mtTech');
-  const category=catEl?catEl.value:'general';
-  const priority=priEl?priEl.value:'medium';
-  const vendorId=vendorEl?vendorEl.value:'';
-  const techId=techEl?techEl.value:'';
+  const {category,priority}=classifyMt(desc);
   toast('Creating ticket...');
-  const res=await api('createTicket',{body:{title,description:desc,category,priority,listing_id:listingId||null,
-    assigned_vendor_id:vendorId?Number(vendorId):null,assigned_technician_id:techId?Number(techId):null,
-    reported_by:cleanerMode?cleanerMode.name:'Manager',photo_data:mtTicketPhoto||null}});
-  if(res.status==='success'){toast('Ticket created ✓','success');mtTicketPhoto=null;await refreshMaintenance();}
-  else toast(res.error||'Error','error');
+  const res=await api('createTicket',{body:{
+    title,
+    description:desc,
+    category,
+    priority,
+    listing_id:listingId||null,
+    reported_by:cleanerMode?cleanerMode.name:'Manager',
+    photo_data:mtTicketPhoto||null
+  }});
+  if(res.status==='success'){
+    toast('Ticket created — '+category+' / '+priority+' ✓','success');
+    haptic('medium');
+    const dEl=document.getElementById('mtDesc');if(dEl)dEl.value='';
+    const lEl=document.getElementById('mtListing');if(lEl)lEl.value='';
+    const pEl=document.getElementById('mtPhotoPreview');if(pEl)pEl.innerHTML='';
+    const sEl=document.getElementById('mtSmartPreview');if(sEl)sEl.style.display='none';
+    mtTicketPhoto=null;
+    await refreshMaintenance();
+  } else {
+    toast(res.error||'Error','error');
+  }
+}
+async function openAssignPicker(ticketId){
+  const ticket=(maintenanceTickets||[]).concat(resolvedTickets||[]).find(x=>x.id===ticketId);
+  if(!ticket)return;
+  const techs=(cleaners||[]).filter(c=>c.is_active&&(c.role==='maintenance'||c.role==='cleaner'));
+  const vendors_=(vendors||[]).filter(v=>v.is_active);
+  let html='<h3>'+icon('user',18)+' Assign ticket</h3>';
+  html+='<div style="font-size:13px;color:var(--text-2);margin-bottom:14px">'+esc(ticket.title)+'</div>';
+  html+='<div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">Technicians</div>';
+  html+='<div class="ap-list">';
+  techs.forEach(c=>{
+    const dotColor=c.color||'#888';
+    html+='<button class="ap-item" onclick="assignTicketToTech('+ticket.id+','+c.id+')">';
+    html+='<span class="ap-dot" style="background:'+esc(dotColor)+'"></span>';
+    html+='<span class="ap-name">'+esc(c.name)+'</span>';
+    html+='<span class="ap-role">'+esc(c.role||'cleaner')+'</span>';
+    html+='</button>';
+  });
+  if(techs.length===0)html+='<div style="font-size:12px;color:var(--text-3);padding:8px 0">No technicians available.</div>';
+  html+='</div>';
+  if(vendors_.length>0){
+    html+='<div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 8px">Or external vendor</div>';
+    html+='<div class="ap-list">';
+    vendors_.forEach(v=>{
+      html+='<button class="ap-item" onclick="assignTicketToVendor('+ticket.id+','+v.id+')">';
+      html+='<span class="ap-dot" style="background:var(--blue)"></span>';
+      html+='<span class="ap-name">'+esc(v.name)+'</span>';
+      html+='<span class="ap-role">'+esc(v.specialty||'')+'</span>';
+      html+='</button>';
+    });
+    html+='</div>';
+  }
+  if(ticket.assigned_technician_id||ticket.assigned_vendor_id){
+    html+='<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">';
+    html+='<button class="btn-ghost" style="color:var(--red)" onclick="unassignTicket('+ticket.id+')">Unassign current</button>';
+    html+='</div>';
+  }
+  html+='<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" onclick="closeMtModal()">Cancel</button></div>';
+  showMtModal(html);
+}
+async function assignTicketToTech(ticketId,techId){
+  closeMtModal();
+  await api('updateTicket',{body:{
+    id:ticketId,
+    assigned_technician_id:techId,
+    assigned_vendor_id:null,
+    status:'assigned',
+    actor:cleanerMode?cleanerMode.name:'Manager'
+  }});
+  toast('Ticket assigned ✓','success');
+  haptic('medium');
+  await refreshMaintenance();
+}
+async function assignTicketToVendor(ticketId,vendorId){
+  closeMtModal();
+  await api('updateTicket',{body:{
+    id:ticketId,
+    assigned_vendor_id:vendorId,
+    assigned_technician_id:null,
+    status:'assigned',
+    actor:cleanerMode?cleanerMode.name:'Manager'
+  }});
+  toast('Ticket assigned to vendor ✓','success');
+  haptic('medium');
+  await refreshMaintenance();
+}
+async function unassignTicket(ticketId){
+  closeMtModal();
+  await api('updateTicket',{body:{
+    id:ticketId,
+    assigned_technician_id:null,
+    assigned_vendor_id:null,
+    status:'open',
+    actor:cleanerMode?cleanerMode.name:'Manager'
+  }});
+  toast('Unassigned','success');
+  await refreshMaintenance();
 }
 async function updateTicketStatus(id,status,extras){
   const body={id,status,actor:cleanerMode?cleanerMode.name:'Manager',...(extras||{})};
@@ -4037,7 +4173,8 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     // Actions
     if(isManager){
       h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
-      if(t.status==='open')h+='<button onclick="updateTicketStatus('+t.id+',\'assigned\')" style="background:var(--orange);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Assign</button>';
+      const assignLabel = (t.assigned_technician_id || t.assigned_vendor_id) ? 'Reassign…' : 'Assign…';
+      h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();openAssignPicker('+t.id+')">'+icon('user',12)+' '+assignLabel+'</button>';
       if(['open','assigned'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
       if(['assigned','in_progress'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Waiting Parts</button>';
       if(['in_progress','waiting_parts'].includes(t.status))h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Resolve</button>';
@@ -4095,21 +4232,11 @@ function renderMtTickets(isManager){
   h+='<div class="mt-form">';
   h+='<button onclick="mtPhotoUpload()" style="background:white;border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer;width:100%;margin-bottom:8px;font-size:13px;font-weight:600">📷 Take / Upload Photo</button>';
   h+='<div id="mtPhotoPreview"></div>';
-  h+='<textarea id="mtDesc" placeholder="Describe the issue…" style="min-height:70px"></textarea>';
+  h+='<textarea id="mtDesc" placeholder="Describe the issue…" style="min-height:70px" oninput="updateMtSmartPreview()"></textarea>';
   h+='<select id="mtListing"><option value="">Select property…</option>';
   allProps.forEach(p=>{h+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});
   h+='</select>';
-  if(isManager){
-    h+='<div class="mt-advanced-toggle" onclick="var s=this.nextElementSibling.style;s.maxHeight=s.maxHeight===\'0px\'?\'300px\':\'0px\';this.querySelector(\'span\').textContent=s.maxHeight===\'0px\'?\'▸\':\'▾\'"><span>▸</span> Advanced options</div>';
-    h+='<div class="mt-advanced-section" style="max-height:0px">';
-    h+='<div class="form-row"><select id="mtCategory"><option value="general">General</option><option value="plumbing">Plumbing</option><option value="electrical">Electrical</option><option value="ac">AC</option><option value="appliance">Appliance</option><option value="structural">Structural</option><option value="pest">Pest</option><option value="painting">Painting</option></select>';
-    h+='<select id="mtPriority"><option value="medium">Medium</option><option value="low">Low</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>';
-    h+='<div class="form-row"><select id="mtVendor"><option value="">Vendor</option>';
-    vendors.forEach(v=>{h+='<option value="'+v.id+'">'+esc(v.name)+'</option>';});
-    h+='</select><select id="mtTech"><option value="">Technician</option>';
-    cleaners.forEach(c=>{if(c.role==='maintenance')h+='<option value="'+c.id+'">'+esc(c.name)+'</option>';});
-    h+='</select></div></div>';
-  }
+  h+='<div id="mtSmartPreview" class="mt-smart-preview" style="display:none"></div>';
   h+='<button onclick="createMaintenanceTicket()" style="background:var(--accent-gradient);color:white;border:none;border-radius:10px;padding:12px;cursor:pointer;width:100%;font-weight:700;font-size:14px;margin-top:4px">Submit Issue</button>';
   h+='</div></div>';
 
@@ -4173,7 +4300,8 @@ function renderMtTickets(isManager){
           h+='</div>';
           h+='<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">';
           if(isManager){
-            if(t.status==='open')h+='<button onclick="updateTicketStatus('+t.id+',\'assigned\')" style="background:var(--orange);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Assign</button>';
+            const kbAssignLabel = (t.assigned_technician_id || t.assigned_vendor_id) ? 'Reassign…' : 'Assign…';
+            h+='<button class="btn-secondary" style="font-size:10px;padding:4px 8px" onclick="event.stopPropagation();openAssignPicker('+t.id+')">'+icon('user',10)+' '+kbAssignLabel+'</button>';
             if(['open','assigned'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
             if(['in_progress','waiting_parts'].includes(t.status))h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
           }else{
