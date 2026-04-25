@@ -2020,6 +2020,235 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
     transform: scale(1.05);
   }
 }
+
+/* ===== DESKTOP S4: Completion heatmap ===== */
+.completion-heatmap {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+.hm-grid {
+  display: flex;
+  gap: 8px;
+}
+.hm-days {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hm-day {
+  font-size: 9px;
+  color: var(--text-3);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  height: 14px;
+  display: flex;
+  align-items: center;
+}
+.hm-weeks {
+  display: flex;
+  gap: 3px;
+}
+.hm-week {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hm-cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  cursor: default;
+  transition: var(--transition-fast);
+}
+.hm-cell:hover { transform: scale(1.3); outline: 1px solid var(--text); }
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 14px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  justify-content: flex-end;
+}
+.hl-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* ===== DESKTOP S4: Tickets funnel ===== */
+.tickets-funnel { margin-top: 10px; }
+.funnel-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.funnel-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 50px;
+  align-items: center;
+  gap: 12px;
+}
+.funnel-label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-2);
+}
+.funnel-bar-wrap {
+  position: relative;
+  background: var(--bg-2);
+  border-radius: var(--radius-md);
+  height: 28px;
+  overflow: hidden;
+}
+.funnel-bar {
+  height: 100%;
+  border-radius: var(--radius-md);
+  transition: width 0.6s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.funnel-count {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-md);
+  color: var(--text);
+}
+.funnel-ratio {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== DESKTOP S4: Kanban board ===== */
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+@media (max-width: 1280px) {
+  .kanban { grid-template-columns: repeat(2, 1fr); }
+}
+.kanban-col {
+  background: var(--bg-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  padding: 10px;
+  min-height: 240px;
+  transition: var(--transition-fast);
+}
+.kanban-col.kc-drop-hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  border-style: dashed;
+}
+.kanban-col-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px 10px;
+  border-bottom: 2px solid;
+  margin-bottom: 8px;
+}
+.kc-label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.kc-count {
+  background: var(--card);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+.kanban-col-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kc-empty {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-align: center;
+  padding: 16px 0;
+  font-style: italic;
+}
+.kanban-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-3);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  font-size: var(--fs-sm);
+}
+.kanban-card.urgent { border-left-color: var(--red); }
+.kanban-card.high { border-left-color: var(--orange); }
+.kanban-card.medium { border-left-color: var(--amber); }
+.kanban-card.low { border-left-color: var(--text-3); }
+.kanban-card:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+.kanban-card.detail-selected { background: var(--primary-light); border-color: var(--primary); }
+.kc-title {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  margin-bottom: 4px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.kc-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kc-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-xs);
+}
+.kc-pri {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.kc-pri.urgent { background: var(--red-light); color: var(--red); }
+.kc-pri.high { background: var(--orange-light); color: var(--orange); }
+.kc-pri.medium { background: var(--bg-3); color: var(--text-2); }
+.kc-pri.low { background: var(--bg-3); color: var(--text-3); }
+.kc-tech {
+  font-size: 10px;
+  color: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  font-weight: var(--fw-medium);
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 </style>
 </head>
 <body>
@@ -2235,7 +2464,13 @@ let currentTab='planner',filterCleaner=null;
 let dashMonth=new Date().getMonth(),dashYear=new Date().getFullYear();
 let dashData=null,dashLoading=false;
 let dashSection='ops'; // 'ops' | 'revenue' | 'properties'
-function setDashSection(s){ dashSection=s; render(); if(s==='properties') setTimeout(loadPropertyHeatmap,50); }
+function setDashSection(s){
+  dashSection=s;
+  try{ localStorage.setItem('dashSection', s); }catch(e){}
+  render();
+  if(s==='properties'){ setTimeout(loadPropertyHeatmap,50); setTimeout(renderTicketsFunnel,120); }
+  if(s==='ops' && typeof isDesktop==='function' && isDesktop()){ setTimeout(renderCompletionHeatmap,120); }
+}
 let searchOpen=false;
 let cancelled={}; // {key: {reason,cancelled_by,cancelled_at}}
 let swipeState=null; // {key,startX,startY,el,swiping}
@@ -2285,6 +2520,16 @@ function renderViewToggle(currentMode, setterName){
   return '<div class="view-toggle">'+
     '<button class="vt-btn'+(currentMode==='cards'?' active':'')+'" onclick="'+setterName+'(\'cards\')">'+icon('clipboard',13)+' Cards</button>'+
     '<button class="vt-btn'+(currentMode==='table'?' active':'')+'" onclick="'+setterName+'(\'table\')">'+icon('chart',13)+' Table</button>'+
+  '</div>';
+}
+
+// S4: Maintenance toggle with extra Kanban option
+function renderMtViewToggle(){
+  if(typeof isDesktop !== 'function' || !isDesktop()) return '';
+  return '<div class="view-toggle">'+
+    '<button class="vt-btn'+(mtViewModeUI==='cards'?' active':'')+'" onclick="setMtViewModeUI(\'cards\')">'+icon('clipboard',13)+' Cards</button>'+
+    '<button class="vt-btn'+(mtViewModeUI==='table'?' active':'')+'" onclick="setMtViewModeUI(\'table\')">'+icon('chart',13)+' Table</button>'+
+    '<button class="vt-btn'+(mtViewModeUI==='kanban'?' active':'')+'" onclick="setMtViewModeUI(\'kanban\')">'+icon('package',13)+' Kanban</button>'+
   '</div>';
 }
 
@@ -2399,6 +2644,78 @@ function renderMtTable(tickets){
   });
   h += '</tbody></table>';
   return h;
+}
+
+// S4: Kanban view for maintenance tickets
+function renderMtKanban(tickets){
+  if(!tickets || tickets.length === 0){
+    return '<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('wrench',56)+'</div><div class="empty-hero-title">All clear</div><div class="empty-hero-sub">No tickets matching this filter.</div></div>';
+  }
+  const cols = [
+    { key: 'open', label: 'Open', color: 'var(--blue)' },
+    { key: 'in_progress', label: 'In Progress', color: 'var(--orange)' },
+    { key: 'waiting_parts', label: 'Waiting parts', color: 'var(--amber)' },
+    { key: 'resolved', label: 'Resolved', color: 'var(--green)' }
+  ];
+  let h = '<div class="kanban">';
+  cols.forEach(col => {
+    const colTickets = tickets.filter(t => {
+      if(col.key === 'open') return t.status === 'open' || t.status === 'assigned';
+      return t.status === col.key;
+    });
+    h += '<div class="kanban-col" ondragover="onDragOverCol(event)" ondragleave="onDragLeaveCol(event)" ondrop="onDropOnKanbanCol(event,\''+col.key+'\')">';
+    h += '<div class="kanban-col-header" style="border-color:'+col.color+'">';
+    h += '<span class="kc-label">'+esc(col.label)+'</span>';
+    h += '<span class="kc-count">'+colTickets.length+'</span>';
+    h += '</div>';
+    h += '<div class="kanban-col-body">';
+    if(colTickets.length === 0){
+      h += '<div class="kc-empty">No tickets</div>';
+    } else {
+      colTickets.forEach(t => {
+        const isSel = (mtExpandedTicket === t.id);
+        const pri = t.priority || 'medium';
+        h += '<div class="kanban-card '+pri+(isSel?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="toggleMtExpand('+t.id+')">';
+        h += '<div class="kc-title">'+esc(t.title||'')+'</div>';
+        h += '<div class="kc-meta">'+esc(t.listing_name||t.listing_id||'No property')+'</div>';
+        h += '<div class="kc-footer">';
+        h += '<span class="kc-pri '+pri+'">'+esc(pri)+'</span>';
+        const tech = t.assigned_technician_id ? (cleaners||[]).find(c => c.id === t.assigned_technician_id) : null;
+        if(tech) h += '<span class="kc-tech"><span style="width:7px;height:7px;border-radius:50%;background:'+(tech.color||'#888')+';display:inline-block;margin-right:4px"></span>'+esc(tech.name)+'</span>';
+        h += '</div>';
+        h += '</div>';
+      });
+    }
+    h += '</div>';
+    h += '</div>';
+  });
+  h += '</div>';
+  return h;
+}
+
+function onDragOverCol(e){
+  if(!dragState || !dragState.id) return;
+  if(dragState.type !== 'ticket') return;
+  e.preventDefault();
+  e.currentTarget.classList.add('kc-drop-hover');
+}
+function onDragLeaveCol(e){
+  e.currentTarget.classList.remove('kc-drop-hover');
+}
+async function onDropOnKanbanCol(e, status){
+  e.preventDefault();
+  e.currentTarget.classList.remove('kc-drop-hover');
+  if(!dragState || dragState.type !== 'ticket' || !dragState.id){ if(typeof onDragEnd==='function') onDragEnd(); return; }
+  const id = Number(dragState.id);
+  try {
+    await api('updateTicket',{body:{id, status, actor: cleanerMode?cleanerMode.name:'Manager'}});
+    toast('Ticket → '+status.replace(/_/g,' ')+' ✓','success');
+    if(typeof haptic==='function') haptic('medium');
+    if(typeof refreshMaintenance === 'function') refreshMaintenance();
+  } catch(err){
+    toast('Error updating ticket','error');
+  }
+  if(typeof onDragEnd === 'function') onDragEnd();
 }
 
 // === Right-click context menu ===
@@ -4780,6 +5097,22 @@ function renderDashboard(){
         '<div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:var(--primary)"></div></div><div class="cs-count">'+dc+'/'+dayRes.length+'</div></div>';
     });
     h+='</div>';
+
+    // S4: Cleanings completion heatmap (last 12 weeks × Mon-Sun)
+    if(typeof isDesktop==='function' && isDesktop()){
+      h+='<div class="dash-card"><h3>'+icon('chart',16)+' Completion heatmap (last 12 weeks)</h3>';
+      h+='<div id="completionHeatmap" class="completion-heatmap"></div>';
+      h+='<div class="heatmap-legend">';
+      h+='<span>Less</span>';
+      h+='<span class="hl-cell" style="background:var(--bg-3)"></span>';
+      h+='<span class="hl-cell" style="background:var(--green-light)"></span>';
+      h+='<span class="hl-cell" style="background:rgba(92,128,96,0.6)"></span>';
+      h+='<span class="hl-cell" style="background:var(--green)"></span>';
+      h+='<span>More</span>';
+      h+='</div>';
+      h+='</div>';
+    }
+
     h+='</div>'; // end dash-grid
   }
 
@@ -4876,12 +5209,25 @@ function renderDashboard(){
         '<button class="export-btn" onclick="generateOwnerReport(\''+lid+'\')">📄 PDF Report</button></div>';
     });
     h+='</div>';
+
+    // S4: Tickets funnel (this month)
+    if(typeof isDesktop==='function' && isDesktop()){
+      h+='<div class="dash-card"><h3>'+icon('trending',16)+' Tickets funnel (this month)</h3>';
+      h+='<div id="ticketsFunnel" class="tickets-funnel"></div>';
+      h+='</div>';
+    }
+
     h+='</div>'; // end dash-grid
   }
 
   h+='</div>'+renderBottomNav();
   document.getElementById('app').innerHTML=h;
   if(dashSection==='properties') setTimeout(loadPropertyHeatmap,100);
+  // S4: render new charts when dashboard mounts
+  setTimeout(()=>{
+    if(dashSection==='ops' && typeof isDesktop==='function' && isDesktop()) renderCompletionHeatmap();
+    if(dashSection==='properties' && typeof isDesktop==='function' && isDesktop()) renderTicketsFunnel();
+  },80);
 
   // Draw charts
   setTimeout(()=>{
@@ -4906,6 +5252,102 @@ function renderDashboard(){
     }
   },100);
   return;
+}
+
+// ============ S4: Completion heatmap + Tickets funnel ============
+function renderCompletionHeatmap(){
+  const el = document.getElementById('completionHeatmap');
+  if(!el) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dayOfWeek = today.getDay(); // 0=Sun
+  const startMonday = new Date(today);
+  startMonday.setDate(today.getDate() - ((dayOfWeek + 6) % 7) - 11 * 7);
+  const weeks = [];
+  for(let w = 0; w < 12; w++){
+    const week = [];
+    for(let d = 0; d < 7; d++){
+      const day = new Date(startMonday);
+      day.setDate(startMonday.getDate() + w * 7 + d);
+      const ds = day.toISOString().split('T')[0];
+      const allItems = (RESERVATIONS||[]).concat(extraCleanings||[]);
+      let dones = 0, total = 0;
+      allItems.forEach(r => {
+        const co = r.co || r.cleaning_date;
+        if(co !== ds) return;
+        const k = keyFor(r);
+        if(cancelled[k]) return;
+        total++;
+        if(done[k]) dones++;
+      });
+      week.push({ date: ds, done: dones, total: total, isPast: day < today });
+    }
+    weeks.push(week);
+  }
+  let html = '<div class="hm-grid">';
+  html += '<div class="hm-days">';
+  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d => {
+    html += '<div class="hm-day">'+d+'</div>';
+  });
+  html += '</div>';
+  html += '<div class="hm-weeks">';
+  weeks.forEach(week => {
+    html += '<div class="hm-week">';
+    week.forEach(cell => {
+      const ratio = cell.total > 0 ? cell.done / cell.total : 0;
+      let bg;
+      if(cell.total === 0) bg = 'var(--bg-3)';
+      else if(ratio >= 0.95) bg = 'var(--green)';
+      else if(ratio >= 0.7) bg = 'rgba(92,128,96,0.6)';
+      else if(ratio >= 0.4) bg = 'var(--green-light)';
+      else bg = 'var(--red-light)';
+      const tooltip = cell.date+' · '+cell.done+'/'+cell.total+' done';
+      html += '<div class="hm-cell" style="background:'+bg+'" title="'+esc(tooltip)+'"></div>';
+    });
+    html += '</div>';
+  });
+  html += '</div>';
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderTicketsFunnel(){
+  const el = document.getElementById('ticketsFunnel');
+  if(!el) return;
+  const month = (typeof dashYear !== 'undefined' && typeof dashMonth !== 'undefined')
+    ? dashYear + '-' + String(dashMonth + 1).padStart(2, '0')
+    : new Date().toISOString().slice(0,7);
+  const all = (maintenanceTickets || []).concat(resolvedTickets || []);
+  const inMonth = all.filter(t => {
+    const c = String(t.created_at || '');
+    return c.startsWith(month);
+  });
+  const created = inMonth.length;
+  const assigned = inMonth.filter(t => t.assigned_technician_id || t.assigned_vendor_id).length;
+  const inProgress = inMonth.filter(t => ['in_progress','waiting_parts','resolved'].includes(t.status)).length;
+  const resolved = inMonth.filter(t => t.status === 'resolved').length;
+  const stages = [
+    { label: 'Created', n: created, color: 'var(--blue)' },
+    { label: 'Assigned', n: assigned, color: 'var(--orange)' },
+    { label: 'In progress', n: inProgress, color: 'var(--amber)' },
+    { label: 'Resolved', n: resolved, color: 'var(--green)' }
+  ];
+  let html = '<div class="funnel-chart">';
+  const max = Math.max(1, stages[0].n, stages[1].n, stages[2].n, stages[3].n);
+  stages.forEach((s, i) => {
+    const pct = (s.n / max) * 100;
+    const ratio = i > 0 ? (stages[i-1].n > 0 ? (s.n / stages[i-1].n * 100) : 0) : 100;
+    html += '<div class="funnel-row">';
+    html += '<div class="funnel-label">'+esc(s.label)+'</div>';
+    html += '<div class="funnel-bar-wrap">';
+    html += '<div class="funnel-bar" style="width:'+pct+'%;background:'+s.color+'"></div>';
+    html += '<span class="funnel-count">'+s.n+'</span>';
+    html += '</div>';
+    if(i > 0) html += '<div class="funnel-ratio">'+(ratio.toFixed(0))+'%</div>';
+    else html += '<div class="funnel-ratio">—</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
 }
 
 // ============ PROPERTY PROFILES ============
@@ -5747,9 +6189,13 @@ function renderMtTickets(isManager){
     h+='</div>';
   }else{
     // === List view ===
-    // S3: Desktop view toggle (Cards / Table)
-    h+=renderViewToggle(mtViewModeUI, 'setMtViewModeUI');
-    if(mtViewModeUI==='table' && isDesktop()){
+    // S3/S4: Desktop view toggle (Cards / Table / Kanban)
+    h+=renderMtViewToggle();
+    if(mtViewModeUI==='kanban' && isDesktop()){
+      h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
+      h+=renderMtKanban(toShow);
+      h+='</div>';
+    } else if(mtViewModeUI==='table' && isDesktop()){
       h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
       h+=renderMtTable(toShow);
       h+='</div>';
