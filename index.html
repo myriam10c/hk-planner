@@ -1575,6 +1575,147 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 /* Legacy .btn-primary/.btn-secondary/.btn-danger now defined in DS v5 layer above */
 .modal-footer .btn-danger { margin-right:auto; }
 .badge-extra { display:inline-block; background:var(--primary-light,rgba(124,58,237,0.1)); color:var(--primary,#7c3aed); padding:2px 8px; border-radius:var(--radius-sm); font-size:var(--fs-xs); font-weight:700; margin-left:6px; text-transform:uppercase; letter-spacing:0.4px; vertical-align:middle; }
+
+/* ===== Desktop UX: keyboard shortcuts help ===== */
+.kbd-list { display: flex; flex-direction: column; gap: 8px; }
+.kbd-row { display: flex; align-items: center; gap: 12px; padding: 8px 4px; font-size: var(--fs-sm); }
+.kbd-row kbd {
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 600;
+  min-width: 24px;
+  text-align: center;
+}
+.kbd-row span { color: var(--text-2); }
+.kbd-selected { outline: 2px solid var(--primary) !important; outline-offset: 2px; }
+
+/* ===== Hover quick actions on cards (desktop only) ===== */
+@media (min-width: 1024px) {
+  .checkout-card { position: relative; }
+  .card-quick-actions {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%) translateX(8px);
+    display: flex;
+    gap: 6px;
+    opacity: 0;
+    pointer-events: none;
+    transition: var(--transition-fast);
+    background: var(--card);
+    padding: 4px;
+    border-radius: var(--radius-pill);
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border);
+    z-index: 5;
+  }
+  .checkout-card:hover .card-quick-actions {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+    pointer-events: auto;
+  }
+  .qa-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
+    color: var(--text-2);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition-fast);
+    padding: 0;
+  }
+  .qa-btn:hover { background: var(--bg-2); color: var(--text); }
+  .qa-btn.qa-success:hover { background: var(--green-light); color: var(--green); }
+  .qa-btn.qa-primary:hover { background: var(--primary-light); color: var(--primary); }
+  .qa-btn.qa-danger:hover { background: var(--red-light); color: var(--red); }
+
+  .mt-card .card-quick-actions {
+    right: 14px;
+    top: 14px;
+    transform: translateY(0) translateX(8px);
+  }
+  .mt-card:hover .card-quick-actions {
+    opacity: 1;
+    transform: translateY(0) translateX(0);
+    pointer-events: auto;
+  }
+}
+
+/* ===== Sidebar collapsible (desktop only) ===== */
+@media (min-width: 1024px) {
+  .sidebar-toggle {
+    margin-top: auto;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition-fast);
+    align-self: flex-start;
+    margin-left: 4px;
+    margin-bottom: 4px;
+  }
+  .sidebar-toggle:hover { background: var(--bg-3); color: var(--text); border-color: var(--border-strong); }
+  .sidebar-toggle svg { transition: var(--transition); }
+
+  body.sidebar-collapsed { padding-left: 64px; }
+  body.sidebar-collapsed .bottom-nav { width: 64px; padding: 16px 8px; }
+  body.sidebar-collapsed .bottom-nav::before {
+    content: 'H';
+    font-size: 18px;
+    text-align: center;
+    padding: 4px 0 16px;
+  }
+  body.sidebar-collapsed .nav-item {
+    justify-content: center;
+    padding: 10px 8px;
+    gap: 0;
+    font-size: 0;
+    position: relative;
+  }
+  body.sidebar-collapsed .nav-item .nav-icon,
+  body.sidebar-collapsed .nav-item svg { font-size: 18px; }
+  body.sidebar-collapsed .nav-item::after {
+    content: attr(data-label);
+    position: absolute;
+    left: 56px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--text);
+    color: var(--text-inverse);
+    padding: 5px 10px;
+    border-radius: var(--radius-md);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: var(--transition-fast);
+    z-index: 10000;
+    box-shadow: var(--shadow-md);
+  }
+  body.sidebar-collapsed .nav-item:hover::after { opacity: 1; }
+  body.sidebar-collapsed .sidebar-toggle svg { transform: rotate(180deg); }
+}
+@media (max-width: 1023px) {
+  .sidebar-toggle { display: none; }
+  .card-quick-actions { display: none; }
+}
 </style>
 </head>
 <body>
@@ -1640,6 +1781,7 @@ const ICONS_SVG = {
   info:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
   timer:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="15" y2="11"/><circle cx="12" cy="14" r="8"/></svg>',
   msgSquare:   '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  chevronLeft: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
 };
 function icon(name, size){
   let svg = ICONS_SVG[name];
@@ -1656,6 +1798,9 @@ const MONTH_NAMES=['January','February','March','April','May','June','July','Aug
 let RESERVATIONS=[],dates=[],selectedDate='all',search='',done={},loading=true,error=null;
 let extraCleanings=[];
 let extraModalState={open:false,editing:null,form:{}};
+// Desktop UX: keyboard nav + collapsible sidebar
+let keyboardSelectedIndex = null;
+let sidebarCollapsed = (typeof localStorage !== 'undefined') && localStorage.getItem('sidebarCollapsed') === 'true';
 function keyFor(r){ return r._reservationKey || (r.co + '_' + r.guest); }
 let weekOffset=0,lastUpdate=null,pendingKey=null;
 function relativeSync(ts){
@@ -3263,8 +3408,8 @@ function renderBottomNav(){
     tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'issues',icon:icon('alertTriangle',22),label:t('issues')},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')}];
   }
   return '<nav class="bottom-nav">'+tabs.map(tab=>
-    '<button class="nav-item'+(currentTab===tab.id?' active':'')+'" onclick="setTab(\''+tab.id+'\')" aria-label="'+tab.label+'"><span class="nav-icon">'+tab.icon+'</span>'+tab.label+'</button>'
-  ).join('')+'</nav>';
+    '<button class="nav-item'+(currentTab===tab.id?' active':'')+'" onclick="setTab(\''+tab.id+'\')" data-label="'+esc(tab.label)+'" aria-label="'+esc(tab.label)+'"><span class="nav-icon">'+tab.icon+'</span>'+tab.label+'</button>'
+  ).join('')+'<button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">'+icon('chevronLeft',16)+'</button>'+'</nav>';
 }
 
 function renderPinScreen(){
@@ -3428,7 +3573,7 @@ function renderPlanner(){
       // Cleaner color for left border
       const cleanerColor=isCancelled?'var(--red)':(cleaner?cleaner.color:(urgency==='urgent'?'var(--red)':urgency==='warning'?'var(--orange)':'transparent'));
 
-      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" style="border-left:4px solid '+cleanerColor+'" onclick="handleCardClick(\''+sk+'\',event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleCardClick(\''+sk+'\',event);}">';
+      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" onclick="handleCardClick(\''+sk+'\',event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleCardClick(\''+sk+'\',event);}">';
       h+='<div class="swipe-cancel-bg"><span class="swipe-cancel-icon">'+(isCancelled?'↩️':'🚫')+'</span></div>';
 
       // Card content wrapper
@@ -3500,6 +3645,19 @@ function renderPlanner(){
       h+='</div>'; // end card-cta-col
 
       h+='</div>'; // end card-content
+
+      // Desktop hover quick actions
+      h+='<div class="card-quick-actions" onclick="event.stopPropagation()">';
+      if(isDone){
+        h+='<button class="qa-btn" title="Mark undone" onclick="markDone(\''+sk+'\')">'+icon('refresh',14)+'</button>';
+      }else{
+        h+='<button class="qa-btn qa-success" title="Mark done" onclick="markDone(\''+sk+'\')">'+icon('check',14)+'</button>';
+      }
+      if(!cleanerMode){
+        h+='<button class="qa-btn qa-primary" title="Assign cleaner" onclick="showAssignPicker(\''+sk+'\')">'+icon('user',14)+'</button>';
+      }
+      h+='<button class="qa-btn" title="View details" onclick="toggleExpand(\''+sk+'\',event)">'+icon('clipboard',14)+'</button>';
+      h+='</div>';
 
       // confirm-msg removed — done/undo now via CTA button
       h+='</div>'; // end checkout-card
@@ -4499,7 +4657,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
   const isResolved=t.status==='resolved';
   const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
-  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+'" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
+  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
   if(mtSelectMode){
     h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" onclick="event.stopPropagation();toggleMtSelected('+t.id+')"></div>';
   }
@@ -4579,6 +4737,18 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();submitInlineComment('+t.id+')">Send</button>';
     h+='</div>';
     h+='</div>';
+    h+='</div>';
+  }
+  // Desktop hover quick actions
+  if(!mtSelectMode){
+    h+='<div class="card-quick-actions" onclick="event.stopPropagation()">';
+    if(t.status !== 'resolved'){
+      h+='<button class="qa-btn qa-primary" title="Assign" onclick="openAssignPicker('+t.id+')">'+icon('user',14)+'</button>';
+    }
+    if(['in_progress','waiting_parts'].includes(t.status)){
+      h+='<button class="qa-btn qa-success" title="Resolve" onclick="resolveTicket('+t.id+')">'+icon('check',14)+'</button>';
+    }
+    h+='<button class="qa-btn" title="Comment" onclick="toggleMtExpand('+t.id+');setTimeout(function(){var i=document.getElementById(\'mtCmtInput-'+t.id+'\');if(i)i.focus();},80)">'+icon('msgSquare',14)+'</button>';
     h+='</div>';
   }
   h+='</div>';
@@ -5252,7 +5422,137 @@ async function generateInvoice(){
   toast('Invoice generated ✓','success');
 }
 
+// ============ DESKTOP UX: keyboard shortcuts + sidebar toggle ============
+function toggleSidebar(){
+  sidebarCollapsed = !sidebarCollapsed;
+  try{ localStorage.setItem('sidebarCollapsed', sidebarCollapsed); }catch(_){}
+  document.body.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+}
+
+function getKeyboardList(){
+  return Array.from(document.querySelectorAll('[data-kb-id]'));
+}
+
+function highlightKeyboardItem(el){
+  document.querySelectorAll('.kbd-selected').forEach(e => e.classList.remove('kbd-selected'));
+  if(el){ el.classList.add('kbd-selected'); try{ el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }catch(_){} }
+}
+
+function showShortcutsHelp(){
+  const html = '<h3>'+icon('clipboard',18)+' Keyboard shortcuts</h3>'+
+    '<div class="kbd-list">'+
+    '<div class="kbd-row"><kbd>j</kbd> <kbd>k</kbd><span>Navigate up/down</span></div>'+
+    '<div class="kbd-row"><kbd>Enter</kbd><span>Open detail</span></div>'+
+    '<div class="kbd-row"><kbd>e</kbd><span>Mark cleaning done</span></div>'+
+    '<div class="kbd-row"><kbd>a</kbd><span>Assign ticket</span></div>'+
+    '<div class="kbd-row"><kbd>c</kbd><span>Comment on ticket</span></div>'+
+    '<div class="kbd-row"><kbd>n</kbd><span>New cleaning / ticket</span></div>'+
+    '<div class="kbd-row"><kbd>/</kbd><span>Focus search</span></div>'+
+    '<div class="kbd-row"><kbd>&#8984;K</kbd><span>Global search</span></div>'+
+    '<div class="kbd-row"><kbd>Esc</kbd><span>Close any modal</span></div>'+
+    '<div class="kbd-row"><kbd>?</kbd><span>This help</span></div>'+
+    '</div>'+
+    '<div class="modal-actions" style="margin-top:16px;display:flex;justify-content:flex-end"><button class="btn-secondary" onclick="closeMtModal()">Close</button></div>';
+  showMtModal(html);
+}
+
+document.addEventListener('keydown', (e) => {
+  // Desktop only
+  if(window.innerWidth < 1024) return;
+  // Ignore if typing
+  const tag = (e.target && e.target.tagName ? e.target.tagName : '').toLowerCase();
+  if(tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable)) return;
+  // Ignore if any modal/overlay open
+  if(document.querySelector('.modal-overlay, .cmdk-overlay, .more-overlay, .mt-modal-overlay')) return;
+  // Ignore modifier keys (Cmd+K handled separately)
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+
+  const k = (e.key || '').toLowerCase();
+
+  if(k === '?'){ e.preventDefault(); showShortcutsHelp(); return; }
+
+  if(k === '/'){
+    e.preventDefault();
+    const inp = document.getElementById('headerSearchInput') || document.querySelector('.search-bar input');
+    if(inp){ inp.focus(); }
+    else if(typeof toggleSearch === 'function'){ toggleSearch(); }
+    else if(typeof openCmdk === 'function'){ openCmdk(); }
+    return;
+  }
+
+  if(k === 'j' || k === 'k'){
+    e.preventDefault();
+    const list = getKeyboardList();
+    if(list.length === 0) return;
+    if(keyboardSelectedIndex === null) keyboardSelectedIndex = 0;
+    else keyboardSelectedIndex = (k === 'j') ? Math.min(list.length-1, keyboardSelectedIndex+1) : Math.max(0, keyboardSelectedIndex-1);
+    highlightKeyboardItem(list[keyboardSelectedIndex]);
+    return;
+  }
+
+  if(k === 'enter' && keyboardSelectedIndex !== null){
+    const list = getKeyboardList();
+    const item = list[keyboardSelectedIndex];
+    if(item){
+      e.preventDefault();
+      const id = item.dataset.kbId;
+      const type = item.dataset.kbType;
+      if(type === 'cleaning' && id){
+        if(typeof toggleExpand === 'function') toggleExpand(id, e);
+      } else if(type === 'ticket' && id){
+        if(typeof toggleMtExpand === 'function') toggleMtExpand(Number(id));
+      }
+    }
+    return;
+  }
+
+  if(k === 'n'){
+    e.preventDefault();
+    if(currentTab === 'planner' && !cleanerMode){
+      if(typeof openExtraModal === 'function') openExtraModal();
+    } else if(currentTab === 'maintenance'){
+      const ta = document.getElementById('mtDesc');
+      if(ta) ta.focus();
+    }
+    return;
+  }
+
+  if(k === 'e' && keyboardSelectedIndex !== null){
+    const list = getKeyboardList();
+    const item = list[keyboardSelectedIndex];
+    if(item && item.dataset.kbType === 'cleaning'){
+      e.preventDefault();
+      if(typeof markDone === 'function') markDone(item.dataset.kbId);
+    }
+    return;
+  }
+
+  if(k === 'a' && keyboardSelectedIndex !== null && currentTab === 'maintenance'){
+    const list = getKeyboardList();
+    const item = list[keyboardSelectedIndex];
+    if(item && item.dataset.kbType === 'ticket'){
+      e.preventDefault();
+      if(typeof openAssignPicker === 'function') openAssignPicker(Number(item.dataset.kbId));
+    }
+    return;
+  }
+
+  if(k === 'c' && keyboardSelectedIndex !== null && currentTab === 'maintenance'){
+    const list = getKeyboardList();
+    const item = list[keyboardSelectedIndex];
+    if(item && item.dataset.kbType === 'ticket'){
+      e.preventDefault();
+      const tid = Number(item.dataset.kbId);
+      mtExpandedTicket = tid;
+      if(typeof render === 'function') render();
+      setTimeout(()=>{ const inp = document.getElementById('mtCmtInput-'+tid); if(inp) inp.focus(); }, 100);
+    }
+    return;
+  }
+});
+
 // ============ INIT ============
+if(sidebarCollapsed) document.body.classList.add('sidebar-collapsed');
 initSwipe();
 fetchAll();
 setInterval(fetchAll,5*60*1000);
