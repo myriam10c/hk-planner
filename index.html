@@ -1204,6 +1204,49 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 .mt-subtab-btn:active { transform:scale(0.95); }
 .mt-subtab-btn.active { background:var(--primary); color:var(--text-inverse); border-color:var(--primary); box-shadow:var(--shadow-xs); }
 
+/* Maintenance action pills (Reports / History modal triggers) */
+.mt-actions-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+.mt-action-pill {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 7px 14px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: var(--transition-fast);
+  font-family: inherit;
+}
+.mt-action-pill:hover { background: var(--bg-2); border-color: var(--border-strong); color: var(--text); }
+.mt-action-pill svg { width:14px; height:14px; }
+
+/* Recurring-patterns inline insight banner */
+.mt-insight-banner {
+  background: var(--orange-light);
+  border: 1px solid rgba(194, 144, 51, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.mt-insight-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.mt-insight-title svg { color: var(--orange); }
+.mt-insight-list { display:flex; flex-direction:column; gap:6px; }
+.mt-insight-item { font-size: var(--fs-sm); color: var(--text-2); display:flex; align-items:center; gap:8px; }
+.mt-insight-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+
 /* ===== PROPERTY PROFILES ===== */
 .settings-panel label { display:block; margin-bottom:4px; font-weight:600; font-size:11px; }
 .settings-panel textarea { resize:vertical; }
@@ -2635,7 +2678,45 @@ function getSLAStatus(ticket){
   if(hoursLeft<4)return{cls:'warning',label:'⚠️ '+hoursLeft+'h left'};
   return{cls:'ok',label:hoursLeft+'h left'};
 }
-function setMtSubTab(t){mtSubTab=t;render();}
+function setMtSubTab(t){
+  if(t==='__reports'){openMtReportsModal();return;}
+  if(t==='__history'){openMtHistoryModal();return;}
+  mtSubTab=t;
+  mtExpandedTicket=null;
+  render();
+}
+
+function openMtReportsModal(){
+  const html='<h3>'+icon('download',18)+' Maintenance Report</h3>'+
+    '<p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Share via WhatsApp.</p>'+
+    '<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px">'+
+    '<button class="btn-success" onclick="shareMaintenanceReport(\'full\')">'+icon('msgSquare',16)+' Share full report</button>'+
+    '<button class="btn-secondary" onclick="shareMaintenanceReport(\'open\')">Share open tickets only</button>'+
+    '<button class="btn-secondary" onclick="shareMaintenanceReport(\'resolved\')">Share resolved tickets only</button>'+
+    '</div>'+
+    '<div style="background:var(--bg-2);border-radius:var(--radius-md);padding:12px;font-size:11px;white-space:pre-wrap;font-family:ui-monospace,monospace;max-height:300px;overflow:auto;border:1px solid var(--border)">'+esc(generateReportText('full'))+'</div>'+
+    '<div class="modal-actions"><button class="btn-secondary" onclick="closeMtModal()">Close</button></div>';
+  showMtModal(html);
+}
+
+function openMtHistoryModal(){
+  const items=(resolvedTickets||[]).slice(0,50);
+  let html='<h3>'+icon('history',18)+' Resolved tickets</h3>';
+  if(items.length===0)html+='<p style="color:var(--text-3);font-size:13px;padding:20px 0;text-align:center">No resolved tickets yet.</p>';
+  else {
+    html+='<div style="max-height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px">';
+    items.forEach(t=>{
+      html+='<div style="padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-2)">';
+      html+='<div style="font-weight:600;font-size:13px">'+esc(t.title)+'</div>';
+      html+='<div style="font-size:11px;color:var(--text-3);margin-top:2px">'+(t.listing_name?esc(t.listing_name):'No property')+' &middot; '+new Date(t.resolved_at||t.created_at).toLocaleDateString()+'</div>';
+      if(t.resolution_notes)html+='<div style="font-size:12px;color:var(--text-2);margin-top:4px">'+esc(t.resolution_notes)+'</div>';
+      html+='</div>';
+    });
+    html+='</div>';
+  }
+  html+='<div class="modal-actions"><button class="btn-secondary" onclick="closeMtModal()">Close</button></div>';
+  showMtModal(html);
+}
 
 function getFiltered(){
   let list=RESERVATIONS;
@@ -3872,26 +3953,21 @@ function renderMaintenance(){
   h+='<div class="container">';
 
   if(isManager){
-    // Manager view with subtabs
+    // Fallback: legacy subtab values now folded into Tickets
+    if(mtSubTab==='health'||mtSubTab==='history'||mtSubTab==='reports'||mtSubTab==='recurring'){mtSubTab='tickets';}
+    // Manager view with subtabs (4 only — Reports/History/Recurring moved into Tickets)
     h+='<div class="mt-subtabs">';
     h+='<button class="mt-subtab-btn'+(mtSubTab==='tickets'?' active':'')+'" onclick="setMtSubTab(\'tickets\')">Tickets</button>';
     h+='<button class="mt-subtab-btn'+(mtSubTab==='vendors'?' active':'')+'" onclick="setMtSubTab(\'vendors\')">Vendors</button>';
     h+='<button class="mt-subtab-btn'+(mtSubTab==='equipment'?' active':'')+'" onclick="setMtSubTab(\'equipment\')">Equipment</button>';
     h+='<button class="mt-subtab-btn'+(mtSubTab==='preventive'?' active':'')+'" onclick="setMtSubTab(\'preventive\')">Preventive</button>';
-    h+='<button class="mt-subtab-btn'+(mtSubTab==='health'?' active':'')+'" onclick="setMtSubTab(\'health\')">Health</button>';
-    h+='<button class="mt-subtab-btn'+(mtSubTab==='history'?' active':'')+'" onclick="setMtSubTab(\'history\')">History</button>';
-    h+='<button class="mt-subtab-btn'+(mtSubTab==='recurring'?' active':'')+'" onclick="setMtSubTab(\'recurring\')">Recurring</button>';
-    h+='<button class="mt-subtab-btn'+(mtSubTab==='reports'?' active':'')+'" onclick="setMtSubTab(\'reports\')">Reports</button>';
     h+='</div>';
 
     if(mtSubTab==='tickets'){h+=renderMtTickets(isManager);}
     else if(mtSubTab==='vendors'){h+=renderMtVendors();}
     else if(mtSubTab==='equipment'){h+=renderMtEquipment();}
     else if(mtSubTab==='preventive'){h+=renderMtPreventive();}
-    else if(mtSubTab==='health'){h+=renderMtHealth();}
-    else if(mtSubTab==='history'){h+=renderMtHistory();}
-    else if(mtSubTab==='recurring'){h+=renderMtRecurring();}
-    else if(mtSubTab==='reports'){h+=renderMtReports();}
+    else {h+=renderMtTickets(isManager);}
   }else if(isTechnician){
     // Technician view - only their tickets
     h+=renderMtTickets(false);
@@ -3984,6 +4060,35 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
 function renderMtTickets(isManager){
   let h='';
   const allProps=getAllProperties();
+  // Force list mode (board mode kept as dead code, can be re-enabled later)
+  if(mtViewMode!=='list')mtViewMode='list';
+
+  // === Action pills (Reports / History modals) — manager only ===
+  if(isManager){
+    h+='<div class="mt-actions-bar">';
+    h+='<button class="mt-action-pill" onclick="setMtSubTab(\'__reports\')" title="Reports">';
+    h+='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+    h+=' Share report</button>';
+    h+='<button class="mt-action-pill" onclick="setMtSubTab(\'__history\')" title="History">';
+    h+='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>';
+    h+=' History</button>';
+    h+='</div>';
+  }
+
+  // === Recurring patterns insight banner ===
+  if(isManager && (recurringIssues||[]).length>0){
+    h+='<div class="mt-insight-banner">';
+    h+='<div class="mt-insight-title">'+icon('alertTriangle',16)+' Recurring patterns detected</div>';
+    h+='<div class="mt-insight-list">';
+    recurringIssues.slice(0,3).forEach(ri=>{
+      const lname=(Object.values(listingPrices||{}).find(l=>String(l.listing_id||'')===String(ri.listing_id))||{}).listing_name || (listingPrices&&listingPrices[ri.listing_id]&&listingPrices[ri.listing_id].listing_name) || ri.listing_id || 'Unknown';
+      h+='<div class="mt-insight-item">';
+      h+='<span class="mt-insight-dot" style="background:var(--orange)"></span>';
+      h+='<strong>'+esc(lname)+'</strong> &middot; '+esc(ri.category)+' &middot; <strong>'+ri.count+'&times;</strong> in 90 days';
+      h+='</div>';
+    });
+    h+='</div></div>';
+  }
 
   // === Simplified form ===
   h+='<div class="settings-panel"><h3>➕ Report Issue</h3>';
@@ -4023,24 +4128,15 @@ function renderMtTickets(isManager){
   h+='<div class="mt-stat-card"><div class="mt-stat-num" style="color:var(--green)">'+resolvedWeek+'</div><div class="mt-stat-label">Resolved 7d</div></div>';
   h+='</div>';
 
-  // === Filters ===
+  // === Filters (status filter handled by stats-bar above) ===
   h+='<div class="settings-panel" style="padding-bottom:8px">';
   h+='<input type="text" class="mt-search" placeholder="🔍 Search tickets…" value="'+esc(mtSearch)+'" oninput="mtSearch=this.value;render()" />';
   h+='<div class="mt-filters">';
-  [['all_open','All Open'],['open','Open'],['assigned','Assigned'],['in_progress','In Progress'],['waiting_parts','Waiting']].forEach(([val,label])=>{
-    h+='<div class="mt-filter-chip'+(mtFilterStatus===val?' active':'')+'" onclick="setMtFilter(\'status\',\''+val+'\')">'+label+'</div>';
-  });
-  h+='</div><div class="mt-filters">';
   ['plumbing','electrical','ac','appliance','structural','pest','painting','general'].forEach(c=>{
     h+='<div class="mt-filter-chip'+(mtFilterCat===c?' active':'')+'" onclick="setMtFilter(\'cat\',\''+c+'\')">'+(CAT_ICONS[c]||'')+' '+c+'</div>';
   });
   h+='</div></div>';
-
-  // === View toggle ===
-  h+='<div class="mt-view-toggle">';
-  h+='<button class="mt-view-btn'+(mtViewMode==='list'?' active':'')+'" onclick="setMtViewMode(\'list\')">📋 List</button>';
-  h+='<button class="mt-view-btn'+(mtViewMode==='board'?' active':'')+'" onclick="setMtViewMode(\'board\')">📊 Board</button>';
-  h+='</div>';
+  // View toggle removed — list mode is canonical (board mode kept as dead code)
 
   // === Filter logic ===
   let toShow=maintenanceTickets;
