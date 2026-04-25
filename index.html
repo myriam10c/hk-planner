@@ -1237,6 +1237,85 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 .mt-action-pill:hover { background: var(--bg-2); border-color: var(--border-strong); color: var(--text); }
 .mt-action-pill svg { width:14px; height:14px; }
 
+/* Maintenance bulk select (multi-select tickets) */
+.mt-card { position: relative; }
+.mt-select-checkbox {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  cursor: pointer;
+  transition: var(--transition-fast);
+  z-index: 2;
+}
+.mt-select-checkbox.checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.mt-select-checkbox.checked::after {
+  content: '';
+  position: absolute;
+  top: 3px; left: 6px;
+  width: 6px; height: 11px;
+  border-right: 2px solid white;
+  border-bottom: 2px solid white;
+  transform: rotate(45deg);
+}
+.mt-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.mt-card.selected:hover { border-color: var(--primary); }
+.mt-bulk-bar {
+  position: fixed;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--text-inverse);
+  border-radius: var(--radius-pill);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  animation: bulkSlideUp 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes bulkSlideUp { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translateX(-50%); opacity: 1; } }
+.mt-bulk-count {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  padding: 0 12px 0 6px;
+  border-right: 1px solid rgba(255,255,255,0.2);
+}
+.mt-bulk-bar .btn-secondary {
+  background: transparent;
+  color: var(--text-inverse);
+  border-color: rgba(255,255,255,0.2);
+}
+.mt-bulk-bar .btn-secondary:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.4);
+}
+.mt-bulk-bar .btn-ghost {
+  color: rgba(255,255,255,0.7);
+}
+.mt-bulk-bar .btn-ghost:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text-inverse);
+}
+@media (min-width: 1024px) {
+  .mt-bulk-bar {
+    left: calc(220px + 50%);
+    transform: translateX(-50%);
+  }
+}
+
 /* Recurring-patterns inline insight banner */
 .mt-insight-banner {
   background: var(--orange-light);
@@ -1619,6 +1698,8 @@ let resolvedTickets=[];
 let mtFilterStatus='all_open',mtFilterCat='',mtFilterProp='',mtSearch='';
 let mtViewMode='list'; // 'list' or 'board'
 let mtExpandedTicket=null;
+let mtSelectMode=false;
+let mtSelected=new Set(); // ticket ids
 let recurringIssues=[];
 let mtComments={};
 let autoSendCleaners=true;
@@ -4309,12 +4390,119 @@ function setMtViewMode(m){mtViewMode=m;render();}
 function toggleMtExpand(id){mtExpandedTicket=mtExpandedTicket===id?null:id;render();}
 function setMtStatFilter(val){mtFilterStatus=mtFilterStatus===val?'all_open':val;render();}
 
+function toggleMtSelectMode(){
+  mtSelectMode = !mtSelectMode;
+  if(!mtSelectMode) mtSelected.clear();
+  render();
+}
+
+function toggleMtSelected(id, e){
+  if(e) e.stopPropagation();
+  if(mtSelected.has(id)) mtSelected.delete(id); else mtSelected.add(id);
+  render();
+}
+
+function clearMtSelection(){
+  mtSelected.clear();
+  mtSelectMode = false;
+  render();
+}
+
+async function bulkAssignSelected(){
+  if(mtSelected.size === 0) return;
+  const techs = (cleaners||[]).filter(c => c.is_active && (c.role==='maintenance' || c.role==='cleaner'));
+  const vendors_ = (vendors||[]).filter(v => v.is_active);
+  let html = '<h3>'+icon('user',18)+' Assign '+mtSelected.size+' tickets</h3>';
+  html += '<div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">Technicians</div>';
+  html += '<div class="ap-list">';
+  techs.forEach(c => {
+    const dotColor = c.color || '#888';
+    html += '<button class="ap-item" onclick="bulkApplyAssign(\'tech\','+c.id+')">';
+    html += '<span class="ap-dot" style="background:'+esc(dotColor)+'"></span>';
+    html += '<span class="ap-name">'+esc(c.name)+'</span>';
+    html += '<span class="ap-role">'+(c.role||'cleaner')+'</span>';
+    html += '</button>';
+  });
+  html += '</div>';
+  if(vendors_.length > 0){
+    html += '<div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 8px">Vendors</div>';
+    html += '<div class="ap-list">';
+    vendors_.forEach(v => {
+      html += '<button class="ap-item" onclick="bulkApplyAssign(\'vendor\','+v.id+')">';
+      html += '<span class="ap-dot" style="background:var(--blue)"></span>';
+      html += '<span class="ap-name">'+esc(v.name)+'</span>';
+      html += '<span class="ap-role">'+esc(v.specialty||'')+'</span>';
+      html += '</button>';
+    });
+    html += '</div>';
+  }
+  html += '<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" onclick="closeMtModal()">Cancel</button></div>';
+  showMtModal(html);
+}
+
+async function bulkApplyAssign(kind, id){
+  closeMtModal();
+  const ids = Array.from(mtSelected);
+  const updates = ids.map(tid => api('updateTicket',{body:{
+    id: tid,
+    assigned_technician_id: kind === 'tech' ? id : null,
+    assigned_vendor_id: kind === 'vendor' ? id : null,
+    status: 'assigned',
+    actor: cleanerMode?cleanerMode.name:'Manager'
+  }}));
+  toast('Assigning '+ids.length+' tickets...');
+  await Promise.all(updates);
+  toast(ids.length+' tickets assigned ✓','success');
+  haptic('medium');
+  clearMtSelection();
+  await refreshMaintenance();
+}
+
+function bulkChangeStatus(){
+  const opts = [
+    {key: 'open', label: 'Open', color: 'var(--blue)'},
+    {key: 'in_progress', label: 'In Progress', color: 'var(--orange)'},
+    {key: 'waiting_parts', label: 'Waiting parts', color: 'var(--amber)'},
+    {key: 'resolved', label: 'Resolved', color: 'var(--green)'},
+  ];
+  let html = '<h3>'+icon('refresh',18)+' Change status of '+mtSelected.size+' tickets</h3>';
+  html += '<div class="ap-list" style="margin-top:14px">';
+  opts.forEach(o => {
+    html += '<button class="ap-item" onclick="bulkApplyStatus(\''+o.key+'\')">';
+    html += '<span class="ap-dot" style="background:'+o.color+'"></span>';
+    html += '<span class="ap-name">'+o.label+'</span>';
+    html += '</button>';
+  });
+  html += '</div>';
+  html += '<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" onclick="closeMtModal()">Cancel</button></div>';
+  showMtModal(html);
+}
+
+async function bulkApplyStatus(status){
+  closeMtModal();
+  const ids = Array.from(mtSelected);
+  const updates = ids.map(tid => api('updateTicket',{body:{
+    id: tid,
+    status,
+    actor: cleanerMode?cleanerMode.name:'Manager'
+  }}));
+  toast('Updating '+ids.length+' tickets...');
+  await Promise.all(updates);
+  toast(ids.length+' tickets → '+status+' ✓','success');
+  haptic('medium');
+  clearMtSelection();
+  await refreshMaintenance();
+}
+
 function renderMtTicketCard(t,allProps,isManager,expanded){
   const sla=getSLAStatus(t);
   const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
   const isResolved=t.status==='resolved';
   const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
-  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+'" onclick="toggleMtExpand('+t.id+')">';
+  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+'" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
+  if(mtSelectMode){
+    h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" onclick="event.stopPropagation();toggleMtSelected('+t.id+')"></div>';
+  }
   // Line 1: title + priority badge
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
   h+='<strong style="font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.title)+'</strong>';
@@ -4412,6 +4600,9 @@ function renderMtTickets(isManager){
     h+='<button class="mt-action-pill" onclick="setMtSubTab(\'__history\')" title="History">';
     h+='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>';
     h+=' History</button>';
+    h+='<button class="mt-action-pill" onclick="toggleMtSelectMode()" title="Select multiple">';
+    h+='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>';
+    h+=' '+(mtSelectMode ? 'Cancel select' : 'Select')+'</button>';
     h+='</div>';
   }
 
@@ -4535,6 +4726,14 @@ function renderMtTickets(isManager){
       h+=renderMtTicketCard(t,allProps,isManager,mtExpandedTicket===t.id);
     });
     h+='</div>';
+  }
+  if(mtSelectMode && mtSelected.size > 0){
+    h += '<div class="mt-bulk-bar">';
+    h += '<div class="mt-bulk-count">'+mtSelected.size+' selected</div>';
+    h += '<button class="btn-secondary" onclick="bulkAssignSelected()" style="font-size:13px;padding:7px 14px">'+icon('user',14)+' Assign…</button>';
+    h += '<button class="btn-secondary" onclick="bulkChangeStatus()" style="font-size:13px;padding:7px 14px">'+icon('refresh',14)+' Status…</button>';
+    h += '<button class="btn-ghost" onclick="clearMtSelection()" style="font-size:13px;padding:7px 14px">Cancel</button>';
+    h += '</div>';
   }
   return h;
 }
