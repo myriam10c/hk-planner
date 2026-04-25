@@ -464,6 +464,97 @@ button:focus-visible, .icon-btn:focus-visible, [role="button"]:focus-visible { o
   .planner-two-col { grid-template-columns:minmax(0, 1fr) 400px; }
 }
 
+/* ===== DESKTOP S2b: Multi-pane (List + Detail) ===== */
+@media (min-width: 1024px) {
+  /* Planner detail pane */
+  .planner-two-col {
+    grid-template-columns: minmax(0, 1fr) 380px;
+    gap: 24px;
+    align-items: flex-start;
+  }
+  .planner-sidebar {
+    position: sticky;
+    top: 84px;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+  }
+  .detail-pane {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .detail-pane-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    font-family: var(--font-serif);
+    background: var(--card);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
+  }
+  .detail-pane-header {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-2);
+  }
+  .detail-pane-title {
+    font-family: var(--font-serif);
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .detail-pane-close {
+    background: transparent;
+    border: none;
+    color: var(--text-2);
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition-fast);
+  }
+  .detail-pane-close:hover { background: var(--bg-3); color: var(--text); }
+  .detail-pane-body {
+    padding: 16px 18px;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+  }
+
+  /* Selected state on cards (desktop only) */
+  .checkout-card.detail-selected,
+  .mt-card.detail-selected {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Maintenance two-col */
+  .mt-two-col {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 24px;
+    align-items: flex-start;
+  }
+  .mt-detail-side {
+    position: sticky;
+    top: 84px;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+  }
+}
+
 /* Background decorations hidden — clean neutral bg */
 .bg-orbs,.bg-noise,.orb-3,.orb-4,.orb-5 { display:none; }
 
@@ -1908,6 +1999,24 @@ function writeUrlState(){
   const url = window.location.pathname + (qs ? '?' + qs : '');
   try { history.replaceState({}, '', url); } catch(e) {}
 }
+// Desktop detection helper (S2b multi-pane)
+function isDesktop(){ return window.matchMedia('(min-width: 1024px)').matches; }
+function closeDetailPane(){
+  if(typeof expandedKey !== 'undefined') expandedKey = null;
+  if(typeof mtExpandedTicket !== 'undefined') mtExpandedTicket = null;
+  render();
+}
+// Re-render on breakpoint cross (debounced)
+let _bpTimer=null,_lastBp=null;
+window.addEventListener('resize',function(){
+  const cur=isDesktop();
+  if(_lastBp===null) _lastBp=cur;
+  if(cur===_lastBp) return;
+  _lastBp=cur;
+  clearTimeout(_bpTimer);
+  _bpTimer=setTimeout(function(){ try{ render(); }catch(e){} },120);
+});
+
 // Saved views
 let savedViews = JSON.parse(localStorage.getItem('savedViews') || '[]');
 function persistSavedViews(){ localStorage.setItem('savedViews', JSON.stringify(savedViews)); }
@@ -3723,6 +3832,7 @@ function renderPlanner(){
       else if(!cleaner&&!cleanerMode) cardStatus='unassigned';
 
       let cc='checkout-card';if(isPending)cc+=' pending-confirm';
+      if(isExp && isDesktop()) cc+=' detail-selected';
 
       // Cleaner color for left border
       const cleanerColor=isCancelled?'var(--red)':(cleaner?cleaner.color:(urgency==='urgent'?'var(--red)':urgency==='warning'?'var(--orange)':'transparent'));
@@ -3815,12 +3925,20 @@ function renderPlanner(){
 
       // confirm-msg removed — done/undo now via CTA button
       h+='</div>'; // end checkout-card
-      if(isExp) h+=renderCardDetail(key,r);
+      if(isExp && !isDesktop()) h+=renderCardDetail(key,r);
     });
     h+='</div>';
   });
   h+='</div>'; // end planner-main
-  h+='<aside class="planner-sidebar">'+renderPlannerSidebar()+'</aside>';
+  let _asideContent = '';
+  if(isDesktop() && expandedKey){
+    const _r = (RESERVATIONS||[]).concat(extraCleanings||[]).find(x => keyFor(x) === expandedKey);
+    if(_r){ _asideContent = renderCleaningDetailPane(_r); }
+    else { _asideContent = renderPlannerSidebar(); }
+  } else {
+    _asideContent = renderPlannerSidebar();
+  }
+  h+='<aside class="planner-sidebar">'+_asideContent+'</aside>';
   h+='</div>'; // end planner-two-col
   h+='</div>'+renderBottomNav();
   document.getElementById('app').innerHTML=h;
@@ -3849,6 +3967,172 @@ function renderPlannerSidebar(){
     });
   }
   h+='</div>';
+  return h;
+}
+
+// === S2b: Desktop multi-pane detail renderers ===
+function renderCleaningDetailPane(r){
+  const k = keyFor(r);
+  const isDone = !!done[k];
+  const isCancelled = !!cancelled[k];
+  const cId = assignments[k];
+  const cleaner = cId ? (cleaners||[]).find(c => c.id === cId) : null;
+  const t = timers[k];
+  const isExtra = !!r._isExtra;
+  const propName = r.listing || '';
+  let h = '<div class="detail-pane">';
+  h += '<div class="detail-pane-header">';
+  h += '<div class="detail-pane-title">'+esc(r.guest||'Guest')+'</div>';
+  h += '<button class="detail-pane-close" onclick="closeDetailPane()" title="Close">'+icon('xCircle',16)+'</button>';
+  h += '</div>';
+  h += '<div class="detail-pane-body">';
+
+  // Property line
+  h += '<div style="font-size:var(--fs-sm);color:var(--text-2);margin-bottom:14px;display:flex;align-items:center;gap:6px">'+icon('home',14)+' '+esc(propName)+'</div>';
+
+  // Status badges
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">';
+  if(isExtra) h += '<span class="badge badge-primary">+ EXTRA'+(r.price_billed?' &middot; '+r.price_billed+' AED':'')+'</span>';
+  if(isDone) h += '<span class="badge badge-green">DONE</span>';
+  if(isCancelled) h += '<span class="badge badge-red">CANCELLED</span>';
+  if(!isDone && !isCancelled) h += '<span class="badge badge-neutral">PENDING</span>';
+  h += '</div>';
+
+  // Meta
+  h += '<div style="font-size:var(--fs-sm);color:var(--text-2);line-height:1.7;margin-bottom:18px">';
+  if(r.channel) h += '<div>'+icon('msgSquare',12)+' '+esc(r.channel)+'</div>';
+  if(r.numberOfGuests) h += '<div>'+icon('user',12)+' '+r.numberOfGuests+' guest'+(r.numberOfGuests>1?'s':'')+'</div>';
+  h += '<div>'+icon('clock',12)+' Checkout '+esc(r.co||'')+'</div>';
+  if(r.cleaningFee) h += '<div>'+icon('dollar',12)+' '+r.cleaningFee+' AED</div>';
+  h += '</div>';
+
+  // Cleaner assignment
+  h += '<div style="margin-bottom:18px">';
+  h += '<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">Assigned cleaner</div>';
+  if(cleaner){
+    h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-md)"><span style="width:10px;height:10px;border-radius:50%;background:'+(cleaner.color||'#888')+'"></span><strong>'+esc(cleaner.name)+'</strong></div>';
+  } else {
+    h += '<div style="color:var(--text-3);font-size:var(--fs-sm)">Unassigned</div>';
+  }
+  if(!cleanerMode){
+    h += '<button class="btn-secondary" style="margin-top:8px;font-size:var(--fs-xs);padding:5px 12px" onclick="showAssignPicker(\''+esc(k)+'\')">'+icon('user',12)+' '+(cleaner?'Reassign':'Assign')+'</button>';
+  }
+  h += '</div>';
+
+  // Timer
+  if(t){
+    h += '<div style="margin-bottom:18px">';
+    h += '<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">Timer</div>';
+    if(t.duration_minutes){
+      h += '<div>'+icon('clock',12)+' '+t.duration_minutes+' min total';
+      if(t.pause_count) h += ' &middot; '+t.pause_count+' pause'+(t.pause_count>1?'s':'');
+      h += '</div>';
+    } else if(t.paused_at){
+      h += '<div style="color:var(--orange)">'+icon('pause',12)+' Paused</div>';
+    } else if(t.started_at){
+      h += '<div style="color:var(--blue)">'+icon('play',12)+' Running</div>';
+    }
+    h += '</div>';
+  }
+
+  // Actions
+  h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px">';
+  if(!isDone) h += '<button class="btn-success" onclick="markDone(\''+esc(k)+'\')">'+icon('check',14)+' Mark done</button>';
+  else h += '<button class="btn-secondary" onclick="markDone(\''+esc(k)+'\')">'+icon('refresh',14)+' Undo</button>';
+  if(!cleanerMode && typeof toggleCancel === 'function'){
+    h += '<button class="btn-secondary" onclick="toggleCancel(\''+esc(k)+'\')">'+icon('xCircle',14)+' '+(isCancelled?'Restore':'Cancel')+'</button>';
+  }
+  if(isExtra && !cleanerMode){
+    h += '<button class="btn-secondary" onclick="openExtraModal((extraCleanings||[]).find(e => e.id === '+r._extraId+'))">'+icon('clipboard',14)+' Edit extra</button>';
+  }
+  h += '</div>';
+
+  h += '</div>'; // body
+  h += '</div>'; // detail-pane
+  return h;
+}
+
+function renderTicketDetailPane(t, isManager){
+  const sla = getSLAStatus(t);
+  const isResolved = t.status === 'resolved';
+  const tech = t.assigned_technician_id ? (cleaners||[]).find(c => c.id === t.assigned_technician_id) : null;
+  const vendor = t.assigned_vendor_id ? (vendors||[]).find(v => v.id === t.assigned_vendor_id) : null;
+  const cmts = (typeof mtComments !== 'undefined' ? mtComments[t.id] : null) || [];
+  const propName = t.listing_name || (t.listing_id ? '#'+t.listing_id : 'No property');
+
+  let h = '<div class="detail-pane">';
+  h += '<div class="detail-pane-header">';
+  h += '<div class="detail-pane-title">'+esc(t.title)+'</div>';
+  h += '<button class="detail-pane-close" onclick="closeDetailPane()" title="Close">'+icon('xCircle',16)+'</button>';
+  h += '</div>';
+  h += '<div class="detail-pane-body">';
+
+  // Badges
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">';
+  h += '<span class="mt-pri-badge '+t.priority+'">'+t.priority+'</span>';
+  h += '<span class="mt-status '+t.status+'">'+t.status.replace(/_/g,' ').toUpperCase()+'</span>';
+  if(t.sla_deadline) h += '<span class="mt-sla '+sla.cls+'">'+sla.label+'</span>';
+  h += '</div>';
+
+  // Meta
+  h += '<div style="font-size:var(--fs-sm);color:var(--text-2);line-height:1.7;margin-bottom:14px">';
+  h += '<div>'+icon('home',12)+' '+esc(propName)+'</div>';
+  if(t.category) h += '<div>'+icon('wrench',12)+' '+esc(t.category)+'</div>';
+  h += '<div>'+icon('clock',12)+' Created '+new Date(t.created_at).toLocaleString()+'</div>';
+  h += '<div>'+icon('user',12)+' Reported by '+esc(t.reported_by||'unknown')+'</div>';
+  h += '</div>';
+
+  // Description
+  if(t.description && t.description !== t.title){
+    h += '<div style="background:var(--bg-2);border-radius:var(--radius-md);padding:10px 12px;font-size:var(--fs-sm);color:var(--text);margin-bottom:14px;line-height:1.5">'+esc(t.description)+'</div>';
+  }
+
+  // Assignment
+  h += '<div style="margin-bottom:14px">';
+  h += '<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">Assigned to</div>';
+  if(tech){ h += '<div style="font-weight:600">'+icon('user',14)+' '+esc(tech.name)+' <span style="color:var(--text-3);font-weight:400;font-size:var(--fs-xs)">('+(tech.role||'cleaner')+')</span></div>'; }
+  else if(vendor){ h += '<div style="font-weight:600">'+icon('user',14)+' '+esc(vendor.name)+' <span style="color:var(--text-3);font-weight:400;font-size:var(--fs-xs)">(vendor)</span></div>'; }
+  else { h += '<div style="color:var(--text-3)">Unassigned</div>'; }
+  if(isManager && !isResolved){
+    const lbl = (tech || vendor) ? 'Reassign' : 'Assign';
+    h += '<button class="btn-secondary" style="margin-top:6px;font-size:var(--fs-xs);padding:5px 12px" onclick="openAssignPicker('+t.id+')">'+icon('user',12)+' '+lbl+'…</button>';
+  }
+  h += '</div>';
+
+  // Actions
+  if(isManager){
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">';
+    if(['open','assigned'].includes(t.status)) h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'in_progress\')">Start work</button>';
+    if(['in_progress','waiting_parts'].includes(t.status)) h += '<button class="btn-success" onclick="resolveTicket('+t.id+')">'+icon('check',14)+' Resolve</button>';
+    if(t.status === 'in_progress') h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'waiting_parts\')">Need parts</button>';
+    if(t.status === 'waiting_parts') h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'in_progress\')">Resume</button>';
+    if(isResolved) h += '<button class="btn-secondary" onclick="reopenTicket('+t.id+')">Reopen</button>';
+    h += '</div>';
+  }
+
+  // Inline comments
+  h += '<div class="mt-cmt-section">';
+  h += '<div class="mt-cmt-header">'+icon('msgSquare',14)+' Comments <span style="color:var(--text-3);font-weight:400">'+cmts.length+'</span></div>';
+  if(cmts.length === 0){
+    h += '<div class="mt-cmt-empty">No comments yet.</div>';
+  } else {
+    h += '<div class="mt-cmt-list">';
+    cmts.forEach(c => {
+      h += '<div class="mt-cmt-item">';
+      h += '<div class="mt-cmt-meta"><strong>'+esc(c.author||'Unknown')+'</strong> &middot; '+new Date(c.created_at).toLocaleString()+'</div>';
+      h += '<div class="mt-cmt-text">'+esc(c.comment)+'</div>';
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+  h += '<div class="mt-cmt-add">';
+  h += '<input type="text" id="mtCmtInput-'+t.id+'" placeholder="Add a comment…" onkeydown="if(event.key===\'Enter\')submitInlineComment('+t.id+')" />';
+  h += '<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="submitInlineComment('+t.id+')">Send</button>';
+  h += '</div>';
+  h += '</div>';
+
+  h += '</div>'; // body
+  h += '</div>'; // detail-pane
   return h;
 }
 
@@ -4811,7 +5095,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
   const isResolved=t.status==='resolved';
   const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
-  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
+  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
   if(mtSelectMode){
     h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" onclick="event.stopPropagation();toggleMtSelected('+t.id+')"></div>';
   }
@@ -4841,8 +5125,8 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   h+='</div>';
   h+='</div>';
 
-  // Expanded: timeline + actions
-  if(expanded){
+  // Expanded: timeline + actions (mobile-only — desktop uses right-side detail pane)
+  if(expanded && !isDesktop()){
     h+='<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px" onclick="event.stopPropagation()">';
     if(t.description&&t.description!==t.title)h+='<div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.4">'+esc(t.description)+'</div>';
     // Timeline
@@ -5060,6 +5344,18 @@ function renderMtTickets(isManager){
     h += '<button class="btn-secondary" onclick="bulkChangeStatus()" style="font-size:13px;padding:7px 14px">'+icon('refresh',14)+' Status…</button>';
     h += '<button class="btn-ghost" onclick="clearMtSelection()" style="font-size:13px;padding:7px 14px">Cancel</button>';
     h += '</div>';
+  }
+  // S2b: Desktop multi-pane — wrap list with right-side detail
+  if(isDesktop() && currentTab === 'maintenance' && (typeof mtSubTab === 'undefined' || mtSubTab === 'tickets' || !mtSubTab)){
+    let detailHtml = '';
+    if(mtExpandedTicket){
+      const _t = (maintenanceTickets||[]).concat(resolvedTickets||[]).find(x => x.id === mtExpandedTicket);
+      if(_t) detailHtml = renderTicketDetailPane(_t, isManager);
+    }
+    if(!detailHtml){
+      detailHtml = '<div class="detail-pane-empty">'+icon('clipboard',24)+'<div style="margin-top:10px">Select a ticket to see details</div></div>';
+    }
+    h = '<div class="mt-two-col"><div class="mt-list-side">' + h + '</div><aside class="mt-detail-side">' + detailHtml + '</aside></div>';
   }
   return h;
 }
