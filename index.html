@@ -1716,6 +1716,67 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
   .sidebar-toggle { display: none; }
   .card-quick-actions { display: none; }
 }
+.saved-views-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 0 12px;
+  font-size: var(--fs-sm);
+}
+.sv-label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+.sv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 4px 4px 4px 12px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.sv-chip:hover { background: var(--bg-2); border-color: var(--border-strong); color: var(--text); }
+.sv-chip-x {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 6px 0 4px;
+  margin-left: 2px;
+  border-radius: 50%;
+  transition: var(--transition-fast);
+}
+.sv-chip-x:hover { background: var(--red-light); color: var(--red); }
+.sv-save {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-2);
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: var(--transition-fast);
+  font-family: inherit;
+}
+.sv-save:hover { background: var(--bg-3); border-color: var(--border-strong); border-style: solid; color: var(--text); }
+.sv-save svg { width: 12px; height: 12px; }
 </style>
 </head>
 <body>
@@ -1818,6 +1879,97 @@ function haptic(type='light'){
 }
 let cleaners=[],assignments={},templates=[],expandedKey=null,listingPrices={},timers={};
 let checklistCache={},notesCache={},photosCache={};
+// URL state sync
+function readUrlState(){
+  const p = new URLSearchParams(window.location.search);
+  return {
+    tab: p.get('tab'),
+    date: p.get('date'),
+    cleaner: p.get('cleaner'),
+    mtSubTab: p.get('mt'),
+    mtStatus: p.get('mtStatus'),
+    mtCat: p.get('mtCat'),
+    mtSearch: p.get('mtSearch'),
+    dashSection: p.get('dash'),
+  };
+}
+function writeUrlState(){
+  if(typeof window === 'undefined') return;
+  const params = new URLSearchParams();
+  if(currentTab && currentTab !== 'planner') params.set('tab', currentTab);
+  if(typeof selectedDate !== 'undefined' && selectedDate && selectedDate !== 'all') params.set('date', selectedDate);
+  if(typeof filterCleaner !== 'undefined' && filterCleaner) params.set('cleaner', String(filterCleaner));
+  if(typeof mtSubTab !== 'undefined' && mtSubTab && mtSubTab !== 'tickets') params.set('mt', mtSubTab);
+  if(typeof mtFilterStatus !== 'undefined' && mtFilterStatus && mtFilterStatus !== 'all_open') params.set('mtStatus', mtFilterStatus);
+  if(typeof mtFilterCat !== 'undefined' && mtFilterCat) params.set('mtCat', mtFilterCat);
+  if(typeof mtSearch !== 'undefined' && mtSearch) params.set('mtSearch', mtSearch);
+  if(typeof dashSection !== 'undefined' && dashSection && dashSection !== 'ops') params.set('dash', dashSection);
+  const qs = params.toString();
+  const url = window.location.pathname + (qs ? '?' + qs : '');
+  try { history.replaceState({}, '', url); } catch(e) {}
+}
+// Saved views
+let savedViews = JSON.parse(localStorage.getItem('savedViews') || '[]');
+function persistSavedViews(){ localStorage.setItem('savedViews', JSON.stringify(savedViews)); }
+function saveCurrentView(){
+  const name = prompt('View name:');
+  if(!name || !name.trim()) return;
+  const id = 'v_' + Date.now();
+  const view = {
+    id,
+    name: name.trim(),
+    tab: typeof currentTab !== 'undefined' ? currentTab : null,
+    date: typeof selectedDate !== 'undefined' ? selectedDate : null,
+    cleaner: typeof filterCleaner !== 'undefined' ? filterCleaner : null,
+    mtSubTab: typeof mtSubTab !== 'undefined' ? mtSubTab : null,
+    mtFilterStatus: typeof mtFilterStatus !== 'undefined' ? mtFilterStatus : null,
+    mtFilterCat: typeof mtFilterCat !== 'undefined' ? mtFilterCat : null,
+    mtSearch: typeof mtSearch !== 'undefined' ? mtSearch : null,
+    dashSection: typeof dashSection !== 'undefined' ? dashSection : null,
+  };
+  savedViews.push(view);
+  persistSavedViews();
+  toast('View saved: '+name,'success');
+  haptic('light');
+  render();
+}
+function applyView(id){
+  const v = savedViews.find(x => x.id === id);
+  if(!v) return;
+  if(v.tab !== null) currentTab = v.tab;
+  if(v.date !== null) selectedDate = v.date;
+  if(v.cleaner !== null) filterCleaner = v.cleaner;
+  if(v.mtSubTab !== null) mtSubTab = v.mtSubTab;
+  if(v.mtFilterStatus !== null) mtFilterStatus = v.mtFilterStatus;
+  if(v.mtFilterCat !== null) mtFilterCat = v.mtFilterCat;
+  if(v.mtSearch !== null) mtSearch = v.mtSearch;
+  if(v.dashSection !== null) dashSection = v.dashSection;
+  render();
+  toast('Applied: '+v.name,'success');
+  haptic('light');
+}
+function deleteView(id, e){
+  if(e) e.stopPropagation();
+  savedViews = savedViews.filter(v => v.id !== id);
+  persistSavedViews();
+  render();
+  toast('View deleted','info');
+}
+function renderSavedViewsBar(){
+  let h = '<div class="saved-views-bar">';
+  if(savedViews && savedViews.length > 0){
+    h += '<span class="sv-label">Views:</span>';
+    savedViews.forEach(v => {
+      h += '<span class="sv-chip" onclick="applyView(\''+v.id+'\')">';
+      h += esc(v.name);
+      h += '<button class="sv-chip-x" onclick="deleteView(\''+v.id+'\',event)" title="Delete">×</button>';
+      h += '</span>';
+    });
+  }
+  h += '<button class="sv-save" onclick="saveCurrentView()" title="Save current filters as a view">'+icon('plus',12)+' Save view</button>';
+  h += '</div>';
+  return h;
+}
 let currentTab='planner',filterCleaner=null;
 let dashMonth=new Date().getMonth(),dashYear=new Date().getFullYear();
 let dashData=null,dashLoading=false;
@@ -3376,6 +3528,7 @@ function render(){
   // #6 PIN screen
   if(!cleanerMode&&window.location.hash==='#cleaner'){renderPinScreen();return;}
   if(cleanerMode&&window.location.hash!=='#cleaner')window.location.hash='#cleaner';
+  try { writeUrlState(); } catch(e) {}
   if(currentTab==='maintenance')return renderMaintenance();
   // properties tab removed
   if(currentTab==='dashboard')return renderDashboard();
@@ -3504,6 +3657,7 @@ function renderPlanner(){
   }
 
   h+='<div class="container"><div class="planner-two-col"><div class="planner-main">';
+  if(!cleanerMode) h+=renderSavedViewsBar();
   h+=renderNotifBanner();
 
   const sortedDates=Object.keys(grouped).sort();
@@ -4761,6 +4915,8 @@ function renderMtTickets(isManager){
   // Force list mode (board mode kept as dead code, can be re-enabled later)
   if(mtViewMode!=='list')mtViewMode='list';
 
+  if(isManager) h+=renderSavedViewsBar();
+
   // === Action pills (Reports / History modals) — manager only ===
   if(isManager){
     h+='<div class="mt-actions-bar">';
@@ -5553,6 +5709,29 @@ document.addEventListener('keydown', (e) => {
 
 // ============ INIT ============
 if(sidebarCollapsed) document.body.classList.add('sidebar-collapsed');
+{
+  const us = readUrlState();
+  if(us.tab) currentTab = us.tab;
+  if(us.date) selectedDate = us.date;
+  if(us.cleaner) filterCleaner = Number(us.cleaner) || us.cleaner;
+  if(us.mtSubTab) mtSubTab = us.mtSubTab;
+  if(us.mtStatus) mtFilterStatus = us.mtStatus;
+  if(us.mtCat) mtFilterCat = us.mtCat;
+  if(us.mtSearch) mtSearch = us.mtSearch;
+  if(us.dashSection) dashSection = us.dashSection;
+}
+window.addEventListener('popstate', () => {
+  const us = readUrlState();
+  if(us.tab !== undefined) currentTab = us.tab || 'planner';
+  if(us.date !== undefined) selectedDate = us.date || 'all';
+  if(us.cleaner !== undefined) filterCleaner = us.cleaner ? (Number(us.cleaner) || us.cleaner) : null;
+  if(us.mtSubTab !== undefined) mtSubTab = us.mtSubTab || 'tickets';
+  if(us.mtStatus !== undefined) mtFilterStatus = us.mtStatus || 'all_open';
+  if(us.mtCat !== undefined) mtFilterCat = us.mtCat || '';
+  if(us.mtSearch !== undefined) mtSearch = us.mtSearch || '';
+  if(us.dashSection !== undefined) dashSection = us.dashSection || 'ops';
+  render();
+});
 initSwipe();
 fetchAll();
 setInterval(fetchAll,5*60*1000);
