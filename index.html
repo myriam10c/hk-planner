@@ -472,6 +472,19 @@ button:focus-visible, .icon-btn:focus-visible, [role="button"]:focus-visible { o
     gap: 24px;
     align-items: flex-start;
   }
+  /* Constrain main column so wide tables don't bleed into sidebar */
+  .planner-main { min-width: 0; }
+  /* Force table to respect parent width — prevents column expansion overlap */
+  .planner-main .compact-table { table-layout: fixed; }
+  .planner-main .compact-table th,
+  .planner-main .compact-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* In table view, hide sidebar widget for more room — set via body class */
+  body.planner-table-mode .planner-two-col { grid-template-columns: minmax(0, 1fr); }
+  body.planner-table-mode .planner-sidebar { display: none; }
   .planner-sidebar {
     position: sticky;
     top: 84px;
@@ -2499,8 +2512,14 @@ let mtComments={};
 // === DESKTOP S3: View toggle (cards <-> table), context menu, drag-drop ===
 let plannerViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('plannerViewMode')) || 'cards'; // 'cards' | 'table'
 let mtViewModeUI = (typeof localStorage !== 'undefined' && localStorage.getItem('mtViewModeUI')) || 'cards'; // 'cards' | 'table'
-function setPlannerViewMode(m){ plannerViewMode = m; try{ localStorage.setItem('plannerViewMode', m); }catch(e){} render(); }
+function setPlannerViewMode(m){ plannerViewMode = m; try{ localStorage.setItem('plannerViewMode', m); }catch(e){} applyPlannerLayoutMode(); render(); }
 function setMtViewModeUI(m){ mtViewModeUI = m; try{ localStorage.setItem('mtViewModeUI', m); }catch(e){} render(); }
+function applyPlannerLayoutMode(){
+  // Toggle body class so CSS can hide sidebar in table mode (full-width table)
+  if(typeof document === 'undefined') return;
+  const onPlanner = (typeof currentTab === 'undefined' || currentTab === 'planner');
+  document.body.classList.toggle('planner-table-mode', onPlanner && plannerViewMode === 'table');
+}
 
 let tableSortPlanner = { col: 'co', asc: true };
 let tableSortMt = { col: 'created_at', asc: false };
@@ -4368,6 +4387,7 @@ function render(){
   if(!cleanerMode&&window.location.hash==='#cleaner'){renderPinScreen();return;}
   if(cleanerMode&&window.location.hash!=='#cleaner')window.location.hash='#cleaner';
   try { writeUrlState(); } catch(e) {}
+  try { applyPlannerLayoutMode(); } catch(e) {}
   if(currentTab==='maintenance')return renderMaintenance();
   // properties tab removed
   if(currentTab==='dashboard')return renderDashboard();
