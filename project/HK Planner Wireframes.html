@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HK Planner — Wireframes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="wireframes.css" />
+  <style>
+    html, body { margin: 0; padding: 0; background: #f0eee9; font-family: Inter, -apple-system, sans-serif; }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="wf-shell.jsx"></script>
+  <script type="text/babel" src="wf-data.jsx"></script>
+  <script type="text/babel" src="wf-checkout.jsx"></script>
+  <script type="text/babel" src="wf-property.jsx"></script>
+  <script type="text/babel" src="wf-inbox.jsx"></script>
+  <script type="text/babel" src="wf-other.jsx"></script>
+
+  <script type="text/babel">
+    const D  = 1280, DH = 760;   // desktop artboard
+    const DT = 1100, DTH = 700;  // smaller desktop
+    const M  = 320,  MH = 640;   // mobile
+
+    const App = () => (
+      <DesignCanvas>
+        <DCSection id="intro" title="HK Planner — Wireframes" subtitle="Low-fi exploration · 5 directions per major screen · clean Inter / boxy">
+          <DCArtboard id="readme" label="README · how to read this" width={520} height={420}>
+            <div className="wf" style={{ padding: 24, fontSize: 13, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 20, fontWeight: 800 }}>HK Planner</div>
+              <div className="muted" style={{ marginTop: 4 }}>Daily checkout + maintenance ticket tool</div>
+              <hr/>
+              <p>Built around two operating loops:</p>
+              <ol style={{ paddingLeft: 18, marginTop: 0 }}>
+                <li><b>Daily turnovers</b> — pulled from Hostaway / any PMS. Manager dispatches; cleaner executes on mobile with checklist + photos.</li>
+                <li><b>WhatsApp → Tickets</b> — Green API watches selected chats; AI parses messages into draft tickets; manager confirms or auto-creates.</li>
+              </ol>
+              <hr/>
+              <h3>What's in this canvas</h3>
+              <ul style={{ paddingLeft: 18, marginTop: 4, fontSize: 12 }}>
+                <li><b>Checkouts</b> — 5 variations (table, board, map, mobile stack, mobile timeline)</li>
+                <li><b>Property / checklist</b> — 5 variations (split, dense, mobile checklist, photo-first, step-by-step)</li>
+                <li><b>WhatsApp inbox</b> — 5 variations (split + AI, inline, threaded, triage queue, mobile)</li>
+                <li><b>Ticket detail</b> — 3 variations (full record, board, mobile tech)</li>
+                <li><b>Calendar</b> — 3 variations (week, matrix, cleaner timeline)</li>
+                <li><b>Team · Reports · Settings</b></li>
+              </ul>
+              <p className="muted" style={{ fontSize: 11, marginTop: 10 }}>Tap any board → fullscreen. Drag to reorder. Yellow notes = design rationale.</p>
+            </div>
+          </DCArtboard>
+          <DCArtboard id="legend" label="Vocabulary" width={420} height={420}>
+            <div className="wf" style={{ padding: 18, fontSize: 12 }}>
+              <h3>Statuses</h3>
+              <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                <Status s="pending" /><Status s="in-progress" /><Status s="done" /><Status s="blocked" /><Status s="open" /><Status s="closed" /><Status s="waiting" />
+              </div>
+              <hr/>
+              <h3>Priorities</h3>
+              <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                <Prio p="urgent" /><Prio p="high" /><Prio p="med" /><Prio p="low" />
+              </div>
+              <hr/>
+              <h3>Tones</h3>
+              <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                <span className="pill">neutral</span>
+                <span className="pill hi">attention</span>
+                <span className="pill warn">caution</span>
+                <span className="pill bad">issue</span>
+                <span className="pill good">resolved</span>
+                <span className="pill wa">whatsapp</span>
+              </div>
+              <hr/>
+              <h3>Frames</h3>
+              <div className="muted" style={{ fontSize: 11 }}>Desktop = 1280×760. Mobile = 320×640. All wireframes share Inter type and a 1.5pt black-on-paper line system.</div>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="checkouts" title="1 · Daily checkouts" subtitle="Today's turnovers · 5 directions">
+          <DCArtboard id="co-v1" label="V1 · Desktop · Dense table" width={D} height={DH}><CheckoutV1/></DCArtboard>
+          <DCArtboard id="co-v2" label="V2 · Desktop · Kanban by status" width={D} height={DH}><CheckoutV2/></DCArtboard>
+          <DCArtboard id="co-v3" label="V3 · Desktop · Map + routes" width={D} height={DH}><CheckoutV3/></DCArtboard>
+          <DCArtboard id="co-v4" label="V4 · Mobile · Cleaner card stack" width={M} height={MH}><CheckoutV4/></DCArtboard>
+          <DCArtboard id="co-v5" label="V5 · Mobile · Schedule timeline" width={M} height={MH}><CheckoutV5/></DCArtboard>
+        </DCSection>
+
+        <DCSection id="property" title="2 · Property / cleaning checklist" subtitle="Per-stop view · 5 directions">
+          <DCArtboard id="pr-v1" label="V1 · Desktop · Split (checklist + meta)" width={D} height={DH}><PropertyV1/></DCArtboard>
+          <DCArtboard id="pr-v2" label="V2 · Desktop · Dense single page" width={D} height={DH}><PropertyV2/></DCArtboard>
+          <DCArtboard id="pr-v3" label="V3 · Mobile · Checklist" width={M} height={MH}><PropertyV3/></DCArtboard>
+          <DCArtboard id="pr-v4" label="V4 · Mobile · Photo-first" width={M} height={MH}><PropertyV4/></DCArtboard>
+          <DCArtboard id="pr-v5" label="V5 · Mobile · Step-by-step focus" width={M} height={MH}><PropertyV5/></DCArtboard>
+        </DCSection>
+
+        <DCSection id="inbox" title="3 · WhatsApp inbox → tickets" subtitle="5 directions · explore parsing UX">
+          <DCArtboard id="in-v1" label="V1 · Split · Raw feed + AI suggestions" width={D} height={DH}><InboxV1/></DCArtboard>
+          <DCArtboard id="in-v2" label="V2 · Inline parser · forms beneath each msg" width={D} height={DH}><InboxV2/></DCArtboard>
+          <DCArtboard id="in-v3" label="V3 · Threaded · convo + linked ticket" width={D} height={DH}><InboxV3/></DCArtboard>
+          <DCArtboard id="in-v4" label="V4 · Triage queue · one-at-a-time" width={D} height={DH}><InboxV4/></DCArtboard>
+          <DCArtboard id="in-v5" label="V5 · Mobile · inbox" width={M} height={MH}><InboxV5/></DCArtboard>
+        </DCSection>
+
+        <DCSection id="ticket" title="4 · Ticket detail" subtitle="3 directions">
+          <DCArtboard id="ti-v1" label="V1 · Full record · activity log" width={D} height={DH}><TicketV1/></DCArtboard>
+          <DCArtboard id="ti-v2" label="V2 · Board · all tickets" width={D} height={DH}><TicketV2/></DCArtboard>
+          <DCArtboard id="ti-v3" label="V3 · Mobile · technician" width={M} height={MH}><TicketV3/></DCArtboard>
+        </DCSection>
+
+        <DCSection id="cal" title="5 · Calendar" subtitle="3 directions">
+          <DCArtboard id="cal-v1" label="V1 · Week grid" width={D} height={DH}><CalV1/></DCArtboard>
+          <DCArtboard id="cal-v2" label="V2 · Property × day matrix" width={D} height={DH}><CalV2/></DCArtboard>
+          <DCArtboard id="cal-v3" label="V3 · Cleaner timeline (Gantt)" width={D} height={DH}><CalV3/></DCArtboard>
+        </DCSection>
+
+        <DCSection id="meta" title="6 · Team · Reports · Settings" subtitle="Supporting screens">
+          <DCArtboard id="team" label="Team · Staff" width={D} height={DH}><TeamV1/></DCArtboard>
+          <DCArtboard id="reports" label="Reports · KPIs" width={D} height={DH}><Reports/></DCArtboard>
+          <DCArtboard id="settings" label="Settings · Hostaway + Green API" width={D} height={DH}><Settings/></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App/>);
+  </script>
+</body>
+</html>
