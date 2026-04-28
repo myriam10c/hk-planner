@@ -1,0 +1,17 @@
+{
+  "name": "hk-planner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HK Planner — housekeeping & maintenance scheduler. Single-file vanilla-JS frontend deployed to Netlify, backed by Supabase edge functions.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:install": "playwright install chromium",
+    "deploy:proxy": "./deploy-proxy.sh",
+    "deploy:netlify": "cd deploy-netlify && zip -qr /tmp/hk-deploy.zip . -x '*.DS_Store' && curl -s -X POST -H \"Authorization: Bearer $(grep -E '^export NETLIFY_AUTH_TOKEN' ~/.netlify/token.env | cut -d'\"' -f2)\" -H 'Content-Type: application/zip' --data-binary @/tmp/hk-deploy.zip https://api.netlify.com/api/v1/sites/d6377da2-9acb-4fbf-84a5-f7bdd87e120b/deploys"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

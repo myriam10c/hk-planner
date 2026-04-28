@@ -6,3 +6,7 @@ node_modules/
 .netlify/
 .vscode/
 .idea/
+.claude/
+playwright-report/
+test-results/
+.playwright/
