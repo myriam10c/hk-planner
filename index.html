@@ -2223,12 +2223,42 @@ async function completePreventive(id){
 }
 // SLA helper
 function getSLAStatus(ticket){
-  if(!ticket.sla_deadline)return{cls:'ok',label:'No SLA'};
+  if(!ticket.sla_deadline)return{cls:'ok',label:'No SLA',pct:null,hoursLeft:null};
   const now=Date.now(),deadline=new Date(ticket.sla_deadline).getTime();
   const hoursLeft=Math.round((deadline-now)/3600000);
-  if(hoursLeft<0)return{cls:'breach',label:'SLA BREACH ('+Math.abs(hoursLeft)+'h over)'};
-  if(hoursLeft<4)return{cls:'warning',label:'⚠️ '+hoursLeft+'h left'};
-  return{cls:'ok',label:hoursLeft+'h left'};
+  // Bar fill: hoursLeft / 24, clamped 0-100. >24h = full; ≤0 = empty.
+  const pct=Math.max(0,Math.min(100,Math.round((hoursLeft/24)*100)));
+  if(hoursLeft<0)return{cls:'breach',label:'SLA breach +'+Math.abs(hoursLeft)+'h',pct:0,hoursLeft};
+  if(hoursLeft<4)return{cls:'warning',label:hoursLeft+'h left',pct,hoursLeft};
+  return{cls:'ok',label:hoursLeft+'h left',pct,hoursLeft};
+}
+
+// Status label + tooltip — friendlier than t.status.toUpperCase()
+const STATUS_LABELS={open:'Open',assigned:'Assigned',in_progress:'In progress',waiting_parts:'Waiting parts',resolved:'Resolved',cancelled:'Cancelled'};
+const STATUS_HINTS={
+  open:'Reported, not yet assigned',
+  assigned:'Someone is responsible, work not started',
+  in_progress:'Active work happening',
+  waiting_parts:'Blocked — waiting on parts or vendor',
+  resolved:'Fixed and closed',
+  cancelled:'False positive / duplicate / not a real issue'
+};
+function statusLabel(s){return STATUS_LABELS[s]||(s||'').replace(/_/g,' ');}
+function dismissStatusLegend(){
+  try{localStorage.setItem('mtStatusLegendDismissed','1');}catch(e){}
+  render();
+}
+function statusPillHtml(s){
+  const tip=STATUS_HINTS[s]||'';
+  return '<span class="mt-status '+esc(s||'open')+'" title="'+esc(tip)+'">'+esc(statusLabel(s))+'</span>';
+}
+// Visual SLA bar: 60px-wide track with colored fill; tooltip shows the time text
+function slaBarHtml(sla){
+  if(!sla||sla.pct===null)return '';
+  return '<span class="mt-sla-bar '+esc(sla.cls)+'" title="'+esc(sla.label)+'">'+
+    '<span class="bar-track"><span class="bar-fill" style="width:'+sla.pct+'%"></span></span>'+
+    '<span class="bar-label">'+esc(sla.label)+'</span>'+
+    '</span>';
 }
 function setMtSubTab(t){
   if(t==='__reports'){openMtReportsModal();return;}
@@ -2824,8 +2854,8 @@ function renderTicketDetailPane(t, isManager){
   // Badges
   h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">';
   h += '<span class="mt-pri-badge '+t.priority+'">'+t.priority+'</span>';
-  h += '<span class="mt-status '+t.status+'">'+t.status.replace(/_/g,' ').toUpperCase()+'</span>';
-  if(t.sla_deadline) h += '<span class="mt-sla '+sla.cls+'">'+sla.label+'</span>';
+  h += statusPillHtml(t.status);
+  if(t.sla_deadline) h += slaBarHtml(sla);
   h += '</div>';
 
   // Meta
@@ -4025,8 +4055,8 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   h+='</div>';
   // Line 3: status badge + SLA countdown (big)
   h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">';
-  h+='<span class="mt-status '+t.status+'">'+t.status.replace(/_/g,' ').toUpperCase()+'</span>';
-  if(t.sla_deadline)h+='<span class="mt-sla-big '+sla.cls+'">'+sla.label+'</span>';
+  h+=statusPillHtml(t.status);
+  if(t.sla_deadline)h+=slaBarHtml(sla);
   h+='</div>';
   // Line 4: assigned technician + date
   h+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text3);gap:8px">';
@@ -4199,6 +4229,26 @@ function renderMtTickets(isManager){
   // All history: open + resolved combined, for browse / audit
   h+='<div class="mt-stat-card'+(mtFilterStatus==='all_history'?' active':'')+'" onclick="setMtStatFilter(\'all_history\')"><div class="mt-stat-num" style="color:var(--text-3)">'+allHistoryCount+'</div><div class="mt-stat-label">All</div></div>';
   h+='</div>';
+
+  // === Status lifecycle legend (dismissible, persisted in localStorage) ===
+  const _showLegend=(function(){try{return localStorage.getItem('mtStatusLegendDismissed')!=='1';}catch(e){return true;}})();
+  if(_showLegend){
+    h+='<div class="mt-status-legend" title="Hover any status pill in the list for a definition">';
+    h+='<span class="mt-legend-title">Lifecycle:</span>';
+    h+=statusPillHtml('open');
+    h+='<span class="mt-legend-arrow">→</span>';
+    h+=statusPillHtml('assigned');
+    h+='<span class="mt-legend-arrow">→</span>';
+    h+=statusPillHtml('in_progress');
+    h+='<span class="mt-legend-arrow">⇄</span>';
+    h+=statusPillHtml('waiting_parts');
+    h+='<span class="mt-legend-arrow">→</span>';
+    h+=statusPillHtml('resolved');
+    h+='<span class="mt-legend-sep">·</span>';
+    h+=statusPillHtml('cancelled');
+    h+='<button class="mt-legend-dismiss" onclick="dismissStatusLegend()" title="Hide this legend">'+icon('x',12)+'</button>';
+    h+='</div>';
+  }
 
   // === Filters (status filter handled by stats-bar above) ===
   h+='<div class="settings-panel" style="padding-bottom:8px">';
