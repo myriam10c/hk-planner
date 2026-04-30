@@ -1557,6 +1557,72 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
   color: var(--text);
   line-height: 1.4;
 }
+
+/* Auto-extracted (bot) comments — quieter visual to separate them from human notes */
+.mt-cmt-item.auto {
+  background: transparent;
+  border-left: 2px solid var(--border);
+  border-radius: 0;
+  padding-left: 10px;
+}
+.mt-cmt-item.auto .mt-cmt-text {
+  color: var(--text-2);
+  font-style: italic;
+  font-size: var(--fs-xs);
+}
+.mt-comment.auto {
+  background: transparent;
+}
+.mt-comment.auto .cm-text {
+  color: var(--text-2);
+  font-style: italic;
+  font-size: 12px;
+}
+.cm-bot-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: var(--fw-medium);
+  color: var(--text-3);
+  background: var(--bg-2);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.cm-bot-tag svg { color: var(--text-3); }
+
+/* Last-comment snippet preview on the ticket card — primary "what happened recently" surface */
+.mt-cmt-snippet {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border-left: 2px solid var(--primary-light);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-2);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.mt-cmt-snippet:hover { background: var(--bg-3); }
+.mt-cmt-snippet strong { color: var(--text); font-weight: var(--fw-semibold); }
+.mt-cmt-snippet.auto {
+  border-left-color: var(--border);
+  font-style: italic;
+}
+.mt-cmt-snippet-bot {
+  display: inline-flex;
+  vertical-align: -2px;
+  color: var(--text-3);
+  margin-right: 2px;
+}
+
 .mt-cmt-add {
   display: flex;
   gap: 6px;

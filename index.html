@@ -1936,13 +1936,40 @@ async function submitResolve(id){
   toast('Resolved ✓','success');await refreshMaintenance();
 }
 
+// Auto-extracted comments (from the redirect_resolution_notes_log_entries trigger or its
+// backfill) are bot output, not real human messages. Mark them so they're scannable.
+function isAutoComment(c){
+  const a=(c&&c.author)||'';
+  return /^auto-extracted/i.test(a);
+}
+function renderCommentRowMt(c){
+  const auto=isAutoComment(c);
+  const date=new Date(c.created_at).toLocaleString();
+  const authorHtml=auto
+    ? '<span class="cm-bot-tag" title="Auto-extracted from a WhatsApp / Gemini classifier">'+icon('sparkles',11)+' bot</span>'
+    : '<strong>'+esc(c.author||'Unknown')+'</strong>';
+  let h='<div class="mt-cmt-item'+(auto?' auto':'')+'">';
+  h+='<div class="mt-cmt-meta">'+authorHtml+' &middot; '+date+'</div>';
+  h+='<div class="mt-cmt-text">'+esc(c.comment||'')+'</div>';
+  h+='</div>';
+  return h;
+}
+function renderCommentRowModal(c){
+  const auto=isAutoComment(c);
+  const date=new Date(c.created_at).toLocaleString();
+  const authorHtml=auto
+    ? '<span class="cm-author cm-bot-tag" title="Auto-extracted">'+icon('sparkles',11)+' bot</span>'
+    : '<span class="cm-author">'+esc(c.author||'Unknown')+'</span>';
+  return '<div class="mt-comment'+(auto?' auto':'')+'">'+authorHtml+'<span class="cm-date">'+date+'</span><div class="cm-text">'+esc(c.comment||'')+'</div></div>';
+}
+
 async function viewTicketComments(ticketId){
   const res=await api('getTicketComments',{params:{ticketId}});
   const comments=res.comments||[];
   let commentsHtml='';
   if(comments.length===0) commentsHtml='<p style="color:var(--text3);font-size:12px;padding:12px 0">No comments yet.</p>';
   comments.forEach(c=>{
-    commentsHtml+='<div class="mt-comment"><span class="cm-author">'+esc(c.author||'Unknown')+'</span><span class="cm-date">'+new Date(c.created_at).toLocaleString()+'</span><div class="cm-text">'+esc(c.comment)+'</div></div>';
+    commentsHtml+=renderCommentRowModal(c);
   });
   const html='<h3>💬 Comments</h3>'+
     '<div style="max-height:250px;overflow-y:auto;margin-bottom:12px;border:1px solid var(--border);border-radius:10px;padding:8px">'+commentsHtml+'</div>'+
@@ -1993,7 +2020,12 @@ async function refreshMaintenance(){
 }
 
 async function loadAllTicketComments(){
-  const ids=(maintenanceTickets||[]).map(t=>t.id);
+  // Load comments for both active and resolved tickets so the History/Resolved
+  // filters can show comment counts and snippets too.
+  const ids=Array.from(new Set([
+    ...((maintenanceTickets||[]).map(t=>t.id)),
+    ...((resolvedTickets||[]).map(t=>t.id))
+  ]));
   if(ids.length===0){mtComments={};return;}
   const results=await Promise.all(ids.map(id=>
     api('getTicketComments',{params:{ticketId:id}}).catch(()=>({comments:[]}))
@@ -2761,12 +2793,7 @@ function renderTicketDetailPane(t, isManager){
     h += '<div class="mt-cmt-empty">No comments yet.</div>';
   } else {
     h += '<div class="mt-cmt-list">';
-    cmts.forEach(c => {
-      h += '<div class="mt-cmt-item">';
-      h += '<div class="mt-cmt-meta"><strong>'+esc(c.author||'Unknown')+'</strong> &middot; '+new Date(c.created_at).toLocaleString()+'</div>';
-      h += '<div class="mt-cmt-text">'+esc(c.comment)+'</div>';
-      h += '</div>';
-    });
+    cmts.forEach(c => { h += renderCommentRowMt(c); });
     h += '</div>';
   }
   h += '<div class="mt-cmt-add">';
@@ -3887,12 +3914,21 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   h+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text3);gap:8px">';
   h+='<span>'+(tech?'👤 '+esc(tech.name):'Unassigned')+'</span>';
   h+='<div style="display:flex;align-items:center;gap:8px">';
-  const _cmtCount=(mtComments[t.id]||[]).length;
+  const _cmts=(mtComments[t.id]||[]);
+  const _cmtCount=_cmts.length;
   const _cmtLabel=_cmtCount>0?icon('msgSquare',12)+' '+_cmtCount:icon('msgSquare',12);
   h+='<button class="mt-cmt-btn" onclick="event.stopPropagation();toggleMtExpand('+t.id+')" title="Comments">'+_cmtLabel+'</button>';
   h+='<span>'+new Date(t.created_at).toLocaleDateString()+' · '+esc(t.reported_by||'')+'</span>';
   h+='</div>';
   h+='</div>';
+  // Line 5: last comment snippet (compact preview — primary "reading" surface)
+  if(_cmtCount>0){
+    const _last=_cmts[_cmts.length-1];
+    const _isAuto=isAutoComment(_last);
+    const _snippet=esc((_last.comment||'').slice(0,140))+(((_last.comment||'').length>140)?'…':'');
+    const _author=_isAuto?'<span class="mt-cmt-snippet-bot">'+icon('sparkles',10)+'</span>':'<strong>'+esc(_last.author||'Unknown')+'</strong>';
+    h+='<div class="mt-cmt-snippet'+(_isAuto?' auto':'')+'" onclick="event.stopPropagation();toggleMtExpand('+t.id+')" title="View all '+_cmtCount+' comment'+(_cmtCount>1?'s':'')+'">'+_author+' &middot; '+_snippet+'</div>';
+  }
 
   // Expanded: timeline + actions (mobile-only — desktop uses right-side detail pane)
   if(expanded && !isDesktop()){
@@ -3931,12 +3967,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
       h+='<div class="mt-cmt-empty">No comments yet.</div>';
     }else{
       h+='<div class="mt-cmt-list">';
-      cmts.forEach(c=>{
-        h+='<div class="mt-cmt-item">';
-        h+='<div class="mt-cmt-meta"><strong>'+esc(c.author||'Unknown')+'</strong> &middot; '+new Date(c.created_at).toLocaleString()+'</div>';
-        h+='<div class="mt-cmt-text">'+esc(c.comment)+'</div>';
-        h+='</div>';
-      });
+      cmts.forEach(c=>{ h+=renderCommentRowMt(c); });
       h+='</div>';
     }
     h+='<div class="mt-cmt-add">';
@@ -4024,14 +4055,18 @@ function renderMtTickets(isManager){
   const inProgCount=allOpen.filter(t=>t.status==='in_progress').length;
   const waitCount=allOpen.filter(t=>t.status==='waiting_parts').length;
   const now7=Date.now()-7*86400000;
-  const resolvedSource=(resolvedTickets&&resolvedTickets.length)?resolvedTickets:maintenanceTickets.filter(t=>t.status==='resolved');
-  const resolvedWeek=resolvedSource.filter(t=>t.resolved_at&&new Date(t.resolved_at).getTime()>now7).length;
+  const resolvedAll=(resolvedTickets&&resolvedTickets.length)?resolvedTickets:maintenanceTickets.filter(t=>t.status==='resolved');
+  const resolvedWeek=resolvedAll.filter(t=>t.resolved_at&&new Date(t.resolved_at).getTime()>now7).length;
+  const allHistoryCount=allOpen.length+resolvedAll.length;
   h+='<div class="mt-stats">';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='all_open'?' active':'')+'" onclick="setMtStatFilter(\'all_open\')"><div class="mt-stat-num">'+allOpen.length+'</div><div class="mt-stat-label">Open</div></div>';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='urgent_stat'?' active':'')+'" onclick="setMtStatFilter(\'urgent_stat\')" style="'+(urgentCount>0?'border-color:var(--red)':'')+'"><div class="mt-stat-num" style="'+(urgentCount>0?'color:var(--red)':'')+'">'+urgentCount+'</div><div class="mt-stat-label">Urgent</div></div>';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='in_progress'?' active':'')+'" onclick="setMtStatFilter(\'in_progress\')"><div class="mt-stat-num" style="color:var(--orange)">'+inProgCount+'</div><div class="mt-stat-label">In Progress</div></div>';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='waiting_parts'?' active':'')+'" onclick="setMtStatFilter(\'waiting_parts\')"><div class="mt-stat-num" style="color:var(--amber)">'+waitCount+'</div><div class="mt-stat-label">Waiting</div></div>';
-  h+='<div class="mt-stat-card"><div class="mt-stat-num" style="color:var(--green)">'+resolvedWeek+'</div><div class="mt-stat-label">Resolved 7d</div></div>';
+  // Resolved: now clickable. Shows last 7d count but filter pulls all resolved tickets.
+  h+='<div class="mt-stat-card'+(mtFilterStatus==='resolved'?' active':'')+'" onclick="setMtStatFilter(\'resolved\')"><div class="mt-stat-num" style="color:var(--green)">'+resolvedWeek+'</div><div class="mt-stat-label">Resolved 7d</div></div>';
+  // All history: open + resolved combined, for browse / audit
+  h+='<div class="mt-stat-card'+(mtFilterStatus==='all_history'?' active':'')+'" onclick="setMtStatFilter(\'all_history\')"><div class="mt-stat-num" style="color:var(--text-3)">'+allHistoryCount+'</div><div class="mt-stat-label">All</div></div>';
   h+='</div>';
 
   // === Filters (status filter handled by stats-bar above) ===
@@ -4045,13 +4080,26 @@ function renderMtTickets(isManager){
   // View toggle removed — list mode is canonical (board mode kept as dead code)
 
   // === Filter logic ===
-  let toShow=maintenanceTickets;
+  // maintenanceTickets = active (open/assigned/in_progress/waiting_parts), resolvedTickets = resolved.
+  // Source set depends on which stat card is active.
+  let toShow;
+  if(mtFilterStatus==='resolved'){
+    toShow=(resolvedTickets||[]).slice();
+  }else if(mtFilterStatus==='all_history'){
+    toShow=(maintenanceTickets||[]).concat(resolvedTickets||[]);
+  }else{
+    toShow=(maintenanceTickets||[]).slice();
+  }
   if(!isManager&&cleanerMode){toShow=toShow.filter(t=>t.assigned_technician_id===cleanerMode.id);}
-  // Default 'all_open' = hide resolved/cancelled
   if(mtFilterStatus==='all_open'){toShow=toShow.filter(t=>t.status!=='resolved'&&t.status!=='cancelled');}
   else if(mtFilterStatus==='urgent_stat'){toShow=toShow.filter(t=>t.priority==='urgent'&&t.status!=='resolved'&&t.status!=='cancelled');}
-  else if(mtFilterStatus){toShow=toShow.filter(t=>t.status===mtFilterStatus);}
+  else if(mtFilterStatus==='in_progress'||mtFilterStatus==='waiting_parts'){toShow=toShow.filter(t=>t.status===mtFilterStatus);}
+  // 'resolved' and 'all_history' use the source-set selection above; no further status filtering.
   if(mtFilterCat){toShow=toShow.filter(t=>t.category===mtFilterCat);}
+  // Sort: when viewing resolved/history, newest-resolved first; otherwise newest-created first.
+  if(mtFilterStatus==='resolved'||mtFilterStatus==='all_history'){
+    toShow.sort((a,b)=>new Date(b.resolved_at||b.created_at)-new Date(a.resolved_at||a.created_at));
+  }
   if(mtSearch.trim()){const q=mtSearch.toLowerCase();toShow=toShow.filter(t=>(t.title||'').toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q));}
 
   if(mtViewMode==='board'){
