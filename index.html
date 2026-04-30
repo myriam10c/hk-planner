@@ -471,7 +471,7 @@ function renderPlannerTable(items){
     const isSelected = (expandedKey === k);
     const isBulk = plannerBulkSelected.has(k);
     const guestFull = r.guest || 'Guest';
-    const listingFull = r.listing || '';
+    const listingFull = formatPropLabel(r.listingId, r.listing) || '';
     const cleanerFull = cleaner ? cleaner.name : 'Unassigned';
     const trCls = (isSelected?'selected ':'') + (isBulk?'bulk-selected':'');
     h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" onclick="toggleExpand(\''+sk+'\',event)">';
@@ -548,7 +548,7 @@ function renderMtTable(tickets){
     h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="toggleMtExpand('+t.id+')">';
     h += '<td class="muted">'+(t.created_at?new Date(t.created_at).toLocaleDateString():'')+'</td>';
     h += '<td><strong>'+esc(t.title||'')+'</strong></td>';
-    h += '<td class="muted">'+esc(t.listing_name||t.listing_id||'—')+'</td>';
+    h += '<td class="muted">'+esc(formatPropLabel(t.listing_id, t.listing_name)||t.listing_id||'—')+'</td>';
     h += '<td class="muted">'+esc(t.category||'')+'</td>';
     h += '<td><span class="row-status '+(t.priority||'medium')+'">'+esc(t.priority||'medium')+'</span></td>';
     h += '<td><span class="row-status '+(t.status||'open')+'">'+esc((t.status||'open').replace(/_/g,' '))+'</span></td>';
@@ -589,7 +589,7 @@ function renderMtKanban(tickets){
         const pri = t.priority || 'medium';
         h += '<div class="kanban-card '+pri+(isSel?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="toggleMtExpand('+t.id+')">';
         h += '<div class="kc-title">'+esc(t.title||'')+'</div>';
-        h += '<div class="kc-meta">'+esc(t.listing_name||t.listing_id||'No property')+'</div>';
+        h += '<div class="kc-meta">'+esc(formatPropLabel(t.listing_id, t.listing_name)||t.listing_id||'No property')+'</div>';
         h += '<div class="kc-footer">';
         h += '<span class="kc-pri '+pri+'">'+esc(pri)+'</span>';
         const tech = t.assigned_technician_id ? (cleaners||[]).find(c => c.id === t.assigned_technician_id) : null;
@@ -1110,6 +1110,22 @@ function getBuildingName(listing){
   return bldg;
 }
 function getCleanerById(id){return cleaners.find(c=>c.id===id);}
+
+// Format a property label for display: "1503 · Tiger V Tower" when apt_number known
+// and not already embedded in the listing_name (some Hostaway names already include it).
+// Returns the unmodified name when no apt_number is available.
+function formatPropLabel(listingId, listingName){
+  const name = (listingName || '').trim();
+  if(!listingId) return name;
+  const lp = listingPrices && listingPrices[listingId];
+  const apt = lp && lp.apt_number ? String(lp.apt_number).trim() : '';
+  if(!apt || !name) return name;
+  // If the name already starts with the apt_number (or contains it as a leading prefix
+  // followed by a separator), don't double up.
+  const re = new RegExp('^' + apt.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&') + '\\b', 'i');
+  if(re.test(name)) return name;
+  return apt + ' · ' + name;
+}
 
 function handleCardClick(key,e){
   if(e&&(e.target.closest('.card-cta')||e.target.closest('.card-detail')||e.target.closest('.cleaner-tap')))return;
@@ -2339,7 +2355,7 @@ function openMtHistoryModal(){
     items.forEach(t=>{
       html+='<div style="padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-2)">';
       html+='<div style="font-weight:600;font-size:13px">'+esc(t.title)+'</div>';
-      html+='<div style="font-size:11px;color:var(--text-3);margin-top:2px">'+(t.listing_name?esc(t.listing_name):'No property')+' &middot; '+new Date(t.resolved_at||t.created_at).toLocaleDateString()+'</div>';
+      html+='<div style="font-size:11px;color:var(--text-3);margin-top:2px">'+(t.listing_name?esc(formatPropLabel(t.listing_id, t.listing_name)):'No property')+' &middot; '+new Date(t.resolved_at||t.created_at).toLocaleDateString()+'</div>';
       if(t.resolution_notes)html+='<div style="font-size:12px;color:var(--text-2);margin-top:4px">'+esc(t.resolution_notes)+'</div>';
       html+='</div>';
     });
@@ -2680,7 +2696,7 @@ function renderPlanner(){
       const estTime=getEstTime(r.listingId);
       h+='<div class="card-row-1">';
       h+='<div class="status-dot '+cardStatus+'"></div>';
-      h+='<div class="listing-name">'+esc(r.listing)+(r._isExtra?' <span class="badge-extra">➕ '+esc(r._extraLabel||'EXTRA')+(r.price_billed?' · '+r.price_billed+' AED':'')+'</span>':'')+'</div>';
+      h+='<div class="listing-name">'+esc(formatPropLabel(r.listingId, r.listing))+(r._isExtra?' <span class="badge-extra">➕ '+esc(r._extraLabel||'EXTRA')+(r.price_billed?' · '+r.price_billed+' AED':'')+'</span>':'')+'</div>';
       if(coT) h+='<span class="tag-pill" style="margin-left:auto;flex-shrink:0">'+coT+'</span>';
       h+='</div>';
 
@@ -2812,7 +2828,7 @@ function renderCleaningDetailPane(r){
   const cleaner = cId ? (cleaners||[]).find(c => c.id === cId) : null;
   const t = timers[k];
   const isExtra = !!r._isExtra;
-  const propName = r.listing || '';
+  const propName = formatPropLabel(r.listingId, r.listing) || '';
   let h = '<div class="detail-pane">';
   h += '<div class="detail-pane-header">';
   h += '<div class="detail-pane-title">'+esc(r.guest||'Guest')+'</div>';
@@ -2895,7 +2911,7 @@ function renderTicketDetailPane(t, isManager){
   const tech = t.assigned_technician_id ? (cleaners||[]).find(c => c.id === t.assigned_technician_id) : null;
   const vendor = t.assigned_vendor_id ? (vendors||[]).find(v => v.id === t.assigned_vendor_id) : null;
   const cmts = (typeof mtComments !== 'undefined' ? mtComments[t.id] : null) || [];
-  const propName = t.listing_name || (t.listing_id ? '#'+t.listing_id : 'No property');
+  const propName = formatPropLabel(t.listing_id, t.listing_name) || (t.listing_id ? '#'+t.listing_id : 'No property');
 
   let h = '<div class="detail-pane mt-detail">';
   h += '<div class="detail-pane-header">';
@@ -3706,7 +3722,7 @@ function renderIssues(){
   // Listing select from known properties
   h+='<select id="issueListing"><option value="">Property (optional)</option>';
   const listingIds=[...new Set(RESERVATIONS.map(r=>r.listingId))];
-  RESERVATIONS.forEach(r=>{if(listingIds.includes(r.listingId)){listingIds.splice(listingIds.indexOf(r.listingId),1);h+='<option value="'+r.listingId+'">'+esc(r.listing)+'</option>';}});
+  RESERVATIONS.forEach(r=>{if(listingIds.includes(r.listingId)){listingIds.splice(listingIds.indexOf(r.listingId),1);h+='<option value="'+r.listingId+'">'+esc(formatPropLabel(r.listingId, r.listing))+'</option>';}});
   h+='</select></div>';
   h+='<div style="margin-bottom:8px"><button onclick="issuePhotoUpload()" style="background:white;border:1px dashed var(--border);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;color:var(--text)">📷 Attach Photo</button><span id="issuePhotoPreview" style="margin-left:8px"></span></div>';
   h+='<button class="issue-submit" onclick="reportIssue()">Report Issue</button></div>';
@@ -3751,7 +3767,7 @@ function renderRecurring(){
   h+='<input id="recDesc" placeholder="Description (optional)"/>';
   h+='<div class="form-row" style="display:flex;gap:8px"><select id="recFreq"><option value="7">Weekly (7 days)</option><option value="14">Bi-weekly (14 days)</option><option value="30" selected>Monthly (30 days)</option><option value="60">Every 2 months</option><option value="90">Quarterly (90 days)</option></select>';
   h+='<select id="recListing"><option value="">All Properties</option>';
-  const seen2={};RESERVATIONS.forEach(r=>{if(!seen2[r.listingId]){seen2[r.listingId]=true;h+='<option value="'+r.listingId+'">'+esc(r.listing)+'</option>';}});
+  const seen2={};RESERVATIONS.forEach(r=>{if(!seen2[r.listingId]){seen2[r.listingId]=true;h+='<option value="'+r.listingId+'">'+esc(formatPropLabel(r.listingId, r.listing))+'</option>';}});
   h+='</select></div>';
   h+='<select id="recCleaner"><option value="">Unassigned</option>';
   cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{h+='<option value="'+c.id+'">'+esc(c.name)+'</option>';});
@@ -3891,7 +3907,7 @@ function renderCleanerStats(){
     const timer=timers[key];
     h+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">';
     h+='<div style="font-size:18px">'+(isDone?'✅':'⏳')+'</div>';
-    h+='<div style="flex:1"><div style="font-size:13px;font-weight:600">'+esc(r.listing)+'</div>';
+    h+='<div style="flex:1"><div style="font-size:13px;font-weight:600">'+esc(formatPropLabel(r.listingId, r.listing))+'</div>';
     h+='<div style="font-size:11px;color:var(--text2)">'+formatDate(r.co)+' · '+esc(r.guest)+'</div></div>';
     if(timer&&timer.duration_minutes) h+='<div style="font-size:12px;font-weight:700">'+timer.duration_minutes+' '+t('mins')+'</div>';
     h+='</div>';
@@ -4094,7 +4110,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   // Compact 3-line layout: titles + status / property + SLA / assignee + comment
   // Date/reporter moved to detail pane (kept readable when needed, hidden by default).
   const sla=getSLAStatus(t);
-  const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
+  const propName = formatPropLabel(t.listing_id, t.listing_name) || formatPropLabel(t.listing_id, (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name) || (t.listing_id ? '#'+t.listing_id : null);
   const isResolved=t.status==='resolved';
   const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
   const _cmts=(mtComments[t.id]||[]);
@@ -4331,7 +4347,7 @@ function renderMtTickets(isManager){
       if(colTickets.length===0){h+='<div style="font-size:11px;color:var(--text3);text-align:center;padding:20px 0">No tickets</div>';}
       colTickets.forEach(t=>{
         const sla=getSLAStatus(t);
-        const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
+        const propName = formatPropLabel(t.listing_id, t.listing_name) || formatPropLabel(t.listing_id, (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name) || (t.listing_id ? '#'+t.listing_id : null);
         h+='<div class="mt-kb-card '+t.priority+'" onclick="toggleMtExpand('+t.id+')">';
         h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><strong style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.title)+'</strong><span class="mt-pri-badge '+t.priority+'">'+t.priority+'</span></div>';
         h+='<div style="font-size:10px;color:var(--text2);margin-bottom:4px">🏠 '+(propName?esc(propName):'<em style="color:var(--text3)">No property</em>')+'</div>';
