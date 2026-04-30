@@ -665,16 +665,40 @@ function renderContextMenu(){
       { divider: true },
       cleanerMode || cancelled[id] ? null : { label: 'Cancel cleaning', icon: 'xCircle', danger: true, action: 'closeContextMenu();(typeof toggleCancel===\'function\'?toggleCancel(\''+id+'\'):null)' },
     ].filter(Boolean);
+  } else if(type === '__mt_header__'){
+    items = [
+      { label: 'Share report…', icon: 'download', action: 'closeContextMenu();setMtSubTab(\'__reports\')' },
+      { label: 'History', icon: 'clock', action: 'closeContextMenu();setMtSubTab(\'__history\')' },
+      { divider: true },
+      { label: mtSelectMode ? 'Cancel select' : 'Select multiple', icon: 'check', action: 'closeContextMenu();toggleMtSelectMode()' },
+    ];
   } else if(type === 'ticket'){
     const tid = Number(id);
-    items = [
-      { label: 'Assign / Reassign…', icon: 'user', action: 'closeContextMenu();openAssignPicker('+tid+')' },
-      { label: 'Add comment…', icon: 'msgSquare', action: 'closeContextMenu();mtExpandedTicket='+tid+';render();setTimeout(function(){var i=document.getElementById(\'mtCmtInput-'+tid+'\');if(i)i.focus();},100)' },
-      { label: 'Mark in progress', icon: 'play', action: 'closeContextMenu();updateTicketStatus('+tid+',\'in_progress\')' },
-      { label: 'Resolve…', icon: 'check', action: 'closeContextMenu();resolveTicket('+tid+')' },
-      { divider: true },
-      { label: 'View details', icon: 'clipboard', action: 'closeContextMenu();toggleMtExpand('+tid+')' },
-    ];
+    const t = (maintenanceTickets||[]).concat(resolvedTickets||[]).find(x => x.id === tid);
+    const status = t ? t.status : 'open';
+    const isClosed = status === 'resolved' || status === 'cancelled';
+    items = [];
+    if(!isClosed){
+      items.push({ label: 'Assign / Reassign…', icon: 'user', action: 'closeContextMenu();openAssignPicker('+tid+')' });
+      if(['open','assigned'].includes(status)){
+        items.push({ label: 'Mark in progress', icon: 'play', action: 'closeContextMenu();updateTicketStatus('+tid+',\'in_progress\')' });
+      }
+      if(['assigned','in_progress'].includes(status)){
+        items.push({ label: 'Mark waiting parts', icon: 'pause', action: 'closeContextMenu();updateTicketStatus('+tid+',\'waiting_parts\')' });
+      }
+      if(status === 'waiting_parts'){
+        items.push({ label: 'Resume work', icon: 'play', action: 'closeContextMenu();updateTicketStatus('+tid+',\'in_progress\')' });
+      }
+      items.push({ label: 'Resolve with notes…', icon: 'check', action: 'closeContextMenu();resolveTicket('+tid+')' });
+      items.push({ divider: true });
+      items.push({ label: 'Cancel ticket', icon: 'x', danger: true, action: 'closeContextMenu();cancelTicket('+tid+')' });
+    } else {
+      items.push({ label: 'Edit notes', icon: 'edit', action: 'closeContextMenu();editResolutionNotes('+tid+')' });
+      items.push({ label: 'Reopen', icon: 'refresh', action: 'closeContextMenu();reopenTicket('+tid+')' });
+      items.push({ divider: true });
+    }
+    items.push({ label: 'Add comment…', icon: 'msgSquare', action: 'closeContextMenu();mtExpandedTicket='+tid+';render();setTimeout(function(){var i=document.getElementById(\'mtCmtInput-'+tid+'\');if(i)i.focus();},100)' });
+    items.push({ label: 'View details', icon: 'clipboard', action: 'closeContextMenu();toggleMtExpand('+tid+')' });
   }
   const menuW = 220, menuH = items.length * 36 + 12;
   const left = Math.min(x, window.innerWidth - menuW - 10);
@@ -2256,6 +2280,23 @@ function toggleMtForm(){
   try{ localStorage.setItem('mtFormOpen', window.mtFormOpen ? '1' : '0'); }catch(e){}
   render();
 }
+
+// "More actions" dropdown for the maintenance header — replaces 3 always-visible action pills
+function showMtMoreMenu(e){
+  e.preventDefault();
+  e.stopPropagation();
+  const rect = e.currentTarget.getBoundingClientRect();
+  contextMenuState.open = true;
+  contextMenuState.x = rect.right;
+  contextMenuState.y = rect.bottom + 4;
+  contextMenuState.id = '__mt_more__';
+  contextMenuState.type = '__mt_header__';
+  renderContextMenu();
+}
+function toggleMtCatFilters(){
+  window.mtCatFiltersOpen = !window.mtCatFiltersOpen;
+  render();
+}
 function statusPillHtml(s){
   const tip=STATUS_HINTS[s]||'';
   return '<span class="mt-status '+esc(s||'open')+'" title="'+esc(tip)+'">'+esc(statusLabel(s))+'</span>';
@@ -2845,74 +2886,66 @@ function renderCleaningDetailPane(r){
 }
 
 function renderTicketDetailPane(t, isManager){
+  // Reading-optimised layout. Order: title → meta strip → description → timeline → comments → actions
+  // Actions are at the BOTTOM — reading the ticket comes first.
   const sla = getSLAStatus(t);
   const isResolved = t.status === 'resolved';
+  const isCancelled = t.status === 'cancelled';
+  const isClosed = isResolved || isCancelled;
   const tech = t.assigned_technician_id ? (cleaners||[]).find(c => c.id === t.assigned_technician_id) : null;
   const vendor = t.assigned_vendor_id ? (vendors||[]).find(v => v.id === t.assigned_vendor_id) : null;
   const cmts = (typeof mtComments !== 'undefined' ? mtComments[t.id] : null) || [];
   const propName = t.listing_name || (t.listing_id ? '#'+t.listing_id : 'No property');
 
-  let h = '<div class="detail-pane">';
+  let h = '<div class="detail-pane mt-detail">';
   h += '<div class="detail-pane-header">';
   h += '<div class="detail-pane-title">'+esc(t.title)+'</div>';
   h += '<button class="detail-pane-close" onclick="closeDetailPane()" title="Close">'+icon('xCircle',16)+'</button>';
   h += '</div>';
   h += '<div class="detail-pane-body">';
 
-  // Badges
-  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">';
+  // Meta strip — single row: priority · status · SLA · category
+  h += '<div class="mt-detail-meta">';
   h += '<span class="mt-pri-badge '+t.priority+'">'+t.priority+'</span>';
   h += statusPillHtml(t.status);
   if(t.sla_deadline) h += slaBarHtml(sla);
+  if(t.category) h += '<span class="mt-card-cat">'+(CAT_ICONS[t.category]||'🔨')+' '+esc(t.category)+'</span>';
   h += '</div>';
 
-  // Meta
-  h += '<div style="font-size:var(--fs-sm);color:var(--text-2);line-height:1.7;margin-bottom:14px">';
-  h += '<div>'+icon('home',12)+' '+esc(propName)+'</div>';
-  if(t.category) h += '<div>'+icon('wrench',12)+' '+esc(t.category)+'</div>';
-  h += '<div>'+icon('clock',12)+' Created '+new Date(t.created_at).toLocaleString()+'</div>';
-  h += '<div>'+icon('user',12)+' Reported by '+esc(t.reported_by||'unknown')+'</div>';
+  // Property + assignee — secondary line
+  h += '<div class="mt-detail-secondary">';
+  h += '<span>'+icon('home',12)+' '+esc(propName)+'</span>';
+  if(tech) h += '<span>'+icon('user',12)+' '+esc(tech.name)+'</span>';
+  else if(vendor) h += '<span>'+icon('user',12)+' '+esc(vendor.name)+' <em>(vendor)</em></span>';
+  else h += '<span class="mt-detail-unassigned">'+icon('user',12)+' Unassigned</span>';
   h += '</div>';
 
-  // Description
+  // Description (only if distinct from title)
   if(t.description && t.description !== t.title){
-    h += '<div style="background:var(--bg-2);border-radius:var(--radius-md);padding:10px 12px;font-size:var(--fs-sm);color:var(--text);margin-bottom:14px;line-height:1.5">'+esc(t.description)+'</div>';
+    h += '<div class="mt-detail-desc">'+esc(t.description)+'</div>';
   }
 
-  // Assignment
-  h += '<div style="margin-bottom:14px">';
-  h += '<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">Assigned to</div>';
-  if(tech){ h += '<div style="font-weight:600">'+icon('user',14)+' '+esc(tech.name)+' <span style="color:var(--text-3);font-weight:400;font-size:var(--fs-xs)">('+(tech.role||'cleaner')+')</span></div>'; }
-  else if(vendor){ h += '<div style="font-weight:600">'+icon('user',14)+' '+esc(vendor.name)+' <span style="color:var(--text-3);font-weight:400;font-size:var(--fs-xs)">(vendor)</span></div>'; }
-  else { h += '<div style="color:var(--text-3)">Unassigned</div>'; }
-  if(isManager && !isResolved){
-    const lbl = (tech || vendor) ? 'Reassign' : 'Assign';
-    h += '<button class="btn-secondary" style="margin-top:6px;font-size:var(--fs-xs);padding:5px 12px" onclick="openAssignPicker('+t.id+')">'+icon('user',12)+' '+lbl+'…</button>';
-  }
-  h += '</div>';
-
-  // Actions
-  const isCancelled = t.status === 'cancelled';
-  const isClosed = isResolved || isCancelled;
-  if(isManager){
-    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">';
-    if(!isClosed){
-      if(['open','assigned'].includes(t.status)) h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'in_progress\')">Start work</button>';
-      if(t.status === 'in_progress') h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'waiting_parts\')">Need parts</button>';
-      if(t.status === 'waiting_parts') h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'in_progress\')">Resume</button>';
-      // Resolve: 1-click default; shift-click for notes modal
-      h += '<button class="btn-success" title="Click to resolve · Shift-click to add notes" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+' Resolve</button>';
-      h += '<button class="btn-secondary" title="Cancel — false positive / duplicate" onclick="cancelTicket('+t.id+')">'+icon('x',14)+' Cancel</button>';
-    } else {
-      h += '<button class="btn-secondary" onclick="editResolutionNotes('+t.id+')">'+icon('edit',14)+' Edit notes</button>';
-      h += '<button class="btn-secondary" onclick="reopenTicket('+t.id+')">'+icon('refresh',14)+' Reopen</button>';
-    }
+  // Resolution notes — surfaced when present, separate from the comment thread
+  if(t.resolution_notes){
+    h += '<div class="mt-detail-resolution">';
+    h += '<div class="mt-detail-section-title">'+icon('check',12)+' Resolution notes</div>';
+    h += '<div class="mt-detail-resolution-body">'+esc(t.resolution_notes)+'</div>';
     h += '</div>';
   }
 
-  // Inline comments
+  // Timeline — vertical, only show stages that happened
+  h += '<div class="mt-detail-section-title">'+icon('clock',12)+' Timeline</div>';
+  h += '<div class="mt-tl">';
+  h += '<div class="mt-tl-step done"><span class="mt-tl-dot"></span><div><strong>Created</strong><span class="mt-tl-when">'+new Date(t.created_at).toLocaleString()+'</span><span class="mt-tl-by">by '+esc(t.reported_by||'unknown')+'</span></div></div>';
+  if(t.started_at) h += '<div class="mt-tl-step done"><span class="mt-tl-dot"></span><div><strong>Work started</strong><span class="mt-tl-when">'+new Date(t.started_at).toLocaleString()+'</span></div></div>';
+  if(t.resolved_at) h += '<div class="mt-tl-step done resolved"><span class="mt-tl-dot"></span><div><strong>Resolved</strong><span class="mt-tl-when">'+new Date(t.resolved_at).toLocaleString()+'</span></div></div>';
+  if(t.closed_at && !t.resolved_at) h += '<div class="mt-tl-step done"><span class="mt-tl-dot"></span><div><strong>Closed</strong><span class="mt-tl-when">'+new Date(t.closed_at).toLocaleString()+'</span></div></div>';
+  if(isCancelled) h += '<div class="mt-tl-step done cancelled"><span class="mt-tl-dot"></span><div><strong>Cancelled</strong></div></div>';
+  h += '</div>';
+
+  // Comments — full-width chronological thread (oldest first; "what happened, in order")
   h += '<div class="mt-cmt-section">';
-  h += '<div class="mt-cmt-header">'+icon('msgSquare',14)+' Comments <span style="color:var(--text-3);font-weight:400">'+cmts.length+'</span></div>';
+  h += '<div class="mt-cmt-header">'+icon('msgSquare',14)+' Thread <span style="color:var(--text-3);font-weight:400">'+cmts.length+'</span></div>';
   if(cmts.length === 0){
     h += '<div class="mt-cmt-empty">No comments yet.</div>';
   } else {
@@ -2925,6 +2958,21 @@ function renderTicketDetailPane(t, isManager){
   h += '<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="submitInlineComment('+t.id+')">Send</button>';
   h += '</div>';
   h += '</div>';
+
+  // Actions — bottom of pane, single sticky row. Compact.
+  if(isManager){
+    h += '<div class="mt-detail-actions">';
+    if(!isClosed){
+      h += '<button class="btn-success" title="Click to resolve · Shift to add notes" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+' Resolve</button>';
+      const lbl = (tech || vendor) ? 'Reassign' : 'Assign';
+      h += '<button class="btn-secondary" onclick="openAssignPicker('+t.id+')">'+icon('user',14)+' '+lbl+'</button>';
+      h += '<button class="btn-ghost" onclick="showCardContextMenu(event,'+t.id+',\'ticket\')" title="More actions">'+icon('moreVertical',14)+'</button>';
+    } else {
+      h += '<button class="btn-secondary" onclick="editResolutionNotes('+t.id+')">'+icon('edit',14)+' Edit notes</button>';
+      h += '<button class="btn-secondary" onclick="reopenTicket('+t.id+')">'+icon('refresh',14)+' Reopen</button>';
+    }
+    h += '</div>';
+  }
 
   h += '</div>'; // body
   h += '</div>'; // detail-pane
@@ -4043,48 +4091,43 @@ async function bulkCancelSelected(){
 }
 
 function renderMtTicketCard(t,allProps,isManager,expanded){
+  // Compact 3-line layout: titles + status / property + SLA / assignee + comment
+  // Date/reporter moved to detail pane (kept readable when needed, hidden by default).
   const sla=getSLAStatus(t);
   const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
   const isResolved=t.status==='resolved';
   const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
+  const _cmts=(mtComments[t.id]||[]);
+  const _cmtCount=_cmts.length;
   let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
   if(mtSelectMode){
     h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" onclick="event.stopPropagation();toggleMtSelected('+t.id+')"></div>';
   }
-  // Line 1: title + priority badge
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-  h+='<strong style="font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.title)+'</strong>';
-  h+='<span class="mt-pri-badge '+t.priority+'" style="flex-shrink:0;margin-left:8px">'+t.priority+'</span>';
-  h+='</div>';
-  // Line 2: property + category icon
-  h+='<div style="display:flex;gap:8px;align-items:center;font-size:11px;margin-bottom:6px">';
-  h+='<span style="color:var(--text2)">🏠 '+(propName?esc(propName):'<em style="color:var(--text3)">No property</em>')+'</span>';
-  h+='<span class="mt-cat">'+(CAT_ICONS[t.category]||'🔨')+' '+t.category+'</span>';
-  h+='</div>';
-  // Line 3: status badge + SLA countdown (big)
-  h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">';
+  // Line 1: priority chip + title + status pill
+  h+='<div class="mt-card-row mt-card-row-1">';
+  h+='<span class="mt-pri-badge '+t.priority+'">'+t.priority+'</span>';
+  h+='<strong class="mt-card-title">'+esc(t.title)+'</strong>';
   h+=statusPillHtml(t.status);
-  if(t.sla_deadline)h+=slaBarHtml(sla);
   h+='</div>';
-  // Line 4: assigned technician + date
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text3);gap:8px">';
-  h+='<span>'+(tech?'👤 '+esc(tech.name):'Unassigned')+'</span>';
-  h+='<div style="display:flex;align-items:center;gap:8px">';
-  const _cmts=(mtComments[t.id]||[]);
-  const _cmtCount=_cmts.length;
-  const _cmtLabel=_cmtCount>0?icon('msgSquare',12)+' '+_cmtCount:icon('msgSquare',12);
-  h+='<button class="mt-cmt-btn" onclick="event.stopPropagation();toggleMtExpand('+t.id+')" title="Comments">'+_cmtLabel+'</button>';
-  h+='<span>'+new Date(t.created_at).toLocaleDateString()+' · '+esc(t.reported_by||'')+'</span>';
+  // Line 2: property + category + SLA bar
+  h+='<div class="mt-card-row mt-card-row-2">';
+  h+='<span class="mt-card-prop" title="'+(propName?esc(propName):'No property')+'">'+icon('home',11)+' '+(propName?esc(propName):'<em>No property</em>')+'</span>';
+  h+='<span class="mt-card-cat">'+(CAT_ICONS[t.category]||'🔨')+' '+esc(t.category||'')+'</span>';
+  if(t.sla_deadline) h+='<span class="mt-card-sla">'+slaBarHtml(sla)+'</span>';
   h+='</div>';
-  h+='</div>';
-  // Line 5: last comment snippet (compact preview — primary "reading" surface)
+  // Line 3: assignee + last comment snippet (or "no comments yet")
+  h+='<div class="mt-card-row mt-card-row-3" onclick="event.stopPropagation();toggleMtExpand('+t.id+')" title="View thread">';
+  h+='<span class="mt-card-assignee">'+icon('user',11)+' '+(tech?esc(tech.name):'<em>Unassigned</em>')+'</span>';
   if(_cmtCount>0){
     const _last=_cmts[_cmts.length-1];
     const _isAuto=isAutoComment(_last);
-    const _snippet=esc((_last.comment||'').slice(0,140))+(((_last.comment||'').length>140)?'…':'');
-    const _author=_isAuto?'<span class="mt-cmt-snippet-bot">'+icon('sparkles',10)+'</span>':'<strong>'+esc(_last.author||'Unknown')+'</strong>';
-    h+='<div class="mt-cmt-snippet'+(_isAuto?' auto':'')+'" onclick="event.stopPropagation();toggleMtExpand('+t.id+')" title="View all '+_cmtCount+' comment'+(_cmtCount>1?'s':'')+'">'+_author+' &middot; '+_snippet+'</div>';
+    const _snippet=esc((_last.comment||'').slice(0,90))+(((_last.comment||'').length>90)?'…':'');
+    const _author=_isAuto?'<span class="mt-cmt-snippet-bot" title="auto-extracted">'+icon('sparkles',10)+'</span>':'<strong>'+esc((_last.author||'').split(' ')[0]||'Unknown')+'</strong>';
+    h+='<span class="mt-card-snippet'+(_isAuto?' auto':'')+'">'+_author+' '+_snippet+'</span>';
+  } else {
+    h+='<span class="mt-card-snippet empty">'+icon('msgSquare',11)+' No comments yet</span>';
   }
+  h+='</div>';
 
   // Expanded: timeline + actions (mobile-only — desktop uses right-side detail pane)
   if(expanded && !isDesktop()){
@@ -4142,20 +4185,18 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     h+='</div>';
     h+='</div>';
   }
-  // Desktop hover quick actions
+  // Desktop hover quick actions — 2 primary buttons + kebab "more"
+  // Reduces accidental Cancel clicks (was right next to Resolve before)
   if(!mtSelectMode){
     h+='<div class="card-quick-actions" onclick="event.stopPropagation()">';
     if(t.status !== 'resolved' && t.status !== 'cancelled'){
-      h+='<button class="qa-btn qa-primary" title="Assign" onclick="openAssignPicker('+t.id+')">'+icon('user',14)+'</button>';
-      // 1-click resolve. Always available on non-terminal tickets, undo via toast.
-      // (Modal-based resolveTicket() still in detail pane / context menu for explicit notes flow.)
-      h+='<button class="qa-btn qa-success" title="Resolve (1-click — Shift to add notes)" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+'</button>';
-      h+='<button class="qa-btn qa-danger" title="Cancel ticket (false positive / duplicate)" onclick="cancelTicket('+t.id+')">'+icon('x',14)+'</button>';
+      h+='<button class="qa-btn qa-success" title="Resolve (1-click) — Shift to add notes" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+'</button>';
     } else {
-      // Terminal states get a notes-edit shortcut.
       h+='<button class="qa-btn" title="Edit resolution notes" onclick="editResolutionNotes('+t.id+')">'+icon('edit',14)+'</button>';
     }
     h+='<button class="qa-btn" title="Comment" onclick="toggleMtExpand('+t.id+');setTimeout(function(){var i=document.getElementById(\'mtCmtInput-'+t.id+'\');if(i)i.focus();},80)">'+icon('msgSquare',14)+'</button>';
+    // Kebab — opens the existing right-click menu (Assign, Cancel, Status changes, etc.)
+    h+='<button class="qa-btn" title="More actions" onclick="showCardContextMenu(event,'+t.id+',\'ticket\')">'+icon('moreVertical',14)+'</button>';
     h+='</div>';
   }
   h+='</div>';
@@ -4168,40 +4209,31 @@ function renderMtTickets(isManager){
   // Force list mode (board mode kept as dead code, can be re-enabled later)
   if(mtViewMode!=='list')mtViewMode='list';
 
-  if(isManager) h+=renderSavedViewsBar();
-
-  // === Action pills (Reports / History modals) — manager only ===
+  // Top toolbar — saved views chip on the left, single "More" kebab dropdown on the right
+  // (Share report / History / Select are now inside the kebab — they were 3 always-visible buttons before)
   if(isManager){
-    h+='<div class="mt-actions-bar">';
-    h+='<button class="mt-action-pill" onclick="setMtSubTab(\'__reports\')" title="Reports">';
-    h+='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-    h+=' Share report</button>';
-    h+='<button class="mt-action-pill" onclick="setMtSubTab(\'__history\')" title="History">';
-    h+='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>';
-    h+=' History</button>';
-    h+='<button class="mt-action-pill" onclick="toggleMtSelectMode()" title="Select multiple">';
-    h+='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>';
-    h+=' '+(mtSelectMode ? 'Cancel select' : 'Select')+'</button>';
+    h+='<div class="mt-toolbar-row">';
+    h+='<div class="mt-toolbar-left">'+renderSavedViewsBar()+'</div>';
+    h+='<div class="mt-toolbar-right">';
+    h+='<button class="mt-action-pill" onclick="event.stopPropagation();showMtMoreMenu(event)" title="More actions">'+icon('moreVertical',14)+'</button>';
+    h+='</div>';
     h+='</div>';
   }
 
-  // === Recurring patterns insight banner ===
+  // Recurring patterns banner — show only the top one when collapsed; expandable
   if(isManager && (recurringIssues||[]).length>0){
-    h+='<div class="mt-insight-banner">';
-    h+='<div class="mt-insight-title">'+icon('alertTriangle',16)+' Recurring patterns detected</div>';
-    h+='<div class="mt-insight-list">';
-    recurringIssues.slice(0,3).forEach(ri=>{
-      const lname=(Object.values(listingPrices||{}).find(l=>String(l.listing_id||'')===String(ri.listing_id))||{}).listing_name || (listingPrices&&listingPrices[ri.listing_id]&&listingPrices[ri.listing_id].listing_name) || ri.listing_id || 'Unknown';
-      const _lid=String(ri.listing_id||'').replace(/'/g,"\\'");
-      const _cat=String(ri.category||'').replace(/'/g,"\\'");
-      const _ln=String(lname).replace(/'/g,"\\'");
-      h+='<button class="mt-insight-item" onclick="openInsightAction('+ri.count+',\''+_lid+'\',\''+_cat+'\',\''+_ln+'\')">';
-      h+='<span class="mt-insight-dot" style="background:var(--orange)"></span>';
-      h+='<span><strong>'+esc(lname)+'</strong> &middot; '+esc(ri.category)+' &middot; <strong>'+ri.count+'&times;</strong> in 90 days</span>';
-      h+='<span class="mt-insight-arrow">&rarr;</span>';
-      h+='</button>';
-    });
-    h+='</div></div>';
+    const _ri=recurringIssues[0];
+    const _lname=(Object.values(listingPrices||{}).find(l=>String(l.listing_id||'')===String(_ri.listing_id))||{}).listing_name || (listingPrices&&listingPrices[_ri.listing_id]&&listingPrices[_ri.listing_id].listing_name) || _ri.listing_id || 'Unknown';
+    const _lid=String(_ri.listing_id||'').replace(/'/g,"\\'");
+    const _cat=String(_ri.category||'').replace(/'/g,"\\'");
+    const _ln=String(_lname).replace(/'/g,"\\'");
+    h+='<button class="mt-insight-compact" onclick="openInsightAction('+_ri.count+',\''+_lid+'\',\''+_cat+'\',\''+_ln+'\')" title="Click to investigate">';
+    h+=icon('alertTriangle',14);
+    h+='<span><strong>'+esc(_lname)+'</strong> · '+esc(_ri.category)+' · <strong>'+_ri.count+'×</strong> in 90 days';
+    if(recurringIssues.length>1) h+=' <em style="color:var(--text-3)">+'+(recurringIssues.length-1)+' more</em>';
+    h+='</span>';
+    h+=icon('chevronLeft',12);
+    h+='</button>';
   }
 
   // === Report Issue form — collapsed by default to reduce visual noise ===
@@ -4227,12 +4259,10 @@ function renderMtTickets(isManager){
     h+='</div></div>';
   }
 
-  // === Stats bar ===
-  // "Open" = anything NOT resolved/cancelled (covers open, assigned, in_progress, waiting_parts)
+  // === Stats bar — 4 cards instead of 6 (was: Open/Urgent/InProg/Waiting/Resolved/All) ===
+  // "In progress" and "Waiting parts" filtering is now via the kebab on each card; rarely needed at the list level.
   const allOpen=maintenanceTickets.filter(t=>t.status!=='resolved'&&t.status!=='cancelled');
   const urgentCount=allOpen.filter(t=>t.priority==='urgent').length;
-  const inProgCount=allOpen.filter(t=>t.status==='in_progress').length;
-  const waitCount=allOpen.filter(t=>t.status==='waiting_parts').length;
   const now7=Date.now()-7*86400000;
   const resolvedAll=(resolvedTickets&&resolvedTickets.length)?resolvedTickets:maintenanceTickets.filter(t=>t.status==='resolved');
   const resolvedWeek=resolvedAll.filter(t=>t.resolved_at&&new Date(t.resolved_at).getTime()>now7).length;
@@ -4240,42 +4270,31 @@ function renderMtTickets(isManager){
   h+='<div class="mt-stats">';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='all_open'?' active':'')+'" onclick="setMtStatFilter(\'all_open\')"><div class="mt-stat-num">'+allOpen.length+'</div><div class="mt-stat-label">Open</div></div>';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='urgent_stat'?' active':'')+'" onclick="setMtStatFilter(\'urgent_stat\')" style="'+(urgentCount>0?'border-color:var(--red)':'')+'"><div class="mt-stat-num" style="'+(urgentCount>0?'color:var(--red)':'')+'">'+urgentCount+'</div><div class="mt-stat-label">Urgent</div></div>';
-  h+='<div class="mt-stat-card'+(mtFilterStatus==='in_progress'?' active':'')+'" onclick="setMtStatFilter(\'in_progress\')"><div class="mt-stat-num" style="color:var(--orange)">'+inProgCount+'</div><div class="mt-stat-label">In Progress</div></div>';
-  h+='<div class="mt-stat-card'+(mtFilterStatus==='waiting_parts'?' active':'')+'" onclick="setMtStatFilter(\'waiting_parts\')"><div class="mt-stat-num" style="color:var(--amber)">'+waitCount+'</div><div class="mt-stat-label">Waiting</div></div>';
-  // Resolved: now clickable. Shows last 7d count but filter pulls all resolved tickets.
   h+='<div class="mt-stat-card'+(mtFilterStatus==='resolved'?' active':'')+'" onclick="setMtStatFilter(\'resolved\')"><div class="mt-stat-num" style="color:var(--green)">'+resolvedWeek+'</div><div class="mt-stat-label">Resolved 7d</div></div>';
-  // All history: open + resolved combined, for browse / audit
   h+='<div class="mt-stat-card'+(mtFilterStatus==='all_history'?' active':'')+'" onclick="setMtStatFilter(\'all_history\')"><div class="mt-stat-num" style="color:var(--text-3)">'+allHistoryCount+'</div><div class="mt-stat-label">All</div></div>';
   h+='</div>';
 
-  // === Status lifecycle legend (dismissible, persisted in localStorage) ===
-  const _showLegend=(function(){try{return localStorage.getItem('mtStatusLegendDismissed')!=='1';}catch(e){return true;}})();
-  if(_showLegend){
-    h+='<div class="mt-status-legend" title="Hover any status pill in the list for a definition">';
-    h+='<span class="mt-legend-title">Lifecycle:</span>';
-    h+=statusPillHtml('open');
-    h+='<span class="mt-legend-arrow">→</span>';
-    h+=statusPillHtml('assigned');
-    h+='<span class="mt-legend-arrow">→</span>';
-    h+=statusPillHtml('in_progress');
-    h+='<span class="mt-legend-arrow">⇄</span>';
-    h+=statusPillHtml('waiting_parts');
-    h+='<span class="mt-legend-arrow">→</span>';
-    h+=statusPillHtml('resolved');
-    h+='<span class="mt-legend-sep">·</span>';
-    h+=statusPillHtml('cancelled');
-    h+='<button class="mt-legend-dismiss" onclick="dismissStatusLegend()" title="Hide this legend">'+icon('x',12)+'</button>';
-    h+='</div>';
-  }
-
-  // === Filters (status filter handled by stats-bar above) ===
-  h+='<div class="settings-panel" style="padding-bottom:8px">';
+  // Filters: search always-visible, category chips collapsed behind a toggle when not active
+  h+='<div class="settings-panel mt-filter-panel">';
   h+='<input type="text" class="mt-search" placeholder="🔍 Search tickets…" value="'+esc(mtSearch)+'" oninput="mtSearch=this.value;render()" />';
-  h+='<div class="mt-filters">';
-  ['plumbing','electrical','ac','appliance','structural','pest','painting','general'].forEach(c=>{
-    h+='<div class="mt-filter-chip'+(mtFilterCat===c?' active':'')+'" onclick="setMtFilter(\'cat\',\''+c+'\')">'+(CAT_ICONS[c]||'')+' '+c+'</div>';
-  });
-  h+='</div></div>';
+  // Category filter: a single button when collapsed; chips when expanded or when a category is active
+  if(typeof window.mtCatFiltersOpen === 'undefined') window.mtCatFiltersOpen = false;
+  const _catOpen = window.mtCatFiltersOpen || !!mtFilterCat;
+  if(_catOpen){
+    h+='<div class="mt-filters">';
+    ['plumbing','electrical','ac','appliance','structural','pest','painting','general'].forEach(c=>{
+      h+='<div class="mt-filter-chip'+(mtFilterCat===c?' active':'')+'" onclick="setMtFilter(\'cat\',\''+c+'\')">'+(CAT_ICONS[c]||'')+' '+c+'</div>';
+    });
+    if(mtFilterCat){
+      h+='<button class="mt-filter-clear" onclick="setMtFilter(\'cat\',\''+mtFilterCat+'\')" title="Clear">'+icon('x',12)+'</button>';
+    } else {
+      h+='<button class="mt-filter-clear" onclick="toggleMtCatFilters()" title="Hide categories">'+icon('chevronLeft',12)+'</button>';
+    }
+    h+='</div>';
+  } else {
+    h+='<button class="mt-filter-toggle" onclick="toggleMtCatFilters()">'+icon('plus',12)+' Filter by category</button>';
+  }
+  h+='</div>';
   // View toggle removed — list mode is canonical (board mode kept as dead code)
 
   // === Filter logic ===
