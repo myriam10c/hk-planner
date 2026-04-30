@@ -1338,6 +1338,45 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
   border-radius: var(--radius-sm);
 }
 .mt-legend-dismiss:hover { background: var(--bg-3); color: var(--text); }
+
+/* Collapsible Report Issue trigger */
+.mt-report-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  margin-bottom: 12px;
+  background: var(--card);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--primary);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.mt-report-trigger:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  border-style: solid;
+}
+.mt-report-panel { position: relative; }
+.mt-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mt-report-collapse {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+}
+.mt-report-collapse:hover { background: var(--bg-2); color: var(--text); }
 /* Stats bar */
 .mt-stats { display:flex; gap:8px; margin-bottom:14px; overflow-x:auto; padding-bottom:4px; }
 .mt-stat-card { flex:1; min-width:70px; background:white; border:1px solid var(--border); border-radius:var(--radius-md); padding:10px 8px; text-align:center; cursor:pointer; transition:var(--transition); }

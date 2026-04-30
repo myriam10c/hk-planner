@@ -1833,6 +1833,9 @@ async function createMaintenanceTicket(){
     const pEl=document.getElementById('mtPhotoPreview');if(pEl)pEl.innerHTML='';
     const sEl=document.getElementById('mtSmartPreview');if(sEl)sEl.style.display='none';
     mtTicketPhoto=null;
+    // Auto-collapse the form after a successful submit so the user lands back on the list view
+    window.mtFormOpen = false;
+    try{ localStorage.setItem('mtFormOpen','0'); }catch(e){}
     await refreshMaintenance();
   } else {
     toast(res.error||'Error','error');
@@ -2246,6 +2249,11 @@ const STATUS_HINTS={
 function statusLabel(s){return STATUS_LABELS[s]||(s||'').replace(/_/g,' ');}
 function dismissStatusLegend(){
   try{localStorage.setItem('mtStatusLegendDismissed','1');}catch(e){}
+  render();
+}
+function toggleMtForm(){
+  window.mtFormOpen = !window.mtFormOpen;
+  try{ localStorage.setItem('mtFormOpen', window.mtFormOpen ? '1' : '0'); }catch(e){}
   render();
 }
 function statusPillHtml(s){
@@ -4196,18 +4204,28 @@ function renderMtTickets(isManager){
     h+='</div></div>';
   }
 
-  // === Simplified form ===
-  h+='<div class="settings-panel"><h3>➕ Report Issue</h3>';
-  h+='<div class="mt-form">';
-  h+='<button onclick="mtPhotoUpload()" style="background:white;border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer;width:100%;margin-bottom:8px;font-size:13px;font-weight:600">📷 Take / Upload Photo</button>';
-  h+='<div id="mtPhotoPreview"></div>';
-  h+='<textarea id="mtDesc" placeholder="Describe the issue…" style="min-height:70px" oninput="updateMtSmartPreview()"></textarea>';
-  h+='<select id="mtListing"><option value="">Select property…</option>';
-  allProps.forEach(p=>{h+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});
-  h+='</select>';
-  h+='<div id="mtSmartPreview" class="mt-smart-preview" style="display:none"></div>';
-  h+='<button onclick="createMaintenanceTicket()" style="background:var(--accent-gradient);color:white;border:none;border-radius:10px;padding:12px;cursor:pointer;width:100%;font-weight:700;font-size:14px;margin-top:4px">Submit Issue</button>';
-  h+='</div></div>';
+  // === Report Issue form — collapsed by default to reduce visual noise ===
+  // State persisted in localStorage; toggle via the panel header.
+  if(typeof window.mtFormOpen === 'undefined'){
+    try{ window.mtFormOpen = localStorage.getItem('mtFormOpen') === '1'; }catch(e){ window.mtFormOpen = false; }
+  }
+  if(!window.mtFormOpen){
+    h+='<button class="mt-report-trigger" onclick="toggleMtForm()">'+icon('plus',14)+' Report a new issue</button>';
+  } else {
+    h+='<div class="settings-panel mt-report-panel"><div class="mt-report-header"><h3>➕ Report Issue</h3>'+
+       '<button class="mt-report-collapse" onclick="toggleMtForm()" title="Hide this form">'+icon('x',14)+'</button>'+
+       '</div>';
+    h+='<div class="mt-form">';
+    h+='<button onclick="mtPhotoUpload()" style="background:white;border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer;width:100%;margin-bottom:8px;font-size:13px;font-weight:600">📷 Take / Upload Photo</button>';
+    h+='<div id="mtPhotoPreview"></div>';
+    h+='<textarea id="mtDesc" placeholder="Describe the issue…" style="min-height:70px" oninput="updateMtSmartPreview()"></textarea>';
+    h+='<select id="mtListing"><option value="">Select property…</option>';
+    allProps.forEach(p=>{h+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});
+    h+='</select>';
+    h+='<div id="mtSmartPreview" class="mt-smart-preview" style="display:none"></div>';
+    h+='<button onclick="createMaintenanceTicket()" style="background:var(--accent-gradient);color:white;border:none;border-radius:10px;padding:12px;cursor:pointer;width:100%;font-weight:700;font-size:14px;margin-top:4px">Submit Issue</button>';
+    h+='</div></div>';
+  }
 
   // === Stats bar ===
   // "Open" = anything NOT resolved/cancelled (covers open, assigned, in_progress, waiting_parts)
