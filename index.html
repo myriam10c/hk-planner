@@ -83,6 +83,8 @@ const ICONS_SVG = {
   msgSquare:   '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   chevronLeft: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
   moreVertical: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>',
+  x:           '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  edit:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
 };
 function icon(name, size){
   let svg = ICONS_SVG[name];
@@ -820,20 +822,41 @@ function toast(msg, type){
   renderToasts();
   setTimeout(()=>dismissToast(id), 3500);
 }
+// Toast with an inline "Undo" / action button. The callback is keyed by toast id and
+// stored on window so HTML onclick can reach it without escaping closures.
+window.__toastActions = window.__toastActions || {};
+function toastAction(msg, type, actionLabel, actionFn, ttlMs){
+  const id = ++toastId;
+  window.__toastActions[id] = actionFn;
+  toastQueue.push({id, msg, type: type||'info', actionLabel});
+  if(toastQueue.length > 3) toastQueue.shift();
+  renderToasts();
+  setTimeout(()=>dismissToast(id), ttlMs || 6000);
+  return id;
+}
+function runToastAction(id){
+  const fn = window.__toastActions[id];
+  delete window.__toastActions[id];
+  dismissToast(id);
+  if(typeof fn === 'function') fn();
+}
 function dismissToast(id){
   toastQueue = toastQueue.filter(t=>t.id!==id);
+  delete window.__toastActions[id];
   renderToasts();
 }
 function renderToasts(){
   let el = document.getElementById('toastStack');
   if(!el){ el = document.createElement('div'); el.id='toastStack'; el.className='toast-stack'; document.body.appendChild(el); }
   const iconMap = {success:icon('checkCircle',16), error:icon('xCircle',16), info:icon('info',16), warning:icon('alertTriangle',16)};
-  el.innerHTML = toastQueue.map(t=>
-    '<div class="toast-item toast-'+t.type+'" onclick="dismissToast('+t.id+')">'+
-      '<span class="toast-icon">'+(iconMap[t.type]||iconMap.info)+'</span>'+
-      '<span class="toast-msg">'+esc(t.msg)+'</span>'+
-    '</div>'
-  ).join('');
+  el.innerHTML = toastQueue.map(t=>{
+    let inner = '<span class="toast-icon">'+(iconMap[t.type]||iconMap.info)+'</span>'+
+                '<span class="toast-msg">'+esc(t.msg)+'</span>';
+    if(t.actionLabel){
+      inner += '<button class="toast-action" onclick="event.stopPropagation();runToastAction('+t.id+')">'+esc(t.actionLabel)+'</button>';
+    }
+    return '<div class="toast-item toast-'+t.type+'" onclick="dismissToast('+t.id+')">'+inner+'</div>';
+  }).join('');
 }
 
 // #10 Onboarding (cleaner first-login tutorial)
@@ -1896,6 +1919,61 @@ async function updateTicketStatus(id,status,extras){
   const body={id,status,actor:cleanerMode?cleanerMode.name:'Manager',...(extras||{})};
   await api('updateTicket',{body});toast('Updated ✓','success');await refreshMaintenance();
 }
+
+// 1-click resolve: API → undo toast for 6s. Preferred path on hover quick-actions.
+// Modal-based resolveTicket() stays for "resolve with notes/cost/photo" intent.
+async function quickResolveTicket(id){
+  haptic('medium');
+  const actor=cleanerMode?cleanerMode.name:'Manager';
+  await api('updateTicket',{body:{id,status:'resolved',actor}});
+  toastAction('Resolved ✓','success','Undo', async ()=>{
+    await api('updateTicket',{body:{id,status:'open',actor}});
+    toast('Reopened','info');
+    await refreshMaintenance();
+  }, 6000);
+  await refreshMaintenance();
+}
+
+// Cancel ticket: for false positives / Gemini duplicates. Sets status='cancelled'
+// (kept in DB for audit; hidden from Open by default).
+async function cancelTicket(id, reasonHint){
+  haptic('medium');
+  const reason = reasonHint!==undefined ? reasonHint
+    : (prompt('Cancel reason (optional):', 'duplicate / not a real issue') || '');
+  if(reason === null) return; // user dismissed
+  const actor=cleanerMode?cleanerMode.name:'Manager';
+  await api('updateTicket',{body:{id,status:'cancelled',resolution_notes:reason||null,actor}});
+  toastAction('Cancelled','warning','Undo', async ()=>{
+    await api('updateTicket',{body:{id,status:'open',actor}});
+    toast('Reopened','info');
+    await refreshMaintenance();
+  }, 6000);
+  await refreshMaintenance();
+}
+
+// Edit / append resolution notes after the ticket is already in a terminal state.
+function editResolutionNotes(id){
+  const t = (maintenanceTickets||[]).concat(resolvedTickets||[]).find(x=>x.id===id);
+  if(!t){ toast('Ticket not found','error'); return; }
+  const cur = t.resolution_notes || '';
+  const html = '<h3>📝 Edit resolution notes</h3>'+
+    '<div class="mt-form"><textarea id="editNotes" placeholder="What was done…" style="min-height:120px">'+esc(cur)+'</textarea></div>'+
+    '<div class="modal-actions">'+
+    '<button class="btn-secondary" onclick="closeMtModal()">Cancel</button>'+
+    '<button class="btn-primary" onclick="submitEditNotes('+id+')">Save</button>'+
+    '</div>';
+  showMtModal(html);
+}
+async function submitEditNotes(id){
+  const el = document.getElementById('editNotes');
+  const notes = el ? el.value.trim() : '';
+  closeMtModal();
+  // Note: the redirect_resolution_notes trigger only intercepts log-pattern writes
+  // on non-resolved tickets. Direct human notes (no [ts] prefix) pass through fine.
+  await api('updateTicket',{body:{id, resolution_notes: notes||null, actor: cleanerMode?cleanerMode.name:'Manager'}});
+  toast('Notes saved ✓','success');
+  await refreshMaintenance();
+}
 function showMtModal(html,onClose){
   const ov=document.createElement('div');ov.className='mt-modal-overlay';
   ov.innerHTML='<div class="mt-modal">'+html+'</div>';
@@ -2776,13 +2854,21 @@ function renderTicketDetailPane(t, isManager){
   h += '</div>';
 
   // Actions
+  const isCancelled = t.status === 'cancelled';
+  const isClosed = isResolved || isCancelled;
   if(isManager){
     h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">';
-    if(['open','assigned'].includes(t.status)) h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'in_progress\')">Start work</button>';
-    if(['in_progress','waiting_parts'].includes(t.status)) h += '<button class="btn-success" onclick="resolveTicket('+t.id+')">'+icon('check',14)+' Resolve</button>';
-    if(t.status === 'in_progress') h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'waiting_parts\')">Need parts</button>';
-    if(t.status === 'waiting_parts') h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'in_progress\')">Resume</button>';
-    if(isResolved) h += '<button class="btn-secondary" onclick="reopenTicket('+t.id+')">Reopen</button>';
+    if(!isClosed){
+      if(['open','assigned'].includes(t.status)) h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'in_progress\')">Start work</button>';
+      if(t.status === 'in_progress') h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'waiting_parts\')">Need parts</button>';
+      if(t.status === 'waiting_parts') h += '<button class="btn-secondary" onclick="updateTicketStatus('+t.id+',\'in_progress\')">Resume</button>';
+      // Resolve: 1-click default; shift-click for notes modal
+      h += '<button class="btn-success" title="Click to resolve · Shift-click to add notes" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+' Resolve</button>';
+      h += '<button class="btn-secondary" title="Cancel — false positive / duplicate" onclick="cancelTicket('+t.id+')">'+icon('x',14)+' Cancel</button>';
+    } else {
+      h += '<button class="btn-secondary" onclick="editResolutionNotes('+t.id+')">'+icon('edit',14)+' Edit notes</button>';
+      h += '<button class="btn-secondary" onclick="reopenTicket('+t.id+')">'+icon('refresh',14)+' Reopen</button>';
+    }
     h += '</div>';
   }
 
@@ -3886,6 +3972,38 @@ async function bulkApplyStatus(status){
   await refreshMaintenance();
 }
 
+// Bulk shortcuts with single-shot Undo. Don't close mtSelected first — we need it for undo.
+async function bulkResolveSelected(){
+  if(!mtSelected.size) return;
+  const ids = Array.from(mtSelected);
+  const actor = cleanerMode?cleanerMode.name:'Manager';
+  await Promise.all(ids.map(tid => api('updateTicket',{body:{id:tid,status:'resolved',actor}})));
+  haptic('medium');
+  clearMtSelection();
+  toastAction(ids.length+' resolved ✓','success','Undo all', async ()=>{
+    await Promise.all(ids.map(tid => api('updateTicket',{body:{id:tid,status:'open',actor}})));
+    toast('Reopened '+ids.length,'info');
+    await refreshMaintenance();
+  }, 8000);
+  await refreshMaintenance();
+}
+async function bulkCancelSelected(){
+  if(!mtSelected.size) return;
+  const ids = Array.from(mtSelected);
+  const reason = prompt('Cancel reason for '+ids.length+' tickets (optional):', 'duplicate / not a real issue');
+  if(reason === null) return;
+  const actor = cleanerMode?cleanerMode.name:'Manager';
+  await Promise.all(ids.map(tid => api('updateTicket',{body:{id:tid,status:'cancelled',resolution_notes:reason||null,actor}})));
+  haptic('medium');
+  clearMtSelection();
+  toastAction(ids.length+' cancelled','warning','Undo all', async ()=>{
+    await Promise.all(ids.map(tid => api('updateTicket',{body:{id:tid,status:'open',actor}})));
+    toast('Reopened '+ids.length,'info');
+    await refreshMaintenance();
+  }, 8000);
+  await refreshMaintenance();
+}
+
 function renderMtTicketCard(t,allProps,isManager,expanded){
   const sla=getSLAStatus(t);
   const propName = t.listing_name || (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name || (t.listing_id ? '#'+t.listing_id : null);
@@ -3944,19 +4062,28 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     // Vendor info
     if(t.assigned_vendor_id){const v=vendors.find(x=>x.id===t.assigned_vendor_id);if(v)h+='<div style="font-size:11px;color:var(--text2);margin-bottom:8px">📞 Vendor: '+esc(v.name)+'</div>';}
     // Actions
+    const isClosed = t.status === 'resolved' || t.status === 'cancelled';
     if(isManager){
       h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
-      const assignLabel = (t.assigned_technician_id || t.assigned_vendor_id) ? 'Reassign…' : 'Assign…';
-      h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();openAssignPicker('+t.id+')">'+icon('user',12)+' '+assignLabel+'</button>';
-      if(['open','assigned'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
-      if(['assigned','in_progress'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Waiting Parts</button>';
-      if(['in_progress','waiting_parts'].includes(t.status))h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Resolve</button>';
+      if(!isClosed){
+        const assignLabel = (t.assigned_technician_id || t.assigned_vendor_id) ? 'Reassign…' : 'Assign…';
+        h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();openAssignPicker('+t.id+')">'+icon('user',12)+' '+assignLabel+'</button>';
+        if(['open','assigned'].includes(t.status))h+='<button onclick="event.stopPropagation();updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
+        if(['assigned','in_progress'].includes(t.status))h+='<button onclick="event.stopPropagation();updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Waiting Parts</button>';
+        // Resolve: 1-click for any non-terminal state. Shift to add notes via modal.
+        h+='<button onclick="event.stopPropagation();if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}" title="Click to resolve · Shift-click to add notes" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">'+icon('check',12)+' Resolve</button>';
+        h+='<button onclick="event.stopPropagation();cancelTicket('+t.id+')" title="Cancel (false positive / duplicate)" style="background:transparent;color:var(--text-3);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">'+icon('x',12)+' Cancel</button>';
+      } else {
+        // Terminal state actions: edit notes, reopen
+        h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();editResolutionNotes('+t.id+')">'+icon('edit',12)+' Edit notes</button>';
+        h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();reopenTicket('+t.id+')">'+icon('refresh',12)+' Reopen</button>';
+      }
       h+='</div>';
     }else{
       h+='<div style="display:flex;gap:6px;margin-top:8px">';
-      if(t.status==='assigned')h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
-      if(t.status==='in_progress')h+='<button onclick="updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Need Parts</button>';
-      if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Resolve</button>';
+      if(t.status==='assigned')h+='<button onclick="event.stopPropagation();updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
+      if(t.status==='in_progress')h+='<button onclick="event.stopPropagation();updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Need Parts</button>';
+      if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button onclick="event.stopPropagation();if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">'+icon('check',12)+' Resolve</button>';
       h+='</div>';
     }
     // Inline comments section
@@ -3980,11 +4107,15 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   // Desktop hover quick actions
   if(!mtSelectMode){
     h+='<div class="card-quick-actions" onclick="event.stopPropagation()">';
-    if(t.status !== 'resolved'){
+    if(t.status !== 'resolved' && t.status !== 'cancelled'){
       h+='<button class="qa-btn qa-primary" title="Assign" onclick="openAssignPicker('+t.id+')">'+icon('user',14)+'</button>';
-    }
-    if(['in_progress','waiting_parts'].includes(t.status)){
-      h+='<button class="qa-btn qa-success" title="Resolve" onclick="resolveTicket('+t.id+')">'+icon('check',14)+'</button>';
+      // 1-click resolve. Always available on non-terminal tickets, undo via toast.
+      // (Modal-based resolveTicket() still in detail pane / context menu for explicit notes flow.)
+      h+='<button class="qa-btn qa-success" title="Resolve (1-click — Shift to add notes)" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+'</button>';
+      h+='<button class="qa-btn qa-danger" title="Cancel ticket (false positive / duplicate)" onclick="cancelTicket('+t.id+')">'+icon('x',14)+'</button>';
+    } else {
+      // Terminal states get a notes-edit shortcut.
+      h+='<button class="qa-btn" title="Edit resolution notes" onclick="editResolutionNotes('+t.id+')">'+icon('edit',14)+'</button>';
     }
     h+='<button class="qa-btn" title="Comment" onclick="toggleMtExpand('+t.id+');setTimeout(function(){var i=document.getElementById(\'mtCmtInput-'+t.id+'\');if(i)i.focus();},80)">'+icon('msgSquare',14)+'</button>';
     h+='</div>';
@@ -4174,8 +4305,11 @@ function renderMtTickets(isManager){
     h += '<div class="mt-bulk-bar">';
     h += '<div class="mt-bulk-count">'+mtSelected.size+' selected</div>';
     h += '<button class="btn-secondary" onclick="bulkAssignSelected()" style="font-size:13px;padding:7px 14px">'+icon('user',14)+' Assign…</button>';
-    h += '<button class="btn-secondary" onclick="bulkChangeStatus()" style="font-size:13px;padding:7px 14px">'+icon('refresh',14)+' Status…</button>';
-    h += '<button class="btn-ghost" onclick="clearMtSelection()" style="font-size:13px;padding:7px 14px">Cancel</button>';
+    // 1-click bulk Resolve / Cancel — shortcuts to bulkApplyStatus (was buried in "Status…" picker)
+    h += '<button class="btn-secondary" onclick="bulkResolveSelected()" style="font-size:13px;padding:7px 14px;color:var(--green);border-color:var(--green-light)">'+icon('check',14)+' Resolve all</button>';
+    h += '<button class="btn-secondary" onclick="bulkCancelSelected()" style="font-size:13px;padding:7px 14px;color:var(--text-3)">'+icon('x',14)+' Cancel all</button>';
+    h += '<button class="btn-secondary" onclick="bulkChangeStatus()" style="font-size:13px;padding:7px 14px">'+icon('refresh',14)+' Other status…</button>';
+    h += '<button class="btn-ghost" onclick="clearMtSelection()" style="font-size:13px;padding:7px 14px">Done</button>';
     h += '</div>';
   }
   // S2b: Desktop multi-pane — wrap list with right-side detail
