@@ -47,6 +47,17 @@ HK_PLANNER_URL=https://my-preview.netlify.app npm test  # any URL
 
 5 tests covering: page-load, global helper exposure, table column count, container width cascade, table-cell layout regression. Designed to catch the bug classes we've shipped (CSS specificity, getAllData filter leaks, broken table layout).
 
+### Deploy canary (auto-rollback on broken deploys)
+
+Every push to `main` triggers Netlify auto-deploy. If the deploy breaks something the smoke suite catches, the **canary** automatically restores the previous good deploy.
+
+```bash
+./canary.sh              # check current prod, rollback if smoke fails
+./canary.sh --dry-run    # smoke only, never rollback (manual check)
+```
+
+Same logic runs in CI on every `push` to `main` — see [`docs/ci/README.md`](docs/ci/README.md) for activation. Background: the React-rewrite incident (2026-04-30) served a white page for 12 hours before anyone noticed.
+
 ### Deploy the edge function
 
 One-time setup:

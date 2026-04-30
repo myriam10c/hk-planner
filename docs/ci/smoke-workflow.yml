@@ -1,5 +1,15 @@
 name: Smoke tests
 
+# Two flows in one workflow:
+# 1. PRs / manual triggers / push to non-main branches -> smoke-only against the URL you pass
+# 2. Push to main          -> deploy canary: wait for Netlify deploy, smoke prod,
+#                              auto-rollback to previous successful deploy on failure
+#
+# Required GitHub secrets:
+#   NETLIFY_AUTH_TOKEN  (Netlify Personal Access Token)
+# Required GitHub variables (or inline below):
+#   NETLIFY_SITE_ID     (defaults to HK Planner site)
+
 on:
   push:
     branches: [main]
@@ -10,11 +20,15 @@ on:
         description: 'URL to smoke-test (defaults to prod)'
         required: false
 
+env:
+  NETLIFY_SITE_ID: d6377da2-9acb-4fbf-84a5-f7bdd87e120b
+  PROD_URL: https://stunning-kleicha-f61101.netlify.app
+
 jobs:
   smoke:
-    name: Playwright smoke (desktop + mobile)
+    name: Playwright smoke (+ canary on main)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
@@ -28,15 +42,69 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
 
-      - name: Run smoke tests
+      # On push-to-main, wait for Netlify to finish deploying the just-pushed commit
+      # before we smoke-test. On other events we hit the URL directly.
+      - name: Wait for Netlify deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
-          HK_PLANNER_URL: ${{ inputs.target_url || 'https://stunning-kleicha-f61101.netlify.app' }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            STATE=$(curl -sS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+              "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/deploys?per_page=1" \
+              | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d[0].get("state","") if d else "")')
+            echo "[wait] attempt $i, state=$STATE"
+            case "$STATE" in
+              ready)        echo "::notice::Netlify deploy ready"; exit 0 ;;
+              error|"")     echo "::error::Netlify deploy state=$STATE"; exit 1 ;;
+              *)            sleep 15 ;;
+            esac
+          done
+          echo "::error::Timed out waiting for Netlify deploy"
+          exit 1
+
+      - name: Run smoke tests
+        id: smoke
+        continue-on-error: true
+        env:
+          HK_PLANNER_URL: ${{ inputs.target_url || env.PROD_URL }}
         run: npx playwright test
 
+      # Canary rollback: if smoke failed AND we just pushed to main, restore previous good deploy.
+      - name: Auto-rollback on smoke failure
+        if: steps.smoke.outcome == 'failure' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          PREV=$(curl -sS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/deploys?per_page=20" \
+            | python3 -c '
+          import sys, json
+          ready = [d for d in json.load(sys.stdin) if d.get("state") == "ready"]
+          # Skip the failing current deploy, restore the one before it
+          print(ready[1]["id"] if len(ready) > 1 else "")
+          ')
+          if [ -z "$PREV" ]; then
+            echo "::error::No previous deploy to restore. Manual intervention required."
+            exit 1
+          fi
+          echo "::warning::Smoke failed — restoring previous deploy $PREV"
+          curl -sS -X POST -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/deploys/$PREV/restore" \
+            | head -c 600
+          echo ""
+          echo "::warning::Rollback issued. Review the failing deploy logs and the smoke report artifact."
+
       - name: Upload report on failure
-        if: failure()
+        if: steps.smoke.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
           path: playwright-report/
-          retention-days: 7
+          retention-days: 14
+
+      - name: Fail job if smoke failed
+        if: steps.smoke.outcome == 'failure'
+        run: exit 1
