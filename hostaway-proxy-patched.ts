@@ -434,22 +434,65 @@ Deno.serve(async (req: Request) => {
     if (action === "getAssignments") {
       const { data, error } = await sb.from("cleaning_assignments").select("reservation_key, cleaner_id");
       if (error) throw error;
-      const map: Record<string, number> = {};
-      (data || []).forEach((r: any) => { map[r.reservation_key] = r.cleaner_id; });
+      // Multi-assign model: each reservation_key maps to an array of cleaner_ids.
+      const map: Record<string, number[]> = {};
+      (data || []).forEach((r: any) => {
+        if (!map[r.reservation_key]) map[r.reservation_key] = [];
+        map[r.reservation_key].push(r.cleaner_id);
+      });
       return jsonResp({ status: "success", assignments: map });
     }
     if (action === "assignCleaner" && req.method === "POST") {
       const body = await req.json();
-      const { reservation_key, cleaner_id, actor } = body;
+      const { reservation_key, cleaner_id, cleaner_ids, mode, actor } = body;
       if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
-      if (cleaner_id) {
-        const { error } = await sb.from("cleaning_assignments").upsert({ reservation_key, cleaner_id, assigned_at: new Date().toISOString() }, { onConflict: "reservation_key" });
-        if (error) throw error;
-        await addLog(sb, reservation_key, "assigned", actor, { cleaner_id });
-      } else {
-        const { error } = await sb.from("cleaning_assignments").delete().eq("reservation_key", reservation_key);
-        if (error) throw error;
+
+      // Three modes — all on the same endpoint for backwards-compatibility:
+      //   1. mode='set' (default if cleaner_ids passed) — replace the assignment list with cleaner_ids[].
+      //      Empty array clears all assignments for the key.
+      //   2. mode='add' (default if cleaner_id passed and not already assigned) — append cleaner_id.
+      //      Falsy cleaner_id with no cleaner_ids means "clear all" (legacy unassign call).
+      //   3. mode='remove' — remove cleaner_id from the assignment list (does not error if absent).
+      // Any other shape returns 400.
+
+      const list: number[] | null = Array.isArray(cleaner_ids)
+        ? cleaner_ids.map((x: any) => Number(x)).filter((x: number) => Number.isFinite(x) && x > 0)
+        : null;
+      const single: number | null = (cleaner_id !== undefined && cleaner_id !== null && cleaner_id !== "")
+        ? Number(cleaner_id) : null;
+
+      const op = mode || (list !== null ? "set" : (single ? "add" : "clear"));
+
+      if (op === "set") {
+        // Replace all rows for this key.
+        const { error: dErr } = await sb.from("cleaning_assignments").delete().eq("reservation_key", reservation_key);
+        if (dErr) throw dErr;
+        const newList = list || (single ? [single] : []);
+        if (newList.length > 0) {
+          const rows = newList.map((cid) => ({ reservation_key, cleaner_id: cid, assigned_at: new Date().toISOString() }));
+          const { error: iErr } = await sb.from("cleaning_assignments").insert(rows);
+          if (iErr) throw iErr;
+        }
+        await addLog(sb, reservation_key, newList.length ? "assigned" : "unassigned", actor, { cleaner_ids: newList });
+      } else if (op === "add") {
+        if (!single) return jsonResp({ error: "cleaner_id required for add" }, 400);
+        const { error: iErr } = await sb.from("cleaning_assignments")
+          .upsert({ reservation_key, cleaner_id: single, assigned_at: new Date().toISOString() },
+                  { onConflict: "reservation_key,cleaner_id" });
+        if (iErr) throw iErr;
+        await addLog(sb, reservation_key, "assigned", actor, { cleaner_id: single, mode: "add" });
+      } else if (op === "remove") {
+        if (!single) return jsonResp({ error: "cleaner_id required for remove" }, 400);
+        const { error: dErr } = await sb.from("cleaning_assignments")
+          .delete().eq("reservation_key", reservation_key).eq("cleaner_id", single);
+        if (dErr) throw dErr;
+        await addLog(sb, reservation_key, "unassigned", actor, { cleaner_id: single, mode: "remove" });
+      } else if (op === "clear") {
+        const { error: dErr } = await sb.from("cleaning_assignments").delete().eq("reservation_key", reservation_key);
+        if (dErr) throw dErr;
         await addLog(sb, reservation_key, "unassigned", actor);
+      } else {
+        return jsonResp({ error: "unknown mode: " + op }, 400);
       }
       return jsonResp({ status: "success" });
     }
@@ -461,17 +504,24 @@ Deno.serve(async (req: Request) => {
       const cls = cleanerData || [];
       if (cls.length === 0) return jsonResp({ error: "No cleaners available" }, 400);
       const { data: existingAssign } = await sb.from("cleaning_assignments").select("reservation_key, cleaner_id");
-      const existingMap: Record<string, number> = {};
-      (existingAssign || []).forEach((r: any) => { existingMap[r.reservation_key] = r.cleaner_id; });
+      // Multi-assign: existingMap[key] is now a Set<cleaner_id>. "Already assigned" =
+      // at least one cleaner attached to that key.
+      const existingMap: Record<string, Set<number>> = {};
+      (existingAssign || []).forEach((r: any) => {
+        if (!existingMap[r.reservation_key]) existingMap[r.reservation_key] = new Set();
+        existingMap[r.reservation_key].add(r.cleaner_id);
+      });
       const load: Record<number, number> = {};
       cls.forEach((c: any) => { load[c.id] = 0; });
-      Object.values(existingMap).forEach((cid: number) => { if (load[cid] !== undefined) load[cid]++; });
+      Object.values(existingMap).forEach((set) => set.forEach((cid) => { if (load[cid] !== undefined) load[cid]++; }));
       let assigned = 0;
       for (const r of reservations) {
-        if (existingMap[r.key]) continue;
+        if (existingMap[r.key] && existingMap[r.key].size > 0) continue;
         let minLoad = Infinity, minId = cls[0].id;
         for (const c of cls) { if (load[c.id] < minLoad) { minLoad = load[c.id]; minId = c.id; } }
-        const { error } = await sb.from("cleaning_assignments").upsert({ reservation_key: r.key, cleaner_id: minId, assigned_at: new Date().toISOString() }, { onConflict: "reservation_key" });
+        const { error } = await sb.from("cleaning_assignments")
+          .upsert({ reservation_key: r.key, cleaner_id: minId, assigned_at: new Date().toISOString() },
+                  { onConflict: "reservation_key,cleaner_id" });
         if (!error) {
           load[minId]++; assigned++;
           await addLog(sb, r.key, "auto_assigned", "system", { cleaner_id: minId });
@@ -1179,35 +1229,44 @@ Deno.serve(async (req: Request) => {
         return jsonResp({ status: "success", message: "No checkouts today", checkouts: 0, assigned: 0, notified: [] });
       }
 
-      // 4. Get current assignments + cleaners
+      // 4. Get current assignments + cleaners (multi-assign aware)
       const { data: assignData } = await sb.from("cleaning_assignments").select("reservation_key, cleaner_id");
-      const existingMap: Record<string, number> = {};
-      (assignData || []).forEach((r: any) => { existingMap[r.reservation_key] = r.cleaner_id; });
+      const existingMap: Record<string, number[]> = {};
+      (assignData || []).forEach((r: any) => {
+        if (!existingMap[r.reservation_key]) existingMap[r.reservation_key] = [];
+        existingMap[r.reservation_key].push(r.cleaner_id);
+      });
 
       const { data: cleanerData } = await sb.from("cleaners").select("*").eq("is_active", true).eq("role", "cleaner").order("name");
       const cls = cleanerData || [];
 
-      // 5. Auto-assign unassigned
-      const unassigned = reservations.filter((r: any) => !existingMap[r.key]);
+      // 5. Auto-assign cleanings that have NO cleaner attached yet
+      const unassigned = reservations.filter((r: any) => !(existingMap[r.key] && existingMap[r.key].length > 0));
       let newlyAssigned = 0;
       if (unassigned.length > 0 && cls.length > 0) {
         const load: Record<number, number> = {};
         cls.forEach((c: any) => { load[c.id] = 0; });
-        Object.values(existingMap).forEach((cid: number) => { if (load[cid] !== undefined) load[cid]++; });
+        Object.values(existingMap).forEach((arr) => arr.forEach((cid) => { if (load[cid] !== undefined) load[cid]++; }));
         for (const r of unassigned) {
           let minLoad = Infinity, minId = cls[0].id;
           for (const c of cls) { if (load[c.id] < minLoad) { minLoad = load[c.id]; minId = c.id; } }
-          const { error } = await sb.from("cleaning_assignments").upsert({ reservation_key: r.key, cleaner_id: minId, assigned_at: new Date().toISOString() }, { onConflict: "reservation_key" });
-          if (!error) { load[minId]++; existingMap[r.key] = minId; newlyAssigned++; }
+          const { error } = await sb.from("cleaning_assignments")
+            .upsert({ reservation_key: r.key, cleaner_id: minId, assigned_at: new Date().toISOString() },
+                    { onConflict: "reservation_key,cleaner_id" });
+          if (!error) { load[minId]++; existingMap[r.key] = [minId]; newlyAssigned++; }
         }
       }
 
-      // 6. Build WhatsApp messages per cleaner
+      // 6. Build WhatsApp messages per cleaner — every assigned cleaner gets the task in their list
       const notified: any[] = [];
       const cleanerTasks: Record<number, any[]> = {};
       reservations.forEach((r: any) => {
-        const cid = existingMap[r.key];
-        if (cid) { if (!cleanerTasks[cid]) cleanerTasks[cid] = []; cleanerTasks[cid].push(r); }
+        const cids = existingMap[r.key] || [];
+        cids.forEach((cid: number) => {
+          if (!cleanerTasks[cid]) cleanerTasks[cid] = [];
+          cleanerTasks[cid].push(r);
+        });
+        if (cids.length === 0) { /* no cleaner attached, nothing to notify */ }
       });
 
       for (const c of cls) {
@@ -1279,13 +1338,17 @@ Deno.serve(async (req: Request) => {
       const durations = timers.map((t: any) => t.duration_minutes).filter((d: number) => d > 0 && d < 480);
       const avgCleaningTime = durations.length > 0 ? Math.round(durations.reduce((a: number, b: number) => a + b, 0) / durations.length) : 0;
 
-      // Per-cleaner performance
-      const assignMap: Record<string, number> = {};
-      assigns.forEach((a: any) => { assignMap[a.reservation_key] = a.cleaner_id; });
+      // Per-cleaner performance — multi-assign aware: count any cleaning where the cleaner is in the list.
+      const assignMap: Record<string, number[]> = {};
+      assigns.forEach((a: any) => {
+        if (!assignMap[a.reservation_key]) assignMap[a.reservation_key] = [];
+        assignMap[a.reservation_key].push(a.cleaner_id);
+      });
+      const isAssigned = (key: string, cid: number) => (assignMap[key] || []).includes(cid);
       const cleanerPerf: any[] = clnrs.filter((c: any) => c.role === 'cleaner').map((c: any) => {
-        const cTimers = timers.filter((t: any) => assignMap[t.reservation_key] === c.id);
+        const cTimers = timers.filter((t: any) => isAssigned(t.reservation_key, c.id));
         const cDurations = cTimers.map((t: any) => t.duration_minutes).filter((d: number) => d > 0 && d < 480);
-        const cDone = dones.filter((d: any) => d.done && assignMap[d.reservation_key] === c.id);
+        const cDone = dones.filter((d: any) => d.done && isAssigned(d.reservation_key, c.id));
         const avgTime = cDurations.length > 0 ? Math.round(cDurations.reduce((a: number, b: number) => a + b, 0) / cDurations.length) : 0;
         const fastest = cDurations.length > 0 ? Math.min(...cDurations) : 0;
         const slowest = cDurations.length > 0 ? Math.max(...cDurations) : 0;
@@ -1353,8 +1416,12 @@ Deno.serve(async (req: Request) => {
       (cancelledRes.data || []).forEach((r: any) => { cancelledMap[r.reservation_key] = { reason: r.reason, cancelled_by: r.cancelled_by, cancelled_at: r.cancelled_at }; });
       const doneMap: Record<string, boolean> = {};
       (doneRes.data || []).forEach((r: any) => { doneMap[r.reservation_key] = r.done; });
-      const assignMap: Record<string, number> = {};
-      (assignRes.data || []).forEach((r: any) => { assignMap[r.reservation_key] = r.cleaner_id; });
+      // Multi-assign: assignments[reservation_key] is now a number[].
+      const assignMap: Record<string, number[]> = {};
+      (assignRes.data || []).forEach((r: any) => {
+        if (!assignMap[r.reservation_key]) assignMap[r.reservation_key] = [];
+        assignMap[r.reservation_key].push(r.cleaner_id);
+      });
       const listingPrices: Record<string, any> = {};
       (listingRes.data || []).forEach((r: any) => { listingPrices[r.listing_id] = { bedrooms: r.bedrooms, price: r.price, custom_price: r.custom_price, listing_name: r.listing_name, unit_type: r.unit_type, apt_number: r.apt_number, internal_name: r.internal_name }; });
       const timerMap: Record<string, any> = {};

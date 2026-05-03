@@ -326,10 +326,9 @@ function exportPlannerCSV(items){
   const header = ['Date','Guest','Property','Cleaner','Status','Reservation Key'];
   const rows = items.map(r => {
     const k = keyFor(r);
-    const cId = assignments[k];
-    const cleaner = cId ? (cleaners||[]).find(c => c.id === cId) : null;
+    const cleaners_ = getAssignees(k);
     const status = cancelled[k] ? 'Cancelled' : done[k] ? 'Done' : 'Pending';
-    return [r.co||'', r.guest||'', r.listing||'', cleaner?cleaner.name:'Unassigned', status, k];
+    return [r.co||'', r.guest||'', r.listing||'', cleaners_.length ? cleaners_.map(c=>c.name).join(' + ') : 'Unassigned', status, k];
   });
   const csv = [header, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
@@ -388,10 +387,9 @@ function renderPlannerTable(items){
       av=sa; bv=sb;
     }
     else if(col === 'cleaner'){
-      const ca = assignments[keyFor(a)]; const cb = assignments[keyFor(b)];
-      const cna = ca ? (((cleaners||[]).find(c=>c.id===ca)||{}).name||'') : '';
-      const cnb = cb ? (((cleaners||[]).find(c=>c.id===cb)||{}).name||'') : '';
-      av=cna.toLowerCase(); bv=cnb.toLowerCase();
+      const ca = firstAssignee(keyFor(a)); const cb = firstAssignee(keyFor(b));
+      av = (ca && ca.name || '').toLowerCase();
+      bv = (cb && cb.name || '').toLowerCase();
     }
     else { av=''; bv=''; }
     if(av < bv) return asc ? -1 : 1;
@@ -466,13 +464,13 @@ function renderPlannerTable(items){
     const sk = esc(k);
     const isDone = !!done[k];
     const isCancelled = !!cancelled[k];
-    const cId = assignments[k];
-    const cleaner = cId ? (cleaners||[]).find(c => c.id === cId) : null;
+    const cleanersForRow = getAssignees(k);
+    const cleaner = cleanersForRow[0] || null;
     const isSelected = (expandedKey === k);
     const isBulk = plannerBulkSelected.has(k);
     const guestFull = r.guest || 'Guest';
     const listingFull = formatPropLabel(r.listingId, r.listing) || '';
-    const cleanerFull = cleaner ? cleaner.name : 'Unassigned';
+    const cleanerFull = cleanersForRow.length ? cleanersForRow.map(c=>c.name).join(' + ') : 'Unassigned';
     const trCls = (isSelected?'selected ':'') + (isBulk?'bulk-selected':'');
     h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" onclick="toggleExpand(\''+sk+'\',event)">';
     // Checkbox
@@ -485,8 +483,14 @@ function renderPlannerTable(items){
     h += '<td class="muted cell-wrap" title="'+esc(listingFull)+'"><div class="clamp-2">'+esc(listingFull)+'</div></td>';
     // Cleaner
     h += '<td title="'+esc(cleanerFull)+'">';
-    if(cleaner) h += '<span class="row-cleaner-dot" style="background:'+(cleaner.color||'#888')+'"></span>'+esc(cleaner.name);
-    else h += '<span class="muted">Unassigned</span>';
+    if(cleanersForRow.length){
+      // Stacked colored dots — one per assigned cleaner, capped at 3 with a +N indicator
+      const shown = cleanersForRow.slice(0, 3);
+      const extra = cleanersForRow.length - shown.length;
+      shown.forEach(c => { h += '<span class="row-cleaner-dot" style="background:'+(c.color||'#888')+'"></span>'; });
+      if(cleanersForRow.length === 1) h += esc(cleanersForRow[0].name);
+      else h += esc(cleanersForRow.map(c=>c.name).join(' + ')) + (extra>0 ? ' (+'+extra+')' : '');
+    } else h += '<span class="muted">Unassigned</span>';
     h += '</td>';
     // Status
     h += '<td>';
@@ -751,12 +755,20 @@ async function onDropOnCleaner(e, cleanerId){
   const { id, type } = dragState;
   if(!id) { onDragEnd(); return; }
   if(type === 'cleaning'){
-    if(cleanerId == null && typeof showAssignPicker === 'function'){
-      showAssignPicker(id);
-    } else {
+    if(cleanerId == null){
+      // Dropped on "Unassigned" → clear all assignees
       try {
-        await api('assignCleaner',{body:{reservation_key:id, cleaner_id:cleanerId, actor:cleanerMode?cleanerMode.name:'Manager'}});
-        toast('Reassigned ✓','success');
+        await api('assignCleaner',{body:{reservation_key:id, mode:'clear', actor:cleanerMode?cleanerMode.name:'Manager'}});
+        toast('Unassigned','success');
+        haptic('medium');
+        if(typeof fetchAll === 'function') fetchAll();
+      } catch(err){ toast('Error','error'); }
+    } else {
+      // Drop on a cleaner = ADD them to the team (Shift = replace existing list)
+      const mode = e.shiftKey ? 'set' : 'add';
+      try {
+        await api('assignCleaner',{body:{reservation_key:id, cleaner_id:cleanerId, mode, actor:cleanerMode?cleanerMode.name:'Manager'}});
+        toast(e.shiftKey ? 'Reassigned ✓' : 'Added ✓','success');
         haptic('medium');
         if(typeof fetchAll === 'function') fetchAll();
       } catch(err){ toast('Error','error'); }
@@ -1049,27 +1061,37 @@ function computeRevenuePerCleaner(month){
   (cleaners||[]).forEach(c=>{
     byCleaner[c.id]={id:c.id,name:c.name,color:c.color,role:c.role,cleanings:0,revenueAED:0,costAED:0};
   });
+  // Multi-assign: revenue + cost split equally across the assigned cleaners; each
+  // cleaner still gets a +1 in the cleanings count (they were on the job).
   (RESERVATIONS||[]).forEach(r=>{
     const key=keyFor(r);
     if(!(r.co||'').startsWith(monthPrefix)) return;
     if(!done[key]) return;
-    const cid=assignments[key];
-    if(!cid||!byCleaner[cid]) return;
-    byCleaner[cid].cleanings++;
-    byCleaner[cid].revenueAED+=Number(r.cleaningFee||0);
-    const l=listingPrices[r.listingId];
-    if(l) byCleaner[cid].costAED+=Number(l.custom_price||l.price||0);
+    const ids=getAssigneeIds(key).filter(id=>byCleaner[id]);
+    if(ids.length===0) return;
+    const rev=Number(r.cleaningFee||0)/ids.length;
+    const lp=listingPrices[r.listingId];
+    const cost=lp?Number(lp.custom_price||lp.price||0)/ids.length:0;
+    ids.forEach(cid=>{
+      byCleaner[cid].cleanings++;
+      byCleaner[cid].revenueAED+=rev;
+      byCleaner[cid].costAED+=cost;
+    });
   });
   (extraCleanings||[]).forEach(e=>{
     if(!String(e.cleaning_date||'').startsWith(monthPrefix)) return;
     const isDone=e.status==='done'||done[e.reservation_key];
     if(!isDone) return;
-    const cid=assignments[e.reservation_key];
-    if(!cid||!byCleaner[cid]) return;
-    byCleaner[cid].cleanings++;
-    byCleaner[cid].revenueAED+=Number(e.price_billed||0);
+    const ids=getAssigneeIds(e.reservation_key).filter(id=>byCleaner[id]);
+    if(ids.length===0) return;
+    const rev=Number(e.price_billed||0)/ids.length;
     const defaultCost=(()=>{const l=listingPrices[e.listing_id];return l?Number(l.custom_price||l.price||0):0;})();
-    byCleaner[cid].costAED+=Number(e.cleaner_price||defaultCost);
+    const cost=Number(e.cleaner_price||defaultCost)/ids.length;
+    ids.forEach(cid=>{
+      byCleaner[cid].cleanings++;
+      byCleaner[cid].revenueAED+=rev;
+      byCleaner[cid].costAED+=cost;
+    });
   });
   return Object.values(byCleaner)
     .filter(c=>c.cleanings>0)
@@ -1110,6 +1132,29 @@ function getBuildingName(listing){
   return bldg;
 }
 function getCleanerById(id){return cleaners.find(c=>c.id===id);}
+
+// Multi-cleaner-per-cleaning helpers. The assignments map stores number[] per
+// reservation_key — proxy emits arrays since 2026-05-03. These helpers tolerate
+// older shapes (scalar number) so a stale frontend doesn't crash mid-deploy.
+function getAssigneeIds(key){
+  const v = assignments[key];
+  if(Array.isArray(v)) return v;
+  if(v == null || v === '') return [];
+  return [Number(v)];
+}
+function isAssignedTo(key, cleanerId){
+  return getAssigneeIds(key).includes(Number(cleanerId));
+}
+function getAssignees(key){
+  return getAssigneeIds(key).map(id => getCleanerById(id)).filter(Boolean);
+}
+function firstAssignee(key){
+  const ids = getAssigneeIds(key);
+  return ids.length ? getCleanerById(ids[0]) : null;
+}
+function hasAnyAssignee(key){
+  return getAssigneeIds(key).length > 0;
+}
 
 // Format a property label for display: "1503 · Tiger V Tower" when apt_number known
 // and not already embedded in the listing_name (some Hostaway names already include it).
@@ -1325,41 +1370,76 @@ async function viewPhoto(id){
 }
 function closeModal(){document.getElementById('modal').innerHTML='';}
 
+// Multi-select assign picker. Each cleaner is a checkbox; toggling adds/removes
+// that cleaner without affecting the others. "Clear all" removes everyone.
 function showAssignPicker(rkey){
   const overlay=document.createElement('div');
   overlay.className='assign-picker-overlay';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove();};
-  const currentAssign=assignments[rkey];
-  let ph='<div class="assign-picker"><h3>'+(currentAssign?'Reassign or unassign':'Assign cleaner')+'</h3>';
-  // Unassign option if currently assigned
-  if(currentAssign){
-    ph+='<div class="assign-picker-item" style="border-bottom:1px solid var(--border);margin-bottom:8px;padding-bottom:12px" onclick="assignCleaner(\''+esc(rkey)+'\',0);this.closest(\'.assign-picker-overlay\').remove()">'+
+  const currentIds=new Set(getAssigneeIds(rkey));
+  const isMulti=currentIds.size>1;
+  let ph='<div class="assign-picker"><h3>'+
+    (currentIds.size>0
+      ? (isMulti ? 'Edit assignees ('+currentIds.size+')' : 'Assign · reassign · add')
+      : 'Assign cleaner(s)')+'</h3>';
+  ph+='<div class="picker-help">Toggle each cleaner. Multiple selections allowed for team work.</div>';
+  if(currentIds.size>0){
+    ph+='<div class="assign-picker-item" style="border-bottom:1px solid var(--border);margin-bottom:8px;padding-bottom:12px" onclick="setAssignees(\''+esc(rkey)+'\',[]);this.closest(\'.assign-picker-overlay\').remove()">'+
       '<div class="picker-dot" style="background:var(--text3)"></div>'+
-      '<span class="picker-name" style="color:var(--red)">✕ Unassign</span></div>';
+      '<span class="picker-name" style="color:var(--red)">✕ Clear all</span></div>';
   }
   cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
-    const cnt=RESERVATIONS.filter(r=>assignments[keyFor(r)]===c.id).length;
-    const isCurrent=currentAssign===c.id;
-    ph+='<div class="assign-picker-item" style="'+(isCurrent?'background:var(--primary-light);border-radius:8px':'')+'" onclick="assignCleaner(\''+esc(rkey)+'\','+c.id+');this.closest(\'.assign-picker-overlay\').remove()">'+
+    const cnt=RESERVATIONS.filter(r=>isAssignedTo(keyFor(r), c.id)).length;
+    const isCurrent=currentIds.has(c.id);
+    ph+='<div class="assign-picker-item'+(isCurrent?' selected':'')+'" style="'+(isCurrent?'background:var(--primary-light);border-radius:8px':'')+'" onclick="toggleAssignee(\''+esc(rkey)+'\','+c.id+')">'+
+      '<div class="picker-checkbox'+(isCurrent?' checked':'')+'">'+(isCurrent?'✓':'')+'</div>'+
       '<div class="picker-dot" style="background:'+c.color+'"></div>'+
-      '<span class="picker-name">'+esc(c.name)+(isCurrent?' ✓':'')+'</span>'+
+      '<span class="picker-name">'+esc(c.name)+'</span>'+
       '<span class="picker-count">'+cnt+' task'+(cnt!==1?'s':'')+'</span></div>';
   });
+  ph+='<button class="picker-done" onclick="this.closest(\'.assign-picker-overlay\').remove()">Done</button>';
   ph+='</div>';
   overlay.innerHTML=ph;
   document.body.appendChild(overlay);
 }
 
-async function assignCleaner(rkey,cid){
-  const cleanerId=cid?Number(cid):null;
-  if(cleanerId)assignments[rkey]=cleanerId;else delete assignments[rkey];render();
-  await api('assignCleaner',{body:{reservation_key:rkey,cleaner_id:cleanerId}});
+// Toggle a single cleaner on/off without closing the picker — supports building a team
+async function toggleAssignee(rkey, cid){
+  const cleanerId=Number(cid);
+  const ids=new Set(getAssigneeIds(rkey));
+  const adding=!ids.has(cleanerId);
+  if(adding) ids.add(cleanerId); else ids.delete(cleanerId);
+  assignments[rkey]=Array.from(ids);
+  // Re-render the picker contents in place (don't close it)
+  const overlay=document.querySelector('.assign-picker-overlay');
+  if(overlay){ overlay.remove(); showAssignPicker(rkey); }
+  render();
+  // Server: incremental add/remove keeps audit trail clean
+  await api('assignCleaner',{body:{reservation_key:rkey, cleaner_id:cleanerId, mode: adding?'add':'remove'}});
+  toast(adding?'Added ✓':'Removed','success');
+}
+
+// Replace the entire assignment list (used by "Clear all" and legacy single-set callers)
+async function setAssignees(rkey, ids){
+  const list=(ids||[]).map(Number).filter(Number.isFinite);
+  assignments[rkey]=list;
+  render();
+  await api('assignCleaner',{body:{reservation_key:rkey, cleaner_ids:list, mode:'set'}});
+  toast(list.length ? list.length+' assigned ✓' : 'Unassigned','success');
+}
+
+// Backwards-compatible single-cleaner shortcut. Setting cid=0/null clears.
+async function assignCleaner(rkey, cid){
+  const cleanerId = cid ? Number(cid) : null;
+  if(cleanerId) assignments[rkey]=[cleanerId]; else assignments[rkey]=[];
+  render();
+  await api('assignCleaner',{body:{reservation_key:rkey, cleaner_id:cleanerId, mode: cleanerId?'set':'clear'}});
   toast(cleanerId?'Assigned ✓':'Unassigned','success');
 }
 
 // #7 Auto-assign
 async function autoAssign(){
-  const unassigned=RESERVATIONS.filter(r=>!assignments[keyFor(r)]).map(r=>({key:keyFor(r),listingId:r.listingId}));
+  const unassigned=RESERVATIONS.filter(r=>!hasAnyAssignee(keyFor(r))).map(r=>({key:keyFor(r),listingId:r.listingId}));
   if(unassigned.length===0){toast('All already assigned!');return;}
   toast('Auto-assigning '+unassigned.length+'...');
   const res=await api('autoAssign',{body:{reservations:unassigned}});
@@ -1380,7 +1460,8 @@ function startTimer(key){
   const r=RESERVATIONS.find(x=>keyFor(x)===key);
   const label=r?r.listing:'this cleaning';
   confirmAction('▶ Start Timer','Start the timer for '+label+'?',async()=>{
-    const cid=assignments[key]||null;
+    // For the timer record we attach the first assignee (timers are per-cleaning, not per-cleaner).
+    const cid=getAssigneeIds(key)[0]||null;
     timers[key]={started_at:new Date().toISOString(),finished_at:null,duration_minutes:null};render();
     await api('startTimer',{body:{reservation_key:key,cleaner_id:cid}});toast('Timer started','success');
   });
@@ -1486,7 +1567,7 @@ function chooseWa(type,url){
 }
 function setWaPref(pref){waPreference=pref;if(pref)localStorage.setItem('waPreference',pref);else localStorage.removeItem('waPreference');render();}
 function sendDailyWhatsApp(cleaner){
-  const cRes=RESERVATIONS.filter(r=>assignments[keyFor(r)]===cleaner.id&&isToday(r.co));
+  const cRes=RESERVATIONS.filter(r=>isAssignedTo(keyFor(r), cleaner.id)&&isToday(r.co));
   if(cRes.length===0){toast('No tasks today for '+cleaner.name);return;}
   let msg='🏠 Hey '+cleaner.name+'! Your cleanings for today:\n\n';
   cRes.forEach((r,i)=>{msg+=(i+1)+'. '+r.listing+' ('+r.guest+')\n';});
@@ -1657,7 +1738,7 @@ async function deleteRecurringTask(id){
 
 // Smart scheduling (#5 improved) — balances workload + estimated time
 async function smartAssign(){
-  const unassigned=RESERVATIONS.filter(r=>!assignments[keyFor(r)]);
+  const unassigned=RESERVATIONS.filter(r=>!hasAnyAssignee(keyFor(r)));
   if(unassigned.length===0){toast('All already assigned!');return;}
   const assignable=cleaners.filter(c=>(c.role||'cleaner')==='cleaner');
   if(assignable.length===0){toast('Add cleaners first','error');return;}
@@ -1667,7 +1748,7 @@ async function smartAssign(){
   let assignedCount=0;
   for(const[date,dateRes]of Object.entries(byDate)){
     // Count existing assignments per cleaner for this date
-    const load={};assignable.forEach(c=>{load[c.id]=RESERVATIONS.filter(r=>r.co===date&&assignments[keyFor(r)]===c.id).length;});
+    const load={};assignable.forEach(c=>{load[c.id]=RESERVATIONS.filter(r=>r.co===date&&isAssignedTo(keyFor(r), c.id)).length;});
     // Sort by estimated time (heaviest first) for better balancing
     dateRes.sort((a,b)=>(getEstTime(b.listingId)||60)-(getEstTime(a.listingId)||60));
     for(const r of dateRes){
@@ -1678,14 +1759,14 @@ async function smartAssign(){
         return(aAvg||999)-(bAvg||999);
       })[0];
       const key=keyFor(r);
-      assignments[key]=best.id;load[best.id]++;assignedCount++;
-      api('assignCleaner',{body:{reservation_key:key,cleaner_id:best.id}});
+      assignments[key]=[best.id];load[best.id]++;assignedCount++;
+      api('assignCleaner',{body:{reservation_key:key,cleaner_id:best.id,mode:'set'}});
     }
   }
   render();toast(assignedCount+' smart-assigned ✓','success');
 }
 function getCleanerAvgTime(cid){
-  const cTimers=Object.entries(timers).filter(([k,t])=>t&&t.duration_minutes&&assignments[k]===cid).map(([k,t])=>t.duration_minutes);
+  const cTimers=Object.entries(timers).filter(([k,t])=>t&&t.duration_minutes&&isAssignedTo(k, cid)).map(([k,t])=>t.duration_minutes);
   return cTimers.length>0?Math.round(cTimers.reduce((a,b)=>a+b,0)/cTimers.length):null;
 }
 
@@ -2369,10 +2450,10 @@ function getFiltered(){
   let list=RESERVATIONS;
   if(selectedDate!=='all')list=list.filter(r=>r.co===selectedDate);
   if(search.trim()){const q=search.toLowerCase();list=list.filter(r=>r.guest.toLowerCase().includes(q)||r.listing.toLowerCase().includes(q));}
-  if(filterCleaner===-1)list=list.filter(r=>!assignments[keyFor(r)]);
-  else if(filterCleaner)list=list.filter(r=>assignments[keyFor(r)]===filterCleaner);
+  if(filterCleaner===-1)list=list.filter(r=>!hasAnyAssignee(keyFor(r)));
+  else if(filterCleaner)list=list.filter(r=>isAssignedTo(keyFor(r), filterCleaner));
   // #6 Cleaner mode: only show assigned to me
-  if(cleanerMode)list=list.filter(r=>assignments[keyFor(r)]===cleanerMode.id);
+  if(cleanerMode)list=list.filter(r=>isAssignedTo(keyFor(r), cleanerMode.id));
   return list;
 }
 
@@ -2592,10 +2673,10 @@ function renderPlanner(){
     h+='<div class="cleaner-filter">';
     h+='<div class="cleaner-chip'+(filterCleaner===0?' active':'')+'" role="button" tabindex="0" aria-label="Show all cleaners" onclick="setFilterCleaner(0)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(0);}">All</div>';
     cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
-      const cnt=RESERVATIONS.filter(r=>assignments[keyFor(r)]===c.id).length;
+      const cnt=RESERVATIONS.filter(r=>isAssignedTo(keyFor(r), c.id)).length;
       h+='<div class="cleaner-chip drop-target'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,'+c.id+')" onclick="setFilterCleaner('+c.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner('+c.id+');}"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
     });
-    const una=RESERVATIONS.filter(r=>!assignments[keyFor(r)]).length;
+    const una=RESERVATIONS.filter(r=>!hasAnyAssignee(keyFor(r))).length;
     if(una>0) h+='<div class="cleaner-chip drop-target'+(filterCleaner===-1?' active':'')+'" role="button" tabindex="0" aria-label="Show unassigned cleanings" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,null)" onclick="setFilterCleaner(-1)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(-1);}">Unassigned '+una+'</div>';
     h+='</div>';
   }
@@ -2642,7 +2723,7 @@ function renderPlanner(){
       if(isRunning)return 5;
       if(r.nextGuest&&r.nextGuest.sameDay)return 0;
       if(r.nextGuest)return 1;
-      if(!assignments[key]&&!cleanerMode)return 2;
+      if(!hasAnyAssignee(key)&&!cleanerMode)return 2;
       return 3;
     };
     items.sort((a,b)=>{
@@ -2662,7 +2743,8 @@ function renderPlanner(){
       }
       const key=keyFor(r),sk=esc(key);
       const isDone=done[key],isPending=pendingKey===key,isExp=expandedKey===key;
-      const cleaner=assignments[key]?getCleanerById(assignments[key]):null;
+      const cleanersForCard=getAssignees(key);
+      const cleaner=cleanersForCard[0]||null;
       const timer=timers[key];
       const urgency=r.nextGuest?(r.nextGuest.sameDay?'urgent':'warning'):'ok';
       const bedrooms=getBedroomsForListing(r.listingId);
@@ -2705,8 +2787,16 @@ function renderPlanner(){
       h+='<span class="guest-name">'+esc(r.guest)+'</span>';
       h+='<span class="tag-pill type" style="margin-left:6px">'+getUnitType(r.listingId)+'</span>';
       if(estTime) h+='<span class="est-time" style="margin-left:6px;font-size:11px;color:var(--text3)">~'+estTime+'min</span>';
-      if(cleaner&&!cleanerMode) h+='<span class="cleaner-tap" onclick="event.stopPropagation();showAssignPicker(\''+sk+'\')" style="margin-left:auto;font-size:11px;color:'+cleaner.color+';font-weight:600;flex-shrink:0;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px">'+esc(cleaner.name)+'</span>';
-      else if(cleaner) h+='<span style="margin-left:auto;font-size:11px;color:'+cleaner.color+';font-weight:600;flex-shrink:0">'+esc(cleaner.name)+'</span>';
+      // Multi-assign display: 1 cleaner → name; 2+ → joined names with " + " separator,
+      // colored as the first cleaner's color (the "primary" visually)
+      if(cleanersForCard.length > 0){
+        const labelCleaner = cleanersForCard.length === 1
+          ? esc(cleanersForCard[0].name)
+          : esc(cleanersForCard.map(c=>c.name).join(' + '));
+        const labelColor = cleanersForCard[0].color;
+        if(!cleanerMode) h+='<span class="cleaner-tap" onclick="event.stopPropagation();showAssignPicker(\''+sk+'\')" style="margin-left:auto;font-size:11px;color:'+labelColor+';font-weight:600;flex-shrink:0;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px">'+labelCleaner+'</span>';
+        else h+='<span style="margin-left:auto;font-size:11px;color:'+labelColor+';font-weight:600;flex-shrink:0">'+labelCleaner+'</span>';
+      }
       h+='</div>';
 
       // Row 3: Alert line (turnover info) — only if next guest
@@ -2824,8 +2914,8 @@ function renderCleaningDetailPane(r){
   const k = keyFor(r);
   const isDone = !!done[k];
   const isCancelled = !!cancelled[k];
-  const cId = assignments[k];
-  const cleaner = cId ? (cleaners||[]).find(c => c.id === cId) : null;
+  const cleanersForPane = getAssignees(k);
+  const cleaner = cleanersForPane[0] || null; // legacy var used for "is anyone assigned" checks below
   const t = timers[k];
   const isExtra = !!r._isExtra;
   const propName = formatPropLabel(r.listingId, r.listing) || '';
@@ -2855,11 +2945,16 @@ function renderCleaningDetailPane(r){
   if(r.cleaningFee) h += '<div>'+icon('dollar',12)+' '+r.cleaningFee+' AED</div>';
   h += '</div>';
 
-  // Cleaner assignment
+  // Cleaner assignment — multi-cleaner aware: list each assignee with their dot
   h += '<div style="margin-bottom:18px">';
-  h += '<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">Assigned cleaner</div>';
-  if(cleaner){
-    h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-md)"><span style="width:10px;height:10px;border-radius:50%;background:'+(cleaner.color||'#888')+'"></span><strong>'+esc(cleaner.name)+'</strong></div>';
+  const assigneeLabel = cleanersForPane.length > 1 ? 'Assigned cleaners ('+cleanersForPane.length+')' : 'Assigned cleaner';
+  h += '<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">'+assigneeLabel+'</div>';
+  if(cleanersForPane.length > 0){
+    h += '<div style="display:flex;flex-direction:column;gap:6px;font-size:var(--fs-md)">';
+    cleanersForPane.forEach(c => {
+      h += '<div style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;background:'+(c.color||'#888')+'"></span><strong>'+esc(c.name)+'</strong></div>';
+    });
+    h += '</div>';
   } else {
     h += '<div style="color:var(--text-3);font-size:var(--fs-sm)">Unassigned</div>';
   }
@@ -3057,10 +3152,11 @@ function renderCardDetail(key,r){
   h+='<div class="detail-title" style="margin-top:10px">📷 '+t('photos')+' ('+photos.length+')</div><div class="photo-grid">';
   photos.forEach(p=>{h+='<div class="photo-thumb" onclick="viewPhoto('+p.id+')">'+(p.photo_type==='before'?'🅱':'📸')+'</div>';});
   h+='<div class="photo-upload-btn" onclick="startPhotoUpload(\''+sk+'\')">+</div></div>';
-  // #8 WhatsApp for this cleaning
-  if(!cleanerMode&&assignments[key]){
-    const cl=getCleanerById(assignments[key]);
-    if(cl&&cl.phone) h+='<button class="wa-btn" style="margin-top:8px" onclick="event.stopPropagation();sendWhatsApp(\''+esc(cl.phone)+'\',\'Reminder: '+esc(r.listing)+' - '+esc(r.guest)+'\')">📱 WhatsApp '+esc(cl.name)+'</button>';
+  // #8 WhatsApp for this cleaning — one button per assigned cleaner
+  if(!cleanerMode){
+    getAssignees(key).forEach(cl=>{
+      if(cl.phone) h+='<button class="wa-btn" style="margin-top:8px" onclick="event.stopPropagation();sendWhatsApp(\''+esc(cl.phone)+'\',\'Reminder: '+esc(r.listing)+' - '+esc(r.guest)+'\')">📱 WhatsApp '+esc(cl.name)+'</button>';
+    });
   }
   h+='</div></div>';
   return h;
@@ -3847,7 +3943,7 @@ function renderCalendar(){
       if(dayDone>0)h+='<div class="cal-done-count">✓'+dayDone+'</div>';
       h+='<div class="cal-dots">';
       dayRes.slice(0,5).forEach(r=>{
-        const cl=assignments[keyFor(r)]?getCleanerById(assignments[keyFor(r)]):null;
+        const cl=firstAssignee(keyFor(r));
         h+='<div class="cal-dot" style="background:'+(cl?cl.color:'var(--text3)')+'"></div>';
       });
       if(dayRes.length>5)h+='<div style="font-size:8px;color:var(--text3)">+'+( dayRes.length-5)+'</div>';
@@ -3863,7 +3959,7 @@ function renderCalendar(){
 function renderCleanerStats(){
   if(!cleanerMode)return;
   const cid=cleanerMode.id;
-  const myRes=RESERVATIONS.filter(r=>assignments[keyFor(r)]===cid);
+  const myRes=RESERVATIONS.filter(r=>isAssignedTo(keyFor(r), cid));
   const myDone=myRes.filter(r=>done[keyFor(r)]);
   const myTimers=myRes.filter(r=>timers[keyFor(r)]&&timers[keyFor(r)].duration_minutes).map(r=>timers[keyFor(r)].duration_minutes);
   const avgTime=myTimers.length>0?Math.round(myTimers.reduce((a,b)=>a+b,0)/myTimers.length):0;
