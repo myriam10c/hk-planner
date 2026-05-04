@@ -670,11 +670,14 @@ function renderContextMenu(){
       cleanerMode || cancelled[id] ? null : { label: 'Cancel cleaning', icon: 'xCircle', danger: true, action: 'closeContextMenu();(typeof toggleCancel===\'function\'?toggleCancel(\''+id+'\'):null)' },
     ].filter(Boolean);
   } else if(type === '__mt_header__'){
+    const advOn = (function(){ try { return localStorage.getItem('mtShowAdvanced') === '1'; } catch(e){ return false; } })();
     items = [
       { label: 'Share report…', icon: 'download', action: 'closeContextMenu();setMtSubTab(\'__reports\')' },
       { label: 'History', icon: 'clock', action: 'closeContextMenu();setMtSubTab(\'__history\')' },
       { divider: true },
       { label: mtSelectMode ? 'Cancel select' : 'Select multiple', icon: 'check', action: 'closeContextMenu();toggleMtSelectMode()' },
+      { divider: true },
+      { label: advOn ? 'Hide Vendors / Equipment / Preventive' : 'Show Vendors / Equipment / Preventive', icon: 'plus', action: 'closeContextMenu();toggleMtAdvanced()' },
     ];
   } else if(type === '__dash_export__'){
     items = [
@@ -2397,6 +2400,34 @@ const STATUS_HINTS={
   cancelled:'False positive / duplicate / not a real issue'
 };
 function statusLabel(s){return STATUS_LABELS[s]||(s||'').replace(/_/g,' ');}
+
+// The Gemini classifier prefixes ticket titles with the property name
+// (e.g. "2411B - Bloom Height — WiFi not working"). The card already shows the
+// property on its own line — strip the prefix from the title so the issue stands
+// alone. Tries common separators: em-dash, en-dash, hyphen, pipe, colon.
+function stripPropFromTitle(title, propName){
+  if(!title) return '';
+  const t = String(title).trim();
+  if(!propName) return t;
+  const p = String(propName).trim();
+  if(!p) return t;
+  // Build candidate prefixes: full property name, and apt-number-only fallbacks
+  const seps = [' — ', ' – ', ' - ', ' | ', ': ', ' • ', ' · '];
+  for(const sep of seps){
+    const prefix = p + sep;
+    if(t.length > prefix.length && t.toLowerCase().startsWith(prefix.toLowerCase())){
+      return t.substring(prefix.length).trim();
+    }
+  }
+  // Fallback: if the title's start matches the property up to a separator (any of the above)
+  const lower = t.toLowerCase();
+  if(lower.startsWith(p.toLowerCase())){
+    const rest = t.substring(p.length);
+    const m = rest.match(/^\s*[—–\-|:•·]\s*(.+)$/);
+    if(m) return m[1].trim();
+  }
+  return t;
+}
 function dismissStatusLegend(){
   try{localStorage.setItem('mtStatusLegendDismissed','1');}catch(e){}
   render();
@@ -4119,9 +4150,17 @@ function renderMaintenance(){
   const isManager=!cleanerMode;
   const isTechnician=cleanerMode&&cleanerMode.role==='maintenance';
 
-  let h='<div class="header"><div class="header-top"><h1>'+icon('wrench',18)+' Maintenance</h1><div class="header-actions">'+renderLangSelector()+
-    ''+
-    (cleanerMode?'<button class="icon-btn" onclick="cleanerLogout()" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>':'')+'</div></div></div>';
+  // Big quiet header: just "Maintenance" + ticket count + bell (= more menu).
+  // Lang selector / logout move into the bell dropdown to stay out of the way.
+  const _openCount=(maintenanceTickets||[]).filter(x=>x.status!=='resolved'&&x.status!=='cancelled').length;
+  h='<div class="header mt-page-header"><div class="header-top">';
+  h+='<h1>Maintenance</h1>';
+  h+='<div class="header-actions">';
+  if(isManager) h+='<button class="icon-btn" onclick="event.stopPropagation();showMtMoreMenu(event)" title="More actions" aria-label="More">'+icon('bell',18)+'</button>';
+  if(cleanerMode) h+='<button class="icon-btn" onclick="cleanerLogout()" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>';
+  h+='</div></div>';
+  h+='<div class="mt-page-subtitle">'+_openCount+' ticket'+(_openCount===1?'':'s')+'</div>';
+  h+='</div>';
   h+='<div class="container">';
 
   if(isManager){
@@ -4134,15 +4173,18 @@ function renderMaintenance(){
     const hasVendors = (vendors||[]).length > 0;
     const hasEquipment = (equipment||[]).length > 0;
     const hasPreventive = (preventiveMaint||[]).length > 0;
-    h+='<div class="mt-subtabs">';
-    h+='<button class="mt-subtab-btn'+(mtSubTab==='tickets'?' active':'')+'" onclick="setMtSubTab(\'tickets\')">Tickets</button>';
-    if(hasVendors || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='vendors'?' active':'')+'" onclick="setMtSubTab(\'vendors\')">Vendors</button>';
-    if(hasEquipment || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='equipment'?' active':'')+'" onclick="setMtSubTab(\'equipment\')">Equipment</button>';
-    if(hasPreventive || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='preventive'?' active':'')+'" onclick="setMtSubTab(\'preventive\')">Preventive</button>';
-    if(!showAdv && !hasVendors && !hasEquipment && !hasPreventive){
-      h+='<button class="mt-subtab-btn mt-subtab-show-adv" onclick="toggleMtAdvanced()" title="Show Vendors / Equipment / Preventive">+</button>';
+    // Subtabs row only renders when there's something other than Tickets to show.
+    // The "+" advanced toggle moved into the bell/more menu (showMtMoreMenu) to keep the
+    // base UI to a single primary view.
+    const hasAdvTabs = showAdv || hasVendors || hasEquipment || hasPreventive;
+    if(hasAdvTabs){
+      h+='<div class="mt-subtabs">';
+      h+='<button class="mt-subtab-btn'+(mtSubTab==='tickets'?' active':'')+'" onclick="setMtSubTab(\'tickets\')">Tickets</button>';
+      if(hasVendors || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='vendors'?' active':'')+'" onclick="setMtSubTab(\'vendors\')">Vendors</button>';
+      if(hasEquipment || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='equipment'?' active':'')+'" onclick="setMtSubTab(\'equipment\')">Equipment</button>';
+      if(hasPreventive || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='preventive'?' active':'')+'" onclick="setMtSubTab(\'preventive\')">Preventive</button>';
+      h+='</div>';
     }
-    h+='</div>';
 
     if(mtSubTab==='tickets'){h+=renderMtTickets(isManager);}
     else if(mtSubTab==='vendors'){h+=renderMtVendors();}
@@ -4320,42 +4362,46 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
   const _cmts=(mtComments[t.id]||[]);
   const _cmtCount=_cmts.length;
+  // Strip the "<property> — " prefix from titles since the property is shown separately
+  const titleClean = stripPropFromTitle(t.title, propName);
+  // Subtitle: unit type + extras pulled from the listing's marketing name
+  const lp = t.listing_id && listingPrices[t.listing_id] ? listingPrices[t.listing_id] : null;
+  const unitType = lp ? (lp.unit_type || (lp.bedrooms ? lp.bedrooms+' BR' : '')) : (typeof getUnitType==='function' ? getUnitType(t.listing_id) : '');
+  // Pull a location hint from the listing_name after the apt prefix
+  const apt = lp && lp.apt_number ? lp.apt_number : '';
+  const locHint = lp && lp.listing_name ? (function(){
+    let n = lp.listing_name;
+    if(apt) n = n.replace(new RegExp('^\\s*'+apt.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*[-—–|:·•]\\s*','i'),'');
+    return n.length>40 ? n.substring(0,40)+'…' : n;
+  })() : '';
   let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
   if(mtSelectMode){
     h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" onclick="event.stopPropagation();toggleMtSelected('+t.id+')"></div>';
   }
-  // Line 1: priority chip + title + status pill
-  h+='<div class="mt-card-row mt-card-row-1">';
-  h+='<span class="mt-pri-badge '+t.priority+'">'+t.priority+'</span>';
-  h+='<strong class="mt-card-title">'+esc(t.title)+'</strong>';
+  // Tag row: priority on left, status on right
+  h+='<div class="mt-card-tags">';
+  h+='<span class="mt-pri-badge '+t.priority+'">'+esc(t.priority)+'</span>';
   h+=statusPillHtml(t.status);
   h+='</div>';
-  // Line 2: property + category + SLA bar
-  h+='<div class="mt-card-row mt-card-row-2">';
-  h+='<span class="mt-card-prop" title="'+(propName?esc(propName):'No property')+'">'+icon('home',11)+' '+(propName?esc(propName):'<em>No property</em>')+'</span>';
-  h+='<span class="mt-card-cat">'+(CAT_ICONS[t.category]||'🔨')+' '+esc(t.category||'')+'</span>';
-  if(t.sla_deadline) h+='<span class="mt-card-sla">'+slaBarHtml(sla)+'</span>';
-  h+='</div>';
-  // Line 3: assignee + last comment snippet (or "no comments yet")
-  h+='<div class="mt-card-row mt-card-row-3" onclick="event.stopPropagation();toggleMtExpand('+t.id+')" title="View thread">';
-  h+='<span class="mt-card-assignee">'+icon('user',11)+' '+(tech?esc(tech.name):'<em>Unassigned</em>')+'</span>';
-  if(_cmtCount>0){
-    // Prefer the latest HUMAN comment when one exists — bot output gets buried otherwise.
-    const _human=[..._cmts].reverse().find(c=>!isAutoComment(c));
-    const _last=_human||_cmts[_cmts.length-1];
-    const _isAuto=isAutoComment(_last);
-    const _snippet=esc((_last.comment||'').slice(0,90))+(((_last.comment||'').length>90)?'…':'');
-    // Suppress author when it matches the assignee (already shown on this row)
-    const _firstName=(_last.author||'').split(' ')[0]||'';
-    const _techFirst=tech?(tech.name||'').split(' ')[0]:'';
-    const _hideAuthor=!_isAuto && _firstName && _firstName.toLowerCase()===_techFirst.toLowerCase();
-    let _authorHtml='';
-    if(_isAuto) _authorHtml='<span class="mt-cmt-snippet-bot" title="auto-extracted">'+icon('sparkles',10)+'</span> ';
-    else if(!_hideAuthor) _authorHtml='<strong>'+esc(_firstName||'Unknown')+'</strong> ';
-    h+='<span class="mt-card-snippet'+(_isAuto?' auto':'')+'">'+_authorHtml+_snippet+'</span>';
-  } else {
-    h+='<span class="mt-card-snippet empty">'+icon('msgSquare',11)+' No comments yet</span>';
+  // Title — the actual issue, no property duplication
+  h+='<h3 class="mt-card-title">'+esc(titleClean)+'</h3>';
+  // Property name on its own line
+  if(propName) h+='<div class="mt-card-property">'+esc(propName)+'</div>';
+  // Sub-meta: unit type + location hint with home icon
+  if(unitType || locHint){
+    h+='<div class="mt-card-meta">'+icon('home',13);
+    h+=' <span>';
+    if(unitType) h+=esc(unitType);
+    if(unitType && locHint) h+=' · ';
+    if(locHint) h+=esc(locHint);
+    h+='</span></div>';
   }
+  // Footer divider + 3-column row: category · SLA · assignee
+  h+='<div class="mt-card-footer">';
+  h+='<span class="mt-card-cat">'+(CAT_ICONS[t.category]||'🔨')+' '+esc(t.category||'')+'</span>';
+  if(t.sla_deadline) h+='<span class="mt-card-sla-text '+sla.cls+'">'+icon('clock',12)+' '+esc(sla.label)+'</span>';
+  else h+='<span class="mt-card-sla-text">'+icon('clock',12)+' No SLA</span>';
+  h+='<span class="mt-card-assignee">'+icon('user',12)+' '+(tech?esc(tech.name):'<em>Unassigned</em>')+'</span>';
   h+='</div>';
 
   // Expanded: timeline + actions (mobile-only — desktop uses right-side detail pane)
@@ -4435,21 +4481,55 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
 function renderMtTickets(isManager){
   let h='';
   const allProps=getAllProperties();
-  // Force list mode (board mode kept as dead code, can be re-enabled later)
   if(mtViewMode!=='list')mtViewMode='list';
 
-  // Top toolbar — saved views chip on the left, single "More" kebab dropdown on the right
-  // (Share report / History / Select are now inside the kebab — they were 3 always-visible buttons before)
-  if(isManager){
-    h+='<div class="mt-toolbar-row">';
-    h+='<div class="mt-toolbar-left">'+renderSavedViewsBar()+'</div>';
-    h+='<div class="mt-toolbar-right">';
-    h+='<button class="mt-action-pill" onclick="event.stopPropagation();showMtMoreMenu(event)" title="More actions">'+icon('moreVertical',14)+'</button>';
-    h+='</div>';
+  // === Counts (used by the chips below) ===
+  const allOpen=maintenanceTickets.filter(t=>t.status!=='resolved'&&t.status!=='cancelled');
+  const urgentCount=allOpen.filter(t=>t.priority==='urgent').length;
+  const now7=Date.now()-7*86400000;
+  const resolvedAll=(resolvedTickets&&resolvedTickets.length)?resolvedTickets:maintenanceTickets.filter(t=>t.status==='resolved');
+  const resolvedWeek=resolvedAll.filter(t=>t.resolved_at&&new Date(t.resolved_at).getTime()>now7).length;
+  const toConfirmCount=allOpen.filter(t=>t.to_confirm===true).length;
+  const today00=new Date(); today00.setHours(0,0,0,0);
+  const filteredToday=(resolvedAll||[]).filter(t=>{
+    if(t.status!=='cancelled') return false;
+    if(!t.resolution_notes||t.resolution_notes.indexOf('auto-filtered')!==0) return false;
+    const closed=t.closed_at?new Date(t.closed_at).getTime():0;
+    return closed>=today00.getTime();
+  }).length;
+  const assignedCount=allOpen.filter(t=>!!t.assigned_technician_id || !!t.assigned_vendor_id).length;
+
+  // === Search bar — first thing under the page header ===
+  h+='<div class="mt-search-wrap mt-search-standalone">'+icon('search',16)+'<input type="text" class="mt-search" placeholder="Search tickets…" value="'+esc(mtSearch)+'" oninput="mtSearch=this.value;render()" /></div>';
+
+  // === Quick filter chips ===
+  h+='<div class="mt-quick-filters">';
+  h+='<button class="mt-qf'+(mtFilterStatus==='all_open'?' active':'')+'" onclick="setMtStatFilter(\'all_open\')">All<span class="mt-qf-count">'+allOpen.length+'</span></button>';
+  if(urgentCount>0) h+='<button class="mt-qf urgent'+(mtFilterStatus==='urgent_stat'?' active':'')+'" onclick="setMtStatFilter(\'urgent_stat\')">Urgent<span class="mt-qf-count">'+urgentCount+'</span></button>';
+  h+='<button class="mt-qf'+(mtFilterStatus==='assigned_filter'?' active':'')+'" onclick="setMtStatFilter(\'assigned_filter\')">Assigned<span class="mt-qf-count">'+assignedCount+'</span></button>';
+  h+='<button class="mt-qf'+(mtFilterStatus==='resolved'?' active':'')+'" onclick="setMtStatFilter(\'resolved\')">Resolved<span class="mt-qf-count">'+resolvedWeek+'</span></button>';
+  if(toConfirmCount>0){
+    h+='<button class="mt-qf review'+(mtFilterStatus==='to_confirm'?' active':'')+'" onclick="setMtStatFilter(\'to_confirm\')" title="Gemini-flagged tickets that need a human eye">Review<span class="mt-qf-count">'+toConfirmCount+'</span></button>';
+  }
+  h+='</div>';
+
+  // === Category filter — collapsed pill until used ===
+  if(typeof window.mtCatFiltersOpen === 'undefined') window.mtCatFiltersOpen = false;
+  const _catOpen = window.mtCatFiltersOpen || !!mtFilterCat;
+  if(_catOpen){
+    h+='<div class="mt-filters">';
+    ['plumbing','electrical','ac','appliance','structural','pest','painting','general'].forEach(c=>{
+      h+='<div class="mt-filter-chip'+(mtFilterCat===c?' active':'')+'" onclick="setMtFilter(\'cat\',\''+c+'\')">'+(CAT_ICONS[c]||'')+' '+c+'</div>';
+    });
+    if(mtFilterCat){
+      h+='<button class="mt-filter-clear" onclick="setMtFilter(\'cat\',\''+mtFilterCat+'\')" title="Clear">'+icon('x',12)+'</button>';
+    } else {
+      h+='<button class="mt-filter-clear" onclick="toggleMtCatFilters()" title="Hide categories">'+icon('chevronLeft',12)+'</button>';
+    }
     h+='</div>';
   }
 
-  // Recurring patterns banner — show only the top one when collapsed; expandable
+  // === Optional info banners (only when meaningful) ===
   if(isManager && (recurringIssues||[]).length>0){
     const _ri=recurringIssues[0];
     const _lname=(Object.values(listingPrices||{}).find(l=>String(l.listing_id||'')===String(_ri.listing_id))||{}).listing_name || (listingPrices&&listingPrices[_ri.listing_id]&&listingPrices[_ri.listing_id].listing_name) || _ri.listing_id || 'Unknown';
@@ -4464,14 +4544,24 @@ function renderMtTickets(isManager){
     h+=icon('chevronLeft',12);
     h+='</button>';
   }
+  if(filteredToday>0 && isManager){
+    h+='<div class="mt-filtered-today" title="WhatsApp/Gemini classifier output that the noise-filter trigger auto-cancelled at insert today">';
+    h+=icon('sparkles',12)+' <strong>'+filteredToday+'</strong> auto-filtered today (noise from the WhatsApp classifier)';
+    h+='</div>';
+  }
 
-  // === Report Issue form — collapsed by default to reduce visual noise ===
-  // State persisted in localStorage; toggle via the panel header.
+  // === Report Issue — collapsed by default ===
   if(typeof window.mtFormOpen === 'undefined'){
     try{ window.mtFormOpen = localStorage.getItem('mtFormOpen') === '1'; }catch(e){ window.mtFormOpen = false; }
   }
   if(!window.mtFormOpen){
-    h+='<button class="mt-report-trigger" onclick="toggleMtForm()">'+icon('plus',14)+' Report a new issue</button>';
+    if(isManager){
+      h+='<div class="mt-secondary-row">';
+      h+='<button class="mt-report-trigger" onclick="toggleMtForm()">'+icon('plus',14)+' Report a new issue</button>';
+      h+='<button class="mt-cat-toggle-icon" onclick="toggleMtCatFilters()" title="Filter by category">'+icon('wrench',14)+'</button>';
+      h+='<button class="mt-cat-toggle-icon" onclick="saveCurrentView()" title="Save current view">'+icon('plus',14)+'</button>';
+      h+='</div>';
+    }
   } else {
     h+='<div class="settings-panel mt-report-panel"><div class="mt-report-header"><h3>➕ Report Issue</h3>'+
        '<button class="mt-report-collapse" onclick="toggleMtForm()" title="Hide this form">'+icon('x',14)+'</button>'+
@@ -4488,67 +4578,6 @@ function renderMtTickets(isManager){
     h+='</div></div>';
   }
 
-  // === Stats bar — 4 cards instead of 6 (was: Open/Urgent/InProg/Waiting/Resolved/All) ===
-  // "In progress" and "Waiting parts" filtering is now via the kebab on each card; rarely needed at the list level.
-  const allOpen=maintenanceTickets.filter(t=>t.status!=='resolved'&&t.status!=='cancelled');
-  const urgentCount=allOpen.filter(t=>t.priority==='urgent').length;
-  const now7=Date.now()-7*86400000;
-  const resolvedAll=(resolvedTickets&&resolvedTickets.length)?resolvedTickets:maintenanceTickets.filter(t=>t.status==='resolved');
-  const resolvedWeek=resolvedAll.filter(t=>t.resolved_at&&new Date(t.resolved_at).getTime()>now7).length;
-  const allHistoryCount=allOpen.length+resolvedAll.length;
-  // Tickets the Gemini classifier flagged for human review — separate queue so they
-  // don't dilute the real Open list.
-  const toConfirmCount=allOpen.filter(t=>t.to_confirm===true).length;
-  // "Filtered today" — proof the BEFORE-INSERT trigger is doing its job.
-  // Counts cancelled tickets where resolution_notes starts with "auto-filtered" and closed_at is today.
-  const today00=new Date(); today00.setHours(0,0,0,0);
-  const filteredToday=(resolvedAll||[]).filter(t=>{
-    if(t.status!=='cancelled') return false;
-    if(!t.resolution_notes||t.resolution_notes.indexOf('auto-filtered')!==0) return false;
-    const closed=t.closed_at?new Date(t.closed_at).getTime():0;
-    return closed>=today00.getTime();
-  }).length;
-  h+='<div class="mt-stats">';
-  h+='<div class="mt-stat-card'+(mtFilterStatus==='all_open'?' active':'')+'" onclick="setMtStatFilter(\'all_open\')"><div class="mt-stat-num">'+allOpen.length+'</div><div class="mt-stat-label">Open</div></div>';
-  h+='<div class="mt-stat-card'+(mtFilterStatus==='urgent_stat'?' active':'')+'" onclick="setMtStatFilter(\'urgent_stat\')" style="'+(urgentCount>0?'border-color:var(--red)':'')+'"><div class="mt-stat-num" style="'+(urgentCount>0?'color:var(--red)':'')+'">'+urgentCount+'</div><div class="mt-stat-label">Urgent</div></div>';
-  h+='<div class="mt-stat-card'+(mtFilterStatus==='resolved'?' active':'')+'" onclick="setMtStatFilter(\'resolved\')"><div class="mt-stat-num" style="color:var(--green)">'+resolvedWeek+'</div><div class="mt-stat-label">Resolved 7d</div></div>';
-  h+='<div class="mt-stat-card'+(mtFilterStatus==='all_history'?' active':'')+'" onclick="setMtStatFilter(\'all_history\')"><div class="mt-stat-num" style="color:var(--text-3)">'+allHistoryCount+'</div><div class="mt-stat-label">All</div></div>';
-  // Review queue: only shown when there are flagged tickets — keeps the bar quiet otherwise.
-  if(toConfirmCount>0){
-    h+='<div class="mt-stat-card mt-stat-review'+(mtFilterStatus==='to_confirm'?' active':'')+'" onclick="setMtStatFilter(\'to_confirm\')" title="Gemini-flagged tickets that need a human eye"><div class="mt-stat-num" style="color:var(--orange)">'+toConfirmCount+'</div><div class="mt-stat-label">'+icon('alertTriangle',10)+' Review</div></div>';
-  }
-  h+='</div>';
-  // Quiet line under the stats: shows the noise filter is working today
-  if(filteredToday>0 && isManager){
-    h+='<div class="mt-filtered-today" title="WhatsApp/Gemini classifier output that the noise-filter trigger auto-cancelled at insert today">';
-    h+=icon('sparkles',12)+' <strong>'+filteredToday+'</strong> auto-filtered today (noise from the WhatsApp classifier)';
-    h+='</div>';
-  }
-
-  // Filters: search always-visible, category chips collapsed behind a toggle when not active
-  h+='<div class="settings-panel mt-filter-panel">';
-  // Search input with proper icon — emoji-in-placeholder rendered awkwardly on mobile.
-  h+='<div class="mt-search-wrap">'+icon('search',14)+'<input type="text" class="mt-search" placeholder="Search tickets…" value="'+esc(mtSearch)+'" oninput="mtSearch=this.value;render()" /></div>';
-  // Category filter: a single button when collapsed; chips when expanded or when a category is active
-  if(typeof window.mtCatFiltersOpen === 'undefined') window.mtCatFiltersOpen = false;
-  const _catOpen = window.mtCatFiltersOpen || !!mtFilterCat;
-  if(_catOpen){
-    h+='<div class="mt-filters">';
-    ['plumbing','electrical','ac','appliance','structural','pest','painting','general'].forEach(c=>{
-      h+='<div class="mt-filter-chip'+(mtFilterCat===c?' active':'')+'" onclick="setMtFilter(\'cat\',\''+c+'\')">'+(CAT_ICONS[c]||'')+' '+c+'</div>';
-    });
-    if(mtFilterCat){
-      h+='<button class="mt-filter-clear" onclick="setMtFilter(\'cat\',\''+mtFilterCat+'\')" title="Clear">'+icon('x',12)+'</button>';
-    } else {
-      h+='<button class="mt-filter-clear" onclick="toggleMtCatFilters()" title="Hide categories">'+icon('chevronLeft',12)+'</button>';
-    }
-    h+='</div>';
-  } else {
-    h+='<button class="mt-filter-toggle" onclick="toggleMtCatFilters()">'+icon('plus',12)+' Filter by category</button>';
-  }
-  h+='</div>';
-  // View toggle removed — list mode is canonical (board mode kept as dead code)
-
   // === Filter logic ===
   // maintenanceTickets = active (open/assigned/in_progress/waiting_parts), resolvedTickets = resolved.
   // Source set depends on which stat card is active.
@@ -4563,6 +4592,7 @@ function renderMtTickets(isManager){
   if(!isManager&&cleanerMode){toShow=toShow.filter(t=>t.assigned_technician_id===cleanerMode.id);}
   if(mtFilterStatus==='all_open'){toShow=toShow.filter(t=>t.status!=='resolved'&&t.status!=='cancelled');}
   else if(mtFilterStatus==='urgent_stat'){toShow=toShow.filter(t=>t.priority==='urgent'&&t.status!=='resolved'&&t.status!=='cancelled');}
+  else if(mtFilterStatus==='assigned_filter'){toShow=toShow.filter(t=>(!!t.assigned_technician_id || !!t.assigned_vendor_id) && t.status!=='resolved' && t.status!=='cancelled');}
   else if(mtFilterStatus==='to_confirm'){toShow=toShow.filter(t=>t.to_confirm===true && t.status!=='resolved' && t.status!=='cancelled');}
   else if(mtFilterStatus==='in_progress'||mtFilterStatus==='waiting_parts'){toShow=toShow.filter(t=>t.status===mtFilterStatus);}
   // 'resolved' and 'all_history' use the source-set selection above; no further status filtering.
@@ -4629,7 +4659,9 @@ function renderMtTickets(isManager){
       h+=renderMtTable(toShow);
       h+='</div>';
     } else {
-      h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
+      // Cards mode (default + only on mobile) — no panel wrapper, no "Tickets (N)" heading.
+      // The chip already shows the count, the cards stand on their own.
+      h+='<div class="mt-card-list">';
       if(toShow.length===0){
         const hasFilter = mtFilterStatus||mtFilterCat||mtSearch.trim();
         if(hasFilter){ h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No tickets</div><div class="empty-hero-sub">No ticket matches this filter.</div></div>'; }
