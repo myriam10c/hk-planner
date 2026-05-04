@@ -4341,13 +4341,18 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   h+='<span class="mt-card-assignee">'+icon('user',11)+' '+(tech?esc(tech.name):'<em>Unassigned</em>')+'</span>';
   if(_cmtCount>0){
     // Prefer the latest HUMAN comment when one exists — bot output gets buried otherwise.
-    // Fall back to the latest comment of any kind if there's no human one yet.
     const _human=[..._cmts].reverse().find(c=>!isAutoComment(c));
     const _last=_human||_cmts[_cmts.length-1];
     const _isAuto=isAutoComment(_last);
     const _snippet=esc((_last.comment||'').slice(0,90))+(((_last.comment||'').length>90)?'…':'');
-    const _author=_isAuto?'<span class="mt-cmt-snippet-bot" title="auto-extracted">'+icon('sparkles',10)+'</span>':'<strong>'+esc((_last.author||'').split(' ')[0]||'Unknown')+'</strong>';
-    h+='<span class="mt-card-snippet'+(_isAuto?' auto':'')+'">'+_author+' '+_snippet+'</span>';
+    // Suppress author when it matches the assignee (already shown on this row)
+    const _firstName=(_last.author||'').split(' ')[0]||'';
+    const _techFirst=tech?(tech.name||'').split(' ')[0]:'';
+    const _hideAuthor=!_isAuto && _firstName && _firstName.toLowerCase()===_techFirst.toLowerCase();
+    let _authorHtml='';
+    if(_isAuto) _authorHtml='<span class="mt-cmt-snippet-bot" title="auto-extracted">'+icon('sparkles',10)+'</span> ';
+    else if(!_hideAuthor) _authorHtml='<strong>'+esc(_firstName||'Unknown')+'</strong> ';
+    h+='<span class="mt-card-snippet'+(_isAuto?' auto':'')+'">'+_authorHtml+_snippet+'</span>';
   } else {
     h+='<span class="mt-card-snippet empty">'+icon('msgSquare',11)+' No comments yet</span>';
   }
@@ -4522,7 +4527,8 @@ function renderMtTickets(isManager){
 
   // Filters: search always-visible, category chips collapsed behind a toggle when not active
   h+='<div class="settings-panel mt-filter-panel">';
-  h+='<input type="text" class="mt-search" placeholder="🔍 Search tickets…" value="'+esc(mtSearch)+'" oninput="mtSearch=this.value;render()" />';
+  // Search input with proper icon — emoji-in-placeholder rendered awkwardly on mobile.
+  h+='<div class="mt-search-wrap">'+icon('search',14)+'<input type="text" class="mt-search" placeholder="Search tickets…" value="'+esc(mtSearch)+'" oninput="mtSearch=this.value;render()" /></div>';
   // Category filter: a single button when collapsed; chips when expanded or when a category is active
   if(typeof window.mtCatFiltersOpen === 'undefined') window.mtCatFiltersOpen = false;
   const _catOpen = window.mtCatFiltersOpen || !!mtFilterCat;

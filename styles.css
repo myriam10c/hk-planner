@@ -1334,6 +1334,99 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 .mt-card-snippet.auto { color: var(--text-3); font-style: italic; }
 .mt-card-snippet.empty { color: var(--text-3); opacity: 0.7; font-style: italic; }
 .mt-cmt-snippet-bot { display: inline-flex; vertical-align: -1px; color: var(--text-3); margin-right: 2px; }
+
+/* Search wrapper — replaces the 🔍-in-placeholder hack with a proper icon */
+.mt-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.mt-search-wrap > svg {
+  position: absolute;
+  left: 12px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.mt-search-wrap .mt-search {
+  padding-left: 36px;
+  width: 100%;
+}
+
+/* === MOBILE (≤1023px) — fix the cramped maintenance card === */
+@media (max-width: 1023px) {
+  /* Title: wrap freely. Don't truncate when there's vertical space available. */
+  .mt-card-title {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    line-height: 1.35;
+    font-size: 14px;
+  }
+  /* Row 1: priority chip + title block on left, status pill on right at top */
+  .mt-card-row-1 {
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .mt-card-row-1 .mt-pri-badge { margin-top: 2px; flex-shrink: 0; }
+  .mt-card-row-1 .mt-status { margin-top: 2px; flex-shrink: 0; }
+
+  /* Row 2: meta — let it wrap naturally, give SLA bar its own line if needed */
+  .mt-card-row-2 {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .mt-card-prop {
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+  .mt-card-cat { font-size: 10px; }
+  .mt-card-sla { margin-left: 0; }
+
+  /* Row 3: assignee + snippet — give snippet enough room, allow 2-line wrap */
+  .mt-card-row-3 {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .mt-card-assignee {
+    flex-basis: auto;
+    color: var(--text-2);
+    font-weight: var(--fw-medium);
+  }
+  .mt-card-snippet {
+    flex: 1 1 100%;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.4;
+    padding-top: 2px;
+  }
+
+  /* Stat cards: shorter labels fit cleanly in 4 narrow boxes */
+  .mt-stats { gap: 6px; }
+  .mt-stat-card { padding: 10px 6px; }
+  .mt-stat-card .mt-stat-num { font-size: 22px; line-height: 1.2; }
+  .mt-stat-card .mt-stat-label {
+    font-size: 9px;
+    line-height: 1.15;
+    letter-spacing: 0.02em;
+    white-space: normal;
+    text-align: center;
+  }
+
+  /* Hide hover quick-actions on mobile — no hover, and they overlap content */
+  .mt-card .card-quick-actions { display: none; }
+
+  /* Top toolbar: stack saved-views + kebab vertically when crowded */
+  .mt-toolbar-row {
+    align-items: stretch;
+  }
+  .mt-toolbar-right .mt-action-pill { width: 36px; height: 36px; }
+
+  /* Filter category toggle: more breathing room */
+  .mt-filter-toggle { width: 100%; justify-content: center; }
+}
 .mt-pri-badge { font-size:var(--fs-xs); font-weight:var(--fw-semibold); padding:2px 8px; border-radius:var(--radius-sm); text-transform:uppercase; letter-spacing:var(--ls-wide); }
 .mt-pri-badge.urgent { background:var(--red-light); color:var(--red); }
 .mt-pri-badge.high { background:var(--orange-light); color:var(--orange); }
