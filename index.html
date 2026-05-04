@@ -676,6 +676,18 @@ function renderContextMenu(){
       { divider: true },
       { label: mtSelectMode ? 'Cancel select' : 'Select multiple', icon: 'check', action: 'closeContextMenu();toggleMtSelectMode()' },
     ];
+  } else if(type === '__dash_export__'){
+    items = [
+      { label: 'Excel — current month', icon: 'download', action: 'closeContextMenu();exportExcel()' },
+      { label: 'PDF — current month',   icon: 'download', action: 'closeContextMenu();exportPDF()' },
+      { divider: true },
+      { label: 'CSV — cleanings',       icon: 'download', action: 'closeContextMenu();exportCsv(\'cleanings\')' },
+      { label: 'CSV — maintenance',     icon: 'download', action: 'closeContextMenu();exportCsv(\'maintenance\')' },
+    ];
+    if(!cleanerMode){
+      items.push({ divider: true });
+      items.push({ label: 'Generate invoice', icon: 'wallet', action: 'closeContextMenu();dashGenerateInvoiceForCurrentMonth()' });
+    }
   } else if(type === 'ticket'){
     const tid = Number(id);
     const t = (maintenanceTickets||[]).concat(resolvedTickets||[]).find(x => x.id === tid);
@@ -2389,6 +2401,13 @@ function dismissStatusLegend(){
   try{localStorage.setItem('mtStatusLegendDismissed','1');}catch(e){}
   render();
 }
+function toggleMtAdvanced(){
+  try{
+    const cur=localStorage.getItem('mtShowAdvanced')==='1';
+    localStorage.setItem('mtShowAdvanced', cur?'0':'1');
+  }catch(e){}
+  render();
+}
 function toggleMtForm(){
   window.mtFormOpen = !window.mtFormOpen;
   try{ localStorage.setItem('mtFormOpen', window.mtFormOpen ? '1' : '0'); }catch(e){}
@@ -3199,14 +3218,41 @@ async function loadDashMonth(){
 }
 function changeDashMonth(dir){dashMonth+=dir;if(dashMonth>11){dashMonth=0;dashYear++;}if(dashMonth<0){dashMonth=11;dashYear--;}loadDashMonth();}
 
+// Single export menu — replaces the 5-button row (Excel/PDF/CSV cleanings/CSV maintenance/Invoice)
+function showDashExportMenu(e){
+  e.preventDefault();
+  e.stopPropagation();
+  const rect=e.currentTarget.getBoundingClientRect();
+  contextMenuState.open=true;
+  contextMenuState.x=rect.right;
+  contextMenuState.y=rect.bottom+4;
+  contextMenuState.id='__dash_export__';
+  contextMenuState.type='__dash_export__';
+  renderContextMenu();
+}
+function dashGenerateInvoiceForCurrentMonth(){
+  // Invoice was previously a separate <select> — now it just picks the current dashboard month.
+  const m=dashMonth, y=dashYear;
+  // Re-implement lightweight: call existing generateInvoice with synthetic select if it exists
+  const sel=document.createElement('select');
+  sel.id='invoiceMonthSel';
+  const opt=document.createElement('option');
+  opt.value=y+'-'+m;
+  sel.appendChild(opt);
+  document.body.appendChild(sel);
+  try { generateInvoice(); } finally { sel.remove(); }
+}
+
 function renderDashboard(){
   const syncD=lastUpdate?relativeSync(lastUpdate):'';
-  let h='<div class="header"><div class="header-top"><h1>📊 Dashboard</h1>'+(syncD?'<div style="flex:1"></div><span class="sync-indicator">📡 '+syncD+'</span>':'')+'</div></div>';
+  // Header: title + single Export kebab. The previous 5-button row (Excel/PDF/CSV cleanings/CSV
+  // maintenance/Invoice) is now consolidated into one dropdown — see showDashExportMenu().
+  let h='<div class="header"><div class="header-top"><h1>📊 Dashboard</h1>'+
+    '<div style="flex:1"></div>'+
+    (syncD?'<span class="sync-indicator" style="margin-right:8px">📡 '+syncD+'</span>':'')+
+    '<button class="icon-btn" onclick="event.stopPropagation();showDashExportMenu(event)" title="Export…">'+icon('download',18)+'</button>'+
+    '</div></div>';
   h+='<div class="container">';
-  h+='<div style="margin-bottom:16px; display:flex; gap:8px; flex-wrap:wrap;">'+
-    '<button onclick="exportCsv(\'cleanings\')" class="btn-export">'+icon('download',16)+' Export cleanings</button>'+
-    '<button onclick="exportCsv(\'maintenance\')" class="btn-export">'+icon('dollar',16)+' Export maintenance</button>'+
-    '</div>';
   h+='<div class="month-selector"><button onclick="changeDashMonth(-1)">‹</button><h3>'+MONTH_NAMES[dashMonth]+' '+dashYear+'</h3><button onclick="changeDashMonth(1)">›</button></div>';
   // #7 Dashboard tabs (Operations / Revenue / Properties)
   h+='<div class="dash-tabs">'+
@@ -3222,22 +3268,15 @@ function renderDashboard(){
   if(!dashData){h+='</div>'+renderBottomNav();document.getElementById('app').innerHTML=h;loadDashMonth();return;}
 
   const mRes=dashData.reservations,mDone=dashData.done,mAssign=dashData.assignments,mTimers=dashData.timers||{};
+  // Multi-assign helpers scoped to dashData (mAssign[key] is number[])
+  const mAssigneesOf=(k)=>{ const v=mAssign[k]; return Array.isArray(v)?v:(v?[v]:[]); };
+  const mIsAssignedTo=(k,id)=>mAssigneesOf(k).includes(id);
   const total=mRes.length,totalDone=mRes.filter(r=>mDone[keyFor(r)]).length;
-  const totalAssigned=mRes.filter(r=>mAssign[keyFor(r)]).length;
+  const totalAssigned=mRes.filter(r=>mAssigneesOf(keyFor(r)).length>0).length;
   const revDone=mRes.reduce((s,r)=>mDone[keyFor(r)]?s+getRevenueFee(r):s,0);
   const revPotential=mRes.reduce((s,r)=>s+getRevenueFee(r),0);
 
-  // #15 Export buttons (always visible)
-  h+='<div class="export-btns"><button class="export-btn" onclick="exportExcel()">📊 Export Excel</button><button class="export-btn" onclick="exportPDF()">📄 Export PDF</button>';
-  if(!cleanerMode){
-    // Invoice section — only past months
-    const now=new Date();const curM=now.getMonth(),curY=now.getFullYear();
-    let invOpts='';
-    for(let i=0;i<12;i++){let m=curM-1-i,yr=curY;if(m<0){m+=12;yr--;}invOpts+='<option value="'+yr+'-'+m+'">'+MONTH_NAMES[m]+' '+yr+'</option>';}
-    h+='<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><select id="invoiceMonthSel" style="flex:1;padding:8px 10px;border:1px solid var(--primary);border-radius:10px;font-size:12px;font-weight:600;background:var(--primary-light);color:var(--primary);outline:none">'+invOpts+'</select>';
-    h+='<button class="export-btn" onclick="generateInvoice()" style="background:var(--primary-light);border-color:var(--primary);color:var(--primary);white-space:nowrap">🧾 Invoice</button></div>';
-  }
-  h+='</div>';
+  // (Export buttons moved into the kebab in the header — see showDashExportMenu)
 
   // Pre-compute for multiple tabs
   const mDates=[...new Set(mRes.map(r=>r.co))].sort();
@@ -3308,17 +3347,61 @@ function renderDashboard(){
     if(cleaners.length>0){
       h+='<div class="dash-card"><h3>👥 Per Cleaner</h3><div class="chart-container"><canvas id="cleanerChart"></canvas></div>';
       cleaners.forEach(c=>{
-        const assigned=mRes.filter(r=>mAssign[keyFor(r)]===c.id).length;
-        const cdone=mRes.filter(r=>mAssign[keyFor(r)]===c.id&&mDone[keyFor(r)]).length;
-        const cRev=mRes.filter(r=>mAssign[keyFor(r)]===c.id).reduce((s,r)=>s+getRevenueFee(r),0);
-        const cTimers=mRes.filter(r=>mAssign[keyFor(r)]===c.id&&mTimers[keyFor(r)]&&mTimers[keyFor(r)].duration_minutes).map(r=>mTimers[keyFor(r)].duration_minutes);
+        const assigned=mRes.filter(r=>mIsAssignedTo(keyFor(r), c.id)).length;
+        const cdone=mRes.filter(r=>mIsAssignedTo(keyFor(r), c.id)&&mDone[keyFor(r)]).length;
+        // Multi-assign: revenue is split equally across all assignees on a job
+        const cRev=mRes.filter(r=>mIsAssignedTo(keyFor(r), c.id)).reduce((s,r)=>{
+          const team=mAssigneesOf(keyFor(r)).length||1;
+          return s+(getRevenueFee(r)/team);
+        },0);
+        const cTimers=mRes.filter(r=>mIsAssignedTo(keyFor(r), c.id)&&mTimers[keyFor(r)]&&mTimers[keyFor(r)].duration_minutes).map(r=>mTimers[keyFor(r)].duration_minutes);
         const avgTime=cTimers.length>0?Math.round(cTimers.reduce((a,b)=>a+b,0)/cTimers.length):0;
         const pct=assigned>0?Math.round(cdone/assigned*100):0;
         h+='<div class="cleaner-stat-row"><div class="cs-name"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+(avgTime?' <span style="font-size:10px;color:var(--text3)">~'+avgTime+'min</span>':'')+'</div>'+
           '<div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:'+c.color+'"></div></div>'+
-          '<div class="cs-count">'+cdone+'/'+assigned+' · '+cRev.toLocaleString()+' AED</div></div>';
+          '<div class="cs-count">'+cdone+'/'+assigned+' · '+Math.round(cRev).toLocaleString()+' AED</div></div>';
       });
       h+='</div>';
+    }
+
+    // Team pairs — only shows when multi-assign is in use this month
+    // Counts cleaning keys where 2+ cleaners are co-assigned, top 5 most-frequent pairs
+    if(cleaners.length>=2){
+      const pairCount={};
+      mRes.forEach(r=>{
+        const ids=mAssigneesOf(keyFor(r));
+        if(ids.length<2) return;
+        // Sort + iterate over all unordered pairs
+        const sorted=[...ids].sort((a,b)=>a-b);
+        for(let i=0;i<sorted.length;i++){
+          for(let j=i+1;j<sorted.length;j++){
+            const k=sorted[i]+'|'+sorted[j];
+            if(!pairCount[k]) pairCount[k]={a:sorted[i], b:sorted[j], n:0, doneN:0, mins:0, minsCount:0};
+            pairCount[k].n++;
+            if(mDone[keyFor(r)]) pairCount[k].doneN++;
+            const tm=mTimers[keyFor(r)];
+            if(tm&&tm.duration_minutes){ pairCount[k].mins+=tm.duration_minutes; pairCount[k].minsCount++; }
+          }
+        }
+      });
+      const pairs=Object.values(pairCount).sort((a,b)=>b.n-a.n).slice(0,5);
+      if(pairs.length>0){
+        h+='<div class="dash-card"><h3>🤝 Team pairs</h3><div style="font-size:11px;color:var(--text-3);margin-bottom:10px">Cleaners who worked together this month</div>';
+        pairs.forEach(p=>{
+          const a=getCleanerById(p.a), b=getCleanerById(p.b);
+          if(!a||!b) return;
+          const avg=p.minsCount>0?Math.round(p.mins/p.minsCount):0;
+          h+='<div class="cleaner-stat-row" style="gap:10px">';
+          h+='<div class="cs-name" style="display:flex;align-items:center;gap:6px">';
+          h+='<span class="cleaner-dot" style="background:'+(a.color||'#888')+'"></span>'+esc(a.name);
+          h+='<span style="color:var(--text-3);font-weight:400">+</span>';
+          h+='<span class="cleaner-dot" style="background:'+(b.color||'#888')+'"></span>'+esc(b.name);
+          h+='</div>';
+          h+='<div class="cs-count">'+p.n+'×'+(avg?(' · ~'+avg+'min'):'')+'</div>';
+          h+='</div>';
+        });
+        h+='</div>';
+      }
     }
 
     // Per day
@@ -3480,7 +3563,7 @@ function renderDashboard(){
     const clCtx=document.getElementById('cleanerChart');
     if(clCtx&&cleaners.length>0){
       const labels=cleaners.map(c=>c.name);
-      const data=cleaners.map(c=>mRes.filter(r=>mAssign[keyFor(r)]===c.id).length);
+      const data=cleaners.map(c=>mRes.filter(r=>mIsAssignedTo(keyFor(r), c.id)).length);
       const colors=cleaners.map(c=>c.color);
       new Chart(clCtx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}}}}});
     }
@@ -4044,12 +4127,21 @@ function renderMaintenance(){
   if(isManager){
     // Fallback: legacy subtab values now folded into Tickets
     if(mtSubTab==='health'||mtSubTab==='history'||mtSubTab==='reports'||mtSubTab==='recurring'){mtSubTab='tickets';}
-    // Manager view with subtabs (4 only — Reports/History/Recurring moved into Tickets)
+    // Manager subtabs — Tickets always visible. Vendors/Equipment/Preventive only show
+    // when they have data, OR when the user has explicitly opted in to "advanced".
+    // Avoids 3 dead tabs for users who don't track inventory.
+    const showAdv = (function(){ try { return localStorage.getItem('mtShowAdvanced') === '1'; } catch(e){ return false; } })();
+    const hasVendors = (vendors||[]).length > 0;
+    const hasEquipment = (equipment||[]).length > 0;
+    const hasPreventive = (preventiveMaint||[]).length > 0;
     h+='<div class="mt-subtabs">';
     h+='<button class="mt-subtab-btn'+(mtSubTab==='tickets'?' active':'')+'" onclick="setMtSubTab(\'tickets\')">Tickets</button>';
-    h+='<button class="mt-subtab-btn'+(mtSubTab==='vendors'?' active':'')+'" onclick="setMtSubTab(\'vendors\')">Vendors</button>';
-    h+='<button class="mt-subtab-btn'+(mtSubTab==='equipment'?' active':'')+'" onclick="setMtSubTab(\'equipment\')">Equipment</button>';
-    h+='<button class="mt-subtab-btn'+(mtSubTab==='preventive'?' active':'')+'" onclick="setMtSubTab(\'preventive\')">Preventive</button>';
+    if(hasVendors || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='vendors'?' active':'')+'" onclick="setMtSubTab(\'vendors\')">Vendors</button>';
+    if(hasEquipment || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='equipment'?' active':'')+'" onclick="setMtSubTab(\'equipment\')">Equipment</button>';
+    if(hasPreventive || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='preventive'?' active':'')+'" onclick="setMtSubTab(\'preventive\')">Preventive</button>';
+    if(!showAdv && !hasVendors && !hasEquipment && !hasPreventive){
+      h+='<button class="mt-subtab-btn mt-subtab-show-adv" onclick="toggleMtAdvanced()" title="Show Vendors / Equipment / Preventive">+</button>';
+    }
     h+='</div>';
 
     if(mtSubTab==='tickets'){h+=renderMtTickets(isManager);}
@@ -4399,6 +4491,9 @@ function renderMtTickets(isManager){
   const resolvedAll=(resolvedTickets&&resolvedTickets.length)?resolvedTickets:maintenanceTickets.filter(t=>t.status==='resolved');
   const resolvedWeek=resolvedAll.filter(t=>t.resolved_at&&new Date(t.resolved_at).getTime()>now7).length;
   const allHistoryCount=allOpen.length+resolvedAll.length;
+  // Tickets the Gemini classifier flagged for human review — separate queue so they
+  // don't dilute the real Open list.
+  const toConfirmCount=allOpen.filter(t=>t.to_confirm===true).length;
   // "Filtered today" — proof the BEFORE-INSERT trigger is doing its job.
   // Counts cancelled tickets where resolution_notes starts with "auto-filtered" and closed_at is today.
   const today00=new Date(); today00.setHours(0,0,0,0);
@@ -4413,6 +4508,10 @@ function renderMtTickets(isManager){
   h+='<div class="mt-stat-card'+(mtFilterStatus==='urgent_stat'?' active':'')+'" onclick="setMtStatFilter(\'urgent_stat\')" style="'+(urgentCount>0?'border-color:var(--red)':'')+'"><div class="mt-stat-num" style="'+(urgentCount>0?'color:var(--red)':'')+'">'+urgentCount+'</div><div class="mt-stat-label">Urgent</div></div>';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='resolved'?' active':'')+'" onclick="setMtStatFilter(\'resolved\')"><div class="mt-stat-num" style="color:var(--green)">'+resolvedWeek+'</div><div class="mt-stat-label">Resolved 7d</div></div>';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='all_history'?' active':'')+'" onclick="setMtStatFilter(\'all_history\')"><div class="mt-stat-num" style="color:var(--text-3)">'+allHistoryCount+'</div><div class="mt-stat-label">All</div></div>';
+  // Review queue: only shown when there are flagged tickets — keeps the bar quiet otherwise.
+  if(toConfirmCount>0){
+    h+='<div class="mt-stat-card mt-stat-review'+(mtFilterStatus==='to_confirm'?' active':'')+'" onclick="setMtStatFilter(\'to_confirm\')" title="Gemini-flagged tickets that need a human eye"><div class="mt-stat-num" style="color:var(--orange)">'+toConfirmCount+'</div><div class="mt-stat-label">'+icon('alertTriangle',10)+' Review</div></div>';
+  }
   h+='</div>';
   // Quiet line under the stats: shows the noise filter is working today
   if(filteredToday>0 && isManager){
@@ -4458,6 +4557,7 @@ function renderMtTickets(isManager){
   if(!isManager&&cleanerMode){toShow=toShow.filter(t=>t.assigned_technician_id===cleanerMode.id);}
   if(mtFilterStatus==='all_open'){toShow=toShow.filter(t=>t.status!=='resolved'&&t.status!=='cancelled');}
   else if(mtFilterStatus==='urgent_stat'){toShow=toShow.filter(t=>t.priority==='urgent'&&t.status!=='resolved'&&t.status!=='cancelled');}
+  else if(mtFilterStatus==='to_confirm'){toShow=toShow.filter(t=>t.to_confirm===true && t.status!=='resolved' && t.status!=='cancelled');}
   else if(mtFilterStatus==='in_progress'||mtFilterStatus==='waiting_parts'){toShow=toShow.filter(t=>t.status===mtFilterStatus);}
   // 'resolved' and 'all_history' use the source-set selection above; no further status filtering.
   if(mtFilterCat){toShow=toShow.filter(t=>t.category===mtFilterCat);}
@@ -4862,7 +4962,10 @@ function generateOwnerReport(listingId){
   mRes.sort((a,b)=>a.co.localeCompare(b.co)).forEach(r=>{
     if(y>275){doc.addPage();y=20;}
     const key=keyFor(r);
-    const cl=mAssign[key]?getCleanerById(mAssign[key]):null;
+    // PDF export: show all assignees (multi-cleaner aware), comma-separated
+    const _cids=Array.isArray(mAssign[key])?mAssign[key]:(mAssign[key]?[mAssign[key]]:[]);
+    const _cls=_cids.map(id=>getCleanerById(id)).filter(Boolean);
+    const cl=_cls.length?{name:_cls.map(x=>x.name).join(', ')}:null;
     const timer=mTimers[key];
     doc.text(r.co,14,y);
     doc.text(r.guest.substring(0,30),45,y);

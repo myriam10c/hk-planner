@@ -1579,6 +1579,10 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 .mt-filtered-today svg { color: var(--text-3); flex-shrink: 0; }
 .mt-filtered-today strong { color: var(--text-2); }
 
+/* Review queue card — only shown when classifier flagged items > 0 */
+.mt-stat-review { border-color: var(--orange) !important; }
+.mt-stat-review .mt-stat-label svg { vertical-align: -1px; color: var(--orange); }
+
 /* Reading-optimised detail pane */
 .mt-detail .detail-pane-title { font-size: 16px; line-height: 1.35; padding-right: 8px; }
 .mt-detail-meta {
@@ -1799,6 +1803,14 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 .mt-subtab-btn { background:var(--glass); border:1px solid var(--border); border-radius:10px; padding:8px 14px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; flex-shrink:0; transition:var(--transition); }
 .mt-subtab-btn:active { transform:scale(0.95); }
 .mt-subtab-btn.active { background:var(--primary); color:var(--text-inverse); border-color:var(--primary); box-shadow:var(--shadow-xs); }
+.mt-subtab-btn.mt-subtab-show-adv {
+  border-style: dashed;
+  color: var(--text-3);
+  background: transparent;
+  padding: 8px 12px;
+  font-weight: var(--fw-medium);
+}
+.mt-subtab-btn.mt-subtab-show-adv:hover { border-color: var(--text-3); color: var(--text-2); }
 
 /* Maintenance action pills (Reports / History modal triggers) */
 .mt-actions-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
