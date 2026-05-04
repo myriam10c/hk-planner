@@ -1563,6 +1563,22 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 }
 .mt-filter-clear:hover { background: var(--bg-2); color: var(--text); }
 
+/* Quiet "X auto-filtered today" line under the stats — visible proof the noise filter is working */
+.mt-filtered-today {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  padding: 6px 10px;
+  margin: -4px 0 8px;
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: help;
+}
+.mt-filtered-today svg { color: var(--text-3); flex-shrink: 0; }
+.mt-filtered-today strong { color: var(--text-2); }
+
 /* Reading-optimised detail pane */
 .mt-detail .detail-pane-title { font-size: 16px; line-height: 1.35; padding-right: 8px; }
 .mt-detail-meta {

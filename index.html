@@ -730,6 +730,18 @@ function onDragStart(e, id, type){
   dragState.type = type;
   try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(id)); } catch(err){}
   document.body.classList.add('dragging');
+  // First-drag hint — explain new multi-assign drag semantic exactly once.
+  // Drop on cleaner = ADD (was REPLACE before 2026-05-03). Shift-drop = REPLACE.
+  // Drop on Unassigned = clear all.
+  if(type === 'cleaning'){
+    try {
+      const seen = localStorage.getItem('seenDragHint');
+      if(!seen){
+        toast('Drop on a cleaner to ADD them. Hold Shift to replace the team.','info');
+        localStorage.setItem('seenDragHint','1');
+      }
+    } catch(err){}
+  }
 }
 
 function onDragEnd(){
@@ -1419,9 +1431,14 @@ async function toggleAssignee(rkey, cid){
   toast(adding?'Added ✓':'Removed','success');
 }
 
-// Replace the entire assignment list (used by "Clear all" and legacy single-set callers)
+// Replace the entire assignment list (used by "Clear all" and legacy single-set callers).
+// When clearing a multi-cleaner team, confirm — single button, no per-cleaner undo otherwise.
 async function setAssignees(rkey, ids){
   const list=(ids||[]).map(Number).filter(Number.isFinite);
+  if(list.length===0){
+    const cur=getAssigneeIds(rkey);
+    if(cur.length>1 && !confirm('Remove all '+cur.length+' assignees from this cleaning?')) return;
+  }
   assignments[rkey]=list;
   render();
   await api('assignCleaner',{body:{reservation_key:rkey, cleaner_ids:list, mode:'set'}});
@@ -4231,7 +4248,10 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   h+='<div class="mt-card-row mt-card-row-3" onclick="event.stopPropagation();toggleMtExpand('+t.id+')" title="View thread">';
   h+='<span class="mt-card-assignee">'+icon('user',11)+' '+(tech?esc(tech.name):'<em>Unassigned</em>')+'</span>';
   if(_cmtCount>0){
-    const _last=_cmts[_cmts.length-1];
+    // Prefer the latest HUMAN comment when one exists — bot output gets buried otherwise.
+    // Fall back to the latest comment of any kind if there's no human one yet.
+    const _human=[..._cmts].reverse().find(c=>!isAutoComment(c));
+    const _last=_human||_cmts[_cmts.length-1];
     const _isAuto=isAutoComment(_last);
     const _snippet=esc((_last.comment||'').slice(0,90))+(((_last.comment||'').length>90)?'…':'');
     const _author=_isAuto?'<span class="mt-cmt-snippet-bot" title="auto-extracted">'+icon('sparkles',10)+'</span>':'<strong>'+esc((_last.author||'').split(' ')[0]||'Unknown')+'</strong>';
@@ -4379,12 +4399,27 @@ function renderMtTickets(isManager){
   const resolvedAll=(resolvedTickets&&resolvedTickets.length)?resolvedTickets:maintenanceTickets.filter(t=>t.status==='resolved');
   const resolvedWeek=resolvedAll.filter(t=>t.resolved_at&&new Date(t.resolved_at).getTime()>now7).length;
   const allHistoryCount=allOpen.length+resolvedAll.length;
+  // "Filtered today" — proof the BEFORE-INSERT trigger is doing its job.
+  // Counts cancelled tickets where resolution_notes starts with "auto-filtered" and closed_at is today.
+  const today00=new Date(); today00.setHours(0,0,0,0);
+  const filteredToday=(resolvedAll||[]).filter(t=>{
+    if(t.status!=='cancelled') return false;
+    if(!t.resolution_notes||t.resolution_notes.indexOf('auto-filtered')!==0) return false;
+    const closed=t.closed_at?new Date(t.closed_at).getTime():0;
+    return closed>=today00.getTime();
+  }).length;
   h+='<div class="mt-stats">';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='all_open'?' active':'')+'" onclick="setMtStatFilter(\'all_open\')"><div class="mt-stat-num">'+allOpen.length+'</div><div class="mt-stat-label">Open</div></div>';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='urgent_stat'?' active':'')+'" onclick="setMtStatFilter(\'urgent_stat\')" style="'+(urgentCount>0?'border-color:var(--red)':'')+'"><div class="mt-stat-num" style="'+(urgentCount>0?'color:var(--red)':'')+'">'+urgentCount+'</div><div class="mt-stat-label">Urgent</div></div>';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='resolved'?' active':'')+'" onclick="setMtStatFilter(\'resolved\')"><div class="mt-stat-num" style="color:var(--green)">'+resolvedWeek+'</div><div class="mt-stat-label">Resolved 7d</div></div>';
   h+='<div class="mt-stat-card'+(mtFilterStatus==='all_history'?' active':'')+'" onclick="setMtStatFilter(\'all_history\')"><div class="mt-stat-num" style="color:var(--text-3)">'+allHistoryCount+'</div><div class="mt-stat-label">All</div></div>';
   h+='</div>';
+  // Quiet line under the stats: shows the noise filter is working today
+  if(filteredToday>0 && isManager){
+    h+='<div class="mt-filtered-today" title="WhatsApp/Gemini classifier output that the noise-filter trigger auto-cancelled at insert today">';
+    h+=icon('sparkles',12)+' <strong>'+filteredToday+'</strong> auto-filtered today (noise from the WhatsApp classifier)';
+    h+='</div>';
+  }
 
   // Filters: search always-visible, category chips collapsed behind a toggle when not active
   h+='<div class="settings-panel mt-filter-panel">';
