@@ -282,18 +282,28 @@ Deno.serve(async (req: Request) => {
       const listData = await listResp.json();
       const listings = listData.result || [];
       let synced = 0;
+      // Pre-load existing rows to know which ones have manual overrides locked.
+      // For locked rows we only refresh metadata that's safe (apt_number, internal_name,
+      // updated_at) and skip bedrooms/unit_type/listing_name overwrites.
+      const { data: existing } = await sb.from("listing_config")
+        .select("listing_id, overrides_locked");
+      const lockedIds = new Set((existing || []).filter((r:any)=>r.overrides_locked).map((r:any)=>String(r.listing_id)));
+      let lockedSkipped = 0;
       for (const l of listings) {
         const lid = String(l.id);
         const bedrooms = l.bedroomsNumber != null ? Number(l.bedroomsNumber) : 0;
         const unitType = extractUnitType(l);
         const price = priceForTag(unitType, bedrooms);
         const internalName = l.internalListingName || null;
-        // Try in order: internalListingName, name, address — first that yields a number wins
         const aptNumber = extractAptNumber(internalName) || extractAptNumber(l.name) || extractAptNumber(l.address) || null;
-        const { error } = await sb.from("listing_config").upsert({ listing_id: lid, listing_name: l.name || "", bedrooms, price, unit_type: unitType, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString() }, { onConflict: "listing_id" });
-        if (!error) synced++;
+        const isLocked = lockedIds.has(lid);
+        const payload: any = isLocked
+          ? { listing_id: lid, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString() }
+          : { listing_id: lid, listing_name: l.name || "", bedrooms, price, unit_type: unitType, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString() };
+        const { error } = await sb.from("listing_config").upsert(payload, { onConflict: "listing_id" });
+        if (!error) { synced++; if (isLocked) lockedSkipped++; }
       }
-      return jsonResp({ status: "success", synced, total: listings.length });
+      return jsonResp({ status: "success", synced, total: listings.length, lockedSkipped });
     }
 
     // ==================== DONE STATES ====================
