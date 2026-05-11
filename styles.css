@@ -134,13 +134,15 @@ button { font-family:inherit; cursor:pointer; transition:var(--transition); }
   background: var(--text);
   color: var(--text-inverse);
   border: 1px solid var(--text);
-  padding: 9px 18px;
+  padding: 12px 20px;
+  min-height: 44px;
   border-radius: var(--radius-pill);
   font-size: var(--fs-md);
   font-weight: var(--fw-medium);
   letter-spacing: var(--ls-normal);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--sp-2);
   cursor: pointer;
   transition: var(--transition-fast);
@@ -153,7 +155,8 @@ button { font-family:inherit; cursor:pointer; transition:var(--transition); }
   background: var(--card);
   color: var(--text);
   border: 1px solid var(--border);
-  padding: 9px 18px;
+  padding: 12px 20px;
+  min-height: 44px;
   border-radius: var(--radius-pill);
   font-size: var(--fs-md);
   font-weight: var(--fw-medium);
@@ -161,6 +164,7 @@ button { font-family:inherit; cursor:pointer; transition:var(--transition); }
   transition: var(--transition-fast);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--sp-2);
 }
 .btn-secondary:hover { background: var(--bg-2); border-color: var(--border-strong); }
@@ -170,12 +174,16 @@ button { font-family:inherit; cursor:pointer; transition:var(--transition); }
   background: transparent;
   color: var(--text-2);
   border: none;
-  padding: 8px 14px;
+  padding: 11px 16px;
+  min-height: 44px;
   border-radius: var(--radius-pill);
   font-size: var(--fs-md);
   font-weight: var(--fw-medium);
   cursor: pointer;
   transition: var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .btn-ghost:hover { background: var(--bg-3); color: var(--text); }
 
@@ -183,7 +191,11 @@ button { font-family:inherit; cursor:pointer; transition:var(--transition); }
   background: transparent;
   color: var(--red);
   border: 1px solid var(--red);
-  padding: 9px 18px;
+  padding: 12px 20px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--radius-pill);
   font-size: var(--fs-md);
   font-weight: var(--fw-medium);
@@ -196,7 +208,11 @@ button { font-family:inherit; cursor:pointer; transition:var(--transition); }
   background: var(--green);
   color: var(--text-inverse);
   border: 1px solid var(--green);
-  padding: 9px 18px;
+  padding: 12px 20px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--radius-pill);
   font-size: var(--fs-md);
   font-weight: var(--fw-medium);
@@ -620,7 +636,7 @@ button:focus-visible, .icon-btn:focus-visible, [role="button"]:focus-visible { o
   background: var(--card);
   color: var(--text-2);
   border: 1px solid var(--border);
-  width: 36px; height: 36px;
+  width: 44px; height: 44px;
   border-radius: var(--radius-pill);
   display: inline-flex;
   align-items: center;
@@ -628,6 +644,10 @@ button:focus-visible, .icon-btn:focus-visible, [role="button"]:focus-visible { o
   transition: var(--transition-fast);
   cursor: pointer;
   font-size:15px;
+}
+@media (max-width: 1023px) {
+  /* Touch targets — Apple HIG 44px min pour cleaners doigts mouillés / soleil Dubai */
+  button:not(.icon-btn-sm), .btn, [role="button"] { min-height: 44px; }
 }
 .icon-btn:hover { background: var(--bg-2); color: var(--text); border-color: var(--border-strong); }
 .icon-btn:active { transform: scale(0.96); }
