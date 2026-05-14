@@ -28,20 +28,38 @@
 <script>
 
 // === Event delegation router for declarative click handlers ===
-// Replaces inline data-action="fn" with <element data-action="fn">.
-// Phase 1 (CSP migration): no-args calls only; complex handlers stay inline until later phases.
+// Replaces inline click handlers with elements declaring data-action + optional data-arg0..N
+// + optional data-pass-event="1". Phases 1+2 of CSP migration. Remaining complex handlers
+// (event.*, multi-statement, conditional) stay inline until Phase 3. Args are coerced
+// (numbers/booleans), event optionally appended last when data-pass-event="1".
 (function(){
+  function coerce(v){
+    if (v === undefined || v === null) return v;
+    if (/^-?\d+$/.test(v)) return parseInt(v, 10);
+    if (/^-?\d+\.\d+$/.test(v)) return parseFloat(v);
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    return v;
+  }
   document.addEventListener('click', function(e){
     const el = e.target.closest('[data-action]');
     if (!el) return;
     const name = el.dataset.action;
     if (!name) return;
     const fn = window[name];
-    if (typeof fn === 'function') {
-      try { fn(); } catch (err) { console.error('[data-action ' + name + ']', err); }
-    } else {
+    if (typeof fn !== 'function') {
       console.warn('[data-action] unknown handler:', name);
+      return;
     }
+    const args = [];
+    for (let i = 0; i < 10; i++) {
+      const v = el.dataset['arg' + i];
+      if (v === undefined) break;
+      args.push(coerce(v));
+    }
+    if (el.dataset.passEvent === '1') args.push(e);
+    try { fn.apply(null, args); }
+    catch (err) { console.error('[data-action ' + name + ']', err); }
   }, false);
 })();
 
@@ -239,9 +257,9 @@ function renderSavedViewsBar(){
   if(savedViews && savedViews.length > 0){
     h += '<span class="sv-label">Views:</span>';
     savedViews.forEach(v => {
-      h += '<span class="sv-chip" onclick="applyView(\''+v.id+'\')">';
+      h += '<span class="sv-chip" data-action="applyView" data-arg0="'+v.id+'">';
       h += esc(v.name);
-      h += '<button class="sv-chip-x" onclick="deleteView(\''+v.id+'\',event)" title="Delete">×</button>';
+      h += '<button class="sv-chip-x" data-action="deleteView" data-arg0="'+v.id+'" data-pass-event="1" title="Delete">×</button>';
       h += '</span>';
     });
   }
@@ -385,9 +403,9 @@ function renderViewToggle(currentMode, setterName){
 function renderMtViewToggle(){
   if(typeof isDesktop !== 'function' || !isDesktop()) return '';
   return '<div class="view-toggle">'+
-    '<button class="vt-btn'+(mtViewModeUI==='cards'?' active':'')+'" onclick="setMtViewModeUI(\'cards\')">'+icon('clipboard',13)+' Cards</button>'+
-    '<button class="vt-btn'+(mtViewModeUI==='table'?' active':'')+'" onclick="setMtViewModeUI(\'table\')">'+icon('chart',13)+' Table</button>'+
-    '<button class="vt-btn'+(mtViewModeUI==='kanban'?' active':'')+'" onclick="setMtViewModeUI(\'kanban\')">'+icon('package',13)+' Kanban</button>'+
+    '<button class="vt-btn'+(mtViewModeUI==='cards'?' active':'')+'" data-action="setMtViewModeUI" data-arg0="cards">'+icon('clipboard',13)+' Cards</button>'+
+    '<button class="vt-btn'+(mtViewModeUI==='table'?' active':'')+'" data-action="setMtViewModeUI" data-arg0="table">'+icon('chart',13)+' Table</button>'+
+    '<button class="vt-btn'+(mtViewModeUI==='kanban'?' active':'')+'" data-action="setMtViewModeUI" data-arg0="kanban">'+icon('package',13)+' Kanban</button>'+
   '</div>';
 }
 
@@ -428,7 +446,7 @@ function renderPlannerTable(items){
   h += '<span class="tt-spacer"></span>';
   h += '<span class="tt-group"><span class="tt-label">Density</span>';
   ['dense','normal','cozy'].forEach(d => {
-    h += '<button class="tt-btn'+(plannerTableDensity===d?' active':'')+'" onclick="setPlannerTableDensity(\''+d+'\')">'+d.charAt(0).toUpperCase()+d.slice(1)+'</button>';
+    h += '<button class="tt-btn'+(plannerTableDensity===d?' active':'')+'" data-action="setPlannerTableDensity" data-arg0="'+d+'">'+d.charAt(0).toUpperCase()+d.slice(1)+'</button>';
   });
   h += '</span>';
   h += '<button class="tt-btn" onclick="exportPlannerCSV(window.__plannerVisible||[])" title="Export current view as CSV">'+icon('download',13)+' Export CSV</button>';
@@ -473,7 +491,7 @@ function renderPlannerTable(items){
   ];
   cols.forEach(c => {
     const cls = (tableSortPlanner.col === c.k) ? ('sorted'+(tableSortPlanner.asc?' asc':'')) : '';
-    h += '<th class="'+cls+'" onclick="setSortPlanner(\''+c.k+'\')">'+esc(c.l)+'</th>';
+    h += '<th class="'+cls+'" data-action="setSortPlanner" data-arg0="'+c.k+'">'+esc(c.l)+'</th>';
   });
   h += '<th style="cursor:default">Actions</th>';
   h += '</tr></thead><tbody>';
@@ -491,7 +509,7 @@ function renderPlannerTable(items){
     const listingFull = formatPropLabel(r.listingId, r.listing) || '';
     const cleanerFull = cleanersForRow.length ? cleanersForRow.map(c=>c.name).join(' + ') : 'Unassigned';
     const trCls = (isSelected?'selected ':'') + (isBulk?'bulk-selected':'');
-    h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" onclick="toggleExpand(\''+sk+'\',event)">';
+    h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1">';
     // Checkbox
     h += '<td class="col-select" onclick="event.stopPropagation();togglePlannerBulk(\''+sk+'\')"><input type="checkbox"'+(isBulk?' checked':'')+' onclick="event.stopPropagation();togglePlannerBulk(\''+sk+'\')"/></td>';
     // Date
@@ -563,12 +581,12 @@ function renderMtTable(tickets){
   ];
   cols.forEach(c => {
     const cls = (tableSortMt.col === c.k) ? ('sorted'+(tableSortMt.asc?' asc':'')) : '';
-    h += '<th class="'+cls+'" onclick="setSortMt(\''+c.k+'\')">'+esc(c.l)+'</th>';
+    h += '<th class="'+cls+'" data-action="setSortMt" data-arg0="'+c.k+'">'+esc(c.l)+'</th>';
   });
   h += '</tr></thead><tbody>';
   sorted.forEach(t => {
     const isSelected = (mtExpandedTicket === t.id);
-    h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="toggleMtExpand('+t.id+')">';
+    h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
     h += '<td class="muted">'+(t.created_at?new Date(t.created_at).toLocaleDateString():'')+'</td>';
     h += '<td><strong>'+esc(t.title||'')+'</strong></td>';
     h += '<td class="muted">'+esc(formatPropLabel(t.listing_id, t.listing_name)||t.listing_id||'—')+'</td>';
@@ -610,7 +628,7 @@ function renderMtKanban(tickets){
       colTickets.forEach(t => {
         const isSel = (mtExpandedTicket === t.id);
         const pri = t.priority || 'medium';
-        h += '<div class="kanban-card '+pri+(isSel?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="toggleMtExpand('+t.id+')">';
+        h += '<div class="kanban-card '+pri+(isSel?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
         h += '<div class="kc-title">'+esc(t.title||'')+'</div>';
         h += '<div class="kc-meta">'+esc(formatPropLabel(t.listing_id, t.listing_name)||t.listing_id||'No property')+'</div>';
         h += '<div class="kc-footer">';
@@ -937,7 +955,7 @@ function renderToasts(){
     if(t.actionLabel){
       inner += '<button class="toast-action" onclick="event.stopPropagation();runToastAction('+t.id+')">'+esc(t.actionLabel)+'</button>';
     }
-    return '<div class="toast-item toast-'+t.type+'" onclick="dismissToast('+t.id+')">'+inner+'</div>';
+    return '<div class="toast-item toast-'+t.type+'" data-action="dismissToast" data-arg0="'+t.id+'">'+inner+'</div>';
   }).join('');
 }
 
@@ -1342,7 +1360,7 @@ function showCancelConfirm(key){
     '<input type="text" id="cancelReason" placeholder="Reason (optional)" style="width:100%;padding:8px 12px;border:1px solid rgba(0,0,0,0.1);border-radius:8px;font-size:13px;margin-bottom:12px;background:rgba(0,0,0,0.03);color:var(--text)"/>'+
     '<div style="display:flex;gap:8px">'+
     '<button data-action="closeCancelModal" style="flex:1;padding:10px;border:1px solid rgba(0,0,0,0.1);border-radius:10px;background:rgba(0,0,0,0.03);color:var(--text2);font-weight:600;font-size:13px;cursor:pointer">No</button>'+
-    '<button onclick="confirmCancel(\''+esc(key)+'\')" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--red);color:white;font-weight:700;font-size:13px;cursor:pointer">Yes, cancel</button>'+
+    '<button data-action="confirmCancel" data-arg0="'+esc(key)+'" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--red);color:white;font-weight:700;font-size:13px;cursor:pointer">Yes, cancel</button>'+
     '</div></div></div>';
   document.getElementById('cancelModal').innerHTML=h;
 }
@@ -1357,7 +1375,7 @@ function showUncancelConfirm(key){
     '<div style="font-size:12px;color:var(--text2);margin-bottom:12px">'+esc(guest)+'</div>'+
     '<div style="display:flex;gap:8px">'+
     '<button data-action="closeCancelModal" style="flex:1;padding:10px;border:1px solid rgba(0,0,0,0.1);border-radius:10px;background:rgba(0,0,0,0.03);color:var(--text2);font-weight:600;font-size:13px;cursor:pointer">No</button>'+
-    '<button onclick="confirmUncancel(\''+esc(key)+'\')" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--green);color:white;font-weight:700;font-size:13px;cursor:pointer">Yes, restore</button>'+
+    '<button data-action="confirmUncancel" data-arg0="'+esc(key)+'" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--green);color:white;font-weight:700;font-size:13px;cursor:pointer">Yes, restore</button>'+
     '</div></div></div>';
   document.getElementById('cancelModal').innerHTML=h;
 }
@@ -1437,7 +1455,7 @@ function showAssignPicker(rkey){
   cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
     const cnt=RESERVATIONS.filter(r=>isAssignedTo(keyFor(r), c.id)).length;
     const isCurrent=currentIds.has(c.id);
-    ph+='<div class="assign-picker-item'+(isCurrent?' selected':'')+'" style="'+(isCurrent?'background:var(--primary-light);border-radius:8px':'')+'" onclick="toggleAssignee(\''+esc(rkey)+'\','+c.id+')">'+
+    ph+='<div class="assign-picker-item'+(isCurrent?' selected':'')+'" style="'+(isCurrent?'background:var(--primary-light);border-radius:8px':'')+'" data-action="toggleAssignee" data-arg0="'+esc(rkey)+'" data-arg1="'+c.id+'">'+
       '<div class="picker-checkbox'+(isCurrent?' checked':'')+'">'+(isCurrent?'✓':'')+'</div>'+
       '<div class="picker-dot" style="background:'+c.color+'"></div>'+
       '<span class="picker-name">'+esc(c.name)+'</span>'+
@@ -1604,8 +1622,8 @@ function showWaChooser(personalUrl,businessUrl){
   const m=document.getElementById('modal');
   m.innerHTML='<div class="modal-overlay" data-action="closeModal"><div class="wa-chooser" onclick="event.stopPropagation()">'+
     '<div style="font-size:15px;font-weight:800;margin-bottom:14px;text-align:center">Open with...</div>'+
-    '<button class="wa-choice-btn personal" onclick="chooseWa(\'personal\',\''+personalUrl+'\')"><span class="wa-choice-icon">📱</span><span class="wa-choice-label">WhatsApp</span></button>'+
-    '<button class="wa-choice-btn business" onclick="chooseWa(\'business\',\''+businessUrl+'\')"><span class="wa-choice-icon">💼</span><span class="wa-choice-label">WhatsApp Business</span></button>'+
+    '<button class="wa-choice-btn personal" data-action="chooseWa" data-arg0="personal" data-arg1="'+personalUrl+'"><span class="wa-choice-icon">📱</span><span class="wa-choice-label">WhatsApp</span></button>'+
+    '<button class="wa-choice-btn business" data-action="chooseWa" data-arg0="business" data-arg1="'+businessUrl+'"><span class="wa-choice-icon">💼</span><span class="wa-choice-label">WhatsApp Business</span></button>'+
     '<label class="wa-remember"><input type="checkbox" id="waRemember" /> Remember my choice</label>'+
     '<button data-action="closeModal" style="background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer;margin-top:8px;font-weight:600">Cancel</button>'+
   '</div></div>';
@@ -2024,7 +2042,7 @@ async function openAssignPicker(ticketId){
   html+='<div class="ap-list">';
   techs.forEach(c=>{
     const dotColor=c.color||'#888';
-    html+='<button class="ap-item" onclick="assignTicketToTech('+ticket.id+','+c.id+')">';
+    html+='<button class="ap-item" data-action="assignTicketToTech" data-arg0="'+ticket.id+'" data-arg1="'+c.id+'">';
     html+='<span class="ap-dot" style="background:'+esc(dotColor)+'"></span>';
     html+='<span class="ap-name">'+esc(c.name)+'</span>';
     html+='<span class="ap-role">'+esc(c.role||'cleaner')+'</span>';
@@ -2036,7 +2054,7 @@ async function openAssignPicker(ticketId){
     html+='<div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 8px">Or external vendor</div>';
     html+='<div class="ap-list">';
     vendors_.forEach(v=>{
-      html+='<button class="ap-item" onclick="assignTicketToVendor('+ticket.id+','+v.id+')">';
+      html+='<button class="ap-item" data-action="assignTicketToVendor" data-arg0="'+ticket.id+'" data-arg1="'+v.id+'">';
       html+='<span class="ap-dot" style="background:var(--blue)"></span>';
       html+='<span class="ap-name">'+esc(v.name)+'</span>';
       html+='<span class="ap-role">'+esc(v.specialty||'')+'</span>';
@@ -2046,7 +2064,7 @@ async function openAssignPicker(ticketId){
   }
   if(ticket.assigned_technician_id||ticket.assigned_vendor_id){
     html+='<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">';
-    html+='<button class="btn-ghost" style="color:var(--red)" onclick="unassignTicket('+ticket.id+')">Unassign current</button>';
+    html+='<button class="btn-ghost" style="color:var(--red)" data-action="unassignTicket" data-arg0="'+ticket.id+'">Unassign current</button>';
     html+='</div>';
   }
   html+='<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" data-action="closeMtModal">Cancel</button></div>';
@@ -2135,7 +2153,7 @@ function editResolutionNotes(id){
     '<div class="mt-form"><textarea id="editNotes" placeholder="What was done…" style="min-height:120px">'+esc(cur)+'</textarea></div>'+
     '<div class="modal-actions">'+
     '<button class="btn-secondary" data-action="closeMtModal">Cancel</button>'+
-    '<button class="btn-primary" onclick="submitEditNotes('+id+')">Save</button>'+
+    '<button class="btn-primary" data-action="submitEditNotes" data-arg0="'+id+'">Save</button>'+
     '</div>';
   showMtModal(html);
 }
@@ -2168,7 +2186,7 @@ function resolveTicket(id){
     '</div>'+
     '<div class="modal-actions">'+
     '<button class="btn-secondary" data-action="closeMtModal">Cancel</button>'+
-    '<button class="btn-success" onclick="submitResolve('+id+')">✓ Resolve</button>'+
+    '<button class="btn-success" data-action="submitResolve" data-arg0="'+id+'">✓ Resolve</button>'+
     '</div>';
   showMtModal(html);
 }
@@ -2229,7 +2247,7 @@ async function viewTicketComments(ticketId){
     '<div class="mt-form"><textarea id="newComment" placeholder="Write a comment…" style="min-height:60px"></textarea></div>'+
     '<div class="modal-actions">'+
     '<button class="btn-secondary" data-action="closeMtModal">Close</button>'+
-    '<button class="btn-primary" onclick="submitComment('+ticketId+')">Send</button>'+
+    '<button class="btn-primary" data-action="submitComment" data-arg0="'+ticketId+'">Send</button>'+
     '</div>';
   showMtModal(html);
 }
@@ -2247,7 +2265,7 @@ function reopenTicket(id){
     '<p style="color:var(--text2);font-size:13px;margin-bottom:16px">Are you sure you want to reopen this ticket?</p>'+
     '<div class="modal-actions">'+
     '<button class="btn-secondary" data-action="closeMtModal">Cancel</button>'+
-    '<button class="btn-danger" onclick="submitReopen('+id+')">Reopen</button>'+
+    '<button class="btn-danger" data-action="submitReopen" data-arg0="'+id+'">Reopen</button>'+
     '</div>';
   showMtModal(html);
 }
@@ -2504,9 +2522,9 @@ function openMtReportsModal(){
   const html='<h3>'+icon('download',18)+' Maintenance Report</h3>'+
     '<p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Share via WhatsApp.</p>'+
     '<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px">'+
-    '<button class="btn-success" onclick="shareMaintenanceReport(\'full\')">'+icon('msgSquare',16)+' Share full report</button>'+
-    '<button class="btn-secondary" onclick="shareMaintenanceReport(\'open\')">Share open tickets only</button>'+
-    '<button class="btn-secondary" onclick="shareMaintenanceReport(\'resolved\')">Share resolved tickets only</button>'+
+    '<button class="btn-success" data-action="shareMaintenanceReport" data-arg0="full">'+icon('msgSquare',16)+' Share full report</button>'+
+    '<button class="btn-secondary" data-action="shareMaintenanceReport" data-arg0="open">Share open tickets only</button>'+
+    '<button class="btn-secondary" data-action="shareMaintenanceReport" data-arg0="resolved">Share resolved tickets only</button>'+
     '</div>'+
     '<div style="background:var(--bg-2);border-radius:var(--radius-md);padding:12px;font-size:11px;white-space:pre-wrap;font-family:ui-monospace,monospace;max-height:300px;overflow:auto;border:1px solid var(--border)">'+esc(generateReportText('full'))+'</div>'+
     '<div class="modal-actions"><button class="btn-secondary" data-action="closeMtModal">Close</button></div>';
@@ -2683,7 +2701,7 @@ function renderBottomNav(){
     tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'issues',icon:icon('alertTriangle',22),label:t('issues')},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')}];
   }
   return '<nav class="bottom-nav">'+tabs.map(tab=>
-    '<button class="nav-item'+(currentTab===tab.id?' active':'')+'" onclick="setTab(\''+tab.id+'\')" data-label="'+esc(tab.label)+'" aria-label="'+esc(tab.label)+'"><span class="nav-icon">'+tab.icon+'</span>'+tab.label+'</button>'
+    '<button class="nav-item'+(currentTab===tab.id?' active':'')+'" data-action="setTab" data-arg0="'+tab.id+'" data-label="'+esc(tab.label)+'" aria-label="'+esc(tab.label)+'"><span class="nav-icon">'+tab.icon+'</span>'+tab.label+'</button>'
   ).join('')+'<button class="sidebar-toggle" data-action="toggleSidebar" title="Toggle sidebar" aria-label="Toggle sidebar">'+icon('chevronLeft',16)+'</button>'+'</nav>';
 }
 
@@ -2726,7 +2744,7 @@ function renderPlanner(){
 
   // Row 1: Date nav + actions (compact)
   h+='<div class="header-top">';
-  if(!cleanerMode){h+='<button class="week-arrow" onclick="changeWeek(-1)" style="margin-right:4px">‹</button>';}
+  if(!cleanerMode){h+='<button class="week-arrow" data-action="changeWeek" data-arg0="-1" style="margin-right:4px">‹</button>';}
   const rangeLabel=(function(){const s=new Date(range.startDate+'T00:00:00'),e=new Date(range.endDate+'T00:00:00');const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return s.getDate()+' '+mo[s.getMonth()]+' – '+e.getDate()+' '+mo[e.getMonth()];})();
   h+='<h1>'+(cleanerMode?'👋 '+esc(cleanerMode.name):selectedDate==='all'?rangeLabel:'<span style="font-weight:500;color:var(--text2)">'+rangeLabel+'</span>')+'</h1>';
   h+='<div style="flex:1"></div>';
@@ -2736,7 +2754,7 @@ function renderPlanner(){
   h+='<button class="icon-btn" data-action="toggleSearch" title="Search" aria-label="Search">'+icon('search',18)+'</button>';
   if(!cleanerMode){ h+='<button class="icon-btn" data-action="openExtraModal" title="Add extra cleaning" aria-label="Add extra cleaning" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">'+icon('plus',18)+'</button>'; }
   h+='</div>';
-  if(!cleanerMode){h+='<button class="week-arrow" onclick="changeWeek(1)" style="margin-left:4px">›</button>';}
+  if(!cleanerMode){h+='<button class="week-arrow" data-action="changeWeek" data-arg0="1" style="margin-left:4px">›</button>';}
   h+='</div>';
 
   // Row 2: Progress bar
@@ -2745,10 +2763,10 @@ function renderPlanner(){
 
   // Row 3: Date pills (compact)
   h+='<div class="date-nav-row"><div class="date-nav">';
-  h+='<button class="date-btn'+(selectedDate==='all'?' active':'')+'" onclick="setSelectedDate(\'all\')"><span class="day-name">All</span><span class="badge">'+total+'</span></button>';
+  h+='<button class="date-btn'+(selectedDate==='all'?' active':'')+'" data-action="setSelectedDate" data-arg0="all"><span class="day-name">All</span><span class="badge">'+total+'</span></button>';
   dates.forEach(d=>{
     const dt=new Date(d+'T00:00:00'),dc=countDoneForDate(d),tc=countByDate(d),allD=dc===tc&&tc>0;
-    h+='<button class="date-btn'+(selectedDate===d?' active':'')+(isToday(d)?' today':'')+'" onclick="setSelectedDate(\''+d+'\')">'+
+    h+='<button class="date-btn'+(selectedDate===d?' active':'')+(isToday(d)?' today':'')+'" data-action="setSelectedDate" data-arg0="'+d+'">'+
       '<span class="day-name">'+DAYS[dt.getDay()]+'</span><span class="day-num">'+dt.getDate()+'</span>'+
       '<span class="badge">'+(allD?'✓':dc+'/'+tc)+'</span></button>';
   });
@@ -2757,13 +2775,13 @@ function renderPlanner(){
   // Row 4: Staff filter (compact pills)
   if(!cleanerMode&&cleaners.length>0){
     h+='<div class="cleaner-filter">';
-    h+='<div class="cleaner-chip'+(filterCleaner===0?' active':'')+'" role="button" tabindex="0" aria-label="Show all cleaners" onclick="setFilterCleaner(0)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(0);}">All</div>';
+    h+='<div class="cleaner-chip'+(filterCleaner===0?' active':'')+'" role="button" tabindex="0" aria-label="Show all cleaners" data-action="setFilterCleaner" data-arg0="0" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(0);}">All</div>';
     cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
       const cnt=RESERVATIONS.filter(r=>isAssignedTo(keyFor(r), c.id)).length;
-      h+='<div class="cleaner-chip drop-target'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,'+c.id+')" onclick="setFilterCleaner('+c.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner('+c.id+');}"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
+      h+='<div class="cleaner-chip drop-target'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,'+c.id+')" data-action="setFilterCleaner" data-arg0="'+c.id+'" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner('+c.id+');}"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
     });
     const una=RESERVATIONS.filter(r=>!hasAnyAssignee(keyFor(r))).length;
-    if(una>0) h+='<div class="cleaner-chip drop-target'+(filterCleaner===-1?' active':'')+'" role="button" tabindex="0" aria-label="Show unassigned cleanings" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,null)" onclick="setFilterCleaner(-1)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(-1);}">Unassigned '+una+'</div>';
+    if(una>0) h+='<div class="cleaner-chip drop-target'+(filterCleaner===-1?' active':'')+'" role="button" tabindex="0" aria-label="Show unassigned cleanings" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,null)" data-action="setFilterCleaner" data-arg0="-1" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(-1);}">Unassigned '+una+'</div>';
     h+='</div>';
   }
   h+='</div>';
@@ -2785,7 +2803,7 @@ function renderPlanner(){
     if(search||filterCleaner!==0||selectedDate!=='all'){
       h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No results</div><div class="empty-hero-sub">Try changing the filter or date.</div><button class="btn-primary" onclick="search=\'\';filterCleaner=0;setSelectedDate(\'all\')">Reset</button></div>';
     } else {
-      h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('partyPopper',56)+'</div><div class="empty-hero-title">No cleanings this week</div><div class="empty-hero-sub">Enjoy the break! Or check next week.</div>'+(!cleanerMode?'<button class="btn-primary" onclick="changeWeek(1)">Next week →</button>':'')+'</div>';
+      h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('partyPopper',56)+'</div><div class="empty-hero-title">No cleanings this week</div><div class="empty-hero-sub">Enjoy the break! Or check next week.</div>'+(!cleanerMode?'<button class="btn-primary" data-action="changeWeek" data-arg0="1">Next week →</button>':'')+'</div>';
     }
   }
 
@@ -2853,7 +2871,7 @@ function renderPlanner(){
       // Cleaner color for left border
       const cleanerColor=isCancelled?'var(--red)':(cleaner?cleaner.color:(urgency==='urgent'?'var(--red)':urgency==='warning'?'var(--orange)':'transparent'));
 
-      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" onclick="handleCardClick(\''+sk+'\',event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleCardClick(\''+sk+'\',event);}">';
+      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" data-action="handleCardClick" data-arg0="'+sk+'" data-pass-event="1" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleCardClick(\''+sk+'\',event);}">';
       h+='<div class="swipe-cancel-bg"><span class="swipe-cancel-icon">'+(isCancelled?'↩️':'🚫')+'</span></div>';
 
       // Card content wrapper
@@ -2937,14 +2955,14 @@ function renderPlanner(){
       // Desktop hover quick actions
       h+='<div class="card-quick-actions" onclick="event.stopPropagation()">';
       if(isDone){
-        h+='<button class="qa-btn" title="Mark undone" onclick="markDone(\''+sk+'\')">'+icon('refresh',14)+'</button>';
+        h+='<button class="qa-btn" title="Mark undone" data-action="markDone" data-arg0="'+sk+'">'+icon('refresh',14)+'</button>';
       }else{
-        h+='<button class="qa-btn qa-success" title="Mark done" onclick="markDone(\''+sk+'\')">'+icon('check',14)+'</button>';
+        h+='<button class="qa-btn qa-success" title="Mark done" data-action="markDone" data-arg0="'+sk+'">'+icon('check',14)+'</button>';
       }
       if(!cleanerMode){
-        h+='<button class="qa-btn qa-primary" title="Assign cleaner" onclick="showAssignPicker(\''+sk+'\')">'+icon('user',14)+'</button>';
+        h+='<button class="qa-btn qa-primary" title="Assign cleaner" data-action="showAssignPicker" data-arg0="'+sk+'">'+icon('user',14)+'</button>';
       }
-      h+='<button class="qa-btn" title="View details" onclick="toggleExpand(\''+sk+'\',event)">'+icon('clipboard',14)+'</button>';
+      h+='<button class="qa-btn" title="View details" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1">'+icon('clipboard',14)+'</button>';
       h+='</div>';
 
       // confirm-msg removed — done/undo now via CTA button
@@ -3045,7 +3063,7 @@ function renderCleaningDetailPane(r){
     h += '<div style="color:var(--text-3);font-size:var(--fs-sm)">Unassigned</div>';
   }
   if(!cleanerMode){
-    h += '<button class="btn-secondary" style="margin-top:8px;font-size:var(--fs-xs);padding:5px 12px" onclick="showAssignPicker(\''+esc(k)+'\')">'+icon('user',12)+' '+(cleaner?'Reassign':'Assign')+'</button>';
+    h += '<button class="btn-secondary" style="margin-top:8px;font-size:var(--fs-xs);padding:5px 12px" data-action="showAssignPicker" data-arg0="'+esc(k)+'">'+icon('user',12)+' '+(cleaner?'Reassign':'Assign')+'</button>';
   }
   h += '</div>';
 
@@ -3067,10 +3085,10 @@ function renderCleaningDetailPane(r){
 
   // Actions
   h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px">';
-  if(!isDone) h += '<button class="btn-success" onclick="markDone(\''+esc(k)+'\')">'+icon('check',14)+' Mark done</button>';
-  else h += '<button class="btn-secondary" onclick="markDone(\''+esc(k)+'\')">'+icon('refresh',14)+' Undo</button>';
+  if(!isDone) h += '<button class="btn-success" data-action="markDone" data-arg0="'+esc(k)+'">'+icon('check',14)+' Mark done</button>';
+  else h += '<button class="btn-secondary" data-action="markDone" data-arg0="'+esc(k)+'">'+icon('refresh',14)+' Undo</button>';
   if(!cleanerMode && typeof toggleCancel === 'function'){
-    h += '<button class="btn-secondary" onclick="toggleCancel(\''+esc(k)+'\')">'+icon('xCircle',14)+' '+(isCancelled?'Restore':'Cancel')+'</button>';
+    h += '<button class="btn-secondary" data-action="toggleCancel" data-arg0="'+esc(k)+'">'+icon('xCircle',14)+' '+(isCancelled?'Restore':'Cancel')+'</button>';
   }
   if(isExtra && !cleanerMode){
     h += '<button class="btn-secondary" onclick="openExtraModal((extraCleanings||[]).find(e => e.id === '+r._extraId+'))">'+icon('clipboard',14)+' Edit extra</button>';
@@ -3152,7 +3170,7 @@ function renderTicketDetailPane(t, isManager){
   }
   h += '<div class="mt-cmt-add">';
   h += '<input type="text" id="mtCmtInput-'+t.id+'" placeholder="Add a comment…" onkeydown="if(event.key===\'Enter\')submitInlineComment('+t.id+')" />';
-  h += '<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="submitInlineComment('+t.id+')">Send</button>';
+  h += '<button class="btn-secondary" style="font-size:11px;padding:6px 12px" data-action="submitInlineComment" data-arg0="'+t.id+'">Send</button>';
   h += '</div>';
   h += '</div>';
 
@@ -3162,11 +3180,11 @@ function renderTicketDetailPane(t, isManager){
     if(!isClosed){
       h += '<button class="btn-success" title="Click to resolve · Shift to add notes" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+' Resolve</button>';
       const lbl = (tech || vendor) ? 'Reassign' : 'Assign';
-      h += '<button class="btn-secondary" onclick="openAssignPicker('+t.id+')">'+icon('user',14)+' '+lbl+'</button>';
-      h += '<button class="btn-ghost" onclick="showCardContextMenu(event,'+t.id+',\'ticket\')" title="More actions">'+icon('moreVertical',14)+'</button>';
+      h += '<button class="btn-secondary" data-action="openAssignPicker" data-arg0="'+t.id+'">'+icon('user',14)+' '+lbl+'</button>';
+      h += '<button class="btn-ghost" data-action="showCardContextMenu" data-arg0="'+t.id+'" data-arg1="ticket" data-pass-event="1" title="More actions">'+icon('moreVertical',14)+'</button>';
     } else {
-      h += '<button class="btn-secondary" onclick="editResolutionNotes('+t.id+')">'+icon('edit',14)+' Edit notes</button>';
-      h += '<button class="btn-secondary" onclick="reopenTicket('+t.id+')">'+icon('refresh',14)+' Reopen</button>';
+      h += '<button class="btn-secondary" data-action="editResolutionNotes" data-arg0="'+t.id+'">'+icon('edit',14)+' Edit notes</button>';
+      h += '<button class="btn-secondary" data-action="reopenTicket" data-arg0="'+t.id+'">'+icon('refresh',14)+' Reopen</button>';
     }
     h += '</div>';
   }
@@ -3210,7 +3228,7 @@ function renderCardDetail(key,r){
       const needsPhoto=photoReqItems.includes(it);
       const hasPhoto=checklistPhotos[key]&&checklistPhotos[key][it];
       h+='<div class="checklist-item '+d+'" style="flex-wrap:wrap">';
-      h+='<div style="display:flex;align-items:center;gap:8px;flex:1" onclick="toggleCheckItem(\''+sk+'\',\''+esc(it)+'\')">';
+      h+='<div style="display:flex;align-items:center;gap:8px;flex:1" data-action="toggleCheckItem" data-arg0="'+sk+'" data-arg1="'+esc(it)+'">';
       h+='<div class="cl-check">'+(prog[it]?'✓':'')+'</div><span class="cl-label">'+esc(it)+'</span>';
       if(needsPhoto) h+='<span class="photo-required">📷 Required</span>';
       h+='</div>';
@@ -3222,22 +3240,22 @@ function renderCardDetail(key,r){
   // Notes
   h+='<div class="detail-title" style="margin-top:10px">📝 Notes ('+notes.length+')</div>';
   notes.forEach(n=>{h+='<div class="note-item">'+esc(n.note_text)+'<div class="note-meta">'+(n.author?esc(n.author)+' — ':'')+new Date(n.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</div></div>';});
-  h+='<div class="note-input-row"><input id="note-'+safeId+'" placeholder="Add a note..." onkeydown="if(event.key===\'Enter\')addNote(\''+sk+'\')"/><button onclick="addNote(\''+sk+'\')">Add</button></div>';
+  h+='<div class="note-input-row"><input id="note-'+safeId+'" placeholder="Add a note..." onkeydown="if(event.key===\'Enter\')addNote(\''+sk+'\')"/><button data-action="addNote" data-arg0="'+sk+'">Add</button></div>';
   // Before/After photo comparison
   const beforeP=photos.find(p=>p.photo_type==='before');
   const afterP=photos.find(p=>p.photo_type==='after');
   h+='<div class="detail-title" style="margin-top:10px">📷 '+t('comparison')+'</div>';
   h+='<div class="photo-compare"><div class="compare-col"><div class="compare-label">'+t('before')+'</div>';
-  if(beforeP) h+='<div class="photo-thumb" style="width:100%;height:auto" onclick="viewPhoto('+beforeP.id+')">📸 '+t('before')+'</div>';
-  else h+='<div class="compare-empty" onclick="uploadBeforePhoto(\''+sk+'\')">+</div>';
+  if(beforeP) h+='<div class="photo-thumb" style="width:100%;height:auto" data-action="viewPhoto" data-arg0="'+beforeP.id+'">📸 '+t('before')+'</div>';
+  else h+='<div class="compare-empty" data-action="uploadBeforePhoto" data-arg0="'+sk+'">+</div>';
   h+='</div><div class="compare-col"><div class="compare-label">'+t('after')+'</div>';
-  if(afterP) h+='<div class="photo-thumb" style="width:100%;height:auto" onclick="viewPhoto('+afterP.id+')">📸 '+t('after')+'</div>';
-  else h+='<div class="compare-empty" onclick="uploadAfterPhoto(\''+sk+'\')">+</div>';
+  if(afterP) h+='<div class="photo-thumb" style="width:100%;height:auto" data-action="viewPhoto" data-arg0="'+afterP.id+'">📸 '+t('after')+'</div>';
+  else h+='<div class="compare-empty" data-action="uploadAfterPhoto" data-arg0="'+sk+'">+</div>';
   h+='</div></div>';
   // All photos
   h+='<div class="detail-title" style="margin-top:10px">📷 '+t('photos')+' ('+photos.length+')</div><div class="photo-grid">';
-  photos.forEach(p=>{h+='<div class="photo-thumb" onclick="viewPhoto('+p.id+')">'+(p.photo_type==='before'?'🅱':'📸')+'</div>';});
-  h+='<div class="photo-upload-btn" onclick="startPhotoUpload(\''+sk+'\')">+</div></div>';
+  photos.forEach(p=>{h+='<div class="photo-thumb" data-action="viewPhoto" data-arg0="'+p.id+'">'+(p.photo_type==='before'?'🅱':'📸')+'</div>';});
+  h+='<div class="photo-upload-btn" data-action="startPhotoUpload" data-arg0="'+sk+'">+</div></div>';
   // #8 WhatsApp for this cleaning — one button per assigned cleaner
   if(!cleanerMode){
     getAssignees(key).forEach(cl=>{
@@ -3303,12 +3321,12 @@ function renderDashboard(){
     '<button class="icon-btn" onclick="event.stopPropagation();showDashExportMenu(event)" title="Export…">'+icon('download',18)+'</button>'+
     '</div></div>';
   h+='<div class="container">';
-  h+='<div class="month-selector"><button onclick="changeDashMonth(-1)">‹</button><h3>'+MONTH_NAMES[dashMonth]+' '+dashYear+'</h3><button onclick="changeDashMonth(1)">›</button></div>';
+  h+='<div class="month-selector"><button data-action="changeDashMonth" data-arg0="-1">‹</button><h3>'+MONTH_NAMES[dashMonth]+' '+dashYear+'</h3><button data-action="changeDashMonth" data-arg0="1">›</button></div>';
   // #7 Dashboard tabs (Operations / Revenue / Properties)
   h+='<div class="dash-tabs">'+
-    '<button class="dash-tab'+(dashSection==='ops'?' active':'')+'" onclick="setDashSection(\'ops\')">'+icon('broom',16)+' Operations</button>'+
-    '<button class="dash-tab'+(dashSection==='revenue'?' active':'')+'" onclick="setDashSection(\'revenue\')">'+icon('wallet',16)+' Revenue</button>'+
-    '<button class="dash-tab'+(dashSection==='properties'?' active':'')+'" onclick="setDashSection(\'properties\')">'+icon('home',16)+' Properties</button>'+
+    '<button class="dash-tab'+(dashSection==='ops'?' active':'')+'" data-action="setDashSection" data-arg0="ops">'+icon('broom',16)+' Operations</button>'+
+    '<button class="dash-tab'+(dashSection==='revenue'?' active':'')+'" data-action="setDashSection" data-arg0="revenue">'+icon('wallet',16)+' Revenue</button>'+
+    '<button class="dash-tab'+(dashSection==='properties'?' active':'')+'" data-action="setDashSection" data-arg0="properties">'+icon('home',16)+' Properties</button>'+
   '</div>';
 
   if(dashLoading){
@@ -3573,7 +3591,7 @@ function renderDashboard(){
     const reportListings={};mRes.forEach(r=>{if(r.listingId&&!reportListings[r.listingId])reportListings[r.listingId]={name:r.listing,count:0};if(reportListings[r.listingId])reportListings[r.listingId].count++;});
     Object.entries(reportListings).sort((a,b)=>b[1].count-a[1].count).forEach(([lid,info])=>{
       h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><div style="font-size:12px;font-weight:600">'+esc(info.name)+' <span style="color:var(--text3);font-weight:400">('+info.count+')</span></div>'+
-        '<button class="export-btn" onclick="generateOwnerReport(\''+lid+'\')">📄 PDF Report</button></div>';
+        '<button class="export-btn" data-action="generateOwnerReport" data-arg0="'+lid+'">📄 PDF Report</button></div>';
     });
     h+='</div>';
 
@@ -3735,7 +3753,7 @@ function renderProperties(){
     const hasProfile=pp.access_code||pp.wifi_name||pp.special_instructions;
     const isEdit=ppEditId===lid;
     h+='<div class="settings-panel" style="border-left:3px solid '+(hasProfile?'var(--green)':'var(--border))')+'">';
-    h+='<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="togglePpEdit(\''+lid+'\')">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" data-action="togglePpEdit" data-arg0="'+lid+'">';
     h+='<div><h3 style="font-size:14px;margin:0">'+esc(info.name)+'</h3><span style="font-size:10px;color:var(--text3)">'+getBedroomLabel(info.bedrooms)+' · ID: '+lid+'</span></div>';
     h+='<div style="display:flex;align-items:center;gap:6px">'+(hasProfile?'<span style="font-size:10px;background:var(--green-light);color:var(--green);padding:2px 8px;border-radius:10px;font-weight:600">✓ Configured</span>':'<span style="font-size:10px;color:var(--text3)">Not configured</span>');
     h+='<span style="font-size:16px">'+(isEdit?'▲':'▼')+'</span></div></div>';
@@ -3762,7 +3780,7 @@ function renderProperties(){
       h+='<div style="margin-top:6px"><label style="font-size:10px;font-weight:600;color:var(--text2)">🗑️ '+t('trashInstructions')+'</label><input id="pp_trash_'+lid+'" value="'+esc(pp.trash_instructions||'')+'" placeholder="Trash room: basement level" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)"/></div>';
       h+='<div style="margin-top:6px"><label style="font-size:10px;font-weight:600;color:var(--text2)">📝 Notes</label><textarea id="pp_notes_'+lid+'" placeholder="Any other info..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;min-height:40px;background:var(--bg2);color:var(--text)">'+esc(pp.notes||'')+'</textarea></div>';
       h+='<input type="hidden" id="pp_name_'+lid+'" value="'+esc(info.name)+'"/>';
-      h+='<button onclick="savePropertyProfile(\''+lid+'\')" style="margin-top:10px;background:var(--primary);color:white;border:none;border-radius:8px;padding:10px 20px;font-weight:700;cursor:pointer;width:100%">💾 '+t('saveProfile')+'</button>';
+      h+='<button data-action="savePropertyProfile" data-arg0="'+lid+'" style="margin-top:10px;background:var(--primary);color:white;border:none;border-radius:8px;padding:10px 20px;font-weight:700;cursor:pointer;width:100%">💾 '+t('saveProfile')+'</button>';
     }
     h+='</div>';
   });
@@ -3791,7 +3809,7 @@ function renderSettings(){
     ['manager','cleaner','maintenance'].forEach(r=>{h+='<option value="'+r+'"'+(role===r?' selected':'')+'>'+r+'</option>';});
     h+='</select>'+
       '<button onclick="sendDailyWhatsApp('+JSON.stringify(c).replace(/"/g,'&quot;')+')" title="Send WhatsApp">📱</button>'+
-      '<button onclick="deleteCleaner('+c.id+')" title="Remove">🗑</button></div>';
+      '<button data-action="deleteCleaner" data-arg0="'+c.id+'" title="Remove">🗑</button></div>';
   });
   h+='<div class="add-form">'+
     '<input id="newName" placeholder="Name"/>'+
@@ -3986,12 +4004,12 @@ function renderIssues(){
     h+='Reported '+new Date(issue.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'});
     if(issue.cleaner_id){const cl=getCleanerById(issue.cleaner_id);if(cl)h+=' by '+esc(cl.name);}
     h+='</div>';
-    if(issue.photo_data) h+='<div style="margin-top:6px"><div class="photo-thumb" onclick="viewIssuePhoto('+issue.id+')">📸</div></div>';
+    if(issue.photo_data) h+='<div style="margin-top:6px"><div class="photo-thumb" data-action="viewIssuePhoto" data-arg0="'+issue.id+'">📸</div></div>';
     if(!cleanerMode){
       h+='<div class="issue-actions">';
-      if(issue.status==='open')h+='<button onclick="startIssueWork('+issue.id+')">🔧 Start Work</button>';
-      if(pendingResolveId===issue.id) h+='<button class="resolve" style="background:var(--orange);animation:pulse 1s infinite" onclick="resolveIssue('+issue.id+')">⚠️ Tap again to confirm</button>';
-      else h+='<button class="resolve" onclick="resolveIssue('+issue.id+')">✅ Resolve</button>';
+      if(issue.status==='open')h+='<button data-action="startIssueWork" data-arg0="'+issue.id+'">🔧 Start Work</button>';
+      if(pendingResolveId===issue.id) h+='<button class="resolve" style="background:var(--orange);animation:pulse 1s infinite" data-action="resolveIssue" data-arg0="'+issue.id+'">⚠️ Tap again to confirm</button>';
+      else h+='<button class="resolve" data-action="resolveIssue" data-arg0="'+issue.id+'">✅ Resolve</button>';
       h+='</div>';
     }
     h+='</div>';
@@ -4043,7 +4061,7 @@ function renderRecurring(){
     if(task.last_done_at)h+='<div class="recurring-meta">Last done: '+new Date(task.last_done_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})+'</div>';
     h+='<span class="recurring-due '+dueClass+'">'+dueLabel+'</span>';
     h+='</div>';
-    h+='<div class="recurring-actions"><button onclick="completeRecurringTask('+task.id+')" title="Mark done">✅</button><button onclick="deleteRecurringTask('+task.id+')" title="Remove">🗑</button></div>';
+    h+='<div class="recurring-actions"><button data-action="completeRecurringTask" data-arg0="'+task.id+'" title="Mark done">✅</button><button data-action="deleteRecurringTask" data-arg0="'+task.id+'" title="Remove">🗑</button></div>';
     h+='</div>';
   });
   h+='</div>';
@@ -4058,7 +4076,7 @@ function renderCalendar(){
   let h='<div class="header"><div class="header-top"><h1>📅 '+t('calendar')+'</h1><div class="header-actions">'+renderLangSelector()+
     '</div></div></div>';
   h+='<div class="container">';
-  h+='<div class="month-selector"><button onclick="changeCalMonth(-1)">‹</button><h3>'+MONTH_NAMES[calMonth]+' '+calYear+'</h3><button onclick="changeCalMonth(1)">›</button></div>';
+  h+='<div class="month-selector"><button data-action="changeCalMonth" data-arg0="-1">‹</button><h3>'+MONTH_NAMES[calMonth]+' '+calYear+'</h3><button data-action="changeCalMonth" data-arg0="1">›</button></div>';
 
   const firstDay=new Date(calYear,calMonth,1).getDay();
   const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
@@ -4198,10 +4216,10 @@ function renderMaintenance(){
     const hasAdvTabs = showAdv || hasVendors || hasEquipment || hasPreventive;
     if(hasAdvTabs){
       h+='<div class="mt-subtabs">';
-      h+='<button class="mt-subtab-btn'+(mtSubTab==='tickets'?' active':'')+'" onclick="setMtSubTab(\'tickets\')">Tickets</button>';
-      if(hasVendors || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='vendors'?' active':'')+'" onclick="setMtSubTab(\'vendors\')">Vendors</button>';
-      if(hasEquipment || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='equipment'?' active':'')+'" onclick="setMtSubTab(\'equipment\')">Equipment</button>';
-      if(hasPreventive || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='preventive'?' active':'')+'" onclick="setMtSubTab(\'preventive\')">Preventive</button>';
+      h+='<button class="mt-subtab-btn'+(mtSubTab==='tickets'?' active':'')+'" data-action="setMtSubTab" data-arg0="tickets">Tickets</button>';
+      if(hasVendors || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='vendors'?' active':'')+'" data-action="setMtSubTab" data-arg0="vendors">Vendors</button>';
+      if(hasEquipment || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='equipment'?' active':'')+'" data-action="setMtSubTab" data-arg0="equipment">Equipment</button>';
+      if(hasPreventive || showAdv) h+='<button class="mt-subtab-btn'+(mtSubTab==='preventive'?' active':'')+'" data-action="setMtSubTab" data-arg0="preventive">Preventive</button>';
       h+='</div>';
     }
 
@@ -4263,7 +4281,7 @@ async function bulkAssignSelected(){
   html += '<div class="ap-list">';
   techs.forEach(c => {
     const dotColor = c.color || '#888';
-    html += '<button class="ap-item" onclick="bulkApplyAssign(\'tech\','+c.id+')">';
+    html += '<button class="ap-item" data-action="bulkApplyAssign" data-arg0="tech" data-arg1="'+c.id+'">';
     html += '<span class="ap-dot" style="background:'+esc(dotColor)+'"></span>';
     html += '<span class="ap-name">'+esc(c.name)+'</span>';
     html += '<span class="ap-role">'+(c.role||'cleaner')+'</span>';
@@ -4274,7 +4292,7 @@ async function bulkAssignSelected(){
     html += '<div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 8px">Vendors</div>';
     html += '<div class="ap-list">';
     vendors_.forEach(v => {
-      html += '<button class="ap-item" onclick="bulkApplyAssign(\'vendor\','+v.id+')">';
+      html += '<button class="ap-item" data-action="bulkApplyAssign" data-arg0="vendor" data-arg1="'+v.id+'">';
       html += '<span class="ap-dot" style="background:var(--blue)"></span>';
       html += '<span class="ap-name">'+esc(v.name)+'</span>';
       html += '<span class="ap-role">'+esc(v.specialty||'')+'</span>';
@@ -4314,7 +4332,7 @@ function bulkChangeStatus(){
   let html = '<h3>'+icon('refresh',18)+' Change status of '+mtSelected.size+' tickets</h3>';
   html += '<div class="ap-list" style="margin-top:14px">';
   opts.forEach(o => {
-    html += '<button class="ap-item" onclick="bulkApplyStatus(\''+o.key+'\')">';
+    html += '<button class="ap-item" data-action="bulkApplyStatus" data-arg0="'+o.key+'">';
     html += '<span class="ap-dot" style="background:'+o.color+'"></span>';
     html += '<span class="ap-name">'+o.label+'</span>';
     html += '</button>';
@@ -4486,11 +4504,11 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     if(t.status !== 'resolved' && t.status !== 'cancelled'){
       h+='<button class="qa-btn qa-success" title="Resolve (1-click) — Shift to add notes" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+'</button>';
     } else {
-      h+='<button class="qa-btn" title="Edit resolution notes" onclick="editResolutionNotes('+t.id+')">'+icon('edit',14)+'</button>';
+      h+='<button class="qa-btn" title="Edit resolution notes" data-action="editResolutionNotes" data-arg0="'+t.id+'">'+icon('edit',14)+'</button>';
     }
     h+='<button class="qa-btn" title="Comment" onclick="toggleMtExpand('+t.id+');setTimeout(function(){var i=document.getElementById(\'mtCmtInput-'+t.id+'\');if(i)i.focus();},80)">'+icon('msgSquare',14)+'</button>';
     // Kebab — opens the existing right-click menu (Assign, Cancel, Status changes, etc.)
-    h+='<button class="qa-btn" title="More actions" onclick="showCardContextMenu(event,'+t.id+',\'ticket\')">'+icon('moreVertical',14)+'</button>';
+    h+='<button class="qa-btn" title="More actions" data-action="showCardContextMenu" data-arg0="'+t.id+'" data-arg1="ticket" data-pass-event="1">'+icon('moreVertical',14)+'</button>';
     h+='</div>';
   }
   h+='</div>';
@@ -4523,12 +4541,12 @@ function renderMtTickets(isManager){
 
   // === Quick filter chips ===
   h+='<div class="mt-quick-filters">';
-  h+='<button class="mt-qf'+(mtFilterStatus==='all_open'?' active':'')+'" onclick="setMtStatFilter(\'all_open\')">All<span class="mt-qf-count">'+allOpen.length+'</span></button>';
-  if(urgentCount>0) h+='<button class="mt-qf urgent'+(mtFilterStatus==='urgent_stat'?' active':'')+'" onclick="setMtStatFilter(\'urgent_stat\')">Urgent<span class="mt-qf-count">'+urgentCount+'</span></button>';
-  h+='<button class="mt-qf'+(mtFilterStatus==='assigned_filter'?' active':'')+'" onclick="setMtStatFilter(\'assigned_filter\')">Assigned<span class="mt-qf-count">'+assignedCount+'</span></button>';
-  h+='<button class="mt-qf'+(mtFilterStatus==='resolved'?' active':'')+'" onclick="setMtStatFilter(\'resolved\')">Resolved<span class="mt-qf-count">'+resolvedWeek+'</span></button>';
+  h+='<button class="mt-qf'+(mtFilterStatus==='all_open'?' active':'')+'" data-action="setMtStatFilter" data-arg0="all_open">All<span class="mt-qf-count">'+allOpen.length+'</span></button>';
+  if(urgentCount>0) h+='<button class="mt-qf urgent'+(mtFilterStatus==='urgent_stat'?' active':'')+'" data-action="setMtStatFilter" data-arg0="urgent_stat">Urgent<span class="mt-qf-count">'+urgentCount+'</span></button>';
+  h+='<button class="mt-qf'+(mtFilterStatus==='assigned_filter'?' active':'')+'" data-action="setMtStatFilter" data-arg0="assigned_filter">Assigned<span class="mt-qf-count">'+assignedCount+'</span></button>';
+  h+='<button class="mt-qf'+(mtFilterStatus==='resolved'?' active':'')+'" data-action="setMtStatFilter" data-arg0="resolved">Resolved<span class="mt-qf-count">'+resolvedWeek+'</span></button>';
   if(toConfirmCount>0){
-    h+='<button class="mt-qf review'+(mtFilterStatus==='to_confirm'?' active':'')+'" onclick="setMtStatFilter(\'to_confirm\')" title="Gemini-flagged tickets that need a human eye">Review<span class="mt-qf-count">'+toConfirmCount+'</span></button>';
+    h+='<button class="mt-qf review'+(mtFilterStatus==='to_confirm'?' active':'')+'" data-action="setMtStatFilter" data-arg0="to_confirm" title="Gemini-flagged tickets that need a human eye">Review<span class="mt-qf-count">'+toConfirmCount+'</span></button>';
   }
   h+='</div>';
 
@@ -4538,10 +4556,10 @@ function renderMtTickets(isManager){
   if(_catOpen){
     h+='<div class="mt-filters">';
     ['plumbing','electrical','ac','appliance','structural','pest','painting','general'].forEach(c=>{
-      h+='<div class="mt-filter-chip'+(mtFilterCat===c?' active':'')+'" onclick="setMtFilter(\'cat\',\''+c+'\')">'+(CAT_ICONS[c]||'')+' '+c+'</div>';
+      h+='<div class="mt-filter-chip'+(mtFilterCat===c?' active':'')+'" data-action="setMtFilter" data-arg0="cat" data-arg1="'+c+'">'+(CAT_ICONS[c]||'')+' '+c+'</div>';
     });
     if(mtFilterCat){
-      h+='<button class="mt-filter-clear" onclick="setMtFilter(\'cat\',\''+mtFilterCat+'\')" title="Clear">'+icon('x',12)+'</button>';
+      h+='<button class="mt-filter-clear" data-action="setMtFilter" data-arg0="cat" data-arg1="'+mtFilterCat+'" title="Clear">'+icon('x',12)+'</button>';
     } else {
       h+='<button class="mt-filter-clear" data-action="toggleMtCatFilters" title="Hide categories">'+icon('chevronLeft',12)+'</button>';
     }
@@ -4555,7 +4573,7 @@ function renderMtTickets(isManager){
     const _lid=String(_ri.listing_id||'').replace(/'/g,"\\'");
     const _cat=String(_ri.category||'').replace(/'/g,"\\'");
     const _ln=String(_lname).replace(/'/g,"\\'");
-    h+='<button class="mt-insight-compact" onclick="openInsightAction('+_ri.count+',\''+_lid+'\',\''+_cat+'\',\''+_ln+'\')" title="Click to investigate">';
+    h+='<button class="mt-insight-compact" data-action="openInsightAction" data-arg0="'+_ri.count+'" data-arg1="'+_lid+'" data-arg2="'+_cat+'" data-arg3="'+_ln+'" title="Click to investigate">';
     h+=icon('alertTriangle',14);
     h+='<span><strong>'+esc(_lname)+'</strong> · '+esc(_ri.category)+' · <strong>'+_ri.count+'×</strong> in 90 days';
     if(recurringIssues.length>1) h+=' <em style="color:var(--text-3)">+'+(recurringIssues.length-1)+' more</em>';
@@ -4634,7 +4652,7 @@ function renderMtTickets(isManager){
       colTickets.forEach(t=>{
         const sla=getSLAStatus(t);
         const propName = formatPropLabel(t.listing_id, t.listing_name) || formatPropLabel(t.listing_id, (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name) || (t.listing_id ? '#'+t.listing_id : null);
-        h+='<div class="mt-kb-card '+t.priority+'" onclick="toggleMtExpand('+t.id+')">';
+        h+='<div class="mt-kb-card '+t.priority+'" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
         h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><strong style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.title)+'</strong><span class="mt-pri-badge '+t.priority+'">'+t.priority+'</span></div>';
         h+='<div style="font-size:10px;color:var(--text2);margin-bottom:4px">🏠 '+(propName?esc(propName):'<em style="color:var(--text3)">No property</em>')+'</div>';
         if(t.sla_deadline)h+='<div style="margin-bottom:4px"><span class="mt-sla '+sla.cls+'" style="font-size:9px">'+sla.label+'</span></div>';
@@ -4651,13 +4669,13 @@ function renderMtTickets(isManager){
           if(isManager){
             const kbAssignLabel = (t.assigned_technician_id || t.assigned_vendor_id) ? 'Reassign…' : 'Assign…';
             h+='<button class="btn-secondary" style="font-size:10px;padding:4px 8px" onclick="event.stopPropagation();openAssignPicker('+t.id+')">'+icon('user',10)+' '+kbAssignLabel+'</button>';
-            if(['open','assigned'].includes(t.status))h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
-            if(['in_progress','waiting_parts'].includes(t.status))h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
+            if(['open','assigned'].includes(t.status))h+='<button data-action="updateTicketStatus" data-arg0="'+t.id+'" data-arg1="in_progress" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
+            if(['in_progress','waiting_parts'].includes(t.status))h+='<button data-action="resolveTicket" data-arg0="'+t.id+'" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
           }else{
-            if(t.status==='assigned')h+='<button onclick="updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
-            if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button onclick="resolveTicket('+t.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
+            if(t.status==='assigned')h+='<button data-action="updateTicketStatus" data-arg0="'+t.id+'" data-arg1="in_progress" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
+            if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button data-action="resolveTicket" data-arg0="'+t.id+'" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
           }
-          h+='<button onclick="viewTicketComments('+t.id+')" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">💬</button>';
+          h+='<button data-action="viewTicketComments" data-arg0="'+t.id+'" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">💬</button>';
           h+='</div></div>';
         }
         h+='</div>';
@@ -4738,7 +4756,7 @@ function renderMtVendors(){
     h+='<span style="font-size:11px;color:var(--text2)">'+esc(v.phone)+' | '+esc(v.email)+'</span><br/>';
     h+='<span style="font-size:11px;color:var(--text3)">'+esc(v.specialty)+' | '+v.hourly_rate+' AED/h</span>';
     h+='</div>';
-    h+='<button onclick="deleteVendor('+v.id+')" style="background:rgba(244,67,54,0.1);color:var(--red);border:none;border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;">✕</button>';
+    h+='<button data-action="deleteVendor" data-arg0="'+v.id+'" style="background:rgba(244,67,54,0.1);color:var(--red);border:none;border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;">✕</button>';
     h+='</div>';
   });
   h+='</div>';
@@ -4807,7 +4825,7 @@ function renderMtPreventive(){
     h+='<div><strong>'+esc(p.task_name)+'</strong><br/><span style="font-size:11px;color:var(--text2)">Every '+p.frequency_days+' days · '+p.category+'</span></div>';
     if(p.last_completed){const days=Math.floor((Date.now()-new Date(p.last_completed).getTime())/(1000*60*60*24));h+='<span style="font-size:11px;color:'+(days>p.frequency_days?'var(--red)':'var(--green)')+'">'+days+' days ago</span>';}
     h+='</div>';
-    h+='<button onclick="completePreventive('+p.id+')" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;width:100%;margin-top:8px;">✓ Mark Complete</button>';
+    h+='<button data-action="completePreventive" data-arg0="'+p.id+'" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;width:100%;margin-top:8px;">✓ Mark Complete</button>';
     h+='</div>';
   });
   h+='</div>';
@@ -4860,8 +4878,8 @@ function renderMtHistory(){
     h+='</div>';
     // Comment thread button
     h+='<div style="margin-top:8px;display:flex;gap:6px">';
-    h+='<button onclick="viewTicketComments('+t.id+')" style="background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;">💬 Comments</button>';
-    h+='<button onclick="reopenTicket('+t.id+')" style="background:rgba(255,152,0,0.1);color:var(--orange);border:1px solid var(--orange);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;">🔄 Reopen</button>';
+    h+='<button data-action="viewTicketComments" data-arg0="'+t.id+'" style="background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;">💬 Comments</button>';
+    h+='<button data-action="reopenTicket" data-arg0="'+t.id+'" style="background:rgba(255,152,0,0.1);color:var(--orange);border:1px solid var(--orange);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;">🔄 Reopen</button>';
     h+='</div>';
     h+='</div>';
   });
@@ -4907,9 +4925,9 @@ function renderMtReports(){
 
   // Full report button
   h+='<div style="display:flex;flex-direction:column;gap:10px">';
-  h+='<button onclick="shareMaintenanceReport(\'full\')" style="background:#25D366;color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;">📱 Share Full Report via WhatsApp</button>';
-  h+='<button onclick="shareMaintenanceReport(\'open\')" style="background:var(--orange);color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;">⚠️ Share Open Tickets Only</button>';
-  h+='<button onclick="shareMaintenanceReport(\'resolved\')" style="background:var(--green);color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;">✅ Share Resolved Tickets Only</button>';
+  h+='<button data-action="shareMaintenanceReport" data-arg0="full" style="background:#25D366;color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;">📱 Share Full Report via WhatsApp</button>';
+  h+='<button data-action="shareMaintenanceReport" data-arg0="open" style="background:var(--orange);color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;">⚠️ Share Open Tickets Only</button>';
+  h+='<button data-action="shareMaintenanceReport" data-arg0="resolved" style="background:var(--green);color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;">✅ Share Resolved Tickets Only</button>';
   h+='</div>';
 
   // Preview
@@ -5476,7 +5494,7 @@ function renderCmdk(){
     Object.entries(groups).forEach(([g,items])=>{
       html+='<div class="cmdk-group"><div class="cmdk-group-title">'+esc(g)+'</div>';
       items.forEach(r=>{
-        html+='<div class="cmdk-item'+(r._idx===cmdkIndex?' active':'')+'" onclick="cmdkSelect('+r._idx+')">';
+        html+='<div class="cmdk-item'+(r._idx===cmdkIndex?' active':'')+'" data-action="cmdkSelect" data-arg0="'+r._idx+'">';
         html+='<span class="icon">'+r.icon+'</span><span class="title">'+esc(r.title)+'</span><span class="meta">'+esc(r.meta||'')+'</span>';
         html+='</div>';
       });
@@ -5552,7 +5570,7 @@ function renderExtraModal(){
       '<div class="modal-body">'+
         // Section 1 : Where & When
         '<div class="acc-section">'+
-          '<button type="button" class="acc-head" onclick="toggleExtraSection(\'where\')">'+
+          '<button type="button" class="acc-head" data-action="toggleExtraSection" data-arg0="where">'+
             '<span class="acc-title">'+icon('home',16)+' Where & When</span>'+
             '<span class="acc-chevron'+(extraModalOpenSection==='where'?' open':'')+'">▼</span>'+
           '</button>'+
@@ -5583,7 +5601,7 @@ function renderExtraModal(){
         '</div>'+
         // Section 2 : Price
         '<div class="acc-section">'+
-          '<button type="button" class="acc-head" onclick="toggleExtraSection(\'price\')">'+
+          '<button type="button" class="acc-head" data-action="toggleExtraSection" data-arg0="price">'+
             '<span class="acc-title">'+icon('wallet',16)+' Price '+(f.price_billed?'<span class="acc-badge">'+esc(String(f.price_billed))+' AED</span>':'')+'</span>'+
             '<span class="acc-chevron'+(extraModalOpenSection==='price'?' open':'')+'">▼</span>'+
           '</button>'+
@@ -5600,7 +5618,7 @@ function renderExtraModal(){
         '</div>'+
         // Section 3 : Assignment & Notes
         '<div class="acc-section">'+
-          '<button type="button" class="acc-head" onclick="toggleExtraSection(\'assign\')">'+
+          '<button type="button" class="acc-head" data-action="toggleExtraSection" data-arg0="assign">'+
             '<span class="acc-title">'+icon('user',16)+' Assignment & Notes</span>'+
             '<span class="acc-chevron'+(extraModalOpenSection==='assign'?' open':'')+'">▼</span>'+
           '</button>'+
@@ -5618,7 +5636,7 @@ function renderExtraModal(){
         '</div>'+
       '</div>'+
       '<div class="modal-footer">'+
-        (isEdit?'<button class="btn-danger" onclick="deleteExtra('+f.id+')">🗑 Delete</button>':'')+
+        (isEdit?'<button class="btn-danger" data-action="deleteExtra" data-arg0="'+f.id+'">🗑 Delete</button>':'')+
         '<button class="btn-secondary" data-action="closeExtraModal">Cancel</button>'+
         '<button class="btn-primary" data-action="saveExtra">'+(isEdit?'💾 Save':'➕ Create')+'</button>'+
       '</div>'+
