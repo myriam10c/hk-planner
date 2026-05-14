@@ -204,6 +204,115 @@ async function getPhotoUrl(sb: any, path: string | null): Promise<string | null>
   return data.signedUrl;
 }
 
+// Route registry — single source of truth for all 75 actions.
+// Used at request entry for 404 (unknown) + 405 (method mismatch) before reaching the dispatch logic below.
+const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
+  // ===== Checkouts / sync =====
+  ["checkouts", "GET"],
+  ["syncListings", "GET"],
+  // ===== Cleaning state =====
+  ["getDone", "GET"],
+  ["setDone", "POST"],
+  ["setCancelled", "POST"],
+  // ===== Cleaners CRUD + auth =====
+  ["getCleaners", "GET"],
+  ["saveCleaner", "POST"],
+  ["deleteCleaner", "POST"],
+  ["cleanerLogin", "POST"],
+  ["cleanerLogout", "POST"],
+  ["cleanerMe", "GET"],
+  // ===== Assignments =====
+  ["getAssignments", "GET"],
+  ["assignCleaner", "POST"],
+  ["autoAssign", "POST"],
+  // ===== Checklists =====
+  ["getChecklistTemplates", "GET"],
+  ["getChecklistProgress", "GET"],
+  ["saveChecklistItem", "POST"],
+  // ===== Notes =====
+  ["getNotes", "GET"],
+  ["addNote", "POST"],
+  // ===== Photos =====
+  ["getPhotos", "GET"],
+  ["getPhoto", "GET"],
+  ["addPhoto", "POST"],
+  // ===== Timers =====
+  ["startTimer", "POST"],
+  ["pauseTimer", "POST"],
+  ["resumeTimer", "POST"],
+  ["stopTimer", "POST"],
+  ["getTimers", "GET"],
+  // ===== Logs =====
+  ["getLogs", "GET"],
+  // ===== Pricing / apt number =====
+  ["setCustomPrice", "POST"],
+  ["setAptNumber", "POST"],
+  // ===== Inventory =====
+  ["getInventory", "GET"],
+  ["saveInventoryItem", "POST"],
+  ["reportLowStock", "POST"],
+  // ===== Alerts =====
+  ["getAlerts", "GET"],
+  // ===== Guest feedback =====
+  ["saveGuestFeedback", "POST"],
+  ["getGuestFeedback", "GET"],
+  // ===== Issues / Tickets =====
+  ["reportIssue", "POST"],
+  ["getIssues", "GET"],
+  ["updateIssue", "POST"],
+  // ===== Recurring tasks =====
+  ["getRecurringTasks", "GET"],
+  ["saveRecurringTask", "POST"],
+  ["completeRecurringTask", "POST"],
+  ["deleteRecurringTask", "POST"],
+  // ===== Maintenance tickets =====
+  ["getMaintenanceTickets", "GET"],
+  ["createTicket", "POST"],
+  ["updateTicket", "POST"],
+  // ===== Vendors =====
+  ["getVendors", "GET"],
+  ["saveVendor", "POST"],
+  ["deleteVendor", "POST"],
+  // ===== Equipment =====
+  ["getEquipment", "GET"],
+  ["saveEquipment", "POST"],
+  // ===== Maintenance costs =====
+  ["getMaintenanceCosts", "GET"],
+  ["addMaintenanceCost", "POST"],
+  // ===== Preventive maintenance =====
+  ["getPreventiveMaintenance", "GET"],
+  ["savePreventiveMaintenance", "POST"],
+  ["completePreventive", "POST"],
+  // ===== SLA / Health =====
+  ["getSLA", "GET"],
+  ["getPropertyHealth", "GET"],
+  // ===== Ticket comments =====
+  ["getTicketComments", "GET"],
+  ["addTicketComment", "POST"],
+  // ===== Recurring issues =====
+  ["getRecurringIssues", "GET"],
+  // ===== Config =====
+  ["getConfig", "GET"],
+  ["setConfig", "POST"],
+  // ===== Autopilot =====
+  ["runAutopilot", "GET"],
+  // ===== Property profiles =====
+  ["getPropertyProfiles", "GET"],
+  ["savePropertyProfile", "POST"],
+  // ===== Dashboard / aggregates =====
+  ["getDashboardKPIs", "GET"],
+  ["getAllData", "GET"],
+  ["getPropertyHeatmap", "GET"],
+  // ===== CSV exports =====
+  ["exportCleaningsCsv", "GET"],
+  ["exportMaintenanceCsv", "GET"],
+  // ===== Extra cleanings (hors Hostaway) =====
+  ["addExtraCleaning", "POST"],
+  ["updateExtraCleaning", "POST"],
+  ["deleteExtraCleaning", "POST"],
+  ["getExtraCleanings", "GET"],
+]);
+
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get("origin");
   const CORS_HEADERS = corsHeaders(origin);
@@ -226,6 +335,18 @@ Deno.serve(async (req: Request) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action");
     const sb = getSupabase();
+
+    // Route validation (404 unknown action + 405 method mismatch) — runs before legacy dispatcher below.
+    if (action !== null) {
+      const expectedMethod = ROUTES.get(action);
+      if (!expectedMethod) {
+        return jsonResp({ error: `Unknown action: ${action}` }, 404);
+      }
+      if (expectedMethod !== req.method) {
+        return jsonResp({ error: `Method ${req.method} not allowed for "${action}" (expected ${expectedMethod})` }, 405);
+      }
+    }
+
 
     // ==================== CHECKOUTS ====================
     if (action === "checkouts") {
