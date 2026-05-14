@@ -90,6 +90,57 @@ function __closeMoreMenuThenSetTab(tabId){ closeMoreMenu(); setTab(tabId); }
 function __setAssigneesEmptyAndCloseOverlay(rkey, e){ setAssignees(rkey, []); var ov=e.target.closest('.assign-picker-overlay'); if(ov)ov.remove(); }
 function __toggleMtExpandAndFocusComment(id){ toggleMtExpand(id); setTimeout(function(){var i=document.getElementById('mtCmtInput-'+id); if(i)i.focus(); }, 80); }
 
+// === Phase 3.b wrappers (final 14 inline onclicks) ===
+function __mtCardClick(id, e){ if(typeof mtSelectMode!=='undefined' && mtSelectMode) toggleMtSelected(id, e); else toggleMtExpand(id); }
+function __sendDailyToAllCleaners(){ cleaners.forEach(function(c){ sendDailyWhatsApp(c); }); }
+function __toggleInventoryQR(id, name, qty){
+  var el=document.getElementById('qr_inv_'+id);
+  if(!el) return;
+  if(el.style.display==='none'){ el.style.display='block'; generateQR('qr_inv_'+id, 'INVENTORY|'+id+'|'+name+'|qty:'+qty); }
+  else { el.style.display='none'; }
+}
+function __sendWhatsAppReminder(phone, listing, guest){ sendWhatsApp(phone, 'Reminder: '+listing+' - '+guest); }
+function __togglePlannerBulkAllFromKeys(keysJson){ try{ togglePlannerBulkAll(JSON.parse(keysJson)); } catch(e){ console.error('togglePlannerBulkAll parse', e); } }
+function __exportPlannerVisibleCSV(){ exportPlannerCSV(window.__plannerVisible || []); }
+function __openExtraModalById(id){ var ex=(extraCleanings||[]).find(function(e){ return e.id === id; }); if(ex) openExtraModal(ex); }
+function __saveCleanerFromForm(){
+  saveCleaner(null,
+    document.getElementById('newName').value,
+    document.getElementById('newPhone').value,
+    document.getElementById('newColor').value,
+    document.getElementById('newPin').value,
+    document.getElementById('newRole').value);
+}
+function __saveInventoryItemFromForm(){
+  saveInventoryItem(null,
+    document.getElementById('invName').value,
+    document.getElementById('invQty').value,
+    document.getElementById('invMin').value,
+    document.getElementById('invUnit').value);
+}
+function __resetSearchFilters(){ search=''; filterCleaner=0; setSelectedDate('all'); }
+function __closeSearchAndRender(){ search=''; searchOpen=false; render(); }
+function __setDateAndShowPlanner(dateStr){ selectedDate=dateStr; setTab('planner'); }
+function __sendDailyWhatsAppFromJson(cleanerJson){ try{ sendDailyWhatsApp(JSON.parse(cleanerJson)); } catch(e){ console.error('sendDailyWhatsApp parse', e); } }
+
+// === Context menu item registry ===
+// Each ctxmenu item registers a real JS closure here at render time; the
+// rendered button carries the closure ID via data-arg0. The map is cleared
+// at the start of every renderContextMenu() so it never grows unbounded.
+const __ctxItems = new Map();
+let __ctxItemCounter = 0;
+function __regCtxItem(fn){
+  const id = 'ci_' + (++__ctxItemCounter);
+  __ctxItems.set(id, fn);
+  return id;
+}
+function __runCtxItem(id, e){
+  const fn = __ctxItems.get(id);
+  if (!fn) return;
+  try { fn(e); } catch (err) { console.error('[__runCtxItem ' + id + ']', err); }
+}
+function __clearCtxItems(){ __ctxItems.clear(); }
+
 // Global error handlers (Sentry-lite MVP)
 window.addEventListener('error', (e) => {
   console.error('[GLOBAL ERROR]', e.error || e.message, e.filename, e.lineno);
@@ -476,7 +527,7 @@ function renderPlannerTable(items){
     h += '<button class="tt-btn'+(plannerTableDensity===d?' active':'')+'" data-action="setPlannerTableDensity" data-arg0="'+d+'">'+d.charAt(0).toUpperCase()+d.slice(1)+'</button>';
   });
   h += '</span>';
-  h += '<button class="tt-btn" onclick="exportPlannerCSV(window.__plannerVisible||[])" title="Export current view as CSV">'+icon('download',13)+' Export CSV</button>';
+  h += '<button class="tt-btn" data-action="__exportPlannerVisibleCSV" title="Export current view as CSV">'+icon('download',13)+' Export CSV</button>';
   h += '</div>';
 
   // Stash visible items for the toolbar's CSV button
@@ -508,7 +559,7 @@ function renderPlannerTable(items){
   h += '</colgroup>';
 
   h += '<thead><tr>';
-  h += '<th class="col-select" onclick="event.stopPropagation();togglePlannerBulkAll('+JSON.stringify(visibleKeys).replace(/"/g,'&quot;')+')"><input type="checkbox"'+(allBulkSel?' checked':'')+' onclick="event.stopPropagation();togglePlannerBulkAll('+JSON.stringify(visibleKeys).replace(/"/g,'&quot;')+')"/></th>';
+  h += '<th class="col-select" data-action="__togglePlannerBulkAllFromKeys" data-arg0="'+JSON.stringify(visibleKeys).replace(/"/g,'&quot;')+'" data-stop-propagation="1"><input type="checkbox"'+(allBulkSel?' checked':'')+' data-action="__togglePlannerBulkAllFromKeys" data-arg0="'+JSON.stringify(visibleKeys).replace(/"/g,'&quot;')+'" data-stop-propagation="1"/></th>';
   const cols = [
     {k:'co', l:'Date'},
     {k:'guest', l:'Guest'},
@@ -720,40 +771,41 @@ function closeContextMenu(){
 function renderContextMenu(){
   let el = document.getElementById('contextMenu');
   if(!el){ el = document.createElement('div'); el.id = 'contextMenu'; document.body.appendChild(el); }
+  __clearCtxItems();
   if(!contextMenuState.open){ el.innerHTML = ''; return; }
   const { x, y, id, type } = contextMenuState;
   let items = [];
   if(type === 'cleaning'){
     const isDone = !!done[id];
     items = [
-      isDone ? { label: 'Mark undone', icon: 'refresh', action: 'markDone(\''+id+'\');closeContextMenu()' }
-             : { label: 'Mark done', icon: 'check', action: 'markDone(\''+id+'\');closeContextMenu()' },
-      cleanerMode ? null : { label: 'Assign cleaner…', icon: 'user', action: 'closeContextMenu();showAssignPicker(\''+id+'\')' },
-      { label: 'View details', icon: 'clipboard', action: 'closeContextMenu();toggleExpand(\''+id+'\',event)' },
+      isDone ? { label: 'Mark undone', icon: 'refresh', handler: function(){ markDone(id); closeContextMenu(); } }
+             : { label: 'Mark done', icon: 'check', handler: function(){ markDone(id); closeContextMenu(); } },
+      cleanerMode ? null : { label: 'Assign cleaner…', icon: 'user', handler: function(){ closeContextMenu(); showAssignPicker(id); } },
+      { label: 'View details', icon: 'clipboard', handler: function(e){ closeContextMenu(); toggleExpand(id, e); } },
       { divider: true },
-      cleanerMode || cancelled[id] ? null : { label: 'Cancel cleaning', icon: 'xCircle', danger: true, action: 'closeContextMenu();(typeof toggleCancel===\'function\'?toggleCancel(\''+id+'\'):null)' },
+      cleanerMode || cancelled[id] ? null : { label: 'Cancel cleaning', icon: 'xCircle', danger: true, handler: function(){ closeContextMenu(); if(typeof toggleCancel === 'function') toggleCancel(id); } },
     ].filter(Boolean);
   } else if(type === '__mt_header__'){
     const advOn = (function(){ try { return localStorage.getItem('mtShowAdvanced') === '1'; } catch(e){ return false; } })();
     items = [
-      { label: 'Share report…', icon: 'download', action: 'closeContextMenu();setMtSubTab(\'__reports\')' },
-      { label: 'History', icon: 'clock', action: 'closeContextMenu();setMtSubTab(\'__history\')' },
+      { label: 'Share report…', icon: 'download', handler: function(){ closeContextMenu(); setMtSubTab('__reports'); } },
+      { label: 'History', icon: 'clock', handler: function(){ closeContextMenu(); setMtSubTab('__history'); } },
       { divider: true },
-      { label: mtSelectMode ? 'Cancel select' : 'Select multiple', icon: 'check', action: 'closeContextMenu();toggleMtSelectMode()' },
+      { label: mtSelectMode ? 'Cancel select' : 'Select multiple', icon: 'check', handler: function(){ closeContextMenu(); toggleMtSelectMode(); } },
       { divider: true },
-      { label: advOn ? 'Hide Vendors / Equipment / Preventive' : 'Show Vendors / Equipment / Preventive', icon: 'plus', action: 'closeContextMenu();toggleMtAdvanced()' },
+      { label: advOn ? 'Hide Vendors / Equipment / Preventive' : 'Show Vendors / Equipment / Preventive', icon: 'plus', handler: function(){ closeContextMenu(); toggleMtAdvanced(); } },
     ];
   } else if(type === '__dash_export__'){
     items = [
-      { label: 'Excel — current month', icon: 'download', action: 'closeContextMenu();exportExcel()' },
-      { label: 'PDF — current month',   icon: 'download', action: 'closeContextMenu();exportPDF()' },
+      { label: 'Excel — current month', icon: 'download', handler: function(){ closeContextMenu(); exportExcel(); } },
+      { label: 'PDF — current month',   icon: 'download', handler: function(){ closeContextMenu(); exportPDF(); } },
       { divider: true },
-      { label: 'CSV — cleanings',       icon: 'download', action: 'closeContextMenu();exportCsv(\'cleanings\')' },
-      { label: 'CSV — maintenance',     icon: 'download', action: 'closeContextMenu();exportCsv(\'maintenance\')' },
+      { label: 'CSV — cleanings',       icon: 'download', handler: function(){ closeContextMenu(); exportCsv('cleanings'); } },
+      { label: 'CSV — maintenance',     icon: 'download', handler: function(){ closeContextMenu(); exportCsv('maintenance'); } },
     ];
     if(!cleanerMode){
       items.push({ divider: true });
-      items.push({ label: 'Generate invoice', icon: 'wallet', action: 'closeContextMenu();dashGenerateInvoiceForCurrentMonth()' });
+      items.push({ label: 'Generate invoice', icon: 'wallet', handler: function(){ closeContextMenu(); dashGenerateInvoiceForCurrentMonth(); } });
     }
   } else if(type === 'ticket'){
     const tid = Number(id);
@@ -762,26 +814,26 @@ function renderContextMenu(){
     const isClosed = status === 'resolved' || status === 'cancelled';
     items = [];
     if(!isClosed){
-      items.push({ label: 'Assign / Reassign…', icon: 'user', action: 'closeContextMenu();openAssignPicker('+tid+')' });
+      items.push({ label: 'Assign / Reassign…', icon: 'user', handler: function(){ closeContextMenu(); openAssignPicker(tid); } });
       if(['open','assigned'].includes(status)){
-        items.push({ label: 'Mark in progress', icon: 'play', action: 'closeContextMenu();updateTicketStatus('+tid+',\'in_progress\')' });
+        items.push({ label: 'Mark in progress', icon: 'play', handler: function(){ closeContextMenu(); updateTicketStatus(tid, 'in_progress'); } });
       }
       if(['assigned','in_progress'].includes(status)){
-        items.push({ label: 'Mark waiting parts', icon: 'pause', action: 'closeContextMenu();updateTicketStatus('+tid+',\'waiting_parts\')' });
+        items.push({ label: 'Mark waiting parts', icon: 'pause', handler: function(){ closeContextMenu(); updateTicketStatus(tid, 'waiting_parts'); } });
       }
       if(status === 'waiting_parts'){
-        items.push({ label: 'Resume work', icon: 'play', action: 'closeContextMenu();updateTicketStatus('+tid+',\'in_progress\')' });
+        items.push({ label: 'Resume work', icon: 'play', handler: function(){ closeContextMenu(); updateTicketStatus(tid, 'in_progress'); } });
       }
-      items.push({ label: 'Resolve with notes…', icon: 'check', action: 'closeContextMenu();resolveTicket('+tid+')' });
+      items.push({ label: 'Resolve with notes…', icon: 'check', handler: function(){ closeContextMenu(); resolveTicket(tid); } });
       items.push({ divider: true });
-      items.push({ label: 'Cancel ticket', icon: 'x', danger: true, action: 'closeContextMenu();cancelTicket('+tid+')' });
+      items.push({ label: 'Cancel ticket', icon: 'x', danger: true, handler: function(){ closeContextMenu(); cancelTicket(tid); } });
     } else {
-      items.push({ label: 'Edit notes', icon: 'edit', action: 'closeContextMenu();editResolutionNotes('+tid+')' });
-      items.push({ label: 'Reopen', icon: 'refresh', action: 'closeContextMenu();reopenTicket('+tid+')' });
+      items.push({ label: 'Edit notes', icon: 'edit', handler: function(){ closeContextMenu(); editResolutionNotes(tid); } });
+      items.push({ label: 'Reopen', icon: 'refresh', handler: function(){ closeContextMenu(); reopenTicket(tid); } });
       items.push({ divider: true });
     }
-    items.push({ label: 'Add comment…', icon: 'msgSquare', action: 'closeContextMenu();mtExpandedTicket='+tid+';render();setTimeout(function(){var i=document.getElementById(\'mtCmtInput-'+tid+'\');if(i)i.focus();},100)' });
-    items.push({ label: 'View details', icon: 'clipboard', action: 'closeContextMenu();toggleMtExpand('+tid+')' });
+    items.push({ label: 'Add comment…', icon: 'msgSquare', handler: function(){ closeContextMenu(); mtExpandedTicket = tid; render(); setTimeout(function(){ var i = document.getElementById('mtCmtInput-' + tid); if(i) i.focus(); }, 100); } });
+    items.push({ label: 'View details', icon: 'clipboard', handler: function(){ closeContextMenu(); toggleMtExpand(tid); } });
   }
   const menuW = 220, menuH = items.length * 36 + 12;
   const left = Math.min(x, window.innerWidth - menuW - 10);
@@ -790,7 +842,10 @@ function renderContextMenu(){
   html += '<div class="ctxmenu" style="left:'+left+'px;top:'+top+'px">';
   items.forEach(it => {
     if(it.divider){ html += '<div class="ctxmenu-divider"></div>'; }
-    else { html += '<button class="ctxmenu-item'+(it.danger?' danger':'')+'" onclick="event.stopPropagation();'+it.action+'">'+icon(it.icon,14)+'<span>'+esc(it.label)+'</span></button>'; }
+    else {
+      const cid = __regCtxItem(it.handler);
+      html += '<button class="ctxmenu-item'+(it.danger?' danger':'')+'" data-action="__runCtxItem" data-arg0="'+cid+'" data-pass-event="1" data-stop-propagation="1">'+icon(it.icon,14)+'<span>'+esc(it.label)+'</span></button>';
+    }
   });
   html += '</div>';
   el.innerHTML = html;
@@ -2815,7 +2870,7 @@ function renderPlanner(){
 
   // Collapsible search overlay
   if(searchOpen){
-    h+='<div class="header-search"><input type="text" id="headerSearchInput" aria-label="Search property or guest" placeholder="Search property or guest..." value="'+esc(search)+'" oninput="search=this.value;render()" autofocus/><button onclick="search=\'\';searchOpen=false;render()" aria-label="Close search" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:4px 8px">✕</button></div>';
+    h+='<div class="header-search"><input type="text" id="headerSearchInput" aria-label="Search property or guest" placeholder="Search property or guest..." value="'+esc(search)+'" oninput="search=this.value;render()" autofocus/><button data-action="__closeSearchAndRender" aria-label="Close search" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:4px 8px">✕</button></div>';
   }
 
   h+='<div class="container"><div class="planner-two-col"><div class="planner-main">';
@@ -2828,7 +2883,7 @@ function renderPlanner(){
   const sortedDates=Object.keys(grouped).sort();
   if(sortedDates.length===0){
     if(search||filterCleaner!==0||selectedDate!=='all'){
-      h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No results</div><div class="empty-hero-sub">Try changing the filter or date.</div><button class="btn-primary" onclick="search=\'\';filterCleaner=0;setSelectedDate(\'all\')">Reset</button></div>';
+      h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No results</div><div class="empty-hero-sub">Try changing the filter or date.</div><button class="btn-primary" data-action="__resetSearchFilters">Reset</button></div>';
     } else {
       h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('partyPopper',56)+'</div><div class="empty-hero-title">No cleanings this week</div><div class="empty-hero-sub">Enjoy the break! Or check next week.</div>'+(!cleanerMode?'<button class="btn-primary" data-action="changeWeek" data-arg0="1">Next week →</button>':'')+'</div>';
     }
@@ -3118,7 +3173,7 @@ function renderCleaningDetailPane(r){
     h += '<button class="btn-secondary" data-action="toggleCancel" data-arg0="'+esc(k)+'">'+icon('xCircle',14)+' '+(isCancelled?'Restore':'Cancel')+'</button>';
   }
   if(isExtra && !cleanerMode){
-    h += '<button class="btn-secondary" onclick="openExtraModal((extraCleanings||[]).find(e => e.id === '+r._extraId+'))">'+icon('clipboard',14)+' Edit extra</button>';
+    h += '<button class="btn-secondary" data-action="__openExtraModalById" data-arg0="'+r._extraId+'">'+icon('clipboard',14)+' Edit extra</button>';
   }
   h += '</div>';
 
@@ -3286,7 +3341,7 @@ function renderCardDetail(key,r){
   // #8 WhatsApp for this cleaning — one button per assigned cleaner
   if(!cleanerMode){
     getAssignees(key).forEach(cl=>{
-      if(cl.phone) h+='<button class="wa-btn" style="margin-top:8px" onclick="event.stopPropagation();sendWhatsApp(\''+esc(cl.phone)+'\',\'Reminder: '+esc(r.listing)+' - '+esc(r.guest)+'\')">📱 WhatsApp '+esc(cl.name)+'</button>';
+      if(cl.phone) h+='<button class="wa-btn" style="margin-top:8px" data-action="__sendWhatsAppReminder" data-arg0="'+esc(cl.phone)+'" data-arg1="'+esc(r.listing)+'" data-arg2="'+esc(r.guest)+'" data-stop-propagation="1">📱 WhatsApp '+esc(cl.name)+'</button>';
     });
   }
   h+='</div></div>';
@@ -3835,7 +3890,7 @@ function renderSettings(){
       '<select onchange="saveCleaner('+c.id+',\''+esc(c.name)+'\',\''+esc(c.phone||'')+'\',\''+c.color+'\',\''+esc(c.pin||'')+'\',this.value)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
     ['manager','cleaner','maintenance'].forEach(r=>{h+='<option value="'+r+'"'+(role===r?' selected':'')+'>'+r+'</option>';});
     h+='</select>'+
-      '<button onclick="sendDailyWhatsApp('+JSON.stringify(c).replace(/"/g,'&quot;')+')" title="Send WhatsApp">📱</button>'+
+      '<button data-action="__sendDailyWhatsAppFromJson" data-arg0="'+JSON.stringify(c).replace(/"/g,'&quot;')+'" title="Send WhatsApp">📱</button>'+
       '<button data-action="deleteCleaner" data-arg0="'+c.id+'" title="Remove">🗑</button></div>';
   });
   h+='<div class="add-form">'+
@@ -3844,9 +3899,9 @@ function renderSettings(){
     '<input id="newPin" placeholder="PIN" maxlength="4" style="width:60px"/>'+
     '<select id="newRole" style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:6px"><option value="cleaner">🧹 Cleaner</option><option value="maintenance">🔧 Maintenance</option><option value="manager">👔 Manager</option></select>'+
     '<input id="newColor" type="color" value="#7c3aed" style="width:40px"/>'+
-    '<button onclick="saveCleaner(null,document.getElementById(\'newName\').value,document.getElementById(\'newPhone\').value,document.getElementById(\'newColor\').value,document.getElementById(\'newPin\').value,document.getElementById(\'newRole\').value)">Add</button></div>';
+    '<button data-action="__saveCleanerFromForm">Add</button></div>';
   // #8 Send all daily WhatsApp
-  if(cleaners.length>0) h+='<button class="wa-btn" style="margin-top:10px" onclick="cleaners.forEach(c=>sendDailyWhatsApp(c))">📱 Send daily recap to all</button>';
+  if(cleaners.length>0) h+='<button class="wa-btn" style="margin-top:10px" data-action="__sendDailyToAllCleaners">📱 Send daily recap to all</button>';
   h+='<div style="margin-top:10px"><a href="#cleaner" data-action="render" style="color:var(--primary);font-size:12px;font-weight:600">🔑 Open Cleaner Login View</a></div></div>';
 
   // WhatsApp preference removed — not needed in ops tool
@@ -3985,7 +4040,7 @@ function renderInventory(){
     h+='<div class="pricing-row" style="'+(low?'color:var(--red)':'')+';flex-wrap:wrap"><div class="pr-name">'+(low?'⚠️ ':'')+esc(item.item_name)+'</div>'+
       '<div style="font-size:11px">'+item.current_qty+'/'+item.min_qty+' '+esc(item.unit||'')+'</div>'+
       '<div id="qr_inv_'+item.id+'" class="qr-container" style="display:none"></div>'+
-      '<button style="font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer;color:var(--text)" onclick="const el=document.getElementById(\'qr_inv_'+item.id+'\');if(el.style.display===\'none\'){el.style.display=\'block\';generateQR(\'qr_inv_'+item.id+'\',\'INVENTORY|'+item.id+'|'+esc(item.item_name)+'|qty:'+item.current_qty+'\');}else{el.style.display=\'none\';}">QR</button></div>';
+      '<button style="font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer;color:var(--text)" data-action="__toggleInventoryQR" data-arg0="'+item.id+'" data-arg1="'+esc(item.item_name)+'" data-arg2="'+item.current_qty+'">QR</button></div>';
   });
   // Add item form
   h+='<div class="add-form" style="margin-top:10px">'+
@@ -3993,7 +4048,7 @@ function renderInventory(){
     '<input id="invQty" type="number" placeholder="Qty" style="width:60px" value="10"/>'+
     '<input id="invMin" type="number" placeholder="Min" style="width:60px" value="2"/>'+
     '<input id="invUnit" placeholder="Unit" style="width:60px" value="pcs"/>'+
-    '<button onclick="saveInventoryItem(null,document.getElementById(\'invName\').value,document.getElementById(\'invQty\').value,document.getElementById(\'invMin\').value,document.getElementById(\'invUnit\').value)">Add</button></div>';
+    '<button data-action="__saveInventoryItemFromForm">Add</button></div>';
   h+='</div>';
 
   h+='</div>'+renderBottomNav();
@@ -4131,7 +4186,7 @@ function renderCalendar(){
     const dayDone=dayRes.filter(r=>done[keyFor(r)]).length;
     const isT=dateStr===today;
 
-    h+='<div class="cal-day'+(isT?' today':'')+'" onclick="selectedDate=\''+dateStr+'\';setTab(\'planner\')">';
+    h+='<div class="cal-day'+(isT?' today':'')+'" data-action="__setDateAndShowPlanner" data-arg0="'+dateStr+'">';
     h+='<div class="cal-num">'+d+'</div>';
     if(dayRes.length>0){
       h+='<div class="cal-count">'+dayRes.length+'</div>';
@@ -4438,7 +4493,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     if(apt) n = n.replace(new RegExp('^\\s*'+apt.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*[-—–|:·•]\\s*','i'),'');
     return n.length>40 ? n.substring(0,40)+'…' : n;
   })() : '';
-  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
+  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="__mtCardClick" data-arg0="'+t.id+'" data-pass-event="1">';
   if(mtSelectMode){
     h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" data-action="toggleMtSelected" data-arg0="'+t.id+'" data-stop-propagation="1"></div>';
   }
