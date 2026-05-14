@@ -28,10 +28,14 @@
 <script>
 
 // === Event delegation router for declarative click handlers ===
-// Replaces inline click handlers with elements declaring data-action + optional data-arg0..N
-// + optional data-pass-event="1". Phases 1+2 of CSP migration. Remaining complex handlers
-// (event.*, multi-statement, conditional) stay inline until Phase 3. Args are coerced
-// (numbers/booleans), event optionally appended last when data-pass-event="1".
+// Replaces inline click handlers with elements declaring:
+//   - data-action="fnName" (required, "__noop" to do nothing)
+//   - data-arg0..N (positional args, coerced to number/bool/string)
+//   - data-pass-event="1" (append the click event as last arg)
+//   - data-stop-propagation="1" (call e.stopPropagation() before fn)
+//   - data-prevent-default="1" (call e.preventDefault() before fn)
+//   - data-close-closest="<selector>" (after fn, remove the closest matching ancestor)
+// Phases 1-3 of CSP migration. Once 0 inline onclick remains, drop 'unsafe-inline' from CSP.
 (function(){
   function coerce(v){
     if (v === undefined || v === null) return v;
@@ -44,24 +48,47 @@
   document.addEventListener('click', function(e){
     const el = e.target.closest('[data-action]');
     if (!el) return;
+    if (el.dataset.stopPropagation === '1') e.stopPropagation();
+    if (el.dataset.preventDefault === '1') e.preventDefault();
     const name = el.dataset.action;
     if (!name) return;
-    const fn = window[name];
-    if (typeof fn !== 'function') {
-      console.warn('[data-action] unknown handler:', name);
-      return;
+    if (name !== '__noop') {
+      const fn = window[name];
+      if (typeof fn !== 'function') {
+        console.warn('[data-action] unknown handler:', name);
+      } else {
+        const args = [];
+        for (let i = 0; i < 10; i++) {
+          const v = el.dataset['arg' + i];
+          if (v === undefined) break;
+          args.push(coerce(v));
+        }
+        if (el.dataset.passEvent === '1') args.push(e);
+        try { fn.apply(null, args); }
+        catch (err) { console.error('[data-action ' + name + ']', err); }
+      }
     }
-    const args = [];
-    for (let i = 0; i < 10; i++) {
-      const v = el.dataset['arg' + i];
-      if (v === undefined) break;
-      args.push(coerce(v));
+    const closeSel = el.dataset.closeClosest;
+    if (closeSel) {
+      const target = el.closest(closeSel);
+      if (target) target.remove();
     }
-    if (el.dataset.passEvent === '1') args.push(e);
-    try { fn.apply(null, args); }
-    catch (err) { console.error('[data-action ' + name + ']', err); }
   }, false);
 })();
+
+// === Phase 3 click-handler wrappers ===
+// Named wrappers for inline handlers that couldn't be migrated via simple data-arg* —
+// patterns like multi-call sequences, conditional dispatch, backdrop close, or DOM form lookups.
+// Each `__wrap*` function is the canonical handler invoked by the event-delegation router.
+function __closeCmdkBackdrop(e){ if(e.target.classList.contains('cmdk-overlay'))closeCmdk(); }
+function __closeExtraModalBackdrop(e){ if(e.target.classList.contains('extra-modal-overlay'))closeExtraModal(); }
+function __closeMoreMenuBackdrop(e){ if(e.target.classList.contains('more-menu-overlay'))closeMoreMenu(); }
+function __resolveOrQuick(id, e){ if(e.shiftKey)resolveTicket(id); else quickResolveTicket(id); }
+function __closeMtModalThenCreatePreventive(lid, cat, ln){ closeMtModal(); createPreventiveFromInsight(lid, cat, ln); }
+function __closeMtModalThenShowRelated(lid, cat){ closeMtModal(); showRelatedTickets(lid, cat); }
+function __closeMoreMenuThenSetTab(tabId){ closeMoreMenu(); setTab(tabId); }
+function __setAssigneesEmptyAndCloseOverlay(rkey, e){ setAssignees(rkey, []); var ov=e.target.closest('.assign-picker-overlay'); if(ov)ov.remove(); }
+function __toggleMtExpandAndFocusComment(id){ toggleMtExpand(id); setTimeout(function(){var i=document.getElementById('mtCmtInput-'+id); if(i)i.focus(); }, 80); }
 
 // Global error handlers (Sentry-lite MVP)
 window.addEventListener('error', (e) => {
@@ -394,8 +421,8 @@ function setSortMt(col){
 function renderViewToggle(currentMode, setterName){
   if(typeof isDesktop !== 'function' || !isDesktop()) return '';
   return '<div class="view-toggle">'+
-    '<button class="vt-btn'+(currentMode==='cards'?' active':'')+'" onclick="'+setterName+'(\'cards\')">'+icon('clipboard',13)+' Cards</button>'+
-    '<button class="vt-btn'+(currentMode==='table'?' active':'')+'" onclick="'+setterName+'(\'table\')">'+icon('chart',13)+' Table</button>'+
+    '<button class="vt-btn'+(currentMode==='cards'?' active':'')+'" data-action="'+setterName+'" data-arg0="cards">'+icon('clipboard',13)+' Cards</button>'+
+    '<button class="vt-btn'+(currentMode==='table'?' active':'')+'" data-action="'+setterName+'" data-arg0="table">'+icon('chart',13)+' Table</button>'+
   '</div>';
 }
 
@@ -511,7 +538,7 @@ function renderPlannerTable(items){
     const trCls = (isSelected?'selected ':'') + (isBulk?'bulk-selected':'');
     h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1">';
     // Checkbox
-    h += '<td class="col-select" onclick="event.stopPropagation();togglePlannerBulk(\''+sk+'\')"><input type="checkbox"'+(isBulk?' checked':'')+' onclick="event.stopPropagation();togglePlannerBulk(\''+sk+'\')"/></td>';
+    h += '<td class="col-select" data-action="togglePlannerBulk" data-arg0="'+sk+'" data-stop-propagation="1"><input type="checkbox"'+(isBulk?' checked':'')+' data-action="togglePlannerBulk" data-arg0="'+sk+'" data-stop-propagation="1"/></td>';
     // Date
     h += '<td class="muted col-date" title="'+esc(r.co||'')+'">'+esc(r.co||'')+'</td>';
     // Guest (allow 2-line wrap)
@@ -536,14 +563,14 @@ function renderPlannerTable(items){
     else h += '<span class="row-status pending">Pending</span>';
     h += '</td>';
     // Actions
-    h += '<td onclick="event.stopPropagation()">';
+    h += '<td data-action="__noop" data-stop-propagation="1">';
     h += '<span class="row-actions">';
-    h += '<button class="row-action-btn" title="View detail" onclick="event.stopPropagation();toggleExpand(\''+sk+'\',event)">'+icon('clipboard',13)+'</button>';
+    h += '<button class="row-action-btn" title="View detail" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1" data-stop-propagation="1">'+icon('clipboard',13)+'</button>';
     if(!isCancelled){
-      if(isDone) h += '<button class="row-action-btn" title="Mark undone" onclick="event.stopPropagation();markDone(\''+sk+'\')">'+icon('refresh',13)+'</button>';
-      else h += '<button class="row-action-btn success" title="Mark done" onclick="event.stopPropagation();markDone(\''+sk+'\')">'+icon('check',13)+'</button>';
+      if(isDone) h += '<button class="row-action-btn" title="Mark undone" data-action="markDone" data-arg0="'+sk+'" data-stop-propagation="1">'+icon('refresh',13)+'</button>';
+      else h += '<button class="row-action-btn success" title="Mark done" data-action="markDone" data-arg0="'+sk+'" data-stop-propagation="1">'+icon('check',13)+'</button>';
     }
-    h += '<button class="row-action-btn" title="More actions" oncontextmenu="event.preventDefault()" onclick="event.stopPropagation();showCardContextMenu(event,\''+sk+'\',\'cleaning\')">'+icon('moreVertical',13)+'</button>';
+    h += '<button class="row-action-btn" title="More actions" oncontextmenu="event.preventDefault()" data-action="showCardContextMenu" data-arg0="'+sk+'" data-arg1="cleaning" data-pass-event="1" data-stop-propagation="1">'+icon('moreVertical',13)+'</button>';
     h += '</span>';
     h += '</td>';
     h += '</tr>';
@@ -953,7 +980,7 @@ function renderToasts(){
     let inner = '<span class="toast-icon">'+(iconMap[t.type]||iconMap.info)+'</span>'+
                 '<span class="toast-msg">'+esc(t.msg)+'</span>';
     if(t.actionLabel){
-      inner += '<button class="toast-action" onclick="event.stopPropagation();runToastAction('+t.id+')">'+esc(t.actionLabel)+'</button>';
+      inner += '<button class="toast-action" data-action="runToastAction" data-arg0="'+t.id+'" data-stop-propagation="1">'+esc(t.actionLabel)+'</button>';
     }
     return '<div class="toast-item toast-'+t.type+'" data-action="dismissToast" data-arg0="'+t.id+'">'+inner+'</div>';
   }).join('');
@@ -1353,7 +1380,7 @@ function showCancelConfirm(key){
   const parts=key.split('_');
   const guest=parts.slice(1).join('_');
   const h='<div class="modal-overlay" data-action="closeCancelModal">'+
-    '<div class="wa-chooser" onclick="event.stopPropagation()" style="width:300px;text-align:center">'+
+    '<div class="wa-chooser" data-action="__noop" data-stop-propagation="1" style="width:300px;text-align:center">'+
     '<div style="font-size:32px;margin-bottom:8px">🚫</div>'+
     '<div style="font-weight:700;font-size:15px;margin-bottom:6px">Cancel this cleaning?</div>'+
     '<div style="font-size:12px;color:var(--text2);margin-bottom:12px">'+esc(guest)+'</div>'+
@@ -1369,7 +1396,7 @@ function showUncancelConfirm(key){
   const parts=key.split('_');
   const guest=parts.slice(1).join('_');
   const h='<div class="modal-overlay" data-action="closeCancelModal">'+
-    '<div class="wa-chooser" onclick="event.stopPropagation()" style="width:300px;text-align:center">'+
+    '<div class="wa-chooser" data-action="__noop" data-stop-propagation="1" style="width:300px;text-align:center">'+
     '<div style="font-size:32px;margin-bottom:8px">↩️</div>'+
     '<div style="font-weight:700;font-size:15px;margin-bottom:6px">Restore this cleaning?</div>'+
     '<div style="font-size:12px;color:var(--text2);margin-bottom:12px">'+esc(guest)+'</div>'+
@@ -1448,7 +1475,7 @@ function showAssignPicker(rkey){
       : 'Assign cleaner(s)')+'</h3>';
   ph+='<div class="picker-help">Toggle each cleaner. Multiple selections allowed for team work.</div>';
   if(currentIds.size>0){
-    ph+='<div class="assign-picker-item" style="border-bottom:1px solid var(--border);margin-bottom:8px;padding-bottom:12px" onclick="setAssignees(\''+esc(rkey)+'\',[]);this.closest(\'.assign-picker-overlay\').remove()">'+
+    ph+='<div class="assign-picker-item" style="border-bottom:1px solid var(--border);margin-bottom:8px;padding-bottom:12px" data-action="__setAssigneesEmptyAndCloseOverlay" data-arg0="'+esc(rkey)+'" data-pass-event="1">'+
       '<div class="picker-dot" style="background:var(--text3)"></div>'+
       '<span class="picker-name" style="color:var(--red)">✕ Clear all</span></div>';
   }
@@ -1461,7 +1488,7 @@ function showAssignPicker(rkey){
       '<span class="picker-name">'+esc(c.name)+'</span>'+
       '<span class="picker-count">'+cnt+' task'+(cnt!==1?'s':'')+'</span></div>';
   });
-  ph+='<button class="picker-done" onclick="this.closest(\'.assign-picker-overlay\').remove()">Done</button>';
+  ph+='<button class="picker-done" data-action="__noop" data-close-closest=".assign-picker-overlay">Done</button>';
   ph+='</div>';
   overlay.innerHTML=ph;
   document.body.appendChild(overlay);
@@ -1620,7 +1647,7 @@ function sendWhatsAppNoPhone(msg){
 }
 function showWaChooser(personalUrl,businessUrl){
   const m=document.getElementById('modal');
-  m.innerHTML='<div class="modal-overlay" data-action="closeModal"><div class="wa-chooser" onclick="event.stopPropagation()">'+
+  m.innerHTML='<div class="modal-overlay" data-action="closeModal"><div class="wa-chooser" data-action="__noop" data-stop-propagation="1">'+
     '<div style="font-size:15px;font-weight:800;margin-bottom:14px;text-align:center">Open with...</div>'+
     '<button class="wa-choice-btn personal" data-action="chooseWa" data-arg0="personal" data-arg1="'+personalUrl+'"><span class="wa-choice-icon">📱</span><span class="wa-choice-label">WhatsApp</span></button>'+
     '<button class="wa-choice-btn business" data-action="chooseWa" data-arg0="business" data-arg1="'+businessUrl+'"><span class="wa-choice-icon">💼</span><span class="wa-choice-label">WhatsApp Business</span></button>'+
@@ -2335,9 +2362,9 @@ function openInsightAction(count,listingId,category,listingName){
     'Consider scheduling preventive maintenance.</div>'+
     '</div>'+
     '<div style="display:flex;flex-direction:column;gap:8px">'+
-    '<button class="btn-primary" onclick="closeMtModal();createPreventiveFromInsight(\''+_lid+'\',\''+_cat+'\',\''+_ln+'\')">'+
+    '<button class="btn-primary" data-action="__closeMtModalThenCreatePreventive" data-arg0="'+_lid+'" data-arg1="'+_cat+'" data-arg2="'+_ln+'">'+
     icon('plus',14)+' Create preventive task</button>'+
-    '<button class="btn-secondary" onclick="closeMtModal();showRelatedTickets(\''+_lid+'\',\''+_cat+'\')">'+
+    '<button class="btn-secondary" data-action="__closeMtModalThenShowRelated" data-arg0="'+_lid+'" data-arg1="'+_cat+'">'+
     icon('clipboard',14)+' Show related tickets</button>'+
     '</div>'+
     '<div class="modal-actions" style="margin-top:14px"><button class="btn-ghost" data-action="closeMtModal">Cancel</button></div>';
@@ -2581,12 +2608,12 @@ function renderMoreMenu(){
     {id:'stats',icon:icon('trending',22),label:'Stats',color:'#be185d'},
   ];
   el.innerHTML=`
-  <div class="more-overlay" onclick="if(event.target===this)closeMoreMenu()">
+  <div class="more-overlay" data-action="__closeMoreMenuBackdrop" data-pass-event="1">
     <div class="more-sheet">
       <div class="more-handle"></div>
       <div class="more-title">More screens</div>
       <div class="more-grid">
-        ${items.map(i=>`<button class="more-item" onclick="closeMoreMenu();setTab('${i.id}')">
+        ${items.map(i=>`<button class="more-item" data-action="__closeMoreMenuThenSetTab" data-arg0="${i.id}">
           <span class="more-icon" style="background:${i.color}20;color:${i.color}">${i.icon}</span>
           <span class="more-label">${i.label}</span>
         </button>`).join('')}
@@ -2898,7 +2925,7 @@ function renderPlanner(){
           ? esc(cleanersForCard[0].name)
           : esc(cleanersForCard.map(c=>c.name).join(' + '));
         const labelColor = cleanersForCard[0].color;
-        if(!cleanerMode) h+='<span class="cleaner-tap" onclick="event.stopPropagation();showAssignPicker(\''+sk+'\')" style="margin-left:auto;font-size:11px;color:'+labelColor+';font-weight:600;flex-shrink:0;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px">'+labelCleaner+'</span>';
+        if(!cleanerMode) h+='<span class="cleaner-tap" data-action="showAssignPicker" data-arg0="'+sk+'" data-stop-propagation="1" style="margin-left:auto;font-size:11px;color:'+labelColor+';font-weight:600;flex-shrink:0;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px">'+labelCleaner+'</span>';
         else h+='<span style="margin-left:auto;font-size:11px;color:'+labelColor+';font-weight:600;flex-shrink:0">'+labelCleaner+'</span>';
       }
       h+='</div>';
@@ -2930,30 +2957,30 @@ function renderPlanner(){
       // CTA button column (right side)
       h+='<div class="card-cta-col">';
       if(isCancelled){
-        h+='<button class="card-cta restore" onclick="event.stopPropagation();toggleCancel(\''+sk+'\')">Restore</button>';
+        h+='<button class="card-cta restore" data-action="toggleCancel" data-arg0="'+sk+'" data-stop-propagation="1">Restore</button>';
       }else if(isPaused){
-        h+='<button class="card-cta resume" onclick="event.stopPropagation();resumeTimer(\''+sk+'\')" title="Resume">'+icon('play',14)+'</button>';
-        h+='<button class="card-cta stop" onclick="event.stopPropagation();stopTimer(\''+sk+'\')">Stop</button>';
+        h+='<button class="card-cta resume" data-action="resumeTimer" data-arg0="'+sk+'" data-stop-propagation="1" title="Resume">'+icon('play',14)+'</button>';
+        h+='<button class="card-cta stop" data-action="stopTimer" data-arg0="'+sk+'" data-stop-propagation="1">Stop</button>';
       }else if(isRunning){
-        h+='<button class="card-cta pause" onclick="event.stopPropagation();pauseTimer(\''+sk+'\')" title="Pause">'+icon('pause',14)+'</button>';
-        h+='<button class="card-cta stop" onclick="event.stopPropagation();stopTimer(\''+sk+'\')">Stop</button>';
+        h+='<button class="card-cta pause" data-action="pauseTimer" data-arg0="'+sk+'" data-stop-propagation="1" title="Pause">'+icon('pause',14)+'</button>';
+        h+='<button class="card-cta stop" data-action="stopTimer" data-arg0="'+sk+'" data-stop-propagation="1">Stop</button>';
       }else if(isDone){
-        h+='<button class="card-cta undo" onclick="event.stopPropagation();markDone(\''+sk+'\')">Undo</button>';
+        h+='<button class="card-cta undo" data-action="markDone" data-arg0="'+sk+'" data-stop-propagation="1">Undo</button>';
       }else if(!cleaner&&!cleanerMode){
-        h+='<button class="card-cta assign" onclick="event.stopPropagation();showAssignPicker(\''+sk+'\')">Assign</button>';
+        h+='<button class="card-cta assign" data-action="showAssignPicker" data-arg0="'+sk+'" data-stop-propagation="1">Assign</button>';
       }else if(isFinished){
         // Timer was stopped → show Done button
-        h+='<button class="card-cta done-direct" onclick="event.stopPropagation();markDone(\''+sk+'\')">'+icon('check',14)+' Done</button>';
+        h+='<button class="card-cta done-direct" data-action="markDone" data-arg0="'+sk+'" data-stop-propagation="1">'+icon('check',14)+' Done</button>';
       }else{
         // No timer or not started → only Start
-        h+='<button class="card-cta start" onclick="event.stopPropagation();startTimer(\''+sk+'\')" style="display:inline-flex;align-items:center;gap:4px">'+icon('play',14)+' Start</button>';
+        h+='<button class="card-cta start" data-action="startTimer" data-arg0="'+sk+'" data-stop-propagation="1" style="display:inline-flex;align-items:center;gap:4px">'+icon('play',14)+' Start</button>';
       }
       h+='</div>'; // end card-cta-col
 
       h+='</div>'; // end card-content
 
       // Desktop hover quick actions
-      h+='<div class="card-quick-actions" onclick="event.stopPropagation()">';
+      h+='<div class="card-quick-actions" data-action="__noop" data-stop-propagation="1">';
       if(isDone){
         h+='<button class="qa-btn" title="Mark undone" data-action="markDone" data-arg0="'+sk+'">'+icon('refresh',14)+'</button>';
       }else{
@@ -3178,7 +3205,7 @@ function renderTicketDetailPane(t, isManager){
   if(isManager){
     h += '<div class="mt-detail-actions">';
     if(!isClosed){
-      h += '<button class="btn-success" title="Click to resolve · Shift to add notes" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+' Resolve</button>';
+      h += '<button class="btn-success" title="Click to resolve · Shift to add notes" data-action="__resolveOrQuick" data-arg0="'+t.id+'" data-pass-event="1">'+icon('check',14)+' Resolve</button>';
       const lbl = (tech || vendor) ? 'Reassign' : 'Assign';
       h += '<button class="btn-secondary" data-action="openAssignPicker" data-arg0="'+t.id+'">'+icon('user',14)+' '+lbl+'</button>';
       h += '<button class="btn-ghost" data-action="showCardContextMenu" data-arg0="'+t.id+'" data-arg1="ticket" data-pass-event="1" title="More actions">'+icon('moreVertical',14)+'</button>';
@@ -3202,7 +3229,7 @@ function renderCardDetail(key,r){
   const doneCnt=items.filter(it=>prog[it]).length;
   const score=getQualityScore(key,r);
 
-  let h='<div class="card-detail" onclick="event.stopPropagation()"><div>';
+  let h='<div class="card-detail" data-action="__noop" data-stop-propagation="1"><div>';
   // Property info for cleaner
   const ppf=propertyProfiles[r.listingId];
   if(ppf&&(ppf.access_code||ppf.wifi_name||ppf.special_instructions||ppf.checkout_instructions)){
@@ -3232,7 +3259,7 @@ function renderCardDetail(key,r){
       h+='<div class="cl-check">'+(prog[it]?'✓':'')+'</div><span class="cl-label">'+esc(it)+'</span>';
       if(needsPhoto) h+='<span class="photo-required">📷 Required</span>';
       h+='</div>';
-      if(needsPhoto) h+='<button class="cl-photo-btn'+(hasPhoto?' uploaded':'')+'" onclick="event.stopPropagation();uploadChecklistPhoto(\''+sk+'\',\''+esc(it)+'\')">'+(hasPhoto?'✓ Photo':'+ Photo')+'</button>';
+      if(needsPhoto) h+='<button class="cl-photo-btn'+(hasPhoto?' uploaded':'')+'" data-action="uploadChecklistPhoto" data-arg0="'+sk+'" data-arg1="'+esc(it)+'" data-stop-propagation="1">'+(hasPhoto?'✓ Photo':'+ Photo')+'</button>';
       h+='</div>';
     });
     h+='</div>';
@@ -3318,7 +3345,7 @@ function renderDashboard(){
   let h='<div class="header"><div class="header-top"><h1>📊 Dashboard</h1>'+
     '<div style="flex:1"></div>'+
     (syncD?'<span class="sync-indicator" style="margin-right:8px">📡 '+syncD+'</span>':'')+
-    '<button class="icon-btn" onclick="event.stopPropagation();showDashExportMenu(event)" title="Export…">'+icon('download',18)+'</button>'+
+    '<button class="icon-btn" data-action="showDashExportMenu" data-pass-event="1" data-stop-propagation="1" title="Export…">'+icon('download',18)+'</button>'+
     '</div></div>';
   h+='<div class="container">';
   h+='<div class="month-selector"><button data-action="changeDashMonth" data-arg0="-1">‹</button><h3>'+MONTH_NAMES[dashMonth]+' '+dashYear+'</h3><button data-action="changeDashMonth" data-arg0="1">›</button></div>';
@@ -4193,7 +4220,7 @@ function renderMaintenance(){
   h='<div class="header mt-page-header"><div class="header-top">';
   h+='<h1>Maintenance</h1>';
   h+='<div class="header-actions">';
-  if(isManager) h+='<button class="icon-btn" onclick="event.stopPropagation();showMtMoreMenu(event)" title="More actions" aria-label="More">'+icon('bell',18)+'</button>';
+  if(isManager) h+='<button class="icon-btn" data-action="showMtMoreMenu" data-pass-event="1" data-stop-propagation="1" title="More actions" aria-label="More">'+icon('bell',18)+'</button>';
   if(cleanerMode) h+='<button class="icon-btn" data-action="cleanerLogout" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='</div></div>';
   h+='<div class="mt-page-subtitle">'+_openCount+' ticket'+(_openCount===1?'':'s')+'</div>';
@@ -4413,7 +4440,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   })() : '';
   let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" onclick="'+(mtSelectMode?'toggleMtSelected('+t.id+',event)':'toggleMtExpand('+t.id+')')+'">';
   if(mtSelectMode){
-    h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" onclick="event.stopPropagation();toggleMtSelected('+t.id+')"></div>';
+    h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" data-action="toggleMtSelected" data-arg0="'+t.id+'" data-stop-propagation="1"></div>';
   }
   // Tag row: priority on left, status on right
   h+='<div class="mt-card-tags">';
@@ -4443,7 +4470,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
 
   // Expanded: timeline + actions (mobile-only — desktop uses right-side detail pane)
   if(expanded && !isDesktop()){
-    h+='<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px" onclick="event.stopPropagation()">';
+    h+='<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px" data-action="__noop" data-stop-propagation="1">';
     if(t.description&&t.description!==t.title)h+='<div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.4">'+esc(t.description)+'</div>';
     // Timeline
     h+='<div class="mt-timeline">';
@@ -4460,23 +4487,23 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
       h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
       if(!isClosed){
         const assignLabel = (t.assigned_technician_id || t.assigned_vendor_id) ? 'Reassign…' : 'Assign…';
-        h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();openAssignPicker('+t.id+')">'+icon('user',12)+' '+assignLabel+'</button>';
-        if(['open','assigned'].includes(t.status))h+='<button onclick="event.stopPropagation();updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
-        if(['assigned','in_progress'].includes(t.status))h+='<button onclick="event.stopPropagation();updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Waiting Parts</button>';
+        h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" data-action="openAssignPicker" data-arg0="'+t.id+'" data-stop-propagation="1">'+icon('user',12)+' '+assignLabel+'</button>';
+        if(['open','assigned'].includes(t.status))h+='<button data-action="updateTicketStatus" data-arg0="'+t.id+'" data-arg1="in_progress" data-stop-propagation="1" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
+        if(['assigned','in_progress'].includes(t.status))h+='<button data-action="updateTicketStatus" data-arg0="'+t.id+'" data-arg1="waiting_parts" data-stop-propagation="1" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Waiting Parts</button>';
         // Resolve: 1-click for any non-terminal state. Shift to add notes via modal.
-        h+='<button onclick="event.stopPropagation();if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}" title="Click to resolve · Shift-click to add notes" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">'+icon('check',12)+' Resolve</button>';
-        h+='<button onclick="event.stopPropagation();cancelTicket('+t.id+')" title="Cancel (false positive / duplicate)" style="background:transparent;color:var(--text-3);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">'+icon('x',12)+' Cancel</button>';
+        h+='<button data-action="__resolveOrQuick" data-arg0="'+t.id+'" data-stop-propagation="1" data-pass-event="1" title="Click to resolve · Shift-click to add notes" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">'+icon('check',12)+' Resolve</button>';
+        h+='<button data-action="cancelTicket" data-arg0="'+t.id+'" data-stop-propagation="1" title="Cancel (false positive / duplicate)" style="background:transparent;color:var(--text-3);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">'+icon('x',12)+' Cancel</button>';
       } else {
         // Terminal state actions: edit notes, reopen
-        h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();editResolutionNotes('+t.id+')">'+icon('edit',12)+' Edit notes</button>';
-        h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();reopenTicket('+t.id+')">'+icon('refresh',12)+' Reopen</button>';
+        h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" data-action="editResolutionNotes" data-arg0="'+t.id+'" data-stop-propagation="1">'+icon('edit',12)+' Edit notes</button>';
+        h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" data-action="reopenTicket" data-arg0="'+t.id+'" data-stop-propagation="1">'+icon('refresh',12)+' Reopen</button>';
       }
       h+='</div>';
     }else{
       h+='<div style="display:flex;gap:6px;margin-top:8px">';
-      if(t.status==='assigned')h+='<button onclick="event.stopPropagation();updateTicketStatus('+t.id+',\'in_progress\')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
-      if(t.status==='in_progress')h+='<button onclick="event.stopPropagation();updateTicketStatus('+t.id+',\'waiting_parts\')" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Need Parts</button>';
-      if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button onclick="event.stopPropagation();if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">'+icon('check',12)+' Resolve</button>';
+      if(t.status==='assigned')h+='<button data-action="updateTicketStatus" data-arg0="'+t.id+'" data-arg1="in_progress" data-stop-propagation="1" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Start Work</button>';
+      if(t.status==='in_progress')h+='<button data-action="updateTicketStatus" data-arg0="'+t.id+'" data-arg1="waiting_parts" data-stop-propagation="1" style="background:#9c27b0;color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">Need Parts</button>';
+      if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button data-action="__resolveOrQuick" data-arg0="'+t.id+'" data-stop-propagation="1" data-pass-event="1" style="background:var(--green);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer">'+icon('check',12)+' Resolve</button>';
       h+='</div>';
     }
     // Inline comments section
@@ -4491,8 +4518,8 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
       h+='</div>';
     }
     h+='<div class="mt-cmt-add">';
-    h+='<input type="text" id="mtCmtInput-'+t.id+'" placeholder="Add a comment…" onkeydown="if(event.key===\'Enter\'){event.stopPropagation();submitInlineComment('+t.id+')}" onclick="event.stopPropagation()" />';
-    h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" onclick="event.stopPropagation();submitInlineComment('+t.id+')">Send</button>';
+    h+='<input type="text" id="mtCmtInput-'+t.id+'" placeholder="Add a comment…" onkeydown="if(event.key===\'Enter\'){event.stopPropagation();submitInlineComment('+t.id+')}" data-action="__noop" data-stop-propagation="1" />';
+    h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" data-action="submitInlineComment" data-arg0="'+t.id+'" data-stop-propagation="1">Send</button>';
     h+='</div>';
     h+='</div>';
     h+='</div>';
@@ -4500,13 +4527,13 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   // Desktop hover quick actions — 2 primary buttons + kebab "more"
   // Reduces accidental Cancel clicks (was right next to Resolve before)
   if(!mtSelectMode){
-    h+='<div class="card-quick-actions" onclick="event.stopPropagation()">';
+    h+='<div class="card-quick-actions" data-action="__noop" data-stop-propagation="1">';
     if(t.status !== 'resolved' && t.status !== 'cancelled'){
-      h+='<button class="qa-btn qa-success" title="Resolve (1-click) — Shift to add notes" onclick="if(event.shiftKey){resolveTicket('+t.id+')}else{quickResolveTicket('+t.id+')}">'+icon('check',14)+'</button>';
+      h+='<button class="qa-btn qa-success" title="Resolve (1-click) — Shift to add notes" data-action="__resolveOrQuick" data-arg0="'+t.id+'" data-pass-event="1">'+icon('check',14)+'</button>';
     } else {
       h+='<button class="qa-btn" title="Edit resolution notes" data-action="editResolutionNotes" data-arg0="'+t.id+'">'+icon('edit',14)+'</button>';
     }
-    h+='<button class="qa-btn" title="Comment" onclick="toggleMtExpand('+t.id+');setTimeout(function(){var i=document.getElementById(\'mtCmtInput-'+t.id+'\');if(i)i.focus();},80)">'+icon('msgSquare',14)+'</button>';
+    h+='<button class="qa-btn" title="Comment" data-action="__toggleMtExpandAndFocusComment" data-arg0="'+t.id+'">'+icon('msgSquare',14)+'</button>';
     // Kebab — opens the existing right-click menu (Assign, Cancel, Status changes, etc.)
     h+='<button class="qa-btn" title="More actions" data-action="showCardContextMenu" data-arg0="'+t.id+'" data-arg1="ticket" data-pass-event="1">'+icon('moreVertical',14)+'</button>';
     h+='</div>';
@@ -4660,7 +4687,7 @@ function renderMtTickets(isManager){
         if(tech)h+='<div style="font-size:10px;color:var(--text3)">👤 '+esc(tech.name)+'</div>';
         // Expanded inline
         if(mtExpandedTicket===t.id){
-          h+='<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px" onclick="event.stopPropagation()">';
+          h+='<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px" data-action="__noop" data-stop-propagation="1">';
           h+='<div class="mt-timeline" style="margin:4px 0 4px 6px;padding:6px 0 2px 14px">';
           h+='<div class="mt-tl-item"><div class="mt-tl-dot" style="background:var(--blue)"></div>Created<div class="mt-tl-date">'+new Date(t.created_at).toLocaleString()+'</div></div>';
           if(t.started_at)h+='<div class="mt-tl-item"><div class="mt-tl-dot" style="background:var(--orange)"></div>Started<div class="mt-tl-date">'+new Date(t.started_at).toLocaleString()+'</div></div>';
@@ -4668,7 +4695,7 @@ function renderMtTickets(isManager){
           h+='<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">';
           if(isManager){
             const kbAssignLabel = (t.assigned_technician_id || t.assigned_vendor_id) ? 'Reassign…' : 'Assign…';
-            h+='<button class="btn-secondary" style="font-size:10px;padding:4px 8px" onclick="event.stopPropagation();openAssignPicker('+t.id+')">'+icon('user',10)+' '+kbAssignLabel+'</button>';
+            h+='<button class="btn-secondary" style="font-size:10px;padding:4px 8px" data-action="openAssignPicker" data-arg0="'+t.id+'" data-stop-propagation="1">'+icon('user',10)+' '+kbAssignLabel+'</button>';
             if(['open','assigned'].includes(t.status))h+='<button data-action="updateTicketStatus" data-arg0="'+t.id+'" data-arg1="in_progress" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
             if(['in_progress','waiting_parts'].includes(t.status))h+='<button data-action="resolveTicket" data-arg0="'+t.id+'" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
           }else{
@@ -5482,8 +5509,8 @@ function renderCmdk(){
     if(!groups[r.group]){groups[r.group]=[];}
     groups[r.group].push(Object.assign({},r,{_idx:i}));
   });
-  let html='<div class="cmdk-overlay" onclick="if(event.target===this)closeCmdk()">';
-  html+='<div class="cmdk-box" onclick="event.stopPropagation()">';
+  let html='<div class="cmdk-overlay" data-action="__closeCmdkBackdrop" data-pass-event="1">';
+  html+='<div class="cmdk-box" data-action="__noop" data-stop-propagation="1">';
   html+='<input id="cmdkInput" class="cmdk-input" aria-label="Search" placeholder="Search for guest, cleaner, property, ticket..." value="'+esc(cmdkQuery)+'" oninput="cmdkSearch(this.value)" onkeydown="cmdkKeyDown(event)" />';
   html+='<div class="cmdk-results">';
   if(cmdkQuery && cmdkResults.length===0){
@@ -5561,7 +5588,7 @@ function renderExtraModal(){
     .map(([id,l])=>({id, name:l.listing_name||id, price:l.custom_price||l.price}))
     .sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const cleanersList = (cleaners||[]).filter(c => c.is_active!==false && (c.role||'cleaner')==='cleaner');
-  el.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeExtraModal()">'+
+  el.innerHTML = '<div class="modal-overlay" data-action="__closeExtraModalBackdrop" data-pass-event="1">'+
     '<div class="modal-box">'+
       '<div class="modal-header">'+
         '<div class="modal-title">'+(isEdit?'✏️ Edit':'➕ Add')+' extra cleaning</div>'+
