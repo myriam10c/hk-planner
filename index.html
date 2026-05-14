@@ -26,6 +26,25 @@
 <input type="file" id="photoInput" accept="image/*" style="display:none" />
 
 <script>
+
+// === Event delegation router for declarative click handlers ===
+// Replaces inline data-action="fn" with <element data-action="fn">.
+// Phase 1 (CSP migration): no-args calls only; complex handlers stay inline until later phases.
+(function(){
+  document.addEventListener('click', function(e){
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const name = el.dataset.action;
+    if (!name) return;
+    const fn = window[name];
+    if (typeof fn === 'function') {
+      try { fn(); } catch (err) { console.error('[data-action ' + name + ']', err); }
+    } else {
+      console.warn('[data-action] unknown handler:', name);
+    }
+  }, false);
+})();
+
 // Global error handlers (Sentry-lite MVP)
 window.addEventListener('error', (e) => {
   console.error('[GLOBAL ERROR]', e.error || e.message, e.filename, e.lineno);
@@ -226,7 +245,7 @@ function renderSavedViewsBar(){
       h += '</span>';
     });
   }
-  h += '<button class="sv-save" onclick="saveCurrentView()" title="Save current filters as a view">'+icon('plus',12)+' Save view</button>';
+  h += '<button class="sv-save" data-action="saveCurrentView" title="Save current filters as a view">'+icon('plus',12)+' Save view</button>';
   h += '</div>';
   return h;
 }
@@ -425,8 +444,8 @@ function renderPlannerTable(items){
     h += '<span>'+plannerBulkSelected.size+' selected</span>';
     h += '<span class="bb-spacer"></span>';
     h += '<select onchange="bulkAssignSelected(this.value);this.value=\'\'"><option value="">Assign to...</option>'+cleanerOpts+'</select>';
-    h += '<button onclick="bulkMarkDoneSelected()">'+icon('check',13)+' Mark done</button>';
-    h += '<button class="bb-clear" onclick="clearPlannerBulk()">Clear</button>';
+    h += '<button data-action="bulkMarkDoneSelected">'+icon('check',13)+' Mark done</button>';
+    h += '<button class="bb-clear" data-action="clearPlannerBulk">Clear</button>';
     h += '</div>';
   }
 
@@ -722,7 +741,7 @@ function renderContextMenu(){
   const menuW = 220, menuH = items.length * 36 + 12;
   const left = Math.min(x, window.innerWidth - menuW - 10);
   const top = Math.min(y, window.innerHeight - menuH - 10);
-  let html = '<div class="ctxmenu-overlay" onclick="closeContextMenu()"></div>';
+  let html = '<div class="ctxmenu-overlay" data-action="closeContextMenu"></div>';
   html += '<div class="ctxmenu" style="left:'+left+'px;top:'+top+'px">';
   items.forEach(it => {
     if(it.divider){ html += '<div class="ctxmenu-divider"></div>'; }
@@ -950,8 +969,8 @@ function renderOnboarding(){
         slides.map((_,i)=>'<span class="onb-dot'+(i===onboardingStep?' active':'')+'"></span>').join('')+
       '</div>'+
       '<div class="onb-footer">'+
-        '<button class="btn-secondary" onclick="closeOnboarding()">Skip</button>'+
-        '<button class="btn-primary" onclick="nextOnboarding()">'+(onboardingStep<2?'Next →':'Let\'s go!')+'</button>'+
+        '<button class="btn-secondary" data-action="closeOnboarding">Skip</button>'+
+        '<button class="btn-primary" data-action="nextOnboarding">'+(onboardingStep<2?'Next →':'Let\'s go!')+'</button>'+
       '</div>'+
     '</div>'+
   '</div>';
@@ -1253,7 +1272,7 @@ function cancelUndo(){
 function showUndoToast(key){
   let el=document.getElementById('undoToast');
   if(!el){el=document.createElement('div');el.id='undoToast';document.body.appendChild(el);}
-  el.innerHTML='<span>✓ Marked done</span><button onclick="cancelUndo()">UNDO</button>';
+  el.innerHTML='<span>✓ Marked done</span><button data-action="cancelUndo">UNDO</button>';
   el.className='undo-toast show';
 }
 function hideUndoToast(){const el=document.getElementById('undoToast');if(el)el.className='undo-toast';}
@@ -1315,14 +1334,14 @@ function onSwipeEnd(e){
 function showCancelConfirm(key){
   const parts=key.split('_');
   const guest=parts.slice(1).join('_');
-  const h='<div class="modal-overlay" onclick="closeCancelModal()">'+
+  const h='<div class="modal-overlay" data-action="closeCancelModal">'+
     '<div class="wa-chooser" onclick="event.stopPropagation()" style="width:300px;text-align:center">'+
     '<div style="font-size:32px;margin-bottom:8px">🚫</div>'+
     '<div style="font-weight:700;font-size:15px;margin-bottom:6px">Cancel this cleaning?</div>'+
     '<div style="font-size:12px;color:var(--text2);margin-bottom:12px">'+esc(guest)+'</div>'+
     '<input type="text" id="cancelReason" placeholder="Reason (optional)" style="width:100%;padding:8px 12px;border:1px solid rgba(0,0,0,0.1);border-radius:8px;font-size:13px;margin-bottom:12px;background:rgba(0,0,0,0.03);color:var(--text)"/>'+
     '<div style="display:flex;gap:8px">'+
-    '<button onclick="closeCancelModal()" style="flex:1;padding:10px;border:1px solid rgba(0,0,0,0.1);border-radius:10px;background:rgba(0,0,0,0.03);color:var(--text2);font-weight:600;font-size:13px;cursor:pointer">No</button>'+
+    '<button data-action="closeCancelModal" style="flex:1;padding:10px;border:1px solid rgba(0,0,0,0.1);border-radius:10px;background:rgba(0,0,0,0.03);color:var(--text2);font-weight:600;font-size:13px;cursor:pointer">No</button>'+
     '<button onclick="confirmCancel(\''+esc(key)+'\')" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--red);color:white;font-weight:700;font-size:13px;cursor:pointer">Yes, cancel</button>'+
     '</div></div></div>';
   document.getElementById('cancelModal').innerHTML=h;
@@ -1331,13 +1350,13 @@ function showCancelConfirm(key){
 function showUncancelConfirm(key){
   const parts=key.split('_');
   const guest=parts.slice(1).join('_');
-  const h='<div class="modal-overlay" onclick="closeCancelModal()">'+
+  const h='<div class="modal-overlay" data-action="closeCancelModal">'+
     '<div class="wa-chooser" onclick="event.stopPropagation()" style="width:300px;text-align:center">'+
     '<div style="font-size:32px;margin-bottom:8px">↩️</div>'+
     '<div style="font-weight:700;font-size:15px;margin-bottom:6px">Restore this cleaning?</div>'+
     '<div style="font-size:12px;color:var(--text2);margin-bottom:12px">'+esc(guest)+'</div>'+
     '<div style="display:flex;gap:8px">'+
-    '<button onclick="closeCancelModal()" style="flex:1;padding:10px;border:1px solid rgba(0,0,0,0.1);border-radius:10px;background:rgba(0,0,0,0.03);color:var(--text2);font-weight:600;font-size:13px;cursor:pointer">No</button>'+
+    '<button data-action="closeCancelModal" style="flex:1;padding:10px;border:1px solid rgba(0,0,0,0.1);border-radius:10px;background:rgba(0,0,0,0.03);color:var(--text2);font-weight:600;font-size:13px;cursor:pointer">No</button>'+
     '<button onclick="confirmUncancel(\''+esc(key)+'\')" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--green);color:white;font-weight:700;font-size:13px;cursor:pointer">Yes, restore</button>'+
     '</div></div></div>';
   document.getElementById('cancelModal').innerHTML=h;
@@ -1393,7 +1412,7 @@ document.getElementById('photoInput').addEventListener('change',async function()
 });
 async function viewPhoto(id){
   const res=await api('getPhoto',{params:{id:String(id)}});
-  if(res.photo&&res.photo.photo_data) document.getElementById('modal').innerHTML='<div class="modal-overlay" onclick="closeModal()"><span class="modal-close">&times;</span><img src="'+res.photo.photo_data+'"/></div>';
+  if(res.photo&&res.photo.photo_data) document.getElementById('modal').innerHTML='<div class="modal-overlay" data-action="closeModal"><span class="modal-close">&times;</span><img src="'+res.photo.photo_data+'"/></div>';
 }
 function closeModal(){document.getElementById('modal').innerHTML='';}
 
@@ -1583,12 +1602,12 @@ function sendWhatsAppNoPhone(msg){
 }
 function showWaChooser(personalUrl,businessUrl){
   const m=document.getElementById('modal');
-  m.innerHTML='<div class="modal-overlay" onclick="closeModal()"><div class="wa-chooser" onclick="event.stopPropagation()">'+
+  m.innerHTML='<div class="modal-overlay" data-action="closeModal"><div class="wa-chooser" onclick="event.stopPropagation()">'+
     '<div style="font-size:15px;font-weight:800;margin-bottom:14px;text-align:center">Open with...</div>'+
     '<button class="wa-choice-btn personal" onclick="chooseWa(\'personal\',\''+personalUrl+'\')"><span class="wa-choice-icon">📱</span><span class="wa-choice-label">WhatsApp</span></button>'+
     '<button class="wa-choice-btn business" onclick="chooseWa(\'business\',\''+businessUrl+'\')"><span class="wa-choice-icon">💼</span><span class="wa-choice-label">WhatsApp Business</span></button>'+
     '<label class="wa-remember"><input type="checkbox" id="waRemember" /> Remember my choice</label>'+
-    '<button onclick="closeModal()" style="background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer;margin-top:8px;font-weight:600">Cancel</button>'+
+    '<button data-action="closeModal" style="background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer;margin-top:8px;font-weight:600">Cancel</button>'+
   '</div></div>';
 }
 function chooseWa(type,url){
@@ -1738,7 +1757,7 @@ async function startIssueWork(id){
 }
 function viewIssuePhoto(issueId){
   const issue=issues.find(i=>i.id===issueId);
-  if(issue&&issue.photo_data) document.getElementById('modal').innerHTML='<div class="modal-overlay" onclick="closeModal()"><span class="modal-close">&times;</span><img src="'+issue.photo_data+'"/></div>';
+  if(issue&&issue.photo_data) document.getElementById('modal').innerHTML='<div class="modal-overlay" data-action="closeModal"><span class="modal-close">&times;</span><img src="'+issue.photo_data+'"/></div>';
 }
 function issuePhotoUpload(){
   const inp=document.createElement('input');inp.type='file';inp.accept='image/*';
@@ -2030,7 +2049,7 @@ async function openAssignPicker(ticketId){
     html+='<button class="btn-ghost" style="color:var(--red)" onclick="unassignTicket('+ticket.id+')">Unassign current</button>';
     html+='</div>';
   }
-  html+='<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" onclick="closeMtModal()">Cancel</button></div>';
+  html+='<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" data-action="closeMtModal">Cancel</button></div>';
   showMtModal(html);
 }
 async function assignTicketToTech(ticketId,techId){
@@ -2115,7 +2134,7 @@ function editResolutionNotes(id){
   const html = '<h3>📝 Edit resolution notes</h3>'+
     '<div class="mt-form"><textarea id="editNotes" placeholder="What was done…" style="min-height:120px">'+esc(cur)+'</textarea></div>'+
     '<div class="modal-actions">'+
-    '<button class="btn-secondary" onclick="closeMtModal()">Cancel</button>'+
+    '<button class="btn-secondary" data-action="closeMtModal">Cancel</button>'+
     '<button class="btn-primary" onclick="submitEditNotes('+id+')">Save</button>'+
     '</div>';
   showMtModal(html);
@@ -2144,11 +2163,11 @@ function resolveTicket(id){
     '<div class="mt-form">'+
     '<textarea id="resolveNotes" placeholder="Resolution notes…" style="min-height:80px"></textarea>'+
     '<input type="number" id="resolveCost" placeholder="Actual cost (AED) — optional" />'+
-    '<button onclick="mtResolvePhotoUpload()" style="background:white;border:1px solid var(--border);border-radius:8px;padding:8px;cursor:pointer;width:100%;margin-bottom:8px">📷 Add resolution photo</button>'+
+    '<button data-action="mtResolvePhotoUpload" style="background:white;border:1px solid var(--border);border-radius:8px;padding:8px;cursor:pointer;width:100%;margin-bottom:8px">📷 Add resolution photo</button>'+
     '<div id="resolvePhotoPreview"></div>'+
     '</div>'+
     '<div class="modal-actions">'+
-    '<button class="btn-secondary" onclick="closeMtModal()">Cancel</button>'+
+    '<button class="btn-secondary" data-action="closeMtModal">Cancel</button>'+
     '<button class="btn-success" onclick="submitResolve('+id+')">✓ Resolve</button>'+
     '</div>';
   showMtModal(html);
@@ -2209,7 +2228,7 @@ async function viewTicketComments(ticketId){
     '<div style="max-height:250px;overflow-y:auto;margin-bottom:12px;border:1px solid var(--border);border-radius:10px;padding:8px">'+commentsHtml+'</div>'+
     '<div class="mt-form"><textarea id="newComment" placeholder="Write a comment…" style="min-height:60px"></textarea></div>'+
     '<div class="modal-actions">'+
-    '<button class="btn-secondary" onclick="closeMtModal()">Close</button>'+
+    '<button class="btn-secondary" data-action="closeMtModal">Close</button>'+
     '<button class="btn-primary" onclick="submitComment('+ticketId+')">Send</button>'+
     '</div>';
   showMtModal(html);
@@ -2227,7 +2246,7 @@ function reopenTicket(id){
   const html='<h3>🔄 Reopen Ticket</h3>'+
     '<p style="color:var(--text2);font-size:13px;margin-bottom:16px">Are you sure you want to reopen this ticket?</p>'+
     '<div class="modal-actions">'+
-    '<button class="btn-secondary" onclick="closeMtModal()">Cancel</button>'+
+    '<button class="btn-secondary" data-action="closeMtModal">Cancel</button>'+
     '<button class="btn-danger" onclick="submitReopen('+id+')">Reopen</button>'+
     '</div>';
   showMtModal(html);
@@ -2303,7 +2322,7 @@ function openInsightAction(count,listingId,category,listingName){
     '<button class="btn-secondary" onclick="closeMtModal();showRelatedTickets(\''+_lid+'\',\''+_cat+'\')">'+
     icon('clipboard',14)+' Show related tickets</button>'+
     '</div>'+
-    '<div class="modal-actions" style="margin-top:14px"><button class="btn-ghost" onclick="closeMtModal()">Cancel</button></div>';
+    '<div class="modal-actions" style="margin-top:14px"><button class="btn-ghost" data-action="closeMtModal">Cancel</button></div>';
   showMtModal(html);
 }
 
@@ -2490,7 +2509,7 @@ function openMtReportsModal(){
     '<button class="btn-secondary" onclick="shareMaintenanceReport(\'resolved\')">Share resolved tickets only</button>'+
     '</div>'+
     '<div style="background:var(--bg-2);border-radius:var(--radius-md);padding:12px;font-size:11px;white-space:pre-wrap;font-family:ui-monospace,monospace;max-height:300px;overflow:auto;border:1px solid var(--border)">'+esc(generateReportText('full'))+'</div>'+
-    '<div class="modal-actions"><button class="btn-secondary" onclick="closeMtModal()">Close</button></div>';
+    '<div class="modal-actions"><button class="btn-secondary" data-action="closeMtModal">Close</button></div>';
   showMtModal(html);
 }
 
@@ -2509,7 +2528,7 @@ function openMtHistoryModal(){
     });
     html+='</div>';
   }
-  html+='<div class="modal-actions"><button class="btn-secondary" onclick="closeMtModal()">Close</button></div>';
+  html+='<div class="modal-actions"><button class="btn-secondary" data-action="closeMtModal">Close</button></div>';
   showMtModal(html);
 }
 
@@ -2622,7 +2641,7 @@ function scoreClass(s){return s>=80?'high':s>=50?'mid':'low';}
 function renderLangSelector(){return '';}
 function renderNotifBanner(){
   if(notifPermission==='granted'||typeof Notification==='undefined')return'';
-  return '<div class="notif-banner">🔔 '+t('enableNotif')+'<button onclick="requestNotifPermission()">'+t('enable')+'</button></div>';
+  return '<div class="notif-banner">🔔 '+t('enableNotif')+'<button data-action="requestNotifPermission">'+t('enable')+'</button></div>';
 }
 
 // ============ RENDER ============
@@ -2665,7 +2684,7 @@ function renderBottomNav(){
   }
   return '<nav class="bottom-nav">'+tabs.map(tab=>
     '<button class="nav-item'+(currentTab===tab.id?' active':'')+'" onclick="setTab(\''+tab.id+'\')" data-label="'+esc(tab.label)+'" aria-label="'+esc(tab.label)+'"><span class="nav-icon">'+tab.icon+'</span>'+tab.label+'</button>'
-  ).join('')+'<button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">'+icon('chevronLeft',16)+'</button>'+'</nav>';
+  ).join('')+'<button class="sidebar-toggle" data-action="toggleSidebar" title="Toggle sidebar" aria-label="Toggle sidebar">'+icon('chevronLeft',16)+'</button>'+'</nav>';
 }
 
 function renderPinScreen(){
@@ -2693,7 +2712,7 @@ function renderPlanner(){
   if(error){
     document.getElementById('app').innerHTML=
       '<div class="header"><h1>Housekeeping Planner</h1></div><div class="container"><div class="error-state"><div class="icon">⚠️</div>'+
-      '<div class="msg">'+esc(error)+'</div><button onclick="fetchAll()">Retry</button></div></div>'+renderBottomNav();return;
+      '<div class="msg">'+esc(error)+'</div><button data-action="fetchAll">Retry</button></div></div>'+renderBottomNav();return;
   }
   const filtered=getFiltered();
   const grouped={};filtered.forEach(r=>{if(!grouped[r.co])grouped[r.co]=[];grouped[r.co].push(r);});
@@ -2712,10 +2731,10 @@ function renderPlanner(){
   h+='<h1>'+(cleanerMode?'👋 '+esc(cleanerMode.name):selectedDate==='all'?rangeLabel:'<span style="font-weight:500;color:var(--text2)">'+rangeLabel+'</span>')+'</h1>';
   h+='<div style="flex:1"></div>';
   h+='<div class="header-actions">';
-  if(cleanerMode) h+='<button class="icon-btn" onclick="cleanerLogout()" title="Logout" aria-label="Logout">'+icon('logout',18)+'</button>';
-  h+='<button class="cmdk-trigger" onclick="openCmdk()" title="Global search (⌘K)" aria-label="Open global search">⌘K</button>';
-  h+='<button class="icon-btn" onclick="toggleSearch()" title="Search" aria-label="Search">'+icon('search',18)+'</button>';
-  if(!cleanerMode){ h+='<button class="icon-btn" onclick="openExtraModal()" title="Add extra cleaning" aria-label="Add extra cleaning" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">'+icon('plus',18)+'</button>'; }
+  if(cleanerMode) h+='<button class="icon-btn" data-action="cleanerLogout" title="Logout" aria-label="Logout">'+icon('logout',18)+'</button>';
+  h+='<button class="cmdk-trigger" data-action="openCmdk" title="Global search (⌘K)" aria-label="Open global search">⌘K</button>';
+  h+='<button class="icon-btn" data-action="toggleSearch" title="Search" aria-label="Search">'+icon('search',18)+'</button>';
+  if(!cleanerMode){ h+='<button class="icon-btn" data-action="openExtraModal" title="Add extra cleaning" aria-label="Add extra cleaning" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">'+icon('plus',18)+'</button>'; }
   h+='</div>';
   if(!cleanerMode){h+='<button class="week-arrow" onclick="changeWeek(1)" style="margin-left:4px">›</button>';}
   h+='</div>';
@@ -2989,7 +3008,7 @@ function renderCleaningDetailPane(r){
   let h = '<div class="detail-pane">';
   h += '<div class="detail-pane-header">';
   h += '<div class="detail-pane-title">'+esc(r.guest||'Guest')+'</div>';
-  h += '<button class="detail-pane-close" onclick="closeDetailPane()" title="Close">'+icon('xCircle',16)+'</button>';
+  h += '<button class="detail-pane-close" data-action="closeDetailPane" title="Close">'+icon('xCircle',16)+'</button>';
   h += '</div>';
   h += '<div class="detail-pane-body">';
 
@@ -3078,7 +3097,7 @@ function renderTicketDetailPane(t, isManager){
   let h = '<div class="detail-pane mt-detail">';
   h += '<div class="detail-pane-header">';
   h += '<div class="detail-pane-title">'+esc(t.title)+'</div>';
-  h += '<button class="detail-pane-close" onclick="closeDetailPane()" title="Close">'+icon('xCircle',16)+'</button>';
+  h += '<button class="detail-pane-close" data-action="closeDetailPane" title="Close">'+icon('xCircle',16)+'</button>';
   h += '</div>';
   h += '<div class="detail-pane-body">';
 
@@ -3783,7 +3802,7 @@ function renderSettings(){
     '<button onclick="saveCleaner(null,document.getElementById(\'newName\').value,document.getElementById(\'newPhone\').value,document.getElementById(\'newColor\').value,document.getElementById(\'newPin\').value,document.getElementById(\'newRole\').value)">Add</button></div>';
   // #8 Send all daily WhatsApp
   if(cleaners.length>0) h+='<button class="wa-btn" style="margin-top:10px" onclick="cleaners.forEach(c=>sendDailyWhatsApp(c))">📱 Send daily recap to all</button>';
-  h+='<div style="margin-top:10px"><a href="#cleaner" onclick="render()" style="color:var(--primary);font-size:12px;font-weight:600">🔑 Open Cleaner Login View</a></div></div>';
+  h+='<div style="margin-top:10px"><a href="#cleaner" data-action="render" style="color:var(--primary);font-size:12px;font-weight:600">🔑 Open Cleaner Login View</a></div></div>';
 
   // WhatsApp preference removed — not needed in ops tool
 
@@ -3793,11 +3812,11 @@ function renderSettings(){
   // On/Off toggle
   h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg2);border-radius:10px;margin-bottom:12px">';
   h+='<div><div style="font-weight:600;font-size:14px">WhatsApp Auto-Send</div><div style="font-size:11px;color:var(--text2)">Send planning to cleaners when running autopilot</div></div>';
-  h+='<div onclick="toggleAutoSend()" style="width:50px;height:28px;border-radius:14px;background:'+(autoSendCleaners?'var(--green)':'var(--border)')+';cursor:pointer;position:relative;transition:background 0.3s">';
+  h+='<div data-action="toggleAutoSend" style="width:50px;height:28px;border-radius:14px;background:'+(autoSendCleaners?'var(--green)':'var(--border)')+';cursor:pointer;position:relative;transition:background 0.3s">';
   h+='<div style="width:24px;height:24px;border-radius:12px;background:white;position:absolute;top:2px;'+(autoSendCleaners?'right:2px':'left:2px')+';transition:all 0.3s;box-shadow:0 1px 3px rgba(0,0,0,0.2)"></div></div>';
   h+='</div>';
   // Run button
-  h+='<button onclick="runAutopilot()" style="background:#25D366;color:white;border:none;border-radius:10px;padding:14px;cursor:pointer;font-weight:700;font-size:15px;width:100%;display:flex;align-items:center;justify-content:center;gap:8px">';
+  h+='<button data-action="runAutopilot" style="background:#25D366;color:white;border:none;border-radius:10px;padding:14px;cursor:pointer;font-weight:700;font-size:15px;width:100%;display:flex;align-items:center;justify-content:center;gap:8px">';
   h+='🚀 Run Autopilot Now</button>';
   h+='<div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:center">'+(autoSendCleaners?'Will auto-assign + send WhatsApp to cleaners':'Will auto-assign only (WhatsApp OFF)')+'</div>';
   h+='</div>';
@@ -3951,8 +3970,8 @@ function renderIssues(){
   const listingIds=[...new Set(RESERVATIONS.map(r=>r.listingId))];
   RESERVATIONS.forEach(r=>{if(listingIds.includes(r.listingId)){listingIds.splice(listingIds.indexOf(r.listingId),1);h+='<option value="'+r.listingId+'">'+esc(formatPropLabel(r.listingId, r.listing))+'</option>';}});
   h+='</select></div>';
-  h+='<div style="margin-bottom:8px"><button onclick="issuePhotoUpload()" style="background:white;border:1px dashed var(--border);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;color:var(--text)">📷 Attach Photo</button><span id="issuePhotoPreview" style="margin-left:8px"></span></div>';
-  h+='<button class="issue-submit" onclick="reportIssue()">Report Issue</button></div>';
+  h+='<div style="margin-bottom:8px"><button data-action="issuePhotoUpload" style="background:white;border:1px dashed var(--border);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;color:var(--text)">📷 Attach Photo</button><span id="issuePhotoPreview" style="margin-left:8px"></span></div>';
+  h+='<button class="issue-submit" data-action="reportIssue">Report Issue</button></div>';
 
   // Open issues
   const openIssues=issues.filter(i=>i.status!=='resolved');
@@ -3999,7 +4018,7 @@ function renderRecurring(){
   h+='<select id="recCleaner"><option value="">Unassigned</option>';
   cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{h+='<option value="'+c.id+'">'+esc(c.name)+'</option>';});
   h+='</select>';
-  h+='<button class="issue-submit" onclick="saveRecurringTask()">Add Task</button></div>';
+  h+='<button class="issue-submit" data-action="saveRecurringTask">Add Task</button></div>';
 
   // Task list
   const today=new Date().toISOString().split('T')[0];
@@ -4106,7 +4125,7 @@ function renderCleanerStats(){
   const avgScore=scoreCount>0?Math.round(totalScore/scoreCount):0;
 
   let h='<div class="header"><div class="header-top"><h1>'+icon('trending',18)+' '+t('myPerformance')+'</h1><div class="header-actions">'+renderLangSelector()+
-    '<button class="icon-btn" onclick="cleanerLogout()" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>'+
+    '<button class="icon-btn" data-action="cleanerLogout" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>'+
     '</div></div></div>';
   h+='<div class="container">';
 
@@ -4157,7 +4176,7 @@ function renderMaintenance(){
   h+='<h1>Maintenance</h1>';
   h+='<div class="header-actions">';
   if(isManager) h+='<button class="icon-btn" onclick="event.stopPropagation();showMtMoreMenu(event)" title="More actions" aria-label="More">'+icon('bell',18)+'</button>';
-  if(cleanerMode) h+='<button class="icon-btn" onclick="cleanerLogout()" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>';
+  if(cleanerMode) h+='<button class="icon-btn" data-action="cleanerLogout" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='</div></div>';
   h+='<div class="mt-page-subtitle">'+_openCount+' ticket'+(_openCount===1?'':'s')+'</div>';
   h+='</div>';
@@ -4263,7 +4282,7 @@ async function bulkAssignSelected(){
     });
     html += '</div>';
   }
-  html += '<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" onclick="closeMtModal()">Cancel</button></div>';
+  html += '<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" data-action="closeMtModal">Cancel</button></div>';
   showMtModal(html);
 }
 
@@ -4301,7 +4320,7 @@ function bulkChangeStatus(){
     html += '</button>';
   });
   html += '</div>';
-  html += '<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" onclick="closeMtModal()">Cancel</button></div>';
+  html += '<div class="modal-actions" style="margin-top:14px"><button class="btn-secondary" data-action="closeMtModal">Cancel</button></div>';
   showMtModal(html);
 }
 
@@ -4524,7 +4543,7 @@ function renderMtTickets(isManager){
     if(mtFilterCat){
       h+='<button class="mt-filter-clear" onclick="setMtFilter(\'cat\',\''+mtFilterCat+'\')" title="Clear">'+icon('x',12)+'</button>';
     } else {
-      h+='<button class="mt-filter-clear" onclick="toggleMtCatFilters()" title="Hide categories">'+icon('chevronLeft',12)+'</button>';
+      h+='<button class="mt-filter-clear" data-action="toggleMtCatFilters" title="Hide categories">'+icon('chevronLeft',12)+'</button>';
     }
     h+='</div>';
   }
@@ -4557,24 +4576,24 @@ function renderMtTickets(isManager){
   if(!window.mtFormOpen){
     if(isManager){
       h+='<div class="mt-secondary-row">';
-      h+='<button class="mt-report-trigger" onclick="toggleMtForm()">'+icon('plus',14)+' Report a new issue</button>';
-      h+='<button class="mt-cat-toggle-icon" onclick="toggleMtCatFilters()" title="Filter by category">'+icon('wrench',14)+'</button>';
-      h+='<button class="mt-cat-toggle-icon" onclick="saveCurrentView()" title="Save current view">'+icon('plus',14)+'</button>';
+      h+='<button class="mt-report-trigger" data-action="toggleMtForm">'+icon('plus',14)+' Report a new issue</button>';
+      h+='<button class="mt-cat-toggle-icon" data-action="toggleMtCatFilters" title="Filter by category">'+icon('wrench',14)+'</button>';
+      h+='<button class="mt-cat-toggle-icon" data-action="saveCurrentView" title="Save current view">'+icon('plus',14)+'</button>';
       h+='</div>';
     }
   } else {
     h+='<div class="settings-panel mt-report-panel"><div class="mt-report-header"><h3>➕ Report Issue</h3>'+
-       '<button class="mt-report-collapse" onclick="toggleMtForm()" title="Hide this form">'+icon('x',14)+'</button>'+
+       '<button class="mt-report-collapse" data-action="toggleMtForm" title="Hide this form">'+icon('x',14)+'</button>'+
        '</div>';
     h+='<div class="mt-form">';
-    h+='<button onclick="mtPhotoUpload()" style="background:white;border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer;width:100%;margin-bottom:8px;font-size:13px;font-weight:600">📷 Take / Upload Photo</button>';
+    h+='<button data-action="mtPhotoUpload" style="background:white;border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer;width:100%;margin-bottom:8px;font-size:13px;font-weight:600">📷 Take / Upload Photo</button>';
     h+='<div id="mtPhotoPreview"></div>';
     h+='<textarea id="mtDesc" placeholder="Describe the issue…" style="min-height:70px" oninput="updateMtSmartPreview()"></textarea>';
     h+='<select id="mtListing"><option value="">Select property…</option>';
     allProps.forEach(p=>{h+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});
     h+='</select>';
     h+='<div id="mtSmartPreview" class="mt-smart-preview" style="display:none"></div>';
-    h+='<button onclick="createMaintenanceTicket()" style="background:var(--accent-gradient);color:white;border:none;border-radius:10px;padding:12px;cursor:pointer;width:100%;font-weight:700;font-size:14px;margin-top:4px">Submit Issue</button>';
+    h+='<button data-action="createMaintenanceTicket" style="background:var(--accent-gradient);color:white;border:none;border-radius:10px;padding:12px;cursor:pointer;width:100%;font-weight:700;font-size:14px;margin-top:4px">Submit Issue</button>';
     h+='</div></div>';
   }
 
@@ -4676,12 +4695,12 @@ function renderMtTickets(isManager){
   if(mtSelectMode && mtSelected.size > 0){
     h += '<div class="mt-bulk-bar">';
     h += '<div class="mt-bulk-count">'+mtSelected.size+' selected</div>';
-    h += '<button class="btn-secondary" onclick="bulkAssignSelected()" style="font-size:13px;padding:7px 14px">'+icon('user',14)+' Assign…</button>';
+    h += '<button class="btn-secondary" data-action="bulkAssignSelected" style="font-size:13px;padding:7px 14px">'+icon('user',14)+' Assign…</button>';
     // 1-click bulk Resolve / Cancel — shortcuts to bulkApplyStatus (was buried in "Status…" picker)
-    h += '<button class="btn-secondary" onclick="bulkResolveSelected()" style="font-size:13px;padding:7px 14px;color:var(--green);border-color:var(--green-light)">'+icon('check',14)+' Resolve all</button>';
-    h += '<button class="btn-secondary" onclick="bulkCancelSelected()" style="font-size:13px;padding:7px 14px;color:var(--text-3)">'+icon('x',14)+' Cancel all</button>';
-    h += '<button class="btn-secondary" onclick="bulkChangeStatus()" style="font-size:13px;padding:7px 14px">'+icon('refresh',14)+' Other status…</button>';
-    h += '<button class="btn-ghost" onclick="clearMtSelection()" style="font-size:13px;padding:7px 14px">Done</button>';
+    h += '<button class="btn-secondary" data-action="bulkResolveSelected" style="font-size:13px;padding:7px 14px;color:var(--green);border-color:var(--green-light)">'+icon('check',14)+' Resolve all</button>';
+    h += '<button class="btn-secondary" data-action="bulkCancelSelected" style="font-size:13px;padding:7px 14px;color:var(--text-3)">'+icon('x',14)+' Cancel all</button>';
+    h += '<button class="btn-secondary" data-action="bulkChangeStatus" style="font-size:13px;padding:7px 14px">'+icon('refresh',14)+' Other status…</button>';
+    h += '<button class="btn-ghost" data-action="clearMtSelection" style="font-size:13px;padding:7px 14px">Done</button>';
     h += '</div>';
   }
   // S2b: Desktop multi-pane — wrap list with right-side detail
@@ -4707,7 +4726,7 @@ function renderMtVendors(){
   h+='<input type="email" id="vEmail" placeholder="Email" />';
   h+='<select id="vSpecialty"><option value="">Specialty</option><option value="plumbing">Plumbing</option><option value="electrical">Electrical</option><option value="ac">AC</option><option value="appliance">Appliance</option><option value="handyman">Handyman</option><option value="pest_control">Pest Control</option><option value="painting">Painting</option></select>';
   h+='<input type="number" id="vRate" placeholder="Hourly Rate (AED)" />';
-  h+='<button onclick="saveVendor()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;width:100%;font-weight:600;">Save Vendor</button>';
+  h+='<button data-action="saveVendor" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;width:100%;font-weight:600;">Save Vendor</button>';
   h+='</div></div>';
   h+='<div class="settings-panel"><h3>Vendors</h3>';
   if(vendors.length===0){h+='<p style="color:var(--text2);font-size:12px;">No vendors yet</p>';}
@@ -4743,7 +4762,7 @@ function renderMtEquipment(){
   h+='<input type="number" id="eqInterval" placeholder="Service Interval (days)" value="180" />';
   h+='</div>';
   h+='<select id="eqCondition"><option value="excellent">Excellent</option><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option><option value="needs_replacement">Needs Replacement</option></select>';
-  h+='<button onclick="saveEquipmentItem()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;width:100%;font-weight:600;">Save Equipment</button>';
+  h+='<button data-action="saveEquipmentItem" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;width:100%;font-weight:600;">Save Equipment</button>';
   h+='</div></div>';
   h+='<div class="settings-panel"><h3>Equipment Inventory</h3>';
   if(equipment.length===0){h+='<p style="color:var(--text2);font-size:12px;">No equipment registered</p>';}
@@ -4778,7 +4797,7 @@ function renderMtPreventive(){
   h+='<select id="pmVendor"><option value="">Vendor (optional)</option>';
   vendors.forEach(v=>{h+='<option value="'+v.id+'">'+esc(v.name)+'</option>';});
   h+='</select>';
-  h+='<button onclick="savePreventive()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;width:100%;font-weight:600;">Save Schedule</button>';
+  h+='<button data-action="savePreventive" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;width:100%;font-weight:600;">Save Schedule</button>';
   h+='</div></div>';
   h+='<div class="settings-panel"><h3>Scheduled Tasks</h3>';
   if(preventiveMaint.length===0){h+='<p style="color:var(--text2);font-size:12px;">No preventive tasks scheduled</p>';}
@@ -5246,7 +5265,7 @@ function showShortcutsHelp(){
     '<div class="kbd-row"><kbd>Esc</kbd><span>Close any modal</span></div>'+
     '<div class="kbd-row"><kbd>?</kbd><span>This help</span></div>'+
     '</div>'+
-    '<div class="modal-actions" style="margin-top:16px;display:flex;justify-content:flex-end"><button class="btn-secondary" onclick="closeMtModal()">Close</button></div>';
+    '<div class="modal-actions" style="margin-top:16px;display:flex;justify-content:flex-end"><button class="btn-secondary" data-action="closeMtModal">Close</button></div>';
   showMtModal(html);
 }
 
@@ -5528,7 +5547,7 @@ function renderExtraModal(){
     '<div class="modal-box">'+
       '<div class="modal-header">'+
         '<div class="modal-title">'+(isEdit?'✏️ Edit':'➕ Add')+' extra cleaning</div>'+
-        '<button class="modal-close" onclick="closeExtraModal()">✕</button>'+
+        '<button class="modal-close" data-action="closeExtraModal">✕</button>'+
       '</div>'+
       '<div class="modal-body">'+
         // Section 1 : Where & When
@@ -5600,8 +5619,8 @@ function renderExtraModal(){
       '</div>'+
       '<div class="modal-footer">'+
         (isEdit?'<button class="btn-danger" onclick="deleteExtra('+f.id+')">🗑 Delete</button>':'')+
-        '<button class="btn-secondary" onclick="closeExtraModal()">Cancel</button>'+
-        '<button class="btn-primary" onclick="saveExtra()">'+(isEdit?'💾 Save':'➕ Create')+'</button>'+
+        '<button class="btn-secondary" data-action="closeExtraModal">Cancel</button>'+
+        '<button class="btn-primary" data-action="saveExtra">'+(isEdit?'💾 Save':'➕ Create')+'</button>'+
       '</div>'+
     '</div>'+
   '</div>';

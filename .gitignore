@@ -10,3 +10,5 @@ node_modules/
 playwright-report/
 test-results/
 .playwright/
+.index.html.bak-*
+supabase/.temp/
