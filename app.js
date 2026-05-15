@@ -1,4 +1,33 @@
 
+// === Lazy CDN loader ===
+// Heavy libraries (Chart.js ~200KB, jsPDF ~350KB, xlsx ~900KB, qrcode ~6KB)
+// are loaded on demand instead of upfront. Cleaner mode never needs them, so
+// the initial page weight drops by ~1.5MB for the cleaner journey.
+const __CDN = Object.freeze({
+  chart:  'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js',
+  pdf:    'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+  xlsx:   'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+  qrcode: 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
+});
+const __loadedScripts = new Map(); // src -> Promise
+function loadScript(src){
+  if (__loadedScripts.has(src)) return __loadedScripts.get(src);
+  const p = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { __loadedScripts.delete(src); reject(new Error('Failed to load ' + src)); };
+    document.head.appendChild(s);
+  });
+  __loadedScripts.set(src, p);
+  return p;
+}
+const ensureChart  = () => loadScript(__CDN.chart);
+const ensurePdf    = () => loadScript(__CDN.pdf);
+const ensureXlsx   = () => loadScript(__CDN.xlsx);
+const ensureQRCode = () => loadScript(__CDN.qrcode);
+
 // === Event delegation router for declarative click handlers ===
 // Replaces inline click handlers with elements declaring:
 //   - data-action="fnName" (required, "__noop" to do nothing)
@@ -1958,8 +1987,9 @@ async function removePropChecklistItem(listingId,idx){
   toast(t('removed'),'success');render();
 }
 
-// QR code for inventory
-function generateQR(elementId,text){
+// QR code for inventory (lazy-loads qrcodejs CDN on first call)
+async function generateQR(elementId,text){
+  try { await ensureQRCode(); } catch(e){ console.error('generateQR: lib load failed', e); return; }
   setTimeout(()=>{
     const el=document.getElementById(elementId);
     if(el&&typeof QRCode!=='undefined'){el.innerHTML='';new QRCode(el,{text,width:80,height:80});}
@@ -3668,27 +3698,30 @@ function renderDashboard(){
     if(dashSection==='properties' && typeof isDesktop==='function' && isDesktop()) renderTicketsFunnel();
   },80);
 
-  // Draw charts
+  // Draw charts (lazy-loads Chart.js CDN on first dashboard render)
   setTimeout(()=>{
-    // Revenue per day chart (revenue tab only)
     const revCtx=document.getElementById('revenueChart');
-    if(revCtx){
-      const labels=mDates.map(d=>{const dt=new Date(d+'T00:00:00');return dt.getDate()+' '+MONTHS[dt.getMonth()];});
-      const dataRev=mDates.map(d=>mRes.filter(r=>r.co===d).reduce((s,r)=>s+getRevenueFee(r),0));
-      const dataDone=mDates.map(d=>mRes.filter(r=>r.co===d&&mDone[keyFor(r)]).reduce((s,r)=>s+getRevenueFee(r),0));
-      new Chart(revCtx,{type:'bar',data:{labels,datasets:[
-        {label:'Potential',data:dataRev,backgroundColor:'rgba(124,58,237,0.25)',borderColor:'#7c3aed',borderWidth:1},
-        {label:'Earned',data:dataDone,backgroundColor:'rgba(5,150,105,0.5)',borderColor:'#059669',borderWidth:1}
-      ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{font:{size:10}}}},scales:{y:{beginAtZero:true,ticks:{font:{size:9}}},x:{ticks:{font:{size:8},maxRotation:45}}}}});
-    }
-    // Cleaner chart (ops tab only)
     const clCtx=document.getElementById('cleanerChart');
-    if(clCtx&&cleaners.length>0){
-      const labels=cleaners.map(c=>c.name);
-      const data=cleaners.map(c=>mRes.filter(r=>mIsAssignedTo(keyFor(r), c.id)).length);
-      const colors=cleaners.map(c=>c.color);
-      new Chart(clCtx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}}}}});
-    }
+    if (!revCtx && !(clCtx && cleaners.length>0)) return; // nothing to draw
+    ensureChart().then(()=>{
+      // Revenue per day chart (revenue tab only)
+      if(revCtx){
+        const labels=mDates.map(d=>{const dt=new Date(d+'T00:00:00');return dt.getDate()+' '+MONTHS[dt.getMonth()];});
+        const dataRev=mDates.map(d=>mRes.filter(r=>r.co===d).reduce((s,r)=>s+getRevenueFee(r),0));
+        const dataDone=mDates.map(d=>mRes.filter(r=>r.co===d&&mDone[keyFor(r)]).reduce((s,r)=>s+getRevenueFee(r),0));
+        new Chart(revCtx,{type:'bar',data:{labels,datasets:[
+          {label:'Potential',data:dataRev,backgroundColor:'rgba(124,58,237,0.25)',borderColor:'#7c3aed',borderWidth:1},
+          {label:'Earned',data:dataDone,backgroundColor:'rgba(5,150,105,0.5)',borderColor:'#059669',borderWidth:1}
+        ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{font:{size:10}}}},scales:{y:{beginAtZero:true,ticks:{font:{size:9}}},x:{ticks:{font:{size:8},maxRotation:45}}}}});
+      }
+      // Cleaner chart (ops tab only)
+      if(clCtx&&cleaners.length>0){
+        const labels=cleaners.map(c=>c.name);
+        const data=cleaners.map(c=>mRes.filter(r=>mIsAssignedTo(keyFor(r), c.id)).length);
+        const colors=cleaners.map(c=>c.color);
+        new Chart(clCtx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}}}}});
+      }
+    }).catch(e => console.error('Chart.js load failed', e));
   },100);
   return;
 }
@@ -5049,8 +5082,9 @@ function shareMaintenanceReport(type){
 }
 
 // ============ OWNER REPORT PDF (#18 - Manager only) ============
-function generateOwnerReport(listingId){
+async function generateOwnerReport(listingId){
   if(!dashData){toast('Load dashboard first','error');return;}
+  try { await ensurePdf(); } catch(e){ toast('PDF library failed to load','error'); return; }
   const{jsPDF}=window.jspdf;
   const doc=new jsPDF();
   const mRes=dashData.reservations.filter(r=>r.listingId==listingId);
@@ -5143,8 +5177,9 @@ async function exportCsv(type){
   toast('Export downloaded','success');
 }
 
-function exportExcel(){
+async function exportExcel(){
   if(!dashData||!dashData.reservations.length){toast('No data to export','error');return;}
+  try { await ensureXlsx(); } catch(e){ toast('Excel library failed to load','error'); return; }
   const mRes=dashData.reservations,mDone=dashData.done,mAssign=dashData.assignments;
   const rows=mRes.map(r=>{
     const cl=mAssign[keyFor(r)]?getCleanerById(mAssign[keyFor(r)]):null;
@@ -5157,8 +5192,9 @@ function exportExcel(){
   toast('Excel exported ✓','success');
 }
 
-function exportPDF(){
+async function exportPDF(){
   if(!dashData||!dashData.reservations.length){toast('No data to export','error');return;}
+  try { await ensurePdf(); } catch(e){ toast('PDF library failed to load','error'); return; }
   const{jsPDF}=window.jspdf;
   const doc=new jsPDF();
   const mRes=dashData.reservations,mDone=dashData.done;
@@ -5190,6 +5226,7 @@ function exportPDF(){
 async function generateInvoice(){
   const sel=document.getElementById('invoiceMonthSel');
   if(!sel){toast('Select a month','error');return;}
+  try { await ensurePdf(); } catch(e){ toast('PDF library failed to load','error'); return; }
   const[invYear,invMonth]=sel.value.split('-').map(Number);
 
   // Block if month not finished
