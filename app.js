@@ -95,6 +95,120 @@ function __closeSearchAndRender(){ search=''; searchOpen=false; render(); }
 function __setDateAndShowPlanner(dateStr){ selectedDate=dateStr; setTab('planner'); }
 function __sendDailyWhatsAppFromJson(cleanerJson){ try{ sendDailyWhatsApp(JSON.parse(cleanerJson)); } catch(e){ console.error('sendDailyWhatsApp parse', e); } }
 
+// === Phase 4 CSP migration: event delegation for non-click events ===
+// The strict CSP (no 'unsafe-inline' in script-src) blocks inline onchange/oninput/
+// onkeydown/ondrag*/oncontextmenu handlers — same constraint that drove Phases 1–3
+// of the onclick migration. Mirror the click-delegation pattern with a generic
+// dispatcher keyed by event type and attribute name. Handlers receive the event
+// and read positional context from `data-arg0..N` on `e.currentTarget`.
+(function(){
+  function __delegateEvent(eventType, attrName){
+    document.addEventListener(eventType, function(e){
+      const el = e.target.closest('['+attrName+']');
+      if (!el) return;
+      const name = el.getAttribute(attrName);
+      if (!name || name === '__noop') return;
+      const fn = window[name];
+      if (typeof fn !== 'function') {
+        console.warn('['+attrName+'] unknown handler:', name);
+        return;
+      }
+      try { fn(e); }
+      catch (err) { console.error('['+attrName+' '+name+']', err); }
+    }, false);
+  }
+  __delegateEvent('change',      'data-onchange');
+  __delegateEvent('input',       'data-oninput');
+  __delegateEvent('keydown',     'data-onkeydown');
+  __delegateEvent('contextmenu', 'data-oncontextmenu');
+  __delegateEvent('dragstart',   'data-ondragstart');
+  __delegateEvent('dragend',     'data-ondragend');
+  __delegateEvent('dragover',    'data-ondragover');
+  __delegateEvent('dragleave',   'data-ondragleave');
+  __delegateEvent('drop',        'data-ondrop');
+})();
+
+// === Phase 4 named handler wrappers ===
+// Extras-cleaning modal form field setters (replaces 8 inline on{change,input}=).
+function __efListingChange(e){ extraModalState.form.listing_id=e.target.value; syncExtraPriceDefaults(); }
+function __efDateChange(e){ extraModalState.form.cleaning_date=e.target.value; }
+function __efLabelChange(e){ extraModalState.form.label=e.target.value; }
+function __efGuestInput(e){ extraModalState.form.guest_name=e.target.value; }
+function __efPriceInput(e){ extraModalState.form.price_billed=e.target.value; }
+function __efCleanerPriceInput(e){ extraModalState.form.cleaner_price=e.target.value; }
+function __efCleanerChange(e){ extraModalState.form.assigned_cleaner_id=e.target.value; }
+function __efNotesInput(e){ extraModalState.form.notes=e.target.value; }
+// Cleaner PIN auto-submit (4 digits)
+function __pinInputAutoSubmit(e){ if(e.target.value.length===4) cleanerLogin(); }
+// Header search / maintenance search / cmdk
+function __headerSearchInput(e){ search=e.target.value; render(); }
+function __mtSearchInput(e){ mtSearch=e.target.value; render(); }
+function __cmdkInputDispatch(e){ cmdkSearch(e.target.value); }
+// Comment Enter-to-submit on a maintenance ticket (id passed via data-arg0).
+// data-stop-propagation="1" preserves the inner-card variant that must not bubble.
+function __mtCmtKeyDown(e){
+  if(e.key !== 'Enter') return;
+  if(e.currentTarget.dataset.stopPropagation === '1') e.stopPropagation();
+  const id = Number(e.currentTarget.dataset.arg0);
+  if(id) submitInlineComment(id);
+}
+// Note Enter-to-submit (reservation key via data-arg0)
+function __noteKeyDown(e){
+  if(e.key !== 'Enter') return;
+  const sk = e.currentTarget.dataset.arg0;
+  if(sk) addNote(sk);
+}
+// Cleaner-chip keyboard activation (Enter/Space) — id in data-arg0
+function __chipKeyDown(e){
+  if(e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  const id = Number(e.currentTarget.dataset.arg0);
+  setFilterCleaner(id);
+}
+// Cleaning-card keyboard activation (Enter/Space) — reservation key in data-arg0
+function __cardKeyDown(e){
+  if(e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  const sk = e.currentTarget.dataset.arg0;
+  handleCardClick(sk, e);
+}
+// Cleaning-card drag start — sk in data-arg0, type in data-kb-type (already present on the card)
+function __cardDragStart(e){
+  const ds = e.currentTarget.dataset;
+  onDragStart(e, ds.arg0, ds.kbType || 'cleaning');
+}
+// Cleaning-card right-click → context menu
+function __cardContextMenu(e){
+  e.preventDefault();
+  const ds = e.currentTarget.dataset;
+  showCardContextMenu(e, ds.arg0, ds.kbType || 'cleaning');
+}
+// Drop on a cleaner-chip — data-arg0 = cleaner id, or "-1" for the unassigned chip (→ null)
+function __chipDrop(e){
+  const raw = e.currentTarget.dataset.arg0;
+  const id = (raw === '' || raw === '-1' || raw === 'null') ? null : Number(raw);
+  onDropOnCleaner(e, id);
+}
+// Bulk-assign select in the planner bulk-bar — passes value then resets the select
+function __bulkAssignChange(e){
+  bulkAssignSelected(e.target.value);
+  e.target.value = '';
+}
+// Cleaner row role <select> — full cleaner record encoded as JSON in data-arg0
+// to survive HTML escaping (the prior inline call double-quoted name/phone/pin).
+function __cleanerRoleChange(e){
+  try {
+    const ctx = JSON.parse(e.currentTarget.dataset.arg0 || '{}');
+    saveCleaner(ctx.id, ctx.name, ctx.phone || '', ctx.color, ctx.pin || '', e.target.value);
+  } catch (err) { console.error('cleanerRoleChange', err); }
+}
+// Suppress the browser's default context menu (used by the row-action "more" button).
+function __ctxPrevent(e){ e.preventDefault(); }
+// Kanban column drag/drop — status key in data-arg0
+function __kanbanColDragOver(e){ onDragOverCol(e); }
+function __kanbanColDragLeave(e){ onDragLeaveCol(e); }
+function __kanbanColDrop(e){ onDropOnKanbanCol(e, e.currentTarget.dataset.arg0); }
+
 // === Context menu item registry ===
 // Each ctxmenu item registers a real JS closure here at render time; the
 // rendered button carries the closure ID via data-arg0. The map is cleared
@@ -545,7 +659,7 @@ function renderPlannerTable(items){
     h += '<div class="bulk-bar">';
     h += '<span>'+plannerBulkSelected.size+' selected</span>';
     h += '<span class="bb-spacer"></span>';
-    h += '<select onchange="bulkAssignSelected(this.value);this.value=\'\'"><option value="">Assign to...</option>'+cleanerOpts+'</select>';
+    h += '<select data-onchange="__bulkAssignChange"><option value="">Assign to...</option>'+cleanerOpts+'</select>';
     h += '<button data-action="bulkMarkDoneSelected">'+icon('check',13)+' Mark done</button>';
     h += '<button class="bb-clear" data-action="clearPlannerBulk">Clear</button>';
     h += '</div>';
@@ -593,7 +707,7 @@ function renderPlannerTable(items){
     const listingFull = formatPropLabel(r.listingId, r.listing) || '';
     const cleanerFull = cleanersForRow.length ? cleanersForRow.map(c=>c.name).join(' + ') : 'Unassigned';
     const trCls = (isSelected?'selected ':'') + (isBulk?'bulk-selected':'');
-    h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1">';
+    h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" data-ondragstart="__cardDragStart" data-ondragend="onDragEnd" data-oncontextmenu="__cardContextMenu" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1">';
     // Checkbox
     h += '<td class="col-select" data-action="togglePlannerBulk" data-arg0="'+sk+'" data-stop-propagation="1"><input type="checkbox"'+(isBulk?' checked':'')+' data-action="togglePlannerBulk" data-arg0="'+sk+'" data-stop-propagation="1"/></td>';
     // Date
@@ -627,7 +741,7 @@ function renderPlannerTable(items){
       if(isDone) h += '<button class="row-action-btn" title="Mark undone" data-action="markDone" data-arg0="'+sk+'" data-stop-propagation="1">'+icon('refresh',13)+'</button>';
       else h += '<button class="row-action-btn success" title="Mark done" data-action="markDone" data-arg0="'+sk+'" data-stop-propagation="1">'+icon('check',13)+'</button>';
     }
-    h += '<button class="row-action-btn" title="More actions" oncontextmenu="event.preventDefault()" data-action="showCardContextMenu" data-arg0="'+sk+'" data-arg1="cleaning" data-pass-event="1" data-stop-propagation="1">'+icon('moreVertical',13)+'</button>';
+    h += '<button class="row-action-btn" title="More actions" data-oncontextmenu="__ctxPrevent" data-action="showCardContextMenu" data-arg0="'+sk+'" data-arg1="cleaning" data-pass-event="1" data-stop-propagation="1">'+icon('moreVertical',13)+'</button>';
     h += '</span>';
     h += '</td>';
     h += '</tr>';
@@ -670,7 +784,7 @@ function renderMtTable(tickets){
   h += '</tr></thead><tbody>';
   sorted.forEach(t => {
     const isSelected = (mtExpandedTicket === t.id);
-    h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
+    h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" data-ondragstart="__cardDragStart" data-ondragend="onDragEnd" data-oncontextmenu="__cardContextMenu" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
     h += '<td class="muted">'+(t.created_at?new Date(t.created_at).toLocaleDateString():'')+'</td>';
     h += '<td><strong>'+esc(t.title||'')+'</strong></td>';
     h += '<td class="muted">'+esc(formatPropLabel(t.listing_id, t.listing_name)||t.listing_id||'—')+'</td>';
@@ -700,7 +814,7 @@ function renderMtKanban(tickets){
       if(col.key === 'open') return t.status === 'open' || t.status === 'assigned';
       return t.status === col.key;
     });
-    h += '<div class="kanban-col" ondragover="onDragOverCol(event)" ondragleave="onDragLeaveCol(event)" ondrop="onDropOnKanbanCol(event,\''+col.key+'\')">';
+    h += '<div class="kanban-col" data-ondragover="__kanbanColDragOver" data-ondragleave="__kanbanColDragLeave" data-ondrop="__kanbanColDrop" data-arg0="'+esc(col.key)+'">';
     h += '<div class="kanban-col-header" style="border-color:'+col.color+'">';
     h += '<span class="kc-label">'+esc(col.label)+'</span>';
     h += '<span class="kc-count">'+colTickets.length+'</span>';
@@ -712,7 +826,7 @@ function renderMtKanban(tickets){
       colTickets.forEach(t => {
         const isSel = (mtExpandedTicket === t.id);
         const pri = t.priority || 'medium';
-        h += '<div class="kanban-card '+pri+(isSel?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
+        h += '<div class="kanban-card '+pri+(isSel?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" data-ondragstart="__cardDragStart" data-ondragend="onDragEnd" data-oncontextmenu="__cardContextMenu" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
         h += '<div class="kc-title">'+esc(t.title||'')+'</div>';
         h += '<div class="kc-meta">'+esc(formatPropLabel(t.listing_id, t.listing_name)||t.listing_id||'No property')+'</div>';
         h += '<div class="kc-footer">';
@@ -2796,7 +2910,7 @@ function renderBottomNav(){
 function renderPinScreen(){
   document.getElementById('app').innerHTML=
     '<div class="pin-screen"><div style="margin-bottom:20px">'+renderLangSelector()+'</div><h2>🔑 '+t('cleanerLogin')+'</h2><p>'+t('enterPin')+'</p>'+
-    '<input type="tel" id="pinInput" class="pin-input" maxlength="4" aria-label="4-digit PIN" oninput="if(this.value.length===4)cleanerLogin()" autofocus/>'+
+    '<input type="tel" id="pinInput" class="pin-input" maxlength="4" aria-label="4-digit PIN" data-oninput="__pinInputAutoSubmit" autofocus/>'+
     '<div id="pinError" class="pin-error"></div></div>';
 }
 
@@ -2863,20 +2977,20 @@ function renderPlanner(){
   // Row 4: Staff filter (compact pills)
   if(!cleanerMode&&cleaners.length>0){
     h+='<div class="cleaner-filter">';
-    h+='<div class="cleaner-chip'+(filterCleaner===0?' active':'')+'" role="button" tabindex="0" aria-label="Show all cleaners" data-action="setFilterCleaner" data-arg0="0" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(0);}">All</div>';
+    h+='<div class="cleaner-chip'+(filterCleaner===0?' active':'')+'" role="button" tabindex="0" aria-label="Show all cleaners" data-action="setFilterCleaner" data-arg0="0" data-onkeydown="__chipKeyDown">All</div>';
     cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
       const cnt=RESERVATIONS.filter(r=>isAssignedTo(keyFor(r), c.id)).length;
-      h+='<div class="cleaner-chip drop-target'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,'+c.id+')" data-action="setFilterCleaner" data-arg0="'+c.id+'" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner('+c.id+');}"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
+      h+='<div class="cleaner-chip drop-target'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" data-ondragover="onDragOver" data-ondragleave="onDragLeave" data-ondrop="__chipDrop" data-action="setFilterCleaner" data-arg0="'+c.id+'" data-onkeydown="__chipKeyDown"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
     });
     const una=RESERVATIONS.filter(r=>!hasAnyAssignee(keyFor(r))).length;
-    if(una>0) h+='<div class="cleaner-chip drop-target'+(filterCleaner===-1?' active':'')+'" role="button" tabindex="0" aria-label="Show unassigned cleanings" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,null)" data-action="setFilterCleaner" data-arg0="-1" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setFilterCleaner(-1);}">Unassigned '+una+'</div>';
+    if(una>0) h+='<div class="cleaner-chip drop-target'+(filterCleaner===-1?' active':'')+'" role="button" tabindex="0" aria-label="Show unassigned cleanings" data-ondragover="onDragOver" data-ondragleave="onDragLeave" data-ondrop="__chipDrop" data-action="setFilterCleaner" data-arg0="-1" data-onkeydown="__chipKeyDown">Unassigned '+una+'</div>';
     h+='</div>';
   }
   h+='</div>';
 
   // Collapsible search overlay
   if(searchOpen){
-    h+='<div class="header-search"><input type="text" id="headerSearchInput" aria-label="Search property or guest" placeholder="Search property or guest..." value="'+esc(search)+'" oninput="search=this.value;render()" autofocus/><button data-action="__closeSearchAndRender" aria-label="Close search" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:4px 8px">✕</button></div>';
+    h+='<div class="header-search"><input type="text" id="headerSearchInput" aria-label="Search property or guest" placeholder="Search property or guest..." value="'+esc(search)+'" data-oninput="__headerSearchInput" autofocus/><button data-action="__closeSearchAndRender" aria-label="Close search" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:4px 8px">✕</button></div>';
   }
 
   h+='<div class="container"><div class="planner-two-col"><div class="planner-main">';
@@ -2959,7 +3073,7 @@ function renderPlanner(){
       // Cleaner color for left border
       const cleanerColor=isCancelled?'var(--red)':(cleaner?cleaner.color:(urgency==='urgent'?'var(--red)':urgency==='warning'?'var(--orange)':'transparent'));
 
-      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" data-action="handleCardClick" data-arg0="'+sk+'" data-pass-event="1" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleCardClick(\''+sk+'\',event);}">';
+      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" draggable="true" data-ondragstart="__cardDragStart" data-ondragend="onDragEnd" data-oncontextmenu="__cardContextMenu" data-action="handleCardClick" data-arg0="'+sk+'" data-pass-event="1" data-onkeydown="__cardKeyDown">';
       h+='<div class="swipe-cancel-bg"><span class="swipe-cancel-icon">'+(isCancelled?'↩️':'🚫')+'</span></div>';
 
       // Card content wrapper
@@ -3257,7 +3371,7 @@ function renderTicketDetailPane(t, isManager){
     h += '</div>';
   }
   h += '<div class="mt-cmt-add">';
-  h += '<input type="text" id="mtCmtInput-'+t.id+'" placeholder="Add a comment…" onkeydown="if(event.key===\'Enter\')submitInlineComment('+t.id+')" />';
+  h += '<input type="text" id="mtCmtInput-'+t.id+'" placeholder="Add a comment…" data-onkeydown="__mtCmtKeyDown" data-arg0="'+t.id+'" />';
   h += '<button class="btn-secondary" style="font-size:11px;padding:6px 12px" data-action="submitInlineComment" data-arg0="'+t.id+'">Send</button>';
   h += '</div>';
   h += '</div>';
@@ -3328,7 +3442,7 @@ function renderCardDetail(key,r){
   // Notes
   h+='<div class="detail-title" style="margin-top:10px">📝 Notes ('+notes.length+')</div>';
   notes.forEach(n=>{h+='<div class="note-item">'+esc(n.note_text)+'<div class="note-meta">'+(n.author?esc(n.author)+' — ':'')+new Date(n.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</div></div>';});
-  h+='<div class="note-input-row"><input id="note-'+safeId+'" placeholder="Add a note..." onkeydown="if(event.key===\'Enter\')addNote(\''+sk+'\')"/><button data-action="addNote" data-arg0="'+sk+'">Add</button></div>';
+  h+='<div class="note-input-row"><input id="note-'+safeId+'" placeholder="Add a note..." data-onkeydown="__noteKeyDown" data-arg0="'+sk+'"/><button data-action="addNote" data-arg0="'+sk+'">Add</button></div>';
   // Before/After photo comparison
   const beforeP=photos.find(p=>p.photo_type==='before');
   const afterP=photos.find(p=>p.photo_type==='after');
@@ -3893,7 +4007,7 @@ function renderSettings(){
       '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(ROLE_COLOR[role]||'#999')+'22;color:'+(ROLE_COLOR[role]||'#999')+';font-weight:600">'+(ROLE_BADGE[role]||role)+'</span>'+
       '<div class="c-phone">'+(c.phone||'')+'</div>'+
       '<div class="c-pin">'+(c.pin?'PIN: '+c.pin:'No PIN')+'</div>'+
-      '<select onchange="saveCleaner('+c.id+',\''+esc(c.name)+'\',\''+esc(c.phone||'')+'\',\''+c.color+'\',\''+esc(c.pin||'')+'\',this.value)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
+      '<select data-onchange="__cleanerRoleChange" data-arg0="'+esc(JSON.stringify({id:c.id,name:c.name,phone:c.phone||'',color:c.color,pin:c.pin||''}))+'" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
     ['manager','cleaner','maintenance'].forEach(r=>{h+='<option value="'+r+'"'+(role===r?' selected':'')+'>'+r+'</option>';});
     h+='</select>'+
       '<button data-action="__sendDailyWhatsAppFromJson" data-arg0="'+JSON.stringify(c).replace(/"/g,'&quot;')+'" title="Send WhatsApp">📱</button>'+
@@ -4499,7 +4613,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     if(apt) n = n.replace(new RegExp('^\\s*'+apt.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*[-—–|:·•]\\s*','i'),'');
     return n.length>40 ? n.substring(0,40)+'…' : n;
   })() : '';
-  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="__mtCardClick" data-arg0="'+t.id+'" data-pass-event="1">';
+  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" data-ondragstart="__cardDragStart" data-ondragend="onDragEnd" data-oncontextmenu="__cardContextMenu" data-action="__mtCardClick" data-arg0="'+t.id+'" data-pass-event="1">';
   if(mtSelectMode){
     h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" data-action="toggleMtSelected" data-arg0="'+t.id+'" data-stop-propagation="1"></div>';
   }
@@ -4579,7 +4693,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
       h+='</div>';
     }
     h+='<div class="mt-cmt-add">';
-    h+='<input type="text" id="mtCmtInput-'+t.id+'" placeholder="Add a comment…" onkeydown="if(event.key===\'Enter\'){event.stopPropagation();submitInlineComment('+t.id+')}" data-action="__noop" data-stop-propagation="1" />';
+    h+='<input type="text" id="mtCmtInput-'+t.id+'" placeholder="Add a comment…" data-onkeydown="__mtCmtKeyDown" data-arg0="'+t.id+'" data-action="__noop" data-stop-propagation="1" />';
     h+='<button class="btn-secondary" style="font-size:11px;padding:6px 12px" data-action="submitInlineComment" data-arg0="'+t.id+'" data-stop-propagation="1">Send</button>';
     h+='</div>';
     h+='</div>';
@@ -4625,7 +4739,7 @@ function renderMtTickets(isManager){
   const assignedCount=allOpen.filter(t=>!!t.assigned_technician_id || !!t.assigned_vendor_id).length;
 
   // === Search bar — first thing under the page header ===
-  h+='<div class="mt-search-wrap mt-search-standalone">'+icon('search',16)+'<input type="text" class="mt-search" placeholder="Search tickets…" value="'+esc(mtSearch)+'" oninput="mtSearch=this.value;render()" /></div>';
+  h+='<div class="mt-search-wrap mt-search-standalone">'+icon('search',16)+'<input type="text" class="mt-search" placeholder="Search tickets…" value="'+esc(mtSearch)+'" data-oninput="__mtSearchInput" /></div>';
 
   // === Quick filter chips ===
   h+='<div class="mt-quick-filters">';
@@ -4694,7 +4808,7 @@ function renderMtTickets(isManager){
     h+='<div class="mt-form">';
     h+='<button data-action="mtPhotoUpload" style="background:white;border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer;width:100%;margin-bottom:8px;font-size:13px;font-weight:600">📷 Take / Upload Photo</button>';
     h+='<div id="mtPhotoPreview"></div>';
-    h+='<textarea id="mtDesc" placeholder="Describe the issue…" style="min-height:70px" oninput="updateMtSmartPreview()"></textarea>';
+    h+='<textarea id="mtDesc" placeholder="Describe the issue…" style="min-height:70px" data-oninput="updateMtSmartPreview"></textarea>';
     h+='<select id="mtListing"><option value="">Select property…</option>';
     allProps.forEach(p=>{h+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});
     h+='</select>';
@@ -5572,7 +5686,7 @@ function renderCmdk(){
   });
   let html='<div class="cmdk-overlay" data-action="__closeCmdkBackdrop" data-pass-event="1">';
   html+='<div class="cmdk-box" data-action="__noop" data-stop-propagation="1">';
-  html+='<input id="cmdkInput" class="cmdk-input" aria-label="Search" placeholder="Search for guest, cleaner, property, ticket..." value="'+esc(cmdkQuery)+'" oninput="cmdkSearch(this.value)" onkeydown="cmdkKeyDown(event)" />';
+  html+='<input id="cmdkInput" class="cmdk-input" aria-label="Search" placeholder="Search for guest, cleaner, property, ticket..." value="'+esc(cmdkQuery)+'" data-oninput="__cmdkInputDispatch" data-onkeydown="cmdkKeyDown" />';
   html+='<div class="cmdk-results">';
   if(cmdkQuery && cmdkResults.length===0){
     html+='<div class="cmdk-empty">No results for "'+esc(cmdkQuery)+'"</div>';
@@ -5664,16 +5778,16 @@ function renderExtraModal(){
           '</button>'+
           (extraModalOpenSection==='where' ? '<div class="acc-body">'+
             '<div class="form-row"><label>Unit <span class="req">*</span></label>'+
-              '<select id="ef-listing" onchange="extraModalState.form.listing_id=this.value;syncExtraPriceDefaults();">'+
+              '<select id="ef-listing" data-onchange="__efListingChange">'+
                 '<option value="">Select...</option>'+
                 listings.map(l=>'<option value="'+esc(l.id)+'" '+(f.listing_id===l.id?'selected':'')+'>'+esc(l.name)+'</option>').join('')+
               '</select>'+
             '</div>'+
             '<div class="form-row"><label>Date <span class="req">*</span></label>'+
-              '<input type="date" id="ef-date" value="'+esc(f.cleaning_date)+'" onchange="extraModalState.form.cleaning_date=this.value">'+
+              '<input type="date" id="ef-date" value="'+esc(f.cleaning_date)+'" data-onchange="__efDateChange">'+
             '</div>'+
             '<div class="form-row"><label>Type</label>'+
-              '<select id="ef-label" onchange="extraModalState.form.label=this.value">'+
+              '<select id="ef-label" data-onchange="__efLabelChange">'+
                 '<option value="" '+(!f.label?'selected':'')+'>— Choose —</option>'+
                 '<option value="Mid-stay" '+(f.label==='Mid-stay'?'selected':'')+'>Mid-stay</option>'+
                 '<option value="Owner turnover" '+(f.label==='Owner turnover'?'selected':'')+'>Owner turnover</option>'+
@@ -5683,7 +5797,7 @@ function renderExtraModal(){
               '</select>'+
             '</div>'+
             '<div class="form-row"><label>Guest / Client name</label>'+
-              '<input type="text" id="ef-guest" value="'+esc(f.guest_name)+'" oninput="extraModalState.form.guest_name=this.value" placeholder="Optional">'+
+              '<input type="text" id="ef-guest" value="'+esc(f.guest_name)+'" data-oninput="__efGuestInput" placeholder="Optional">'+
             '</div>'+
           '</div>' : '')+
         '</div>'+
@@ -5696,10 +5810,10 @@ function renderExtraModal(){
           (extraModalOpenSection==='price' ? '<div class="acc-body">'+
             '<div class="form-grid">'+
               '<div class="form-row"><label>Price billed (AED) <span class="req">*</span></label>'+
-                '<input type="number" step="1" id="ef-price" value="'+esc(String(f.price_billed))+'" oninput="extraModalState.form.price_billed=this.value" placeholder="250">'+
+                '<input type="number" step="1" id="ef-price" value="'+esc(String(f.price_billed))+'" data-oninput="__efPriceInput" placeholder="250">'+
               '</div>'+
               '<div class="form-row"><label>Cleaner rate (AED)</label>'+
-                '<input type="number" step="1" id="ef-cleanerprice" value="'+esc(String(f.cleaner_price))+'" oninput="extraModalState.form.cleaner_price=this.value" placeholder="Unit default">'+
+                '<input type="number" step="1" id="ef-cleanerprice" value="'+esc(String(f.cleaner_price))+'" data-oninput="__efCleanerPriceInput" placeholder="Unit default">'+
               '</div>'+
             '</div>'+
           '</div>' : '')+
@@ -5712,13 +5826,13 @@ function renderExtraModal(){
           '</button>'+
           (extraModalOpenSection==='assign' ? '<div class="acc-body">'+
             '<div class="form-row"><label>Assigned cleaner</label>'+
-              '<select id="ef-cleaner" onchange="extraModalState.form.assigned_cleaner_id=this.value">'+
+              '<select id="ef-cleaner" data-onchange="__efCleanerChange">'+
                 '<option value="">— Unassigned —</option>'+
                 cleanersList.map(c=>'<option value="'+c.id+'" '+(String(f.assigned_cleaner_id)===String(c.id)?'selected':'')+'>'+esc(c.name)+'</option>').join('')+
               '</select>'+
             '</div>'+
             '<div class="form-row"><label>Notes</label>'+
-              '<textarea id="ef-notes" rows="2" oninput="extraModalState.form.notes=this.value" placeholder="Optional info">'+esc(f.notes)+'</textarea>'+
+              '<textarea id="ef-notes" rows="2" data-oninput="__efNotesInput" placeholder="Optional info">'+esc(f.notes)+'</textarea>'+
             '</div>'+
           '</div>' : '')+
         '</div>'+
