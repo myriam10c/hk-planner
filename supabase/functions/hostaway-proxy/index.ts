@@ -244,6 +244,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["getTimers", "GET"],
   // ===== Logs =====
   ["getLogs", "GET"],
+  ["logError", "POST"],
   // ===== Pricing / apt number =====
   ["setCustomPrice", "POST"],
   ["setAptNumber", "POST"],
@@ -833,6 +834,30 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await query;
       if (error) throw error;
       return jsonResp({ status: "success", logs: data });
+    }
+    // Sentry-lite MVP: persist client-side errors caught by global handlers.
+    // Best-effort — never returns 5xx so the front-end can drop responses on the floor.
+    if (action === "logError" && req.method === "POST") {
+      try {
+        const body = await req.json();
+        const num = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+        const str = (v: any, max: number) => (v == null ? null : String(v).slice(0, max));
+        const { error } = await sb.from("error_logs").insert({
+          kind: str(body.kind, 30) ?? "error",
+          message: str(body.message, 4000),
+          stack: str(body.stack, 8000),
+          source: str(body.source, 500),
+          lineno: num(body.lineno),
+          colno: num(body.colno),
+          url: str(body.url, 1000),
+          user_agent: str(body.user_agent, 500),
+          actor: str(body.actor, 100),
+        });
+        if (error) console.error("[logError] insert failed:", error.message);
+      } catch (err) {
+        console.error("[logError] handler error:", err);
+      }
+      return jsonResp({ status: "success" });
     }
 
     // ==================== CUSTOM PRICING ====================

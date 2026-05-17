@@ -114,12 +114,46 @@ function __runCtxItem(id, e){
 function __clearCtxItems(){ __ctxItems.clear(); }
 
 // Global error handlers (Sentry-lite MVP)
+// De-dup by (message|source:line) and cap per page-session to avoid spamming the backend
+// on tight error loops. api() is defined later in the file but error events fire after
+// page load, so by then everything is wired up — wrapped in try/catch regardless so
+// the reporter itself can never trigger another error event.
+const __errorLogSeen = new Set();
+function __sendErrorLog(payload){
+  try{
+    if(typeof api !== 'function') return;
+    const dedupKey = (payload.message||'') + '|' + (payload.source||'') + ':' + (payload.lineno||0);
+    if(__errorLogSeen.has(dedupKey)) return;
+    if(__errorLogSeen.size >= 50) return;
+    __errorLogSeen.add(dedupKey);
+    api('logError', { body: payload }).catch(()=>{});
+  }catch(_){ /* swallow */ }
+}
 window.addEventListener('error', (e) => {
   console.error('[GLOBAL ERROR]', e.error || e.message, e.filename, e.lineno);
-  // TODO : envoyer vers backend via api('logError',...) quand l'endpoint sera prêt
+  __sendErrorLog({
+    kind: 'error',
+    message: String((e.error && e.error.message) || e.message || 'unknown').slice(0, 2000),
+    stack: (e.error && e.error.stack) ? String(e.error.stack).slice(0, 4000) : null,
+    source: e.filename || null,
+    lineno: e.lineno || null,
+    colno: e.colno || null,
+    url: location.href,
+    user_agent: navigator.userAgent,
+    actor: (typeof cleanerMode !== 'undefined' && cleanerMode) ? cleanerMode.name : null,
+  });
 });
 window.addEventListener('unhandledrejection', (e) => {
   console.error('[UNHANDLED PROMISE]', e.reason);
+  const r = e.reason;
+  __sendErrorLog({
+    kind: 'unhandledrejection',
+    message: String((r && r.message) || r || 'unknown').slice(0, 2000),
+    stack: (r && r.stack) ? String(r.stack).slice(0, 4000) : null,
+    url: location.href,
+    user_agent: navigator.userAgent,
+    actor: (typeof cleanerMode !== 'undefined' && cleanerMode) ? cleanerMode.name : null,
+  });
 });
 const API='https://dqjnqvbxfwtvrjwnnmns.supabase.co/functions/v1/hostaway-proxy';
 const APP_SHARED_SECRET='0RicFT1AZL0NDyH1M2ZWhbUvworsGOx38UhNNwFVF8dmP8SC-TRXfaoyQbR5pdn0';
