@@ -1207,14 +1207,17 @@ function getCleaningFee(r){
 // Dashboard revenue: exact Hostaway fee (no fallback — matches rental activity)
 function getRevenueFee(r){return r.cleaningFee||0;}
 // Revenue per cleaner (dashboard): month='YYYY-MM'
+// IMPORTANT : cost par cleaning ne s'applique QU'aux subcontractors (Elite, id=12).
+// Les cleaners INTERNES (Faiza, Pionah) sont salariés mensuels — leur cost par
+// cleaning = 0 ici (le salaire est un cost fixe géré ailleurs en OPEX).
 function computeRevenuePerCleaner(month){
   const monthPrefix=month;
   const byCleaner={};
   (cleaners||[]).forEach(c=>{
     byCleaner[c.id]={id:c.id,name:c.name,color:c.color,role:c.role,cleanings:0,revenueAED:0,costAED:0};
   });
-  // Multi-assign: revenue + cost split equally across the assigned cleaners; each
-  // cleaner still gets a +1 in the cleanings count (they were on the job).
+  // Multi-assign: revenue split equally across the assigned cleaners.
+  // Cost split equally BUT only debited to subcontractor cleaners.
   (RESERVATIONS||[]).forEach(r=>{
     const key=keyFor(r);
     if(!(r.co||'').startsWith(monthPrefix)) return;
@@ -1223,11 +1226,12 @@ function computeRevenuePerCleaner(month){
     if(ids.length===0) return;
     const rev=Number(r.cleaningFee||0)/ids.length;
     const lp=listingPrices[r.listingId];
-    const cost=lp?Number(lp.custom_price||lp.price||0)/ids.length:0;
+    const costPerCleaner=lp?Number(lp.custom_price||lp.price||0)/ids.length:0;
     ids.forEach(cid=>{
       byCleaner[cid].cleanings++;
       byCleaner[cid].revenueAED+=rev;
-      byCleaner[cid].costAED+=cost;
+      // Cost only for subcontractors (Elite). Internal salariés = 0 per-job.
+      if(byCleaner[cid].role==='subcontractor') byCleaner[cid].costAED+=costPerCleaner;
     });
   });
   (extraCleanings||[]).forEach(e=>{
@@ -1238,11 +1242,11 @@ function computeRevenuePerCleaner(month){
     if(ids.length===0) return;
     const rev=Number(e.price_billed||0)/ids.length;
     const defaultCost=(()=>{const l=listingPrices[e.listing_id];return l?Number(l.custom_price||l.price||0):0;})();
-    const cost=Number(e.cleaner_price||defaultCost)/ids.length;
+    const costPerCleaner=Number(e.cleaner_price||defaultCost)/ids.length;
     ids.forEach(cid=>{
       byCleaner[cid].cleanings++;
       byCleaner[cid].revenueAED+=rev;
-      byCleaner[cid].costAED+=cost;
+      if(byCleaner[cid].role==='subcontractor') byCleaner[cid].costAED+=costPerCleaner;
     });
   });
   return Object.values(byCleaner)
