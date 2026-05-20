@@ -19,8 +19,10 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:3000",
   "http://localhost:8080",
 ]);
+// Netlify deploy previews use sub-domain prefix : <deploy-id>--stunning-kleicha-f61101.netlify.app
+const NETLIFY_PREVIEW_RE = /^https:\/\/[a-z0-9-]+--stunning-kleicha-f61101\.netlify\.app$/;
 function corsHeaders(origin: string | null): Record<string, string> {
-  if (origin && ALLOWED_ORIGINS.has(origin)) {
+  if (origin && (ALLOWED_ORIGINS.has(origin) || NETLIFY_PREVIEW_RE.test(origin))) {
     return { ...DEFAULT_CORS_HEADERS, "Access-Control-Allow-Origin": origin };
   }
   return DEFAULT_CORS_HEADERS;
@@ -161,6 +163,119 @@ async function validateCleanerToken(sb: any, token: string | null): Promise<{ cl
   const { data, error } = await sb.rpc('validate_cleaner_session', { p_token: token });
   if (error || !data || data.length === 0) return null;
   return data[0];
+}
+
+// ========== Telegram notifications (team_tasks) ==========
+// Side-effect : si fail, ne pas faire échouer la requête principale.
+const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
+async function sendTelegram(chatId: string | null | undefined, text: string): Promise<void> {
+  if (!chatId || !TELEGRAM_BOT_TOKEN) return;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true }),
+    });
+    if (!r.ok) {
+      const body = await r.text();
+      console.warn(`[telegram] HTTP ${r.status}: ${body.slice(0, 200)}`);
+    }
+  } catch (e) {
+    console.warn(`[telegram] fetch failed:`, e);
+  }
+}
+
+function formatTaskNotification(task: any, createdBy: { name?: string } | null, assignee: { name?: string } | null): string {
+  const lines: string[] = [];
+  const priorityEmoji = task.priority === "urgent" ? "🚨" : task.priority === "high" ? "🔥" : task.priority === "low" ? "🟢" : "📌";
+  lines.push(`${priorityEmoji} <b>New task assigned</b>`);
+  lines.push("");
+  lines.push(`<b>${escapeHtml(task.title)}</b>`);
+  if (task.description) lines.push(escapeHtml(task.description).slice(0, 400));
+  lines.push("");
+  const meta: string[] = [];
+  meta.push(`Priority: <b>${task.priority || "normal"}</b>`);
+  if (task.due_at) meta.push(`Due: ${task.due_at.slice(0, 10)}`);
+  if (task.category) meta.push(`Category: ${task.category}`);
+  if (createdBy?.name) meta.push(`From: ${createdBy.name}`);
+  lines.push(meta.join(" · "));
+  lines.push("");
+  lines.push(`👉 https://stunning-kleicha-f61101.netlify.app/`);
+  return lines.join("\n");
+}
+
+function escapeHtml(s: string): string {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ========== Decision rules : monitoring_events → team_task spec ==========
+// Renvoie un objet avec les champs team_tasks (title, description, assigned_cleaner_id, priority,
+// category, listing_id, due_at) si l'event mérite une tâche. Renvoie null si on ignore.
+//
+// Règles MVP (à étoffer au fil de l'usage) :
+// - reservation.updated avec status cancelled → tâche Hillal high
+// - reservation.created avec check-in <48h → tâche Walter high (urgent si <12h)
+// - Autres : ignore (Hostaway tasks natives, messages team, etc.)
+function decideTaskFromEvent(ev: any, ids: any): any | null {
+  const p = ev.raw_payload || {};
+  const type = ev.event_type;
+
+  if (type === "reservation.updated") {
+    const status = String(p.status || "").toLowerCase();
+    if (status.includes("cancel")) {
+      const checkIn = p.arrivalDate || p.checkInDate || "?";
+      const guest = ev.guest_name || p.guestName || "Guest";
+      const apt = ev.apartment_no || ev.building || (ev.listing_id ? `listing ${ev.listing_id}` : "logement ?");
+      return {
+        title: `❌ Cancellation: ${guest} — ${apt} (${checkIn})`,
+        description: `Booking cancelled (status: ${status}). Channel: ${ev.channel || "?"}. Check: rebook possible? Compensation to claim from OTA?`,
+        assigned_cleaner_id: ids.HILLAL,
+        priority: "high",
+        category: "ops",
+        listing_id: ev.listing_id ? String(ev.listing_id) : null,
+      };
+    }
+    return null;
+  }
+
+  if (type === "reservation.created") {
+    const checkIn = p.arrivalDate || p.checkInDate;
+    if (!checkIn) return null;
+    const ciTs = new Date(checkIn).getTime();
+    if (isNaN(ciTs)) return null;
+    const hoursUntil = (ciTs - Date.now()) / 3600000;
+    if (hoursUntil < 0) return null; // already past, ignore
+    if (hoursUntil > 48) return null; // normal flow HK Planner, no task needed
+    const guest = ev.guest_name || p.guestName || "Guest";
+    const apt = ev.apartment_no || ev.building || (ev.listing_id ? `listing ${ev.listing_id}` : "unknown unit");
+    return {
+      title: `⚡ Last-minute: ${guest} arrives ${checkIn} — ${apt}`,
+      description: `Last-minute booking (check-in in ~${Math.round(hoursUntil)}h). Check: cleaning scheduled? access code sent? instructions OK? Channel: ${ev.channel || "?"}.`,
+      assigned_cleaner_id: ids.WALTER,
+      priority: hoursUntil <= 12 ? "urgent" : "high",
+      category: "ops",
+      listing_id: ev.listing_id ? String(ev.listing_id) : null,
+    };
+  }
+
+  // task.*, team.message, autres : ignore pour MVP
+  return null;
+}
+
+// Notifie l'assigné de la tâche par Telegram si chat_id configuré.
+// Idempotent côté Telegram (un message envoyé = un message reçu, pas de dédup nécessaire pour ce MVP).
+async function notifyAssignee(sb: any, task: any): Promise<void> {
+  if (!task?.assigned_cleaner_id) return;
+  const { data: assignee } = await sb.from("cleaners")
+    .select("id, name, telegram_chat_id")
+    .eq("id", task.assigned_cleaner_id).single();
+  if (!assignee?.telegram_chat_id) return;
+  let createdBy: { name?: string } | null = null;
+  if (task.created_by_cleaner_id) {
+    const { data: c } = await sb.from("cleaners").select("name").eq("id", task.created_by_cleaner_id).single();
+    createdBy = c || null;
+  }
+  await sendTelegram(assignee.telegram_chat_id, formatTaskNotification(task, createdBy, assignee));
 }
 
 // ========== Phase 3 : photos bucket helpers ==========
@@ -311,6 +426,29 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["updateExtraCleaning", "POST"],
   ["deleteExtraCleaning", "POST"],
   ["getExtraCleanings", "GET"],
+  // ===== Team tasks (to-do partagée multi-rôles) =====
+  ["listTeamTasks", "GET"],
+  ["getTeamTask", "GET"],
+  ["createTeamTask", "POST"],
+  ["updateTeamTask", "POST"],
+  ["completeTeamTask", "POST"],
+  ["addTeamTaskComment", "POST"],
+  ["dispatchPendingEvents", "POST"],
+  ["dispatchMaintenance", "POST"],
+  // ===== Subcontractor pricing =====
+  ["getSubcontractorPricing", "GET"],
+  // ===== Reviews + Hermes cache (VPS-pushed mirrors) =====
+  ["syncReviewsCache", "POST"],
+  ["syncHermesActionsCache", "POST"],
+  ["getRecentReviews", "GET"],
+  ["getHermesActivity", "GET"],
+  ["submitHermesCommand", "POST"],
+  ["getHermesCommands", "GET"],
+  ["updateHermesCommand", "POST"],
+  // Mac commands (reverse channel : VPS Hermes → Mac launchd)
+  ["submitMacCommand", "POST"],
+  ["getMacCommands", "GET"],
+  ["updateMacCommand", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -474,21 +612,32 @@ Deno.serve(async (req: Request) => {
     }
     if (action === "saveCleaner" && req.method === "POST") {
       const body = await req.json();
-      const { id, name, phone, color, pin, role } = body;
+      const { id, name, phone, color, pin, role, telegram_chat_id } = body;
       if (!name || typeof name !== 'string' || name.length > 100) return jsonResp({ error: "name required" }, 400);
       if (pin !== undefined && pin !== null && pin !== "" && (typeof pin !== 'string' || !/^\d{3,8}$/.test(pin))) {
         return jsonResp({ error: "pin must be 3-8 digits" }, 400);
+      }
+      // telegram_chat_id : optionnel. Doit être numérique (positif ou négatif pour les groupes).
+      let normalizedTgChat: string | null | undefined = undefined;
+      if (telegram_chat_id !== undefined) {
+        const raw = (telegram_chat_id ?? "").toString().trim();
+        if (raw === "") normalizedTgChat = null;
+        else if (!/^-?\d{4,16}$/.test(raw)) return jsonResp({ error: "telegram_chat_id must be a numeric chat id" }, 400);
+        else normalizedTgChat = raw;
       }
       let cleanerId: number;
       if (id) {
         const upd: any = { name, phone: phone || null, color: color || "#e94560" };
         if (role !== undefined) upd.role = role;
+        if (normalizedTgChat !== undefined) upd.telegram_chat_id = normalizedTgChat;
         const { error } = await sb.from("cleaners").update(upd).eq("id", id);
         if (error) throw error;
         cleanerId = Number(id);
       } else {
+        const insRow: any = { name, phone: phone || null, color: color || "#e94560", role: role || "cleaner", is_active: true };
+        if (normalizedTgChat !== undefined) insRow.telegram_chat_id = normalizedTgChat;
         const { data: inserted, error } = await sb.from("cleaners")
-          .insert({ name, phone: phone || null, color: color || "#e94560", role: role || "cleaner", is_active: true })
+          .insert(insRow)
           .select("id").single();
         if (error) throw error;
         cleanerId = inserted.id;
@@ -563,20 +712,48 @@ Deno.serve(async (req: Request) => {
 
     // ==================== ASSIGNMENTS ====================
     if (action === "getAssignments") {
-      const { data, error } = await sb.from("cleaning_assignments").select("reservation_key, cleaner_id");
+      const { data, error } = await sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type");
       if (error) throw error;
       // Multi-assign model: each reservation_key maps to an array of cleaner_ids.
       const map: Record<string, number[]> = {};
+      const meta: Record<string, Record<string, string>> = {};
       (data || []).forEach((r: any) => {
         if (!map[r.reservation_key]) map[r.reservation_key] = [];
         map[r.reservation_key].push(r.cleaner_id);
+        if (!meta[r.reservation_key]) meta[r.reservation_key] = {};
+        meta[r.reservation_key][String(r.cleaner_id)] = r.service_type || 'CHC';
       });
-      return jsonResp({ status: "success", assignments: map });
+      return jsonResp({ status: "success", assignments: map, assignmentMeta: meta });
+    }
+    if (action === "getSubcontractorPricing") {
+      // Retourne la grille active (effective au moment de la requête)
+      const { data, error } = await sb.from("subcontractor_pricing")
+        .select("subcontractor_cleaner_id, service_type, bedrooms, price_ht, tax_rate, effective_from, effective_to")
+        .lte("effective_from", new Date().toISOString().split('T')[0])
+        .order("effective_from", { ascending: false });
+      if (error) throw error;
+      // Filtre côté serveur : ne garde que les prix ENCORE actifs (effective_to null ou futur),
+      // et le plus récent par tuple (sub, service, bedrooms).
+      const today = new Date().toISOString().split('T')[0];
+      const seen = new Set<string>();
+      const active: any[] = [];
+      for (const row of (data || [])) {
+        if (row.effective_to && row.effective_to < today) continue;
+        const k = `${row.subcontractor_cleaner_id}|${row.service_type}|${row.bedrooms}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        active.push(row);
+      }
+      return jsonResp({ status: "success", pricing: active });
     }
     if (action === "assignCleaner" && req.method === "POST") {
       const body = await req.json();
-      const { reservation_key, cleaner_id, cleaner_ids, mode, actor } = body;
+      const { reservation_key, cleaner_id, cleaner_ids, mode, actor, service_type } = body;
       if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
+
+      // service_type optionnel : applique à la NOUVELLE row insérée (add/set). Default CHC.
+      const ALLOWED_SERVICES = new Set(['CHC','INSTAY','INSTAY_WITH_LINENS','REFRESH','REFRESH_LINEN','CARPET_LAUNDRY','BALCONY','CHC_MATTRESS','STRIP_CLEAN','DEEP_CLEAN','CANCELLED','CANCELLED_WITH_FEE','RECTIFICATION','INSPECTION']);
+      const stype = (typeof service_type === 'string' && ALLOWED_SERVICES.has(service_type)) ? service_type : 'CHC';
 
       // Three modes — all on the same endpoint for backwards-compatibility:
       //   1. mode='set' (default if cleaner_ids passed) — replace the assignment list with cleaner_ids[].
@@ -600,18 +777,24 @@ Deno.serve(async (req: Request) => {
         if (dErr) throw dErr;
         const newList = list || (single ? [single] : []);
         if (newList.length > 0) {
-          const rows = newList.map((cid) => ({ reservation_key, cleaner_id: cid, assigned_at: new Date().toISOString() }));
+          const rows = newList.map((cid) => ({ reservation_key, cleaner_id: cid, service_type: stype, assigned_at: new Date().toISOString() }));
           const { error: iErr } = await sb.from("cleaning_assignments").insert(rows);
           if (iErr) throw iErr;
         }
-        await addLog(sb, reservation_key, newList.length ? "assigned" : "unassigned", actor, { cleaner_ids: newList });
+        await addLog(sb, reservation_key, newList.length ? "assigned" : "unassigned", actor, { cleaner_ids: newList, service_type: stype });
       } else if (op === "add") {
         if (!single) return jsonResp({ error: "cleaner_id required for add" }, 400);
         const { error: iErr } = await sb.from("cleaning_assignments")
-          .upsert({ reservation_key, cleaner_id: single, assigned_at: new Date().toISOString() },
+          .upsert({ reservation_key, cleaner_id: single, service_type: stype, assigned_at: new Date().toISOString() },
                   { onConflict: "reservation_key,cleaner_id" });
         if (iErr) throw iErr;
-        await addLog(sb, reservation_key, "assigned", actor, { cleaner_id: single, mode: "add" });
+        await addLog(sb, reservation_key, "assigned", actor, { cleaner_id: single, mode: "add", service_type: stype });
+      } else if (op === "update_service_type") {
+        // Modif du service_type sans toucher aux assignés
+        if (!single) return jsonResp({ error: "cleaner_id required for update_service_type" }, 400);
+        const { error: uErr } = await sb.from("cleaning_assignments")
+          .update({ service_type: stype }).eq("reservation_key", reservation_key).eq("cleaner_id", single);
+        if (uErr) throw uErr;
       } else if (op === "remove") {
         if (!single) return jsonResp({ error: "cleaner_id required for remove" }, 400);
         const { error: dErr } = await sb.from("cleaning_assignments")
@@ -1525,7 +1708,7 @@ Deno.serve(async (req: Request) => {
     if (action === "getAllData") {
       const [doneRes, assignRes, cleanerRes, templateRes, listingRes, timerRes, issueRes, recurRes, ticketRes, vendorRes, equipRes, prevRes, profileRes, cancelledRes, extraRes] = await Promise.all([
         sb.from("menage_done").select("reservation_key, done"),
-        sb.from("cleaning_assignments").select("reservation_key, cleaner_id"),
+        sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type"),
         sb.from("cleaners").select("*").eq("is_active", true).order("name"),
         sb.from("checklist_templates").select("*").order("name"),
         sb.from("listing_config").select("listing_id, listing_name, bedrooms, price, custom_price, unit_type, apt_number, internal_name"),
@@ -1549,9 +1732,12 @@ Deno.serve(async (req: Request) => {
       (doneRes.data || []).forEach((r: any) => { doneMap[r.reservation_key] = r.done; });
       // Multi-assign: assignments[reservation_key] is now a number[].
       const assignMap: Record<string, number[]> = {};
+      const assignMeta: Record<string, Record<string, string>> = {};
       (assignRes.data || []).forEach((r: any) => {
         if (!assignMap[r.reservation_key]) assignMap[r.reservation_key] = [];
         assignMap[r.reservation_key].push(r.cleaner_id);
+        if (!assignMeta[r.reservation_key]) assignMeta[r.reservation_key] = {};
+        assignMeta[r.reservation_key][String(r.cleaner_id)] = r.service_type || 'CHC';
       });
       const listingPrices: Record<string, any> = {};
       (listingRes.data || []).forEach((r: any) => { listingPrices[r.listing_id] = { bedrooms: r.bedrooms, price: r.price, custom_price: r.custom_price, listing_name: r.listing_name, unit_type: r.unit_type, apt_number: r.apt_number, internal_name: r.internal_name }; });
@@ -1560,7 +1746,7 @@ Deno.serve(async (req: Request) => {
       const profileMap: Record<string, any> = {};
       (profileRes.data || []).forEach((p: any) => { profileMap[p.listing_id] = p; });
       return jsonResp({
-        status: "success", done: doneMap, assignments: assignMap,
+        status: "success", done: doneMap, assignments: assignMap, assignmentMeta: assignMeta,
         cleaners: cleanerRes.data || [], templates: templateRes.data || [],
         listingPrices, timers: timerMap,
         issues: issueRes.data || [], recurringTasks: recurRes.data || [],
@@ -1853,6 +2039,485 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await q;
       if (error) throw error;
       return jsonResp({ status: "success", extras: data || [] });
+    }
+
+    // ==================== TEAM TASKS (to-do partagée multi-rôles) ====================
+    // MVP : tout user authentifié peut créer/lire/modifier. La filtration par rôle se fait
+    // côté front (manager voit tout, cleaner ne voit que ses tâches). Quand le besoin de
+    // permissions plus fines arrivera, ajouter ici un check role-based.
+    if (action === "listTeamTasks") {
+      const mine = url.searchParams.get("mine") === "1";
+      const statusFilter = url.searchParams.get("status") || "open"; // open|in_progress|done|cancelled|all
+      const assignedTo = url.searchParams.get("assigned_to");
+      const listingId = url.searchParams.get("listing_id");
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      let q = sb.from("team_tasks").select("*").order("due_at", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false });
+      if (statusFilter !== "all") q = q.eq("status", statusFilter);
+      if (mine) {
+        if (!me) return jsonResp({ error: "auth required" }, 401);
+        q = q.eq("assigned_cleaner_id", me.cleaner_id);
+      } else if (assignedTo) {
+        q = q.eq("assigned_cleaner_id", parseInt(assignedTo, 10));
+      }
+      if (listingId) q = q.eq("listing_id", listingId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return jsonResp({ status: "success", tasks: data || [] });
+    }
+    if (action === "getTeamTask") {
+      const id = url.searchParams.get("id");
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      const { data: task, error: tErr } = await sb.from("team_tasks").select("*").eq("id", id).single();
+      if (tErr) return jsonResp({ error: tErr.message }, 404);
+      const { data: comments, error: cErr } = await sb.from("team_task_comments")
+        .select("id, task_id, cleaner_id, body, created_at")
+        .eq("task_id", id).order("created_at", { ascending: true });
+      if (cErr) throw cErr;
+      return jsonResp({ status: "success", task, comments: comments || [] });
+    }
+    if (action === "createTeamTask" && req.method === "POST") {
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      const body = await req.json();
+      const { title, description, assigned_cleaner_id, priority, due_at, listing_id, category, source, source_ref } = body;
+      if (!title || typeof title !== "string" || !title.trim()) {
+        return jsonResp({ error: "title required" }, 400);
+      }
+      // Idempotence : si source_ref fourni et déjà présent en DB, retourne la tâche existante (pas de doublon).
+      if (source_ref && typeof source_ref === "string") {
+        const { data: existing } = await sb.from("team_tasks").select("*").eq("source_ref", source_ref).maybeSingle();
+        if (existing) {
+          return jsonResp({ status: "success", task: existing, deduplicated: true });
+        }
+      }
+      const row: Record<string, any> = {
+        title: title.trim(),
+        description: description ?? null,
+        priority: priority || "normal",
+        source: source || "manual",
+        category: category ?? null,
+        listing_id: listing_id ?? null,
+        assigned_cleaner_id: assigned_cleaner_id ?? null,
+        created_by_cleaner_id: me.cleaner_id,
+        due_at: due_at ?? null,
+        source_ref: source_ref ?? null,
+      };
+      const { data, error } = await sb.from("team_tasks").insert(row).select().single();
+      if (error) {
+        // Cas de course : une autre requête a inséré le même source_ref entre notre check et l'insert.
+        // L'index unique partiel renvoie 23505. On retourne la tâche maintenant présente.
+        if (error.code === "23505" && source_ref) {
+          const { data: existing } = await sb.from("team_tasks").select("*").eq("source_ref", source_ref).single();
+          if (existing) return jsonResp({ status: "success", task: existing, deduplicated: true });
+        }
+        throw error;
+      }
+      // Notif Telegram à l'assigné (si chat_id configuré) — side-effect, fail-soft
+      notifyAssignee(sb, data).catch(e => console.warn("[notifyAssignee create]", e));
+      return jsonResp({ status: "success", task: data });
+    }
+    if (action === "updateTeamTask" && req.method === "POST") {
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      const body = await req.json();
+      const { id } = body;
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      // Récupérer l'ancien assigné pour détecter une réassignation
+      const { data: prev } = await sb.from("team_tasks").select("assigned_cleaner_id").eq("id", id).single();
+      const prevAssignee = prev?.assigned_cleaner_id ?? null;
+      const allowed = ["title", "description", "status", "priority", "category", "listing_id", "assigned_cleaner_id", "due_at"];
+      const upd: Record<string, any> = {};
+      for (const k of allowed) if (k in body) upd[k] = body[k];
+      if (upd.status === "done") {
+        upd.completed_at = new Date().toISOString();
+        upd.completed_by_cleaner_id = me.cleaner_id;
+      } else if ("status" in upd && upd.status !== "done") {
+        upd.completed_at = null;
+        upd.completed_by_cleaner_id = null;
+      }
+      const { data, error } = await sb.from("team_tasks").update(upd).eq("id", id).select().single();
+      if (error) throw error;
+      // Notif Telegram uniquement si réassignation vers un NOUVEAU cleaner (pas si on update juste le titre)
+      if (data && data.assigned_cleaner_id && data.assigned_cleaner_id !== prevAssignee) {
+        notifyAssignee(sb, data).catch(e => console.warn("[notifyAssignee reassign]", e));
+      }
+      return jsonResp({ status: "success", task: data });
+    }
+    if (action === "completeTeamTask" && req.method === "POST") {
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      const body = await req.json();
+      const { id } = body;
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      const { data, error } = await sb.from("team_tasks")
+        .update({ status: "done", completed_at: new Date().toISOString(), completed_by_cleaner_id: me.cleaner_id })
+        .eq("id", id).select().single();
+      if (error) throw error;
+      return jsonResp({ status: "success", task: data });
+    }
+    // ========== DISPATCH monitoring_events → team_tasks ==========
+    // Job système : scan les events Hostaway pas encore examinés et crée les tâches selon
+    // règles métier. Idempotent via source_ref. Auth = X-App-Secret uniquement (pas besoin
+    // d'un cleaner token, c'est le serveur qui s'appelle lui-même via cron VPS).
+    if (action === "dispatchPendingEvents" && req.method === "POST") {
+      const body = await req.json().catch(() => ({}));
+      const limit = Math.min(Number(body.limit) || 50, 200);
+
+      // Lookup cleaners par nom (plus robuste que hardcoder les ids)
+      const { data: cleanersData } = await sb.from("cleaners")
+        .select("id, name").eq("is_active", true);
+      const cmap = new Map<string, number>();
+      (cleanersData || []).forEach((c: any) => cmap.set(c.name.trim().toLowerCase(), c.id));
+      const ids = {
+        HILLAL: cmap.get("hillal") ?? null,
+        WALTER: cmap.get("walter") ?? null,
+        HARLENE: cmap.get("harlene") ?? null,
+        SEMAX: cmap.get("semax") ?? null,
+        AGENT: cmap.get("medini ceo agent") ?? null,
+      };
+
+      const { data: events, error: evErr } = await sb.from("monitoring_events")
+        .select("*")
+        .eq("task_dispatched", false)
+        .order("received_at", { ascending: true })
+        .limit(limit);
+      if (evErr) throw evErr;
+
+      const results: any = {
+        scanned: events?.length || 0,
+        dispatched: 0,
+        ignored: 0,
+        errors: 0,
+        tasks: [] as any[],
+      };
+
+      for (const ev of events || []) {
+        let decision: any = null;
+        try {
+          decision = decideTaskFromEvent(ev, ids);
+        } catch (e) {
+          console.warn(`[dispatch] decide failed ev=${ev.id}:`, e);
+        }
+
+        if (decision) {
+          const sourceRef = `monit:${ev.id}`;
+          // Upsert idempotent
+          const { data: existing } = await sb.from("team_tasks").select("id").eq("source_ref", sourceRef).maybeSingle();
+          if (existing) {
+            // Déjà créée (re-run safe)
+          } else {
+            const row = {
+              ...decision,
+              source: "system",
+              source_ref: sourceRef,
+              created_by_cleaner_id: ids.AGENT,
+            };
+            const { data: newTask, error: insErr } = await sb.from("team_tasks").insert(row).select().single();
+            if (insErr) {
+              if (insErr.code !== "23505") {
+                results.errors++;
+                console.warn(`[dispatch] insert failed ev=${ev.id}:`, insErr);
+              }
+            } else {
+              results.dispatched++;
+              results.tasks.push({ event_id: ev.id, task_id: newTask.id, title: newTask.title, assignee_id: newTask.assigned_cleaner_id });
+              notifyAssignee(sb, newTask).catch(e => console.warn("[notif dispatch]", e));
+            }
+          }
+        } else {
+          results.ignored++;
+        }
+
+        // Toujours marquer comme dispatché (même si on a ignoré → ne pas reboucler)
+        await sb.from("monitoring_events")
+          .update({ task_dispatched: true, task_dispatched_at: new Date().toISOString() })
+          .eq("id", ev.id);
+      }
+
+      return jsonResp({ status: "success", ...results });
+    }
+
+    // ========== DISPATCH maintenance_tickets → team_tasks ==========
+    // Tickets maintenance ouverts, non assignés, créés depuis < N jours → tâche Semax.
+    // Auth via X-App-Secret seul. Idempotent via source_ref=maint:{id}.
+    if (action === "dispatchMaintenance" && req.method === "POST") {
+      const body = await req.json().catch(() => ({}));
+      const lookbackDays = Math.min(Number(body.lookback_days) || 3, 30);
+      const limit = Math.min(Number(body.limit) || 50, 200);
+
+      // Lookup Semax + agent system
+      const { data: cleanersData } = await sb.from("cleaners")
+        .select("id, name").eq("is_active", true);
+      const cmap = new Map<string, number>();
+      (cleanersData || []).forEach((c: any) => cmap.set(c.name.trim().toLowerCase(), c.id));
+      const SEMAX = cmap.get("semax") ?? null;
+      const AGENT = cmap.get("medini ceo agent") ?? null;
+      if (!SEMAX) return jsonResp({ error: "Semax cleaner introuvable" }, 500);
+
+      const sinceIso = new Date(Date.now() - lookbackDays * 86400_000).toISOString();
+      const { data: tickets, error: tErr } = await sb.from("maintenance_tickets")
+        .select("id, listing_id, title, description, category, priority, apartment_mention, sla_deadline, created_at, guest_risk")
+        .eq("status", "open")
+        .is("assigned_technician_id", null)
+        .is("assigned_vendor_id", null)
+        .or("to_confirm.is.null,to_confirm.eq.false")
+        .gte("created_at", sinceIso)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (tErr) throw tErr;
+
+      const results: any = { scanned: tickets?.length || 0, dispatched: 0, deduped: 0, errors: 0, tasks: [] };
+
+      // Mapping priorité ticket → team_task
+      const prioMap: Record<string, string> = {
+        urgent: "urgent", high: "high", medium: "normal", normal: "normal", low: "low",
+      };
+      // Échéance par défaut si pas de sla_deadline
+      const dueFromPriority = (p: string): string => {
+        const hours = p === "urgent" ? 24 : p === "high" ? 48 : 72;
+        return new Date(Date.now() + hours * 3600_000).toISOString();
+      };
+
+      for (const t of tickets || []) {
+        const sourceRef = `maint:${t.id}`;
+        // Idempotence : skip si tâche existe déjà
+        const { data: existing } = await sb.from("team_tasks").select("id").eq("source_ref", sourceRef).maybeSingle();
+        if (existing) { results.deduped++; continue; }
+
+        const tPriority = prioMap[(t.priority || "normal").toLowerCase()] || "normal";
+        const titlePrefix = tPriority === "urgent" ? "🚨" : "🔧";
+        const aptHint = t.apartment_mention || "";
+        const row: Record<string, any> = {
+          title: `${titlePrefix} ${t.title}`,
+          description: [
+            t.description?.trim() || "",
+            t.category ? `Category: ${t.category}` : "",
+            t.guest_risk ? `⚠ Guest risk: ${t.guest_risk}` : "",
+            `Ticket #${t.id}` + (aptHint ? ` · ${aptHint}` : ""),
+          ].filter(Boolean).join("\n"),
+          priority: tPriority,
+          source: "system",
+          source_ref: sourceRef,
+          category: "maintenance",
+          listing_id: t.listing_id || null,
+          assigned_cleaner_id: SEMAX,
+          created_by_cleaner_id: AGENT,
+          due_at: t.sla_deadline || dueFromPriority(tPriority),
+        };
+
+        const { data: newTask, error: insErr } = await sb.from("team_tasks").insert(row).select().single();
+        if (insErr) {
+          if (insErr.code === "23505") {
+            results.deduped++;
+          } else {
+            results.errors++;
+            console.warn(`[dispatchMaintenance] insert failed ticket=${t.id}:`, insErr);
+          }
+          continue;
+        }
+        results.dispatched++;
+        results.tasks.push({ ticket_id: t.id, task_id: newTask.id, title: newTask.title, priority: newTask.priority });
+        notifyAssignee(sb, newTask).catch(e => console.warn("[notif maintenance]", e));
+      }
+
+      return jsonResp({ status: "success", ...results });
+    }
+
+    // ========== REVIEWS + HERMES cache (synced from VPS) ==========
+    // sync* actions : push from VPS, upsert rows. Auth via X-App-Secret only
+    // (system job, no cleaner token). Bulk: up to a few hundred rows per call.
+    if (action === "syncReviewsCache" && req.method === "POST") {
+      const body = await req.json().catch(() => ({}));
+      const rows: any[] = Array.isArray(body.rows) ? body.rows : [];
+      if (rows.length === 0) return jsonResp({ status: "success", upserted: 0 });
+      // Chunk to stay safely under any Supabase row limits
+      const CHUNK = 200;
+      let upserted = 0;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const slice = rows.slice(i, i + CHUNK).map((r: any) => ({
+          id: Number(r.id),
+          listing_id: r.listing_id ?? null,
+          listing_name: r.listing_name ?? null,
+          reservation_id: r.reservation_id ?? null,
+          type: r.type ?? null,
+          rating: r.rating != null ? Number(r.rating) : null,
+          reviewer_name: r.reviewer_name ?? null,
+          public_review: r.public_review ?? null,
+          reviewee_response: r.reviewee_response ?? null,
+          submitted_at: r.submitted_at ?? null,
+          arrival_date: r.arrival_date ?? null,
+          departure_date: r.departure_date ?? null,
+          channel_id: r.channel_id ?? null,
+          is_hidden: !!r.is_hidden,
+          is_cancelled: !!r.is_cancelled,
+          synced_at: new Date().toISOString(),
+        }));
+        const { error } = await sb.from("reviews_cache").upsert(slice, { onConflict: "id" });
+        if (error) throw error;
+        upserted += slice.length;
+      }
+      return jsonResp({ status: "success", upserted });
+    }
+    if (action === "syncHermesActionsCache" && req.method === "POST") {
+      const body = await req.json().catch(() => ({}));
+      const rows: any[] = Array.isArray(body.rows) ? body.rows : [];
+      if (rows.length === 0) return jsonResp({ status: "success", upserted: 0 });
+      const CHUNK = 200;
+      let upserted = 0;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const slice = rows.slice(i, i + CHUNK).map((r: any) => ({
+          id: Number(r.id),
+          ts: r.ts,
+          handler: r.handler,
+          category: r.category ?? null,
+          level: r.level ?? null,
+          status: r.status ?? null,
+          summary: r.summary ?? null,
+          tg_message_id: r.tg_message_id != null ? Number(r.tg_message_id) : null,
+          payload_json: r.payload_json ?? {},
+          // Métriques LLM (depuis migration extend_hermes_actions_cache_llm_metrics)
+          input_tokens: r.input_tokens != null ? Number(r.input_tokens) : null,
+          output_tokens: r.output_tokens != null ? Number(r.output_tokens) : null,
+          cost_usd_est: r.cost_usd_est != null ? Number(r.cost_usd_est) : null,
+          latency_ms: r.latency_ms != null ? Number(r.latency_ms) : null,
+          llm_model: r.llm_model ?? null,
+          trigger: r.trigger ?? null,
+          synced_at: new Date().toISOString(),
+        }));
+        const { error } = await sb.from("hermes_actions_cache").upsert(slice, { onConflict: "id" });
+        if (error) throw error;
+        upserted += slice.length;
+      }
+      return jsonResp({ status: "success", upserted });
+    }
+    if (action === "getRecentReviews") {
+      const days = Math.min(Number(url.searchParams.get("days") || 30), 90);
+      const filter = url.searchParams.get("filter") || "all"; // all | unanswered | low_rated
+      const since = new Date(Date.now() - days * 86400_000).toISOString();
+      let q = sb.from("reviews_cache").select("*")
+        .gte("submitted_at", since)
+        .eq("is_hidden", false).eq("is_cancelled", false)
+        .order("submitted_at", { ascending: false }).limit(500);
+      if (filter === "unanswered") {
+        q = q.or("reviewee_response.is.null,reviewee_response.eq.");
+      } else if (filter === "low_rated") {
+        q = q.lte("rating", 6);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return jsonResp({ status: "success", reviews: data || [] });
+    }
+    if (action === "getHermesActivity") {
+      const days = Math.min(Number(url.searchParams.get("days") || 3), 7);
+      const handler = url.searchParams.get("handler");
+      const status = url.searchParams.get("status");
+      const since = new Date(Date.now() - days * 86400_000).toISOString();
+      let q = sb.from("hermes_actions_cache").select("*").gte("ts", since)
+        .order("ts", { ascending: false }).limit(200);
+      if (handler) q = q.eq("handler", handler);
+      if (status) q = q.eq("status", status);
+      const { data, error } = await q;
+      if (error) throw error;
+      return jsonResp({ status: "success", actions: data || [] });
+    }
+
+    // ========== HERMES COMMANDS (HK Planner → VPS bridge) ==========
+    // Insert a command for the VPS poller to pick up. Authenticated via cleaner token
+    // so we can log who initiated each action (Hillal, Walter, etc.).
+    if (action === "submitHermesCommand" && req.method === "POST") {
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const body = await req.json();
+      const { command, target, payload } = body;
+      const allowedCommands = new Set(["approve_action", "reject_action", "run_handler"]);
+      if (!command || !allowedCommands.has(command)) return jsonResp({ error: "invalid command" }, 400);
+      if (!target || typeof target !== "string") return jsonResp({ error: "target required" }, 400);
+      const row = {
+        command,
+        target,
+        payload: payload && typeof payload === "object" ? payload : {},
+        status: "pending" as const,
+        created_by: me?.name || "manager",
+      };
+      const { data, error } = await sb.from("hermes_commands").insert(row).select().single();
+      if (error) throw error;
+      return jsonResp({ status: "success", command: data });
+    }
+    if (action === "getHermesCommands") {
+      // Lookup status of recently submitted commands (poll from UI to confirm exec)
+      const target = url.searchParams.get("target");
+      const status = url.searchParams.get("status");
+      const limit = Math.min(Number(url.searchParams.get("limit") || 30), 200);
+      let q = sb.from("hermes_commands").select("*").order("created_at", { ascending: false }).limit(limit);
+      if (target) q = q.eq("target", target);
+      if (status) q = q.eq("status", status);
+      const { data, error } = await q;
+      if (error) throw error;
+      return jsonResp({ status: "success", commands: data || [] });
+    }
+    // ========== MAC COMMANDS (Hermes VPS → Mac launchd) ==========
+    if (action === "submitMacCommand" && req.method === "POST") {
+      const body = await req.json();
+      const { command, payload, created_by } = body;
+      const allowed = new Set(["push_claude_creds"]);
+      if (!command || !allowed.has(command)) return jsonResp({ error: "invalid command" }, 400);
+      const row = {
+        command,
+        payload: payload && typeof payload === "object" ? payload : {},
+        status: "pending" as const,
+        created_by: created_by || "system",
+      };
+      const { data, error } = await sb.from("mac_commands").insert(row).select().single();
+      if (error) throw error;
+      return jsonResp({ status: "success", command: data });
+    }
+    if (action === "getMacCommands") {
+      const status = url.searchParams.get("status");
+      const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
+      let q = sb.from("mac_commands").select("*").order("created_at", { ascending: false }).limit(limit);
+      if (status) q = q.eq("status", status);
+      const { data, error } = await q;
+      if (error) throw error;
+      return jsonResp({ status: "success", commands: data || [] });
+    }
+    if (action === "updateMacCommand" && req.method === "POST") {
+      const body = await req.json();
+      const { id, status: newStatus, result } = body;
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      const allowed = new Set(["pending", "processing", "done", "failed"]);
+      if (!allowed.has(newStatus)) return jsonResp({ error: "invalid status" }, 400);
+      const upd: Record<string, any> = { status: newStatus };
+      if (result !== undefined) upd.result = result;
+      if (newStatus === "done" || newStatus === "failed") upd.processed_at = new Date().toISOString();
+      const { data, error } = await sb.from("mac_commands").update(upd).eq("id", id).select().single();
+      if (error) throw error;
+      return jsonResp({ status: "success", command: data });
+    }
+
+    if (action === "updateHermesCommand" && req.method === "POST") {
+      // Called by VPS poller to mark a command as processing/done/failed
+      const body = await req.json();
+      const { id, status: newStatus, result } = body;
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      const allowed = new Set(["pending", "processing", "done", "failed"]);
+      if (!allowed.has(newStatus)) return jsonResp({ error: "invalid status" }, 400);
+      const upd: Record<string, any> = { status: newStatus };
+      if (result !== undefined) upd.result = result;
+      if (newStatus === "done" || newStatus === "failed") upd.processed_at = new Date().toISOString();
+      const { data, error } = await sb.from("hermes_commands").update(upd).eq("id", id).select().single();
+      if (error) throw error;
+      return jsonResp({ status: "success", command: data });
+    }
+
+    if (action === "addTeamTaskComment" && req.method === "POST") {
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      const body = await req.json();
+      const { task_id, body: text } = body;
+      if (!task_id || !text || !text.trim()) return jsonResp({ error: "task_id and body required" }, 400);
+      const { data, error } = await sb.from("team_task_comments")
+        .insert({ task_id, cleaner_id: me.cleaner_id, body: text.trim() }).select().single();
+      if (error) throw error;
+      return jsonResp({ status: "success", comment: data });
     }
 
     return jsonResp({ error: "Unknown action" }, 400);
