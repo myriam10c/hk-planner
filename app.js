@@ -1207,22 +1207,40 @@ function getCleaningFee(r){
 // Dashboard revenue: exact Hostaway fee (no fallback — matches rental activity)
 function getRevenueFee(r){return r.cleaningFee||0;}
 // Revenue per cleaner (dashboard): month='YYYY-MM'
-// IMPORTANT : cost par cleaning ne s'applique QU'aux subcontractors (Elite, id=12).
-// Les cleaners INTERNES (Faiza, Pionah) sont salariés mensuels — leur cost par
-// cleaning = 0 ici (le salaire est un cost fixe géré ailleurs en OPEX).
+// CORRIGÉ 21/05/2026 : utilise dashData.reservations (MOIS COMPLET chargé par
+// loadDashMonth) et dashData.done/assignments — au lieu de RESERVATIONS globale
+// qui ne contient que la SEMAINE EN COURS (chargée par fetchAll/getWeekRange).
+//
+// Bug initial : Faiza affichait 6 cleanings alors qu'elle en fait 44 sur le mois
+// (= la semaine en cours seulement était comptée).
+//
+// Cost rule : ne s'applique QU'aux subcontractors (Elite role='subcontractor').
+// Les internes (Faiza, Pionah role='cleaner') ont cost=0 par cleaning (salaire
+// mensuel fixe géré en OPEX, pas par job).
 function computeRevenuePerCleaner(month){
   const monthPrefix=month;
+  // Source : dashData (mois complet) si disponible, sinon fallback global (semaine)
+  const srcReservations = (dashData && dashData.reservations) ? dashData.reservations : (RESERVATIONS||[]);
+  const srcDone = (dashData && dashData.done) ? dashData.done : (done||{});
+  const srcAssign = (dashData && dashData.assignments) ? dashData.assignments : (assignments||{});
+  const assigneeIdsOf = (key) => {
+    const v = srcAssign[key];
+    if (Array.isArray(v)) return v;
+    if (v) return [v];
+    return [];
+  };
+
   const byCleaner={};
   (cleaners||[]).forEach(c=>{
     byCleaner[c.id]={id:c.id,name:c.name,color:c.color,role:c.role,cleanings:0,revenueAED:0,costAED:0};
   });
   // Multi-assign: revenue split equally across the assigned cleaners.
   // Cost split equally BUT only debited to subcontractor cleaners.
-  (RESERVATIONS||[]).forEach(r=>{
+  srcReservations.forEach(r=>{
     const key=keyFor(r);
     if(!(r.co||'').startsWith(monthPrefix)) return;
-    if(!done[key]) return;
-    const ids=getAssigneeIds(key).filter(id=>byCleaner[id]);
+    if(!srcDone[key]) return;
+    const ids=assigneeIdsOf(key).filter(id=>byCleaner[id]);
     if(ids.length===0) return;
     const rev=Number(r.cleaningFee||0)/ids.length;
     const lp=listingPrices[r.listingId];
@@ -1230,15 +1248,14 @@ function computeRevenuePerCleaner(month){
     ids.forEach(cid=>{
       byCleaner[cid].cleanings++;
       byCleaner[cid].revenueAED+=rev;
-      // Cost only for subcontractors (Elite). Internal salariés = 0 per-job.
       if(byCleaner[cid].role==='subcontractor') byCleaner[cid].costAED+=costPerCleaner;
     });
   });
   (extraCleanings||[]).forEach(e=>{
     if(!String(e.cleaning_date||'').startsWith(monthPrefix)) return;
-    const isDone=e.status==='done'||done[e.reservation_key];
+    const isDone=e.status==='done'||srcDone[e.reservation_key];
     if(!isDone) return;
-    const ids=getAssigneeIds(e.reservation_key).filter(id=>byCleaner[id]);
+    const ids=assigneeIdsOf(e.reservation_key).filter(id=>byCleaner[id]);
     if(ids.length===0) return;
     const rev=Number(e.price_billed||0)/ids.length;
     const defaultCost=(()=>{const l=listingPrices[e.listing_id];return l?Number(l.custom_price||l.price||0):0;})();
