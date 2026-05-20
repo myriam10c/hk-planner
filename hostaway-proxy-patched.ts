@@ -442,6 +442,9 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["syncHermesActionsCache", "POST"],
   ["getRecentReviews", "GET"],
   ["getHermesActivity", "GET"],
+  ["getCleaningAccounting", "GET"],
+  ["listCleaningAccountingMonths", "GET"],
+  ["syncCleaningAccounting", "POST"],
   ["submitHermesCommand", "POST"],
   ["getHermesCommands", "GET"],
   ["updateHermesCommand", "POST"],
@@ -2419,6 +2422,46 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await q;
       if (error) throw error;
       return jsonResp({ status: "success", actions: data || [] });
+    }
+    // ========== CLEANING ACCOUNTING (Elite subcontractor) ==========
+    // Read : current data for a month. Returns the cached snapshot computed by VPS handler.
+    if (action === "getCleaningAccounting") {
+      const month = url.searchParams.get("month");  // YYYY-MM
+      if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+        return jsonResp({ error: "month param required (YYYY-MM)" }, 400);
+      }
+      const { data, error } = await sb.from("cleaning_accounting_cache")
+        .select("*").eq("month", month).maybeSingle();
+      if (error) throw error;
+      return jsonResp({ status: "success", month, data: data || null });
+    }
+    // List all months that have cached data (for the month picker)
+    if (action === "listCleaningAccountingMonths") {
+      const { data, error } = await sb.from("cleaning_accounting_cache")
+        .select("month, rows_count, unmatched_count, computed_at, totals_json")
+        .order("month", { ascending: false });
+      if (error) throw error;
+      return jsonResp({ status: "success", months: data || [] });
+    }
+    // Write : VPS handler pushes computed snapshot.
+    if (action === "syncCleaningAccounting" && req.method === "POST") {
+      const body = await req.json().catch(() => ({}));
+      const month = body.month;
+      if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+        return jsonResp({ error: "month required (YYYY-MM)" }, 400);
+      }
+      const row = {
+        month,
+        payload_json: body.payload_json ?? {},
+        totals_json: body.totals_json ?? {},
+        rows_count: Number(body.rows_count || 0),
+        unmatched_count: Number(body.unmatched_count || 0),
+        computed_at: new Date().toISOString(),
+        synced_at: new Date().toISOString(),
+      };
+      const { error } = await sb.from("cleaning_accounting_cache").upsert(row, { onConflict: "month" });
+      if (error) throw error;
+      return jsonResp({ status: "success", month, rows_count: row.rows_count });
     }
 
     // ========== HERMES COMMANDS (HK Planner → VPS bridge) ==========

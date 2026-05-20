@@ -939,6 +939,8 @@ let propertyProfiles={};
 let dashKPIs=null,dashKPIsLoading=false;
 // Hermes Activity tab (auto-agent observability)
 let hermesData=null,hermesLoading=false,hermesFilter={handler:'',status:'',days:7};
+// Subcontractors tab (Elite Cleaning accounting)
+let subData=null,subLoading=false,subMonth=null,subAvailableMonths=null;
 let liveTimerInterval=null;
 let currentLang='en';
 let calMonth=new Date().getMonth(),calYear=new Date().getFullYear();
@@ -1828,6 +1830,45 @@ function setHermesFilter(key,val){
   hermesFilter[key]=val;loadHermesActivity();
 }
 function refreshHermes(){loadHermesActivity();}
+
+// ============== SUBCONTRACTORS (Elite accounting) ==============
+async function loadSubcontractorMonths(){
+  try{
+    const res=await api('listCleaningAccountingMonths');
+    subAvailableMonths=res.months||[];
+    if(!subMonth && subAvailableMonths.length>0) subMonth=subAvailableMonths[0].month;
+  }catch(e){subAvailableMonths=[];}
+  render();
+}
+async function loadSubcontractorMonth(month){
+  if(month) subMonth=month;
+  if(!subMonth){
+    const d=new Date(); subMonth=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  }
+  subLoading=true;render();
+  try{
+    const res=await api('getCleaningAccounting',{params:{month:subMonth}});
+    subData=res.data;
+  }catch(e){subData=null;console.error('loadSubcontractorMonth',e);}
+  subLoading=false;render();
+}
+function setSubMonth(m){loadSubcontractorMonth(m);}
+function refreshSub(){loadSubcontractorMonth(subMonth);}
+function exportSubCsv(){
+  if(!subData||!subData.payload_json||!subData.payload_json.rows){toast('No data','error');return;}
+  const rows=subData.payload_json.rows;
+  const headers=['cleaning_date','resa_id','listing_id','listing_internal','guest','arrival','departure','nights','service_type','bedrooms','cost_ht','vat_input','cost_ttc','revenue_ttc','revenue_ht','vat_output','margin_ht','vat_net','revenue_status'];
+  const csv=[headers.join(',')].concat(rows.map(r=>headers.map(h=>{
+    const v=r[h]??'';
+    const s=String(v).replace(/"/g,'""');
+    return s.includes(',')||s.includes('"')||s.includes('\n')?`"${s}"`:s;
+  }).join(','))).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=`elite_accounting_${subMonth}.csv`;
+  document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  toast('CSV downloaded','success');
+}
 
 async function saveCleaner(id,name,phone,color,pin,role){
   await api('saveCleaner',{body:{id:id||undefined,name,phone,color,pin:pin||null,role:role||'cleaner'}});
@@ -2784,6 +2825,11 @@ function render(){
   if(currentTab==='calendar')return renderCalendar();
   if(currentTab==='stats')return renderCleanerStats();
   if(currentTab==='hermes'){if(hermesData===null && !hermesLoading)loadHermesActivity();return renderHermes();}
+  if(currentTab==='subcontractors'){
+    if(subAvailableMonths===null)loadSubcontractorMonths();
+    if(subData===null && !subLoading && subMonth)loadSubcontractorMonth();
+    return renderSubcontractors();
+  }
   renderPlanner();
 }
 
@@ -2796,6 +2842,7 @@ function renderBottomNav(){
       {id:'dashboard',icon:icon('chart',22),label:t('dashboard')},
       {id:'maintenance',icon:icon('wrench',22),label:'Maint.'},
       {id:'hermes',icon:icon('zap',22),label:'Hermes'},
+      {id:'subcontractors',icon:icon('dollar',22),label:'Subs'},
       {id:'settings',icon:icon('settings',22),label:t('settings')},
       {id:'__more',icon:icon('more',22),label:'More'},
     ];
@@ -4233,6 +4280,117 @@ function renderCalendar(){
 }
 
 // ============ CLEANER STATS ============
+// ============== SUBCONTRACTORS TAB (Elite accounting) ==============
+function renderSubcontractors(){
+  let h='<div class="header"><div class="header-top"><h1>💰 Subcontractors — Elite Cleaning</h1>'+
+    '<div style="flex:1"></div>'+
+    '<button class="icon-btn" data-action="refreshSub" title="Refresh">'+icon('refresh',18)+'</button>'+
+    '<button class="icon-btn" data-action="exportSubCsv" title="Export CSV">'+icon('download',18)+'</button>'+
+    '</div></div>';
+  h+='<div class="container">';
+
+  // Month picker
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding:10px;background:rgba(0,0,0,0.02);border-radius:12px;align-items:center">';
+  h+='<span style="font-size:12px;color:var(--text3);font-weight:700;margin-right:8px">Month:</span>';
+  if(subAvailableMonths && subAvailableMonths.length){
+    subAvailableMonths.slice(0,6).forEach(m=>{
+      h+='<button class="dash-tab'+(subMonth===m.month?' active':'')+'" data-action="setSubMonth" data-arg0="'+m.month+'" style="padding:6px 12px;font-size:12px">'+
+        m.month+' <span style="color:var(--text3);font-size:10px">('+m.rows_count+')</span></button>';
+    });
+  } else {
+    h+='<span style="font-size:12px;color:var(--text3)">Loading available months…</span>';
+  }
+  h+='</div>';
+
+  if(subLoading){
+    h+='<div style="text-align:center;padding:40px;color:var(--text3)">Loading…</div>';
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h;return;
+  }
+  if(!subData||!subData.totals_json){
+    h+='<div class="empty-state" style="text-align:center;padding:60px 20px;color:var(--text3)">'+
+      '<div style="font-size:48px;margin-bottom:12px">📊</div>'+
+      '<div style="font-size:16px;font-weight:600;margin-bottom:6px">No data for '+(subMonth||'this month')+' yet</div>'+
+      '<div style="font-size:13px">VPS handler runs hourly. Wait or trigger manually.</div></div>';
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h;return;
+  }
+
+  const t=subData.totals_json;
+  const rows=(subData.payload_json&&subData.payload_json.rows)||[];
+  const unm=((subData.payload_json&&subData.payload_json.unmatched_resa)||[]).length +
+            ((subData.payload_json&&subData.payload_json.unmatched_pricing)||[]).length;
+
+  // KPI bar
+  h+='<div class="dash-card" style="border:1px solid rgba(16,185,129,0.15);overflow:hidden;position:relative;margin-bottom:14px">';
+  h+='<div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#10b981,#059669)"></div>';
+  h+='<h3 style="margin-bottom:14px;margin-top:4px">📊 '+subMonth+' Summary</h3>';
+  h+='<div class="dash-stat-row" style="flex-wrap:wrap">';
+  h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--primary)"><div class="ds-num">'+t.cleanings_count+'</div><div class="ds-label">Cleanings</div></div>';
+  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--primary)"><div class="ds-num">'+(t.revenue_ttc||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Revenue TTC</div></div>';
+  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--orange)"><div class="ds-num">'+(t.cost_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Cost HT (Elite)</div></div>';
+  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--green)"><div class="ds-num" style="color:var(--green)">'+(t.margin_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Margin HT ('+(t.margin_pct||0).toFixed(1)+'%)</div></div>';
+  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--orange)"><div class="ds-num">'+(t.vat_net||0).toLocaleString('en',{maximumFractionDigits:2})+'</div><div class="ds-label">VAT net (to FTA)</div></div>';
+  if(unm>0)h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid #ef4444"><div class="ds-num" style="color:#ef4444">'+unm+'</div><div class="ds-label">Unmatched</div></div>';
+  h+='</div>';
+  h+='<div style="margin-top:10px;font-size:11px;color:var(--text3)">Computed at '+(subData.computed_at||'?').slice(0,16)+' UTC · Source: cleaning_assignments + Hostaway cleaningFee + subcontractor_pricing</div>';
+  h+='</div>';
+
+  // Breakdown by service / bedrooms
+  function breakdownTable(title,obj){
+    let s='<div class="dash-card" style="margin-bottom:14px"><h3 style="margin-bottom:14px">'+title+'</h3>';
+    s+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">';
+    s+='<thead><tr style="border-bottom:2px solid rgba(0,0,0,0.08)"><th style="text-align:left;padding:8px 6px">Category</th><th style="text-align:right;padding:8px 6px">Count</th><th style="text-align:right;padding:8px 6px">Cost HT</th><th style="text-align:right;padding:8px 6px">Revenue HT</th><th style="text-align:right;padding:8px 6px">Margin HT</th><th style="text-align:right;padding:8px 6px">Margin %</th></tr></thead><tbody>';
+    const entries=Object.entries(obj||{}).sort((a,b)=>b[1].count-a[1].count);
+    entries.forEach(([k,v])=>{
+      const pct=v.revenue_ht>0?(v.margin_ht/v.revenue_ht*100).toFixed(1):'?';
+      s+='<tr style="border-bottom:1px solid rgba(0,0,0,0.04)"><td style="padding:8px 6px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(k)+'</td>'+
+        '<td style="padding:8px 6px;text-align:right;font-weight:600">'+v.count+'</td>'+
+        '<td style="padding:8px 6px;text-align:right">'+v.cost_ht.toLocaleString('en',{maximumFractionDigits:2})+'</td>'+
+        '<td style="padding:8px 6px;text-align:right">'+v.revenue_ht.toLocaleString('en',{maximumFractionDigits:2})+'</td>'+
+        '<td style="padding:8px 6px;text-align:right;font-weight:600;color:'+(v.margin_ht>0?'var(--green)':'var(--orange)')+'">'+v.margin_ht.toLocaleString('en',{maximumFractionDigits:2})+'</td>'+
+        '<td style="padding:8px 6px;text-align:right;color:var(--text3)">'+pct+'%</td></tr>';
+    });
+    s+='</tbody></table></div></div>';
+    return s;
+  }
+  if(t.by_service&&Object.keys(t.by_service).length)h+=breakdownTable('🛎 Par service type',t.by_service);
+  if(t.by_bedrooms&&Object.keys(t.by_bedrooms).length)h+=breakdownTable('🛏 Par bedrooms',t.by_bedrooms);
+
+  // Detail table (paginated to first 100)
+  h+='<div class="dash-card"><h3 style="margin-bottom:14px">📋 Detail cleanings ('+rows.length+')</h3>';
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+  h+='<thead><tr style="border-bottom:2px solid rgba(0,0,0,0.08)">'+
+    '<th style="text-align:left;padding:6px">Date</th>'+
+    '<th style="text-align:left;padding:6px">Listing</th>'+
+    '<th style="text-align:left;padding:6px">Guest</th>'+
+    '<th style="text-align:left;padding:6px">Service</th>'+
+    '<th style="text-align:left;padding:6px">BR</th>'+
+    '<th style="text-align:right;padding:6px">Cost HT</th>'+
+    '<th style="text-align:right;padding:6px">Rev TTC</th>'+
+    '<th style="text-align:right;padding:6px">Margin HT</th>'+
+    '<th style="text-align:right;padding:6px">VAT net</th>'+
+    '</tr></thead><tbody>';
+  rows.slice(0,200).forEach(r=>{
+    const warn=r.revenue_status!=='OK'?'background:#fef3c7':'';
+    h+='<tr style="border-bottom:1px solid rgba(0,0,0,0.04);'+warn+'">'+
+      '<td style="padding:6px">'+esc(r.cleaning_date)+'</td>'+
+      '<td style="padding:6px;font-size:11px"><code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">'+r.listing_id+'</code> '+esc((r.listing_internal||'').slice(0,30))+'</td>'+
+      '<td style="padding:6px">'+esc((r.guest||'').slice(0,22))+'</td>'+
+      '<td style="padding:6px;font-size:11px">'+esc(r.service_type)+'</td>'+
+      '<td style="padding:6px;font-size:11px">'+esc(r.bedrooms)+'</td>'+
+      '<td style="padding:6px;text-align:right">'+r.cost_ht.toFixed(2)+'</td>'+
+      '<td style="padding:6px;text-align:right">'+r.revenue_ttc.toFixed(2)+'</td>'+
+      '<td style="padding:6px;text-align:right;font-weight:600;color:'+(r.margin_ht>0?'var(--green)':(r.margin_ht<0?'#ef4444':'var(--text3)'))+'">'+r.margin_ht.toFixed(2)+'</td>'+
+      '<td style="padding:6px;text-align:right">'+r.vat_net.toFixed(2)+'</td>'+
+      '</tr>';
+  });
+  h+='</tbody></table></div></div>';
+
+  h+='</div>'+renderBottomNav();
+  document.getElementById('app').innerHTML=h;
+}
+
 // ============== HERMES TAB ==============
 function renderHermes(){
   // Header
