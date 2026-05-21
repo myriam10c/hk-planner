@@ -3675,85 +3675,146 @@ function renderDashboard(){
     h+='</div>'; // end dash-grid
   }
 
-  // ============ TAB: REVENUE ============
+  // ============ TAB: REVENUE (refonte 21/05/2026) ============
   if(dashSection==='revenue'){
-    h+='<div class="dash-grid">';
-    // Revenue with visual gauge
     const revPct=revPotential>0?Math.round(revDone/revPotential*100):0;
-    h+='<div class="dash-card"><h3>'+icon('dollar',18)+' Cleaning Fees</h3>';
-    h+='<div style="display:flex;align-items:center;gap:16px;margin:10px 0">';
-    h+='<div style="position:relative;width:80px;height:80px;flex-shrink:0">';
-    h+='<svg viewBox="0 0 36 36" style="width:80px;height:80px;transform:rotate(-90deg)">';
-    h+='<circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--border)" stroke-width="3"/>';
-    h+='<circle cx="18" cy="18" r="15.9" fill="none" stroke="url(#revGrad)" stroke-width="3" stroke-linecap="round" stroke-dasharray="'+revPct+' '+(100-revPct)+'" style="transition:stroke-dasharray 1s cubic-bezier(0.4,0,0.2,1)"/>';
+    const avgFee=mRes.length>0?Math.round(revPotential/mRes.length):0;
+    const monthName=MONTH_NAMES[dashMonth]+' '+dashYear;
+
+    // ===== KPI TOP BAR (full width) =====
+    h+='<div class="dash-card" style="margin-bottom:14px;background:linear-gradient(135deg,#fafbfc 0%,#fff 100%);border:1px solid #e5e7eb">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">';
+    h+='<h3 style="margin:0">💰 Revenue '+esc(monthName)+'</h3>';
+    h+='<span style="font-size:11px;color:#6b7280">Source : Hostaway cleaningFee · '+mRes.length+' réservations / '+(Object.keys(mDone).length)+' marquées done</span>';
+    h+='</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px">';
+    const kpis=[
+      {label:'Earned (done)',value:revDone,color:'#059669',unit:'AED'},
+      {label:'Potential',value:revPotential,color:'#6b7280',unit:'AED'},
+      {label:'Completion',value:revPct,color:revPct>=70?'#059669':(revPct>=40?'#d97706':'#dc2626'),unit:'%'},
+      {label:'Avg fee/cleaning',value:avgFee,color:'#1f2937',unit:'AED'},
+      {label:'Cleanings count',value:mRes.length,color:'#1f2937',unit:''},
+    ];
+    kpis.forEach(k=>{
+      h+='<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;border-left:3px solid '+k.color+'">';
+      h+='<div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">'+k.label+'</div>';
+      h+='<div style="font-size:20px;font-weight:700;color:'+k.color+';margin-top:2px">'+(typeof k.value==='number'?k.value.toLocaleString():k.value)+'<span style="font-size:11px;font-weight:500;margin-left:3px;color:#6b7280">'+k.unit+'</span></div>';
+      h+='</div>';
+    });
+    h+='</div></div>';
+
+    // ===== 2-COLUMN GRID =====
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px;margin-bottom:14px">';
+
+    // --- LEFT COLUMN ---
+    h+='<div>';
+
+    // Cleaning Fees Gauge (BIG pie chart)
+    h+='<div class="dash-card"><h3>'+icon('dollar',18)+' Cleaning Fees — Completion</h3>';
+    h+='<div style="display:flex;align-items:center;gap:20px;margin:14px 0;padding:6px">';
+    h+='<div style="position:relative;width:140px;height:140px;flex-shrink:0">';
+    h+='<svg viewBox="0 0 36 36" style="width:140px;height:140px;transform:rotate(-90deg)">';
+    h+='<circle cx="18" cy="18" r="15.9" fill="none" stroke="#f3f4f6" stroke-width="3.2"/>';
+    h+='<circle cx="18" cy="18" r="15.9" fill="none" stroke="url(#revGrad)" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="'+revPct+' '+(100-revPct)+'" style="transition:stroke-dasharray 1s cubic-bezier(0.4,0,0.2,1)"/>';
     h+='<defs><linearGradient id="revGrad"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#34d399"/></linearGradient></defs>';
     h+='</svg>';
-    h+='<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><span style="font-size:16px;font-weight:900;color:var(--green)">'+revPct+'%</span></div></div>';
-    h+='<div style="flex:1"><div style="font-size:22px;font-weight:900;color:var(--green)">'+revDone.toLocaleString()+' <span style="font-size:12px;font-weight:600">AED</span></div>';
-    h+='<div style="font-size:11px;color:var(--text3)">of '+revPotential.toLocaleString()+' AED potential</div>';
-    const revByType={};mRes.forEach(r=>{const type=getUnitType(r.listingId);if(!revByType[type])revByType[type]={count:0,rev:0};revByType[type].count++;revByType[type].rev+=getRevenueFee(r);});
-    h+='<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">';
-    const typeColors={'Studio':'var(--primary)','1 BR':'var(--orange)','2 BR':'#6366f1','3 BR':'var(--green)'};
-    Object.entries(revByType).sort((a,b)=>b[1].rev-a[1].rev).forEach(([type,d])=>{
-      h+='<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:'+(typeColors[type]||'var(--border)')+'15;color:'+(typeColors[type]||'var(--text2)')+'">'+type+': '+d.count+'×'+getCleaningFee(mRes.find(r=>getUnitType(r.listingId)===type))+'</span>';
-    });
-    h+='</div></div></div></div>';
+    h+='<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">';
+    h+='<span style="font-size:32px;font-weight:800;color:#059669;line-height:1">'+revPct+'%</span>';
+    h+='<span style="font-size:10px;color:#6b7280;font-weight:600;margin-top:2px">EARNED</span></div></div>';
+    h+='<div style="flex:1;min-width:0">';
+    h+='<div style="font-size:13px;color:#6b7280;font-weight:600">Earned so far</div>';
+    h+='<div style="font-size:28px;font-weight:800;color:#059669;line-height:1.1">'+revDone.toLocaleString()+' <span style="font-size:13px;font-weight:600;color:#6b7280">AED</span></div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#6b7280">on '+revPotential.toLocaleString()+' AED potential</div>';
+    h+='<div style="margin-top:4px;font-size:12px;color:#6b7280">remaining : <strong style="color:#1f2937">'+Math.max(0,revPotential-revDone).toLocaleString()+' AED</strong></div>';
+    h+='</div></div></div>';
 
-    // Extra cleanings card
+    // Daily Revenue Chart
+    h+='<div class="dash-card" style="margin-top:14px"><h3>📉 Daily Revenue</h3><div class="chart-container" style="height:240px"><canvas id="revenueChart"></canvas></div></div>';
+
+    h+='</div>'; // end left col
+
+    // --- RIGHT COLUMN ---
+    h+='<div>';
+
+    // Revenue per cleaner (table clean)
+    const revenuePerCleaner=computeRevenuePerCleaner(dashYear+'-'+String(dashMonth+1).padStart(2,'0'));
+    if(revenuePerCleaner.length>0){
+      h+='<div class="dash-card"><h3>'+icon('user',18)+' Revenue per cleaner ('+revenuePerCleaner.length+')</h3>';
+      h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;min-width:380px">';
+      h+='<thead><tr style="border-bottom:2px solid #e5e7eb"><th style="text-align:left;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleaner</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleanings</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Revenue</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cost</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Margin</th></tr></thead><tbody>';
+      revenuePerCleaner.forEach(c=>{
+        const isSub=c.role==='subcontractor';
+        const marginColor=c.marginAED>=0?'#059669':'#dc2626';
+        const roleBadge=isSub
+          ?'<span style="display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;background:#fef3c7;color:#92400e;margin-left:6px">SUB</span>'
+          :'<span style="display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;background:#dbeafe;color:#1e40af;margin-left:6px">STAFF</span>';
+        h+='<tr style="border-bottom:1px solid #f3f4f6">'+
+          '<td style="padding:10px 6px;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+(c.color||'#888')+';margin-right:6px;vertical-align:middle"></span>'+esc(c.name)+roleBadge+'</td>'+
+          '<td style="padding:10px 6px;text-align:right;font-weight:600">'+c.cleanings+'</td>'+
+          '<td style="padding:10px 6px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap">'+Math.round(c.revenueAED).toLocaleString()+'</td>'+
+          '<td style="padding:10px 6px;text-align:right;font-variant-numeric:tabular-nums;color:#6b7280;white-space:nowrap">'+(isSub?Math.round(c.costAED).toLocaleString():'—')+'</td>'+
+          '<td style="padding:10px 6px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:'+marginColor+';white-space:nowrap">'+(c.marginAED>=0?'+':'')+Math.round(c.marginAED).toLocaleString()+'</td>'+
+          '</tr>';
+      });
+      h+='</tbody></table></div>';
+      h+='<div style="font-size:10px;color:#9ca3af;margin-top:8px;line-height:1.4">💡 STAFF = salariés (cost mensuel fixe, pas comptabilisé per-cleaning). SUB = sous-traitants (cost par cleaning depuis subcontractor_pricing).</div>';
+      h+='</div>';
+    }
+
+    // By Type (table propre)
+    const byType={};
+    mRes.forEach(r=>{const label=getUnitType(r.listingId);if(!byType[label])byType[label]=[];byType[label].push(r);});
+    h+='<div class="dash-card" style="margin-top:14px"><h3>🏠 By Type</h3>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:340px">';
+    h+='<thead><tr style="border-bottom:2px solid #e5e7eb"><th style="text-align:left;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Type</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Total</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Done</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">% Done</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Revenue</th></tr></thead><tbody>';
+    const typeColors={'Studio':'#0071e3','1 BR':'#f59e0b','2 BR':'#6366f1','3 BR':'#10b981'};
+    Object.entries(byType).sort((a,b)=>b[1].length-a[1].length).forEach(([type,list])=>{
+      const d=list.filter(r=>mDone[keyFor(r)]).length;
+      const rev=list.reduce((s,r)=>s+getRevenueFee(r),0);
+      const pct=list.length>0?Math.round(d/list.length*100):0;
+      const color=typeColors[type]||'#6b7280';
+      const dWarn=d>list.length?'⚠️':'';  // safety check
+      h+='<tr style="border-bottom:1px solid #f3f4f6">'+
+        '<td style="padding:10px 6px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:6px;vertical-align:middle"></span><strong>'+type+'</strong></td>'+
+        '<td style="padding:10px 6px;text-align:right;font-variant-numeric:tabular-nums">'+list.length+'</td>'+
+        '<td style="padding:10px 6px;text-align:right;font-variant-numeric:tabular-nums">'+d+' '+dWarn+'</td>'+
+        '<td style="padding:10px 6px;text-align:right;font-variant-numeric:tabular-nums;color:'+(pct>=70?'#059669':(pct>=40?'#d97706':'#dc2626'))+';font-weight:600">'+pct+'%</td>'+
+        '<td style="padding:10px 6px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">'+rev.toLocaleString()+' AED</td>'+
+        '</tr>';
+    });
+    h+='</tbody></table></div></div>';
+
+    h+='</div>'; // end right col
+
+    h+='</div>'; // end 2-col grid
+
+    // ===== EXTRA CLEANINGS (full width if exists) =====
     if(monthExtras.length>0){
-      h+='<div class="dash-card"><h3>'+icon('plus',18)+' Extra Cleanings — '+MONTH_NAMES[dashMonth]+'</h3><div class="dash-stat-row">'+
-        '<div class="dash-stat"><div class="ds-num">'+monthExtras.length+'</div><div class="ds-label">Total</div></div>'+
-        '<div class="dash-stat"><div class="ds-num">'+extrasDone.length+'</div><div class="ds-label">Done</div></div>'+
-        '<div class="dash-stat"><div class="ds-num" style="color:var(--green)">'+Math.round(extrasBilledDone)+'</div><div class="ds-label">Billed AED (done)</div></div>'+
-        '<div class="dash-stat"><div class="ds-num" style="color:var(--text2)">'+Math.round(extrasBilledPending)+'</div><div class="ds-label">Upcoming AED</div></div></div>';
+      h+='<div class="dash-card"><h3>'+icon('plus',18)+' Extra Cleanings — '+esc(monthName)+'</h3>';
+      h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-top:10px">';
+      const extraKpis=[
+        {label:'Total',value:monthExtras.length,color:'#1f2937'},
+        {label:'Done',value:extrasDone.length,color:'#059669'},
+        {label:'Pending',value:extrasPending.length,color:'#d97706'},
+        {label:'Billed (done)',value:Math.round(extrasBilledDone),color:'#059669',unit:'AED'},
+        {label:'Upcoming',value:Math.round(extrasBilledPending),color:'#6b7280',unit:'AED'},
+      ];
+      extraKpis.forEach(k=>{
+        h+='<div style="background:#fafbfc;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center">';
+        h+='<div style="font-size:10px;color:#6b7280;font-weight:600;text-transform:uppercase">'+k.label+'</div>';
+        h+='<div style="font-size:18px;font-weight:700;color:'+k.color+';margin-top:2px">'+k.value.toLocaleString()+(k.unit?' <span style="font-size:10px;color:#6b7280">'+k.unit+'</span>':'')+'</div>';
+        h+='</div>';
+      });
+      h+='</div>';
       if(extrasCleanerCost>0){
         const margin=extrasBilledDone-extrasCleanerCost;
-        h+='<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)">'+
-          'Cleaner cost: <strong>'+Math.round(extrasCleanerCost)+' AED</strong> · '+
-          'Margin: <strong style="color:'+(margin>=0?'var(--green)':'var(--red)')+'">'+Math.round(margin)+' AED</strong>'+
+        h+='<div style="margin-top:14px;padding:10px 14px;background:#f9fafb;border-radius:8px;font-size:13px;color:#374151">'+
+          '<strong>Cleaner cost :</strong> '+Math.round(extrasCleanerCost).toLocaleString()+' AED · '+
+          '<strong>Margin :</strong> <span style="color:'+(margin>=0?'#059669':'#dc2626')+';font-weight:700">'+(margin>=0?'+':'')+Math.round(margin).toLocaleString()+' AED</span>'+
           '</div>';
       }
       h+='</div>';
     }
-
-    // Revenue chart
-    h+='<div class="dash-card"><h3>📉 Daily Revenue</h3><div class="chart-container"><canvas id="revenueChart"></canvas></div></div>';
-
-    // By Property Type
-    const byType={};
-    mRes.forEach(r=>{const label=getUnitType(r.listingId);if(!byType[label])byType[label]=[];byType[label].push(r);});
-    h+='<div class="dash-card"><h3>🏠 By Type</h3>';
-    for(const[type,list]of Object.entries(byType).sort((a,b)=>a[0].localeCompare(b[0]))){
-      const d=list.filter(r=>mDone[keyFor(r)]).length;
-      const rev=list.reduce((s,r)=>s+getRevenueFee(r),0);
-      const pct=list.length>0?Math.round(d/list.length*100):0;
-      h+='<div class="cleaner-stat-row"><div class="cs-name">'+type+'</div><div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:var(--primary)"></div></div><div class="cs-count">'+d+'/'+list.length+' · '+rev.toLocaleString()+' AED</div></div>';
-    }
-    h+='</div>';
-
-    // Revenue per cleaner
-    const revenuePerCleaner=computeRevenuePerCleaner(dashYear+'-'+String(dashMonth+1).padStart(2,'0'));
-    if(revenuePerCleaner.length>0){
-      h+='<div class="dash-card"><h3>'+icon('user',18)+' Revenue per cleaner</h3>'+
-        '<table class="rev-cleaner-table">'+
-          '<thead><tr>'+
-            '<th>Cleaner</th><th>Cleanings</th><th>Revenue</th><th>Cost</th><th>Margin</th>'+
-          '</tr></thead>'+
-          '<tbody>'+
-            revenuePerCleaner.map(c=>{
-              const marginColor=c.marginAED>=0?'var(--green)':'var(--red)';
-              return '<tr>'+
-                '<td class="rev-name"><span class="rev-dot" style="background:'+(c.color||'#888')+'"></span>'+esc(c.name)+'</td>'+
-                '<td>'+c.cleanings+'</td>'+
-                '<td class="rev-num">'+Math.round(c.revenueAED)+' AED</td>'+
-                '<td class="rev-num rev-muted">'+Math.round(c.costAED)+' AED</td>'+
-                '<td class="rev-num" style="color:'+marginColor+'">'+(c.marginAED>=0?'+':'')+Math.round(c.marginAED)+' AED</td>'+
-              '</tr>';
-            }).join('')+
-          '</tbody>'+
-        '</table></div>';
-    }
-    h+='</div>'; // end dash-grid
   }
 
   // ============ TAB: PROPERTIES ============
