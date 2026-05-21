@@ -941,6 +941,8 @@ let dashKPIs=null,dashKPIsLoading=false;
 let hermesData=null,hermesLoading=false,hermesFilter={handler:'',status:'',days:7};
 // Subcontractors tab (Elite Cleaning accounting)
 let subData=null,subLoading=false,subMonth=null,subAvailableMonths=null;
+// Heatmap data (12 weeks past, fetched separately because dashData only has the selected month)
+let dashHeatmapData=null,dashHeatmapLoading=false;
 let liveTimerInterval=null;
 let currentLang='en';
 let calMonth=new Date().getMonth(),calYear=new Date().getFullYear();
@@ -3458,6 +3460,42 @@ async function loadDashMonth(){
   }catch(e){dashData={reservations:[],done:{},assignments:{},timers:{},error:e.message};}
   dashLoading=false;render();
 }
+
+// Load 12 weeks of checkouts for the heatmap (Operations tab desktop only).
+// Cached after first load — re-fetched when user explicitly triggers refresh.
+async function loadDashHeatmap(){
+  if(dashHeatmapLoading) return;
+  dashHeatmapLoading=true;
+  try{
+    const today=new Date();today.setHours(0,0,0,0);
+    const dayOfWeek=today.getDay();
+    const startMonday=new Date(today);
+    startMonday.setDate(today.getDate()-((dayOfWeek+6)%7)-11*7);
+    const sd=startMonday.toISOString().split('T')[0];
+    const ed=today.toISOString().split('T')[0];
+    const[coRes,allRes]=await Promise.all([
+      api('checkouts',{params:{startDate:sd,endDate:ed}}),
+      api('getAllData'),
+    ]);
+    const valid=['new','modified','confirmed','reserved'];
+    const res=(coRes.reservations||[]).filter(r=>valid.includes(r.status)).map(r=>({
+      co:r.checkOut,guest:r.guest||'Guest',listing:r.listing||'',listingId:r.listingId||'',
+      status:r.status,cleaningFee:r.cleaningFee||0,
+    }));
+    dashHeatmapData={
+      reservations:res,
+      done:allRes.done||{},
+      cancelled:allRes.cancelled||{},
+      // Snapshot of all extras in the 12-week window
+      extras:(allRes.extraCleanings||[]).filter(e=>e.cleaning_date>=sd && e.cleaning_date<=ed),
+    };
+  }catch(e){
+    dashHeatmapData={reservations:[],done:{},cancelled:{},extras:[],error:e.message};
+  }
+  dashHeatmapLoading=false;
+  // Re-render heatmap now data is ready
+  if(typeof renderCompletionHeatmap==='function') renderCompletionHeatmap();
+}
 function changeDashMonth(dir){dashMonth+=dir;if(dashMonth>11){dashMonth=0;dashYear++;}if(dashMonth<0){dashMonth=11;dashYear--;}loadDashMonth();}
 
 // Single export menu — replaces the 5-button row (Excel/PDF/CSV cleanings/CSV maintenance/Invoice)
@@ -3878,9 +3916,22 @@ function renderDashboard(){
 }
 
 // ============ S4: Completion heatmap + Tickets funnel ============
+// Read from dashHeatmapData (12 weeks fetched separately) instead of RESERVATIONS
+// (which only contains the current week via fetchAll/getWeekRange).
 function renderCompletionHeatmap(){
   const el = document.getElementById('completionHeatmap');
   if(!el) return;
+  // Trigger fetch on first render
+  if(dashHeatmapData===null && !dashHeatmapLoading){
+    el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">Loading 12 weeks of data…</div>';
+    loadDashHeatmap();
+    return;
+  }
+  if(dashHeatmapLoading){
+    el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">Loading…</div>';
+    return;
+  }
+  const src=dashHeatmapData||{reservations:[],done:{},cancelled:{},extras:[]};
   const today = new Date(); today.setHours(0,0,0,0);
   const dayOfWeek = today.getDay(); // 0=Sun
   const startMonday = new Date(today);
@@ -3892,15 +3943,15 @@ function renderCompletionHeatmap(){
       const day = new Date(startMonday);
       day.setDate(startMonday.getDate() + w * 7 + d);
       const ds = day.toISOString().split('T')[0];
-      const allItems = (RESERVATIONS||[]).concat(extraCleanings||[]);
+      const allItems = (src.reservations||[]).concat(src.extras||[]);
       let dones = 0, total = 0;
       allItems.forEach(r => {
         const co = r.co || r.cleaning_date;
         if(co !== ds) return;
         const k = keyFor(r);
-        if(cancelled[k]) return;
+        if(src.cancelled[k]) return;
         total++;
-        if(done[k]) dones++;
+        if(src.done[k]) dones++;
       });
       week.push({ date: ds, done: dones, total: total, isPast: day < today });
     }
