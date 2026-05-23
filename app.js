@@ -3713,30 +3713,69 @@ function renderDashboard(){
     h+='</div>'; // end dash-grid
   }
 
-  // ============ TAB: REVENUE (refonte 21/05/2026) ============
+  // ============ TAB: REVENUE (refonte 23/05/2026 — focus marge Elite) ============
   if(dashSection==='revenue'){
     const revPct=revPotential>0?Math.round(revDone/revPotential*100):0;
     const avgFee=mRes.length>0?Math.round(revPotential/mRes.length):0;
     const monthName=MONTH_NAMES[dashMonth]+' '+dashYear;
+    const monthKey=dashYear+'-'+String(dashMonth+1).padStart(2,'0');
+    // Load Elite accounting for this month if not already
+    if(!subData||subMonth!==monthKey){
+      if(!subLoading){ loadSubcontractorMonth(monthKey); }
+    }
+    const eliteTotals=(subData&&subData.payload_json&&subData.payload_json.totals)||{};
+    const eliteCount=eliteTotals.cleanings_count||0;
+    const eliteRevTTC=Math.round(eliteTotals.revenue_ttc||0);
+    const eliteCostHT=Math.round(eliteTotals.cost_ht||0);
+    const eliteMarginHT=Math.round(eliteTotals.margin_ht||0);
+    const eliteMarginPct=eliteTotals.margin_pct?Math.round(eliteTotals.margin_pct):0;
+    const eliteVatNet=Math.round(eliteTotals.vat_net||0);
+    const internalCount=Math.max(0,(Object.keys(mDone).length)-eliteCount);
 
-    // ===== KPI TOP BAR (full width) =====
+    // ===== KPI TOP BAR — Focus marge Elite (compta réelle) =====
     h+='<div class="dash-card" style="margin-bottom:14px;background:linear-gradient(135deg,#fafbfc 0%,#fff 100%);border:1px solid #e5e7eb">';
     h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">';
-    h+='<h3 style="margin:0">💰 Revenue '+esc(monthName)+'</h3>';
-    h+='<span style="font-size:11px;color:#6b7280">Source : Hostaway cleaningFee · '+mRes.length+' réservations / '+(Object.keys(mDone).length)+' marquées done</span>';
+    h+='<h3 style="margin:0">💰 Marge Elite '+esc(monthName)+'</h3>';
+    h+='<span style="font-size:11px;color:#6b7280">Source : sync_cleaning_accounting · '+eliteCount+' ménages Elite / '+internalCount+' internes</span>';
     h+='</div>';
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px">';
     const kpis=[
-      {label:'Earned (done)',value:revDone,color:'#059669',unit:'AED'},
-      {label:'Potential',value:revPotential,color:'#6b7280',unit:'AED'},
-      {label:'Completion',value:revPct,color:revPct>=70?'#059669':(revPct>=40?'#d97706':'#dc2626'),unit:'%'},
-      {label:'Avg fee/cleaning',value:avgFee,color:'#1f2937',unit:'AED'},
-      {label:'Cleanings count',value:mRes.length,color:'#1f2937',unit:''},
+      {label:'Marge Elite HT',value:eliteMarginHT,color:'#059669',unit:'AED',primary:true},
+      {label:'Revenue Elite TTC',value:eliteRevTTC,color:'#1f2937',unit:'AED'},
+      {label:'Cost Elite HT',value:eliteCostHT,color:'#dc2626',unit:'AED'},
+      {label:'Marge %',value:eliteMarginPct,color:eliteMarginPct>=30?'#059669':(eliteMarginPct>=20?'#d97706':'#dc2626'),unit:'%'},
+      {label:'TVA nette',value:eliteVatNet,color:'#6b7280',unit:'AED'},
+      {label:'Ménages Elite',value:eliteCount,color:'#1f2937',unit:''},
     ];
     kpis.forEach(k=>{
-      h+='<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;border-left:3px solid '+k.color+'">';
-      h+='<div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">'+k.label+'</div>';
-      h+='<div style="font-size:20px;font-weight:700;color:'+k.color+';margin-top:2px">'+(typeof k.value==='number'?k.value.toLocaleString():k.value)+'<span style="font-size:11px;font-weight:500;margin-left:3px;color:#6b7280">'+k.unit+'</span></div>';
+      const fontSize=k.primary?'24px':'20px';
+      h+='<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;border-left:'+(k.primary?'4':'3')+'px solid '+k.color+(k.primary?';background:linear-gradient(135deg,#f0fdf4 0%,#fff 100%)':'')+'">';
+      h+='<div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">'+k.label+(k.primary?' ⭐':'')+'</div>';
+      h+='<div style="font-size:'+fontSize+';font-weight:'+(k.primary?'800':'700')+';color:'+k.color+';margin-top:2px">'+(typeof k.value==='number'?k.value.toLocaleString():k.value)+'<span style="font-size:11px;font-weight:500;margin-left:3px;color:#6b7280">'+k.unit+'</span></div>';
+      h+='</div>';
+    });
+    h+='</div>';
+    h+='<div style="font-size:10px;color:#9ca3af;margin-top:10px;line-height:1.4">💡 La <strong>marge Elite HT</strong> est la vraie compta : revenue cleaning fees encaissées sur ménages Elite, moins le coût facturé par Elite. Les ménages internes ne sont pas comptés ici (leur "coût" = salaire fixe, géré séparément).</div>';
+    h+='</div>';
+
+    // ===== Brut cleanings (info secondaire, mélange interne + Elite) =====
+    h+='<div class="dash-card" style="margin-bottom:14px;background:#fafbfc">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">';
+    h+='<h3 style="margin:0;font-size:14px;color:#6b7280">📊 Cleaning fees brutes (info)</h3>';
+    h+='<span style="font-size:11px;color:#9ca3af">tous cleaners cumulés (internes + Elite + extras)</span>';
+    h+='</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px">';
+    const brutKpis=[
+      {label:'Earned (all done)',value:revDone,color:'#6b7280',unit:'AED'},
+      {label:'Potential',value:revPotential,color:'#9ca3af',unit:'AED'},
+      {label:'Completion',value:revPct,color:'#6b7280',unit:'%'},
+      {label:'Avg fee/cleaning',value:avgFee,color:'#6b7280',unit:'AED'},
+      {label:'Cleanings total',value:mRes.length,color:'#6b7280',unit:''},
+    ];
+    brutKpis.forEach(k=>{
+      h+='<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px">';
+      h+='<div style="font-size:10px;color:#9ca3af;font-weight:600;text-transform:uppercase">'+k.label+'</div>';
+      h+='<div style="font-size:16px;font-weight:600;color:'+k.color+';margin-top:2px">'+(typeof k.value==='number'?k.value.toLocaleString():k.value)+'<span style="font-size:10px;font-weight:500;margin-left:3px;color:#9ca3af">'+k.unit+'</span></div>';
       h+='</div>';
     });
     h+='</div></div>';
