@@ -3572,6 +3572,28 @@ function renderDashboard(){
   const totalAssigned=mRes.filter(r=>mAssigneesOf(keyFor(r)).length>0).length;
   const revDone=mRes.reduce((s,r)=>mDone[keyFor(r)]?s+getRevenueFee(r):s,0);
   const revPotential=mRes.reduce((s,r)=>s+getRevenueFee(r),0);
+  // VRAI revenu net Medini (HT) : pour Elite = marge (revHT - costHT), pour staff/no-assign = revHT entier
+  // (= ce que Medini garde vraiment, hors salaire fixe staff géré ailleurs)
+  const _VAT=0.05;
+  const _ELITE_COST={0:155,1:195,2:295,3:415,4:415,5:695};
+  const _cleanerById={}; (cleaners||[]).forEach(c=>{_cleanerById[c.id]=c;});
+  function _netRevForResa(r){
+    const revTTC=getRevenueFee(r);
+    if(revTTC<=0)return 0;
+    const revHT=revTTC/(1+_VAT);
+    const key=keyFor(r);
+    const ids=mAssigneesOf(key);
+    // Détecte si au moins un cleaner Elite (subcontractor) assigné
+    const hasElite=ids.some(id=>_cleanerById[id]&&_cleanerById[id].role==='subcontractor');
+    if(!hasElite)return revHT; // staff seul OR no-assign → revenu entier
+    // Elite assigné → vraie marge = revHT - coût Elite (par BR du listing)
+    const lp=listingPrices[r.listingId];
+    const br=lp?Number(lp.bedrooms||0):0;
+    const eliteCostHT=_ELITE_COST[br]||_ELITE_COST[0];
+    return revHT-eliteCostHT;
+  }
+  const revNetMedini=mRes.reduce((s,r)=>mDone[keyFor(r)]?s+_netRevForResa(r):s,0);
+  const revNetPotential=mRes.reduce((s,r)=>s+_netRevForResa(r),0);
 
   // (Export buttons moved into the kebab in the header — see showDashExportMenu)
 
@@ -3816,10 +3838,11 @@ function renderDashboard(){
     h+='<span style="font-size:32px;font-weight:800;color:#059669;line-height:1">'+revPct+'%</span>';
     h+='<span style="font-size:10px;color:#6b7280;font-weight:600;margin-top:2px">EARNED</span></div></div>';
     h+='<div style="flex:1;min-width:0">';
-    h+='<div style="font-size:13px;color:#6b7280;font-weight:600">Earned so far</div>';
-    h+='<div style="font-size:28px;font-weight:800;color:#059669;line-height:1.1">'+revDone.toLocaleString()+' <span style="font-size:13px;font-weight:600;color:#6b7280">AED</span></div>';
-    h+='<div style="margin-top:8px;font-size:12px;color:#6b7280">on '+revPotential.toLocaleString()+' AED potential</div>';
-    h+='<div style="margin-top:4px;font-size:12px;color:#6b7280">remaining : <strong style="color:#1f2937">'+Math.max(0,revPotential-revDone).toLocaleString()+' AED</strong></div>';
+    h+='<div style="font-size:13px;color:#6b7280;font-weight:600">Vrai revenu Medini (HT) — marge Elite incluse</div>';
+    h+='<div style="font-size:28px;font-weight:800;color:#059669;line-height:1.1">'+Math.round(revNetMedini).toLocaleString()+' <span style="font-size:13px;font-weight:600;color:#6b7280">AED HT</span></div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#6b7280">on '+Math.round(revNetPotential).toLocaleString()+' AED HT potentiel</div>';
+    h+='<div style="margin-top:4px;font-size:12px;color:#6b7280">à venir : <strong style="color:#1f2937">'+Math.max(0,Math.round(revNetPotential-revNetMedini)).toLocaleString()+' AED HT</strong></div>';
+    h+='<div style="margin-top:8px;font-size:10px;color:#9ca3af;line-height:1.4">💡 Elite : on déduit le coût facturé par Elite. Cleaners internes : on garde la totalité du cleaning fee (salaire fixe géré ailleurs). Hors CA total facturé au guest.</div>';
     h+='</div></div></div>';
 
     // Daily Revenue Chart
