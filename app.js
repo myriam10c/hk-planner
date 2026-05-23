@@ -1219,6 +1219,11 @@ function getRevenueFee(r){return r.cleaningFee||0;}
 // Cost rule : ne s'applique QU'aux subcontractors (Elite role='subcontractor').
 // Les internes (Faiza, Pionah role='cleaner') ont cost=0 par cleaning (salaire
 // mensuel fixe géré en OPEX, pas par job).
+// REAL Elite (subcontractor) cleaning cost HT per bedroom — source subcontractor_pricing table CHC
+// Update here if Elite renegotiates tariff (mise à jour 23/05/2026 — confirmé par Hillal)
+const ELITE_COST_HT_BY_BR = {0: 155, 1: 195, 2: 295, 3: 415, 4: 415, 5: 695};
+const VAT_RATE = 0.05;
+
 function computeRevenuePerCleaner(month){
   const monthPrefix=month;
   // Source : dashData (mois complet) si disponible, sinon fallback global (semaine)
@@ -1236,21 +1241,31 @@ function computeRevenuePerCleaner(month){
   (cleaners||[]).forEach(c=>{
     byCleaner[c.id]={id:c.id,name:c.name,color:c.color,role:c.role,cleanings:0,revenueAED:0,costAED:0};
   });
-  // Multi-assign: revenue split equally across the assigned cleaners.
-  // Cost split equally BUT only debited to subcontractor cleaners.
+
+  // VRAIE MARGE : revenue_HT - cost_HT (HT-based, aligned avec backend sync_cleaning_accounting)
+  // Pour Elite : cost = ELITE_COST_HT_BY_BR[bedrooms] (155/195/295/415 selon BR)
+  // Pour staff : cost = 0 (salaire fixe géré séparément, pas per-cleaning)
+  // Revenue = cleaningFee Hostaway TTC → on convertit en HT (÷1.05)
+  function eliteCostForListing(listingId) {
+    const lp = listingPrices[listingId];
+    const br = lp ? Number(lp.bedrooms || 0) : 0;
+    return ELITE_COST_HT_BY_BR[br] || ELITE_COST_HT_BY_BR[0];
+  }
+
   srcReservations.forEach(r=>{
     const key=keyFor(r);
     if(!(r.co||'').startsWith(monthPrefix)) return;
     if(!srcDone[key]) return;
     const ids=assigneeIdsOf(key).filter(id=>byCleaner[id]);
     if(ids.length===0) return;
-    const rev=Number(r.cleaningFee||0)/ids.length;
-    const lp=listingPrices[r.listingId];
-    const costPerCleaner=lp?Number(lp.custom_price||lp.price||0)/ids.length:0;
+    const revTTC = Number(r.cleaningFee||0);
+    const revHT = revTTC / (1 + VAT_RATE);
+    const revPerCleaner = revHT / ids.length;
+    const eliteCostHT = eliteCostForListing(r.listingId) / ids.length;
     ids.forEach(cid=>{
       byCleaner[cid].cleanings++;
-      byCleaner[cid].revenueAED+=rev;
-      if(byCleaner[cid].role==='subcontractor') byCleaner[cid].costAED+=costPerCleaner;
+      byCleaner[cid].revenueAED += revPerCleaner;
+      if(byCleaner[cid].role==='subcontractor') byCleaner[cid].costAED += eliteCostHT;
     });
   });
   (extraCleanings||[]).forEach(e=>{
@@ -1259,19 +1274,21 @@ function computeRevenuePerCleaner(month){
     if(!isDone) return;
     const ids=assigneeIdsOf(e.reservation_key).filter(id=>byCleaner[id]);
     if(ids.length===0) return;
-    const rev=Number(e.price_billed||0)/ids.length;
-    const defaultCost=(()=>{const l=listingPrices[e.listing_id];return l?Number(l.custom_price||l.price||0):0;})();
-    const costPerCleaner=Number(e.cleaner_price||defaultCost)/ids.length;
+    const revTTC = Number(e.price_billed||0);
+    const revHT = revTTC / (1 + VAT_RATE);
+    const revPerCleaner = revHT / ids.length;
+    // Pour extra cleanings, use cleaner_price si fourni (négocié à la main), sinon Elite tariff
+    const eliteCostHT = (Number(e.cleaner_price) || eliteCostForListing(e.listing_id)) / ids.length;
     ids.forEach(cid=>{
       byCleaner[cid].cleanings++;
-      byCleaner[cid].revenueAED+=rev;
-      if(byCleaner[cid].role==='subcontractor') byCleaner[cid].costAED+=costPerCleaner;
+      byCleaner[cid].revenueAED += revPerCleaner;
+      if(byCleaner[cid].role==='subcontractor') byCleaner[cid].costAED += eliteCostHT;
     });
   });
   return Object.values(byCleaner)
     .filter(c=>c.cleanings>0)
     .map(c=>({...c,marginAED:c.revenueAED-c.costAED}))
-    .sort((a,b)=>b.revenueAED-a.revenueAED);
+    .sort((a,b)=>b.marginAED-a.marginAED); // tri par marge décroissante (plus parlant que revenue)
 }
 function getBedroomsForListing(lid){return(lid&&listingPrices[lid])?listingPrices[lid].bedrooms:0;}
 function getUnitType(lid){
@@ -3818,7 +3835,7 @@ function renderDashboard(){
     if(revenuePerCleaner.length>0){
       h+='<div class="dash-card"><h3>'+icon('user',18)+' Revenue per cleaner ('+revenuePerCleaner.length+')</h3>';
       h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;min-width:380px">';
-      h+='<thead><tr style="border-bottom:2px solid #e5e7eb"><th style="text-align:left;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleaner</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleanings</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Revenue</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cost</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Margin</th></tr></thead><tbody>';
+      h+='<thead><tr style="border-bottom:2px solid #e5e7eb"><th style="text-align:left;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleaner</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleanings</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Revenue HT</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cost HT</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Margin HT</th></tr></thead><tbody>';
       revenuePerCleaner.forEach(c=>{
         const isSub=c.role==='subcontractor';
         const marginColor=c.marginAED>=0?'#059669':'#dc2626';
@@ -3834,7 +3851,7 @@ function renderDashboard(){
           '</tr>';
       });
       h+='</tbody></table></div>';
-      h+='<div style="font-size:10px;color:#9ca3af;margin-top:8px;line-height:1.4">💡 STAFF = salariés (cost mensuel fixe, pas comptabilisé per-cleaning). SUB = sous-traitants (cost par cleaning depuis subcontractor_pricing).</div>';
+      h+='<div style="font-size:10px;color:#9ca3af;margin-top:8px;line-height:1.4">💡 STAFF = salariés Medini (cost mensuel fixe, pas comptabilisé per-cleaning). SUB = sous-traitants Elite (cost = 155 STUDIO / 195 1BHK / 295 2BHK HT par cleaning). Revenue HT = cleaningFee Hostaway TTC ÷ 1,05.</div>';
       h+='</div>';
     }
 
