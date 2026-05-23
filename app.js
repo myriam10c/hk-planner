@@ -3762,7 +3762,7 @@ function renderDashboard(){
     if(!subData||subMonth!==monthKey){
       if(!subLoading){ loadSubcontractorMonth(monthKey); }
     }
-    const eliteTotals=(subData&&subData.payload_json&&subData.payload_json.totals)||{};
+    const eliteTotals=(subData&&subData.totals_json)||{};
     const eliteCount=eliteTotals.cleanings_count||0;
     const eliteRevTTC=Math.round(eliteTotals.revenue_ttc||0);
     const eliteCostHT=Math.round(eliteTotals.cost_ht||0);
