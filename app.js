@@ -348,31 +348,6 @@ function renderSavedViewsBar(){
   return h;
 }
 let currentTab='planner',filterCleaner=null;
-// Team tasks (DTCM passport scans, owner relances, etc.) — créées par handlers Hermes + manuellement
-const TEAM_TASKS_API='https://dqjnqvbxfwtvrjwnnmns.supabase.co/functions/v1/team-tasks-proxy';
-let teamTasks=[],tasksLoading=false,tasksFilter={status:'open',assignee:null,category:null};
-async function loadTeamTasks(){
-  tasksLoading=true; render();
-  try{
-    const params=new URLSearchParams({limit:'200'});
-    if(tasksFilter.status) params.set('status',tasksFilter.status);
-    if(tasksFilter.assignee) params.set('assigned_to',String(tasksFilter.assignee));
-    if(tasksFilter.category) params.set('category',tasksFilter.category);
-    const r=await fetch(TEAM_TASKS_API+'?action=list&'+params.toString(),{headers:{'X-App-Secret':APP_SHARED_SECRET}});
-    const d=await r.json();
-    teamTasks=d.tasks||[];
-  }catch(e){ console.error('loadTeamTasks',e); teamTasks=[]; }
-  tasksLoading=false; render();
-}
-async function updateTeamTask(id,patch){
-  try{
-    const r=await fetch(TEAM_TASKS_API+'?action=update',{method:'POST',headers:{'X-App-Secret':APP_SHARED_SECRET,'Content-Type':'application/json'},body:JSON.stringify({id,...patch})});
-    const d=await r.json();
-    if(d.ok){ toast('Task '+(patch.status==='done'?'completed ✓':'updated ✓'),'success'); loadTeamTasks(); }
-    else toast('Error: '+(d.error||'unknown'),'error');
-  }catch(e){ toast('Network error','error'); }
-}
-function setTasksFilter(k,v){ tasksFilter[k]=(tasksFilter[k]===v?null:v); loadTeamTasks(); }
 let dashMonth=new Date().getMonth(),dashYear=new Date().getFullYear();
 let dashData=null,dashLoading=false;
 let dashSection='ops'; // 'ops' | 'revenue' | 'properties'
@@ -2890,7 +2865,6 @@ function render(){
   if(currentTab==='calendar')return renderCalendar();
   if(currentTab==='stats')return renderCleanerStats();
   if(currentTab==='hermes'){if(hermesData===null && !hermesLoading)loadHermesActivity();return renderHermes();}
-  if(currentTab==='tasks'){if(teamTasks.length===0 && !tasksLoading)loadTeamTasks();return renderTasks();}
   if(currentTab==='subcontractors'){
     if(subAvailableMonths===null)loadSubcontractorMonths();
     if(subData===null && !subLoading && subMonth)loadSubcontractorMonth();
@@ -2908,7 +2882,6 @@ function renderBottomNav(){
       {id:'dashboard',icon:icon('chart',22),label:t('dashboard')},
       {id:'maintenance',icon:icon('wrench',22),label:'Maint.'},
       {id:'hermes',icon:icon('zap',22),label:'Hermes'},
-      {id:'tasks',icon:icon('clipboard',22),label:'Tasks'},
       {id:'subcontractors',icon:icon('dollar',22),label:'Subs'},
       {id:'settings',icon:icon('settings',22),label:t('settings')},
       {id:'__more',icon:icon('more',22),label:'More'},
@@ -4631,99 +4604,6 @@ function renderSubcontractors(){
 }
 
 // ============== HERMES TAB ==============
-function refreshTasks(){ loadTeamTasks(); }
-function renderTasks(){
-  // Header
-  let h='<div class="header"><div class="header-top"><h1>📋 Team Tasks</h1>'+
-    '<div style="flex:1"></div>'+
-    '<button class="icon-btn" data-action="refreshTasks" title="Refresh">'+icon('refresh',18)+'</button>'+
-    '</div></div>';
-  h+='<div class="container">';
-
-  // Filters bar
-  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding:10px;background:rgba(0,0,0,0.02);border-radius:12px">';
-  // Status filter
-  h+='<div style="display:flex;gap:4px;align-items:center"><span style="font-size:12px;color:var(--text3);font-weight:700">Status:</span>';
-  [['open','Open'],['in_progress','In progress'],['done','Done'],['',  'All']].forEach(([v,lbl])=>{
-    h+='<button class="dash-tab'+((tasksFilter.status||'')===v?' active':'')+'" data-action="setTasksFilter" data-arg0="status" data-arg1="'+v+'" style="padding:4px 10px;font-size:12px">'+lbl+'</button>';
-  });
-  h+='</div>';
-  // Assignee filter (from cleaners array if available)
-  if(typeof cleaners!=='undefined' && cleaners && cleaners.length){
-    h+='<div style="display:flex;gap:4px;align-items:center;margin-left:12px;flex-wrap:wrap"><span style="font-size:12px;color:var(--text3);font-weight:700">Assignee:</span>';
-    h+='<button class="dash-tab'+(!tasksFilter.assignee?' active':'')+'" data-action="setTasksFilter" data-arg0="assignee" data-arg1="" style="padding:4px 10px;font-size:12px">All</button>';
-    cleaners.filter(c=>c.role==='manager'||c.role==='maintenance'||c.role==='cleaner'||c.role==='subcontractor').forEach(c=>{
-      const cnt=teamTasks.filter(t=>t.assigned_cleaner_id===c.id && (!tasksFilter.status||t.status===tasksFilter.status)).length;
-      h+='<button class="dash-tab'+(tasksFilter.assignee===c.id?' active':'')+'" data-action="setTasksFilter" data-arg0="assignee" data-arg1="'+c.id+'" style="padding:4px 10px;font-size:12px">'+esc(c.name)+(cnt?' <span style="opacity:0.6">('+cnt+')</span>':'')+'</button>';
-    });
-    h+='</div>';
-  }
-  h+='</div>';
-
-  // Loading state
-  if(tasksLoading && teamTasks.length===0){
-    h+='<div style="text-align:center;padding:40px;color:var(--text3)">Chargement…</div>';
-    h+='</div>'+renderBottomNav();
-    document.getElementById('app').innerHTML=h;
-    return;
-  }
-
-  // Filter client-side too (in case assignee filter is local)
-  let filtered=teamTasks;
-  // tasks list
-  if(filtered.length===0){
-    h+='<div class="empty-hero"><div class="empty-hero-icon">'+icon('clipboard',56)+'</div><div class="empty-hero-title">Aucune tâche</div><div class="empty-hero-sub">Tout est traité pour ces filtres.</div></div>';
-  }else{
-    // Group by priority
-    const byPri={urgent:[],high:[],medium:[],low:[]};
-    filtered.forEach(t=>{ const p=t.priority||'medium'; (byPri[p]||byPri.medium).push(t); });
-    ['urgent','high','medium','low'].forEach(pri=>{
-      const arr=byPri[pri];
-      if(!arr.length) return;
-      const colors={urgent:'#dc2626',high:'#ea580c',medium:'#0891b2',low:'#65a30d'};
-      const emoji={urgent:'🚨',high:'⚡',medium:'📋',low:'📎'};
-      h+='<div style="margin-bottom:18px"><h3 style="font-size:13px;font-weight:700;margin:0 0 8px 0;color:'+colors[pri]+';text-transform:uppercase;letter-spacing:0.05em">'+emoji[pri]+' '+pri+' ('+arr.length+')</h3>';
-      arr.forEach(t=>{
-        const assignee=(cleaners||[]).find(c=>c.id===t.assigned_cleaner_id);
-        const aName=assignee?assignee.name:'(non assigné)';
-        const aColor=assignee?(assignee.color||'#888'):'#888';
-        const created=new Date(t.created_at);
-        const ageHours=Math.floor((Date.now()-created.getTime())/3600000);
-        const ageLbl=ageHours<24?(ageHours+'h'):(Math.floor(ageHours/24)+'j');
-        const statusBadge={open:'#dc2626',in_progress:'#0891b2',done:'#16a34a',completed:'#16a34a',skipped:'#888'}[t.status]||'#888';
-        h+='<div style="background:white;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start">';
-        h+='<div style="width:4px;align-self:stretch;background:'+colors[pri]+';border-radius:2px;flex-shrink:0"></div>';
-        h+='<div style="flex:1;min-width:0">';
-        h+='<div style="font-weight:600;font-size:14px;color:var(--text);margin-bottom:4px">'+esc(t.title)+'</div>';
-        if(t.description) h+='<div style="font-size:12px;color:var(--text2);margin-bottom:6px;white-space:pre-wrap">'+esc(t.description.slice(0,300))+(t.description.length>300?'…':'')+'</div>';
-        h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--text3)">';
-        h+='<span style="background:'+statusBadge+'15;color:'+statusBadge+';padding:2px 8px;border-radius:6px;font-weight:600">'+t.status+'</span>';
-        h+='<span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+aColor+';margin-right:4px;vertical-align:middle"></span>'+esc(aName)+'</span>';
-        if(t.category) h+='<span>📂 '+esc(t.category)+'</span>';
-        h+='<span>⏱ '+ageLbl+'</span>';
-        if(t.source && t.source!=='manual') h+='<span style="opacity:0.7">via '+esc(t.source)+'</span>';
-        h+='</div></div>';
-        // Action buttons
-        if(t.status==='open'||t.status==='in_progress'){
-          h+='<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">';
-          h+='<button class="icon-btn" data-action="completeTask" data-arg0="'+t.id+'" title="Marquer comme fait" style="background:#16a34a;color:white;padding:6px 10px;font-size:12px;font-weight:600;border-radius:6px">✓ Fait</button>';
-          if(t.status==='open') h+='<button class="icon-btn" data-action="startTask" data-arg0="'+t.id+'" title="En cours" style="font-size:11px;padding:4px 8px">▶ Start</button>';
-          h+='</div>';
-        }
-        h+='</div>';
-      });
-      h+='</div>';
-    });
-  }
-  h+='</div>'+renderBottomNav();
-  document.getElementById('app').innerHTML=h;
-}
-function completeTask(id){
-  if(!confirm('Marquer cette tâche comme faite ?')) return;
-  const completedBy=(cleanerMode && cleanerMode.id) || 6; // default Hillal
-  updateTeamTask(id,{status:'done',completed_by_cleaner_id:completedBy});
-}
-function startTask(id){ updateTeamTask(id,{status:'in_progress'}); }
 
 function renderHermes(){
   // Header
