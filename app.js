@@ -4663,8 +4663,9 @@ function renderTasks(){
   // Loading state
   if(tasksLoading && teamTasks.length===0){
     h+='<div style="text-align:center;padding:40px;color:var(--text3)">Chargement…</div>';
-    h+='</div>';
-    return h;
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h;
+    return;
   }
 
   // Filter client-side too (in case assignee filter is local)
@@ -4714,8 +4715,8 @@ function renderTasks(){
       h+='</div>';
     });
   }
-  h+='</div>';
-  return h;
+  h+='</div>'+renderBottomNav();
+  document.getElementById('app').innerHTML=h;
 }
 function completeTask(id){
   if(!confirm('Marquer cette tâche comme faite ?')) return;
