@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Simulateur Lego 3D</title>
+<style>
+  /* ---------- Reset & base ---------- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; color: #1a1a1a; background: #e9eef5; }
+  canvas { display: block; }
+
+  /* ---------- Layout & UI overlays ---------- */
+  #app { position: fixed; inset: 0; }
+
+  .panel {
+    position: absolute;
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.78);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(20, 30, 60, 0.12), 0 2px 6px rgba(20, 30, 60, 0.06);
+    padding: 14px 16px;
+  }
+
+  /* Top-left: title + hints */
+  #hud {
+    top: 16px; left: 16px;
+    max-width: 280px;
+  }
+  #hud h1 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  #hud p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #555;
+  }
+  #hud kbd {
+    background: rgba(0,0,0,0.06);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+  }
+
+  /* Top-right: actions */
+  #actions {
+    top: 16px; right: 16px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+  }
+  .btn {
+    appearance: none;
+    border: 1px solid rgba(0,0,0,0.08);
+    background: #ffffff;
+    color: #1a1a1a;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 8px 14px;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .btn:hover { background: #f5f7fb; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
+  .btn:active { transform: translateY(0); }
+  .btn.danger { color: #b00020; border-color: rgba(176,0,32,0.2); }
+  .btn.danger:hover { background: #fff0f2; }
+  .btn.toggle.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+  /* Bottom-center: color palette */
+  #palette {
+    bottom: 20px; left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 14px;
+  }
+  .swatch {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.9);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+    position: relative;
+  }
+  .swatch:hover { transform: scale(1.08); }
+  .swatch.active::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border-radius: 50%;
+    border: 2px solid #1a1a1a;
+  }
+  .palette-sep {
+    width: 1px;
+    height: 28px;
+    background: rgba(0,0,0,0.08);
+    margin: 0 4px;
+  }
+
+  /* Confirmation modal */
+  #modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 20, 35, 0.45);
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  #modal.show { display: flex; }
+  .modal-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 24px;
+    max-width: 360px;
+    box-shadow: 0 30px 70px rgba(0,0,0,0.3);
+    text-align: center;
+  }
+  .modal-card h3 { margin: 0 0 8px; font-size: 17px; }
+  .modal-card p { margin: 0 0 18px; font-size: 13px; color: #555; }
+  .modal-actions { display: flex; gap: 10px; justify-content: center; }
+
+  /* Status badge for delete mode */
+  #status {
+    position: absolute;
+    top: 70px; right: 16px;
+    z-index: 10;
+    background: #b00020;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 999px;
+    display: none;
+    box-shadow: 0 4px 10px rgba(176,0,32,0.3);
+  }
+  #status.show { display: block; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- ============== UI overlays ============== -->
+<div id="hud" class="panel">
+  <h1>🧱 Simulateur Lego 3D</h1>
+  <p>
+    <strong>Clic gauche</strong> : poser une brique<br>
+    <strong>Clic droit</strong> : supprimer une brique<br>
+    <strong>Molette</strong> : zoomer · <strong>Glisser</strong> : tourner<br>
+    <kbd>Shift</kbd>+glisser : se déplacer (Pan)
+  </p>
+</div>
+
+<div id="actions" class="panel">
+  <button id="btnDelete" class="btn toggle" title="Mode suppression">🗑 Supprimer</button>
+  <button id="btnUndo" class="btn" title="Annuler la dernière action">↶ Undo</button>
+  <button id="btnClear" class="btn danger" title="Effacer toute la scène">Clear All</button>
+</div>
+
+<div id="status">Mode suppression actif — clic gauche pour retirer</div>
+
+<div id="palette" class="panel">
+  <!-- swatches dynamically generated -->
+</div>
+
+<!-- Confirmation modal -->
+<div id="modal">
+  <div class="modal-card">
+    <h3>Vider la scène ?</h3>
+    <p>Toutes les briques posées seront définitivement supprimées. Cette action est irréversible.</p>
+    <div class="modal-actions">
+      <button id="modalCancel" class="btn">Annuler</button>
+      <button id="modalConfirm" class="btn danger">Vider</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============== Three.js (CDN) ============== -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ============================================================
+   CONSTANTES — dimensions d'une brique Lego (en unités scène)
+   ============================================================
+   Une brique 2x4 a 8 picots. On choisit une unité de "stud" = 1.
+   La hauteur d'une brique standard ≈ 1.2 stud (proportions Lego). */
+const STUD          = 1;        // distance entre deux picots
+const BRICK_W       = 2 * STUD; // largeur (2 picots)
+const BRICK_D       = 4 * STUD; // profondeur (4 picots)
+const BRICK_H       = 1.2;      // hauteur d'une brique standard
+const STUD_RADIUS   = 0.3 * STUD;
+const STUD_HEIGHT   = 0.18;
+const GRID_SIZE     = 40;       // 40 x 40 unités
+const GRID_DIV      = 20;       // ⇒ chaque cellule = 2 unités = largeur brique
+
+/* Palette de couleurs Lego classique */
+const COLORS = [
+  { name: 'Rouge',   hex: 0xc0211f },
+  { name: 'Bleu',    hex: 0x1f5fc0 },
+  { name: 'Jaune',   hex: 0xf2c20a },
+  { name: 'Vert',    hex: 0x2aa849 },
+  { name: 'Orange',  hex: 0xe87722 },
+  { name: 'Blanc',   hex: 0xf5f5f5 },
+  { name: 'Noir',    hex: 0x1a1a1a },
+  { name: 'Gris',    hex: 0x7d8084 },
+];
+
+/* ============================================================
+   ÉTAT GLOBAL
+   ============================================================ */
+let scene, camera, renderer, controls;
+let raycaster, pointer;
+let gridPlane;                  // plan invisible pour caster le sol
+let rollover;                   // brique fantôme (preview)
+let currentColor = COLORS[0].hex;
+let deleteMode   = false;
+
+const bricks       = [];        // toutes les briques posées (Mesh)
+const history      = [];        // pile d'actions pour Undo
+                                // { type: 'add'|'remove', brick, position, color }
+
+/* ============================================================
+   INITIALISATION
+   ============================================================ */
+init();
+animate();
+
+function init() {
+  /* --- Scène & fond --- */
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xe9eef5);
+  scene.fog = new THREE.Fog(0xe9eef5, 50, 110);
+
+  /* --- Caméra --- */
+  camera = new THREE.PerspectiveCamera(
+    45,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    500
+  );
+  camera.position.set(20, 22, 28);
+  camera.lookAt(0, 0, 0);
+
+  /* --- Renderer --- */
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  document.getElementById('app').appendChild(renderer.domElement);
+
+  /* --- Éclairage --- */
+  // Ambient pour combler les ombres
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xa0a8b8, 0.7));
+
+  // Directionnelle (soleil) avec ombres
+  const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+  sun.position.set(18, 30, 14);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left   = -30;
+  sun.shadow.camera.right  =  30;
+  sun.shadow.camera.top    =  30;
+  sun.shadow.camera.bottom = -30;
+  sun.shadow.camera.near   = 0.5;
+  sun.shadow.camera.far    = 80;
+  sun.shadow.bias = -0.0005;
+  scene.add(sun);
+
+  /* --- Sol & grille --- */
+  // Plateau base (légèrement enfoncé pour ne pas z-fight avec la grille)
+  const groundGeo = new THREE.PlaneGeometry(GRID_SIZE, GRID_SIZE);
+  const groundMat = new THREE.MeshStandardMaterial({
+    color: 0xdfe5ee, roughness: 0.95, metalness: 0
+  });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // GridHelper
+  const grid = new THREE.GridHelper(GRID_SIZE, GRID_DIV, 0x99a3b3, 0xc0c8d4);
+  grid.material.opacity = 0.55;
+  grid.material.transparent = true;
+  scene.add(grid);
+
+  // Plan invisible (y=0) pour raycasting au sol
+  const planeGeo = new THREE.PlaneGeometry(GRID_SIZE, GRID_SIZE);
+  gridPlane = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({ visible: false }));
+  gridPlane.rotation.x = -Math.PI / 2;
+  gridPlane.name = 'gridPlane';
+  scene.add(gridPlane);
+
+  /* --- Contrôles caméra --- */
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 6;
+  controls.maxDistance = 80;
+  controls.maxPolarAngle = Math.PI / 2 - 0.05; // empêche de passer sous le sol
+
+  /* --- Raycaster --- */
+  raycaster = new THREE.Raycaster();
+  pointer = new THREE.Vector2();
+
+  /* --- Brique fantôme (rollover) --- */
+  rollover = createBrickMesh(currentColor, /*ghost*/ true);
+  scene.add(rollover);
+
+  /* --- UI --- */
+  buildPalette();
+  bindUI();
+
+  /* --- Events --- */
+  window.addEventListener('resize', onResize);
+  renderer.domElement.addEventListener('pointermove', onPointerMove);
+  renderer.domElement.addEventListener('pointerdown', onPointerDown);
+  renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+/* ============================================================
+   GÉOMÉTRIE D'UNE BRIQUE (corps + picots)
+   ============================================================ */
+function createBrickMesh(colorHex, ghost = false) {
+  const group = new THREE.Group();
+
+  // Corps de la brique
+  const bodyGeo = new THREE.BoxGeometry(BRICK_W, BRICK_H, BRICK_D);
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: colorHex,
+    roughness: 0.45,
+    metalness: 0.05,
+    transparent: ghost,
+    opacity: ghost ? 0.45 : 1,
+  });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.castShadow    = !ghost;
+  body.receiveShadow = !ghost;
+  group.add(body);
+
+  // Picots (2 x 4 = 8)
+  const studGeo = new THREE.CylinderGeometry(STUD_RADIUS, STUD_RADIUS, STUD_HEIGHT, 24);
+  for (let ix = 0; ix < 2; ix++) {
+    for (let iz = 0; iz < 4; iz++) {
+      const stud = new THREE.Mesh(studGeo, bodyMat);
+      stud.position.set(
+        -BRICK_W / 2 + STUD / 2 + ix * STUD,
+        BRICK_H / 2 + STUD_HEIGHT / 2,
+        -BRICK_D / 2 + STUD / 2 + iz * STUD
+      );
+      stud.castShadow    = !ghost;
+      stud.receiveShadow = !ghost;
+      group.add(stud);
+    }
+  }
+
+  // Sur le ghost, ajoute un wireframe léger pour la lisibilité
+  if (ghost) {
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(bodyGeo),
+      new THREE.LineBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.55 })
+    );
+    group.add(edges);
+  }
+
+  // Marque le groupe comme une "brique" pour le raycasting
+  group.userData.isBrick = true;
+  return group;
+}
+
+/* Change la couleur d'un mesh ghost déjà créé */
+function setRolloverColor(hex) {
+  rollover.children.forEach((c) => {
+    if (c.material && c.material.color) {
+      c.material.color.setHex(hex);
+    }
+  });
+}
+
+/* ============================================================
+   INTERACTION SOURIS — calcul de la position de pose
+   ============================================================
+   Stratégie :
+   - On caste un rayon depuis la caméra à la position du pointeur.
+   - On intersecte (a) les briques existantes, (b) le plan-sol.
+   - Si la 1ère intersection est une brique : on pose AU-DESSUS
+     en utilisant la normale de la face cliquée (snap sur la
+     surface supérieure de cette brique).
+   - Sinon : on snap sur la grille au sol.
+   - Toutes les positions X/Z sont snappées sur le pas STUD x 2
+     (taille d'une cellule = largeur de brique). */
+function pickTarget() {
+  raycaster.setFromCamera(pointer, camera);
+
+  // Tous les meshes individuels des briques (corps + picots)
+  const brickMeshes = [];
+  bricks.forEach((b) => b.traverse((o) => o.isMesh && brickMeshes.push(o)));
+
+  const targets = [...brickMeshes, gridPlane];
+  const hits = raycaster.intersectObjects(targets, false);
+  if (!hits.length) return null;
+
+  const hit = hits[0];
+
+  // Détermine si on a touché une brique
+  let parentBrick = hit.object;
+  while (parentBrick.parent && !parentBrick.userData.isBrick) {
+    parentBrick = parentBrick.parent;
+    if (parentBrick === scene) { parentBrick = null; break; }
+  }
+
+  if (parentBrick && parentBrick.userData.isBrick) {
+    // Pose sur la face touchée — on utilise la normale en world space
+    const worldNormal = hit.face.normal.clone()
+      .transformDirection(hit.object.matrixWorld)
+      .normalize();
+
+    // On pose au-dessus de cette brique : son centre + hauteur
+    const base = parentBrick.position.clone();
+    // Si la face cliquée est le dessus (normale ~ +Y) ⇒ pile au-dessus.
+    // Si c'est un côté, on monte d'une hauteur depuis le point d'impact snappé.
+    let x, y, z;
+    if (worldNormal.y > 0.5) {
+      x = base.x;
+      y = base.y + BRICK_H;
+      z = base.z;
+    } else {
+      // Côté : snap XZ depuis le point d'impact, hauteur identique
+      x = snap(hit.point.x);
+      z = snap(hit.point.z);
+      y = base.y;
+    }
+    return { x, y, z, onBrick: true };
+  }
+
+  // Sinon : sol — snap sur la grille
+  return {
+    x: snap(hit.point.x),
+    y: BRICK_H / 2,
+    z: snap(hit.point.z),
+    onBrick: false,
+  };
+}
+
+/* Snap à la cellule de la grille (cellule = 2 studs = BRICK_W). */
+function snap(v) {
+  const cell = BRICK_W; // pas d'une cellule de la grille
+  // Décalage pour centrer la brique sur une cellule (offset de cell/2)
+  return Math.round((v - cell / 2) / cell) * cell + cell / 2;
+}
+
+/* Limite à l'intérieur de la grille */
+function inBounds(x, z) {
+  const half = GRID_SIZE / 2 - BRICK_W / 2;
+  return Math.abs(x) <= half && Math.abs(z) <= half;
+}
+
+/* ============================================================
+   EVENTS POINTER
+   ============================================================ */
+function onPointerMove(event) {
+  updatePointer(event);
+
+  const target = pickTarget();
+  if (target && inBounds(target.x, target.z) && !deleteMode) {
+    rollover.visible = true;
+    rollover.position.set(target.x, target.y, target.z);
+  } else {
+    rollover.visible = false;
+  }
+}
+
+function onPointerDown(event) {
+  updatePointer(event);
+
+  // Clic droit ⇒ suppression
+  if (event.button === 2) {
+    handleDelete();
+    return;
+  }
+  // Clic gauche
+  if (event.button !== 0) return;
+
+  if (deleteMode) {
+    handleDelete();
+  } else {
+    placeBrick();
+  }
+}
+
+function updatePointer(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x =  ((event.clientX - rect.left) / rect.width)  * 2 - 1;
+  pointer.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
+}
+
+/* ============================================================
+   PLACEMENT / SUPPRESSION
+   ============================================================ */
+function placeBrick() {
+  const t = pickTarget();
+  if (!t) return;
+  if (!inBounds(t.x, t.z)) return;
+
+  const brick = createBrickMesh(currentColor, false);
+  brick.position.set(t.x, t.y, t.z);
+  brick.userData.color = currentColor;
+  scene.add(brick);
+  bricks.push(brick);
+  history.push({ type: 'add', brick });
+}
+
+function handleDelete() {
+  raycaster.setFromCamera(pointer, camera);
+  const brickMeshes = [];
+  bricks.forEach((b) => b.traverse((o) => o.isMesh && brickMeshes.push(o)));
+  const hits = raycaster.intersectObjects(brickMeshes, false);
+  if (!hits.length) return;
+
+  // Remonte au groupe-brique
+  let target = hits[0].object;
+  while (target.parent && !target.userData.isBrick) target = target.parent;
+  if (!target.userData.isBrick) return;
+
+  removeBrick(target, /*recordHistory*/ true);
+}
+
+function removeBrick(brick, recordHistory) {
+  scene.remove(brick);
+  const idx = bricks.indexOf(brick);
+  if (idx >= 0) bricks.splice(idx, 1);
+  if (recordHistory) {
+    history.push({
+      type: 'remove',
+      brick,
+      position: brick.position.clone(),
+      color: brick.userData.color,
+    });
+  }
+}
+
+/* ============================================================
+   UNDO
+   ============================================================ */
+function undo() {
+  const last = history.pop();
+  if (!last) return;
+
+  if (last.type === 'add') {
+    // L'utilisateur avait ajouté ⇒ on retire
+    removeBrick(last.brick, false);
+  } else if (last.type === 'remove') {
+    // L'utilisateur avait supprimé ⇒ on remet
+    scene.add(last.brick);
+    bricks.push(last.brick);
+  }
+}
+
+/* ============================================================
+   CLEAR ALL (avec confirmation)
+   ============================================================ */
+function clearAll() {
+  while (bricks.length) {
+    scene.remove(bricks.pop());
+  }
+  history.length = 0;
+}
+
+/* ============================================================
+   UI — PALETTE & BOUTONS
+   ============================================================ */
+function buildPalette() {
+  const palette = document.getElementById('palette');
+  COLORS.forEach((c, i) => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (i === 0 ? ' active' : '');
+    sw.style.background = '#' + c.hex.toString(16).padStart(6, '0');
+    sw.title = c.name;
+    sw.addEventListener('click', () => {
+      currentColor = c.hex;
+      setRolloverColor(c.hex);
+      document.querySelectorAll('.swatch').forEach((s) => s.classList.remove('active'));
+      sw.classList.add('active');
+    });
+    palette.appendChild(sw);
+  });
+}
+
+function bindUI() {
+  const btnDelete = document.getElementById('btnDelete');
+  const btnUndo   = document.getElementById('btnUndo');
+  const btnClear  = document.getElementById('btnClear');
+  const modal     = document.getElementById('modal');
+  const modalOk   = document.getElementById('modalConfirm');
+  const modalNo   = document.getElementById('modalCancel');
+  const status    = document.getElementById('status');
+
+  btnDelete.addEventListener('click', () => {
+    deleteMode = !deleteMode;
+    btnDelete.classList.toggle('active', deleteMode);
+    status.classList.toggle('show', deleteMode);
+    rollover.visible = false;
+    renderer.domElement.style.cursor = deleteMode ? 'not-allowed' : 'crosshair';
+  });
+
+  btnUndo.addEventListener('click', undo);
+
+  btnClear.addEventListener('click', () => {
+    if (bricks.length === 0) return;
+    modal.classList.add('show');
+  });
+
+  modalOk.addEventListener('click', () => {
+    clearAll();
+    modal.classList.remove('show');
+  });
+  modalNo.addEventListener('click', () => modal.classList.remove('show'));
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.remove('show');
+  });
+
+  // Raccourci clavier : Ctrl/Cmd+Z = Undo
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      undo();
+    }
+  });
+
+  renderer.domElement.style.cursor = 'crosshair';
+}
+
+/* ============================================================
+   BOUCLE D'ANIMATION
+   ============================================================ */
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
