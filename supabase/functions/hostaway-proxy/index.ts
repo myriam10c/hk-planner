@@ -5,13 +5,31 @@ const HOSTAWAY_ACCOUNT_ID = Deno.env.get("HOSTAWAY_ACCOUNT_ID") ?? "";
 const HOSTAWAY_API_SECRET = Deno.env.get("HOSTAWAY_API_KEY") ?? "";
 const APP_SHARED_SECRET = Deno.env.get("APP_SHARED_SECRET") ?? "";
 const STRICT_AUTH = (Deno.env.get("STRICT_AUTH") ?? "true") !== "false";
+// Server-to-server secret, NEVER shipped in the client bundle. Gates the
+// server-only routes below (sync/dispatch/command-queue), which the browser
+// never calls. Until it is configured these routes keep their previous
+// X-App-Secret gating so deploying this code can't break the VPS jobs.
+const SERVER_SHARED_SECRET = Deno.env.get("SERVER_SHARED_SECRET") ?? "";
+const SERVER_ONLY_ACTIONS = new Set([
+  "syncListings",
+  "dispatchPendingEvents",
+  "dispatchMaintenance",
+  "syncReviewsCache",
+  "syncHermesActionsCache",
+  "syncCleaningAccounting",
+  "updateHermesCommand",
+  "updateMacCommand",
+  "submitMacCommand",
+  "getMacCommands",
+  "getHermesCommands",
+]);
 const TOKEN_URL = "https://api.hostaway.com/v1/accessTokens";
 const API_BASE = "https://api.hostaway.com/v1";
 
 const DEFAULT_CORS_HEADERS = {
   "Access-Control-Allow-Origin": "https://stunning-kleicha-f61101.netlify.app",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-App-Secret, X-Cleaner-Token",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-App-Secret, X-Cleaner-Token, X-Server-Secret",
   "Vary": "Origin",
 };
 const ALLOWED_ORIGINS = new Set([
@@ -488,6 +506,18 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Server-only routes: require a secret that never ships to the browser.
+    // If SERVER_SHARED_SECRET is unset, keep the previous X-App-Secret gating
+    // (already validated above) so the VPS jobs are not broken before the env
+    // var is configured on both the edge function and the callers.
+    if (action !== null && SERVER_ONLY_ACTIONS.has(action)) {
+      if (SERVER_SHARED_SECRET === "") {
+        console.warn(`[hostaway-proxy] SERVER_SHARED_SECRET not set — "${action}" still gated by X-App-Secret only; configure it to harden.`);
+      } else if ((req.headers.get("x-server-secret") ?? "") !== SERVER_SHARED_SECRET) {
+        console.log(`[hostaway-proxy] missing/invalid X-Server-Secret for "${action}" from origin=${origin}`);
+        return jsonResp({ error: "server auth required" }, 403);
+      }
+    }
 
     // ==================== CHECKOUTS ====================
     if (action === "checkouts") {
