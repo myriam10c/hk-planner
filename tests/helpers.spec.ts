@@ -105,3 +105,44 @@ test('classifyMt() returns a {category, priority} pair', async ({ page }) => {
   // Empty input falls back to defaults.
   expect(r.blank).toEqual({ category: 'general', priority: 'medium' });
 });
+
+test('classifyMt() short keywords match as words, not substrings', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const f = (window as any).classifyMt;
+    return {
+      // "ac" must classify cooling issues...
+      acReal: f('AC not cooling in bedroom').category,
+      // ...but NOT trigger on "ac" buried in unrelated words.
+      replace: f('replace the light bulb in the hallway').category,
+      cracked: f('cracked tile near the entrance').category,
+      // word-boundary keeps real matches working
+      tap: f('kitchen tap dripping').category,
+      rat: f('rat seen in the kitchen').category,
+    };
+  });
+  expect(r.acReal).toBe('ac');
+  // "replace" contains the substring "ac" but must NOT be misclassified as ac.
+  expect(r.replace).not.toBe('ac');
+  // "cracked" contains "ac" but must resolve to structural (tile/crack), not ac.
+  expect(r.cracked).toBe('structural');
+  expect(r.tap).toBe('plumbing');
+  expect(r.rat).toBe('pest');
+});
+
+test('localYMD() uses local date components (not UTC)', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const f = (window as any).localYMD;
+    // A fixed local date — must serialize to its LOCAL Y-M-D regardless of TZ,
+    // unlike toISOString() which would shift it in UTC+ timezones.
+    const d = new Date(2026, 0, 15, 1, 30); // 15 Jan 2026, 01:30 local
+    const today = (window as any).todayLocal();
+    const now = new Date();
+    const expectedToday =
+      now.getFullYear() + '-' +
+      String(now.getMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getDate()).padStart(2, '0');
+    return { fixed: f(d), today, expectedToday };
+  });
+  expect(r.fixed).toBe('2026-01-15');
+  expect(r.today).toBe(r.expectedToday);
+});

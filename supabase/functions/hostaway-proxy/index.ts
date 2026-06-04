@@ -1148,8 +1148,17 @@ Deno.serve(async (req: Request) => {
         const catMap: Record<string, string> = { 'ac': 'ac', 'plumb': 'plumbing', 'electr': 'electrical', 'water': 'plumbing', 'leak': 'plumbing', 'pipe': 'plumbing', 'drain': 'plumbing', 'power': 'electrical', 'light': 'electrical', 'pest': 'pest', 'paint': 'painting' };
         let category = 'general';
         const titleLower = (title + ' ' + (description || '')).toLowerCase();
+        // Word-boundary match for short keywords (e.g. 'ac') so they don't match
+        // inside unrelated words like "replace"/"cracked"/"back".
+        const matchKw = (text: string, kw: string) => {
+          if (kw.length <= 3) {
+            const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return new RegExp('\\b' + esc + '\\b', 'i').test(text);
+          }
+          return text.includes(kw);
+        };
         for (const [keyword, cat] of Object.entries(catMap)) {
-          if (titleLower.includes(keyword)) { category = cat; break; }
+          if (matchKw(titleLower, keyword)) { category = cat; break; }
         }
         // Get SLA
         const { data: slaData } = await sb.from("maintenance_sla").select("max_hours").eq("category", category).eq("priority", severity || 'medium').single();

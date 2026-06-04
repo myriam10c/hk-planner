@@ -451,7 +451,7 @@ function exportPlannerCSV(items){
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   a.href = url; a.download = 'planner-'+today+'.csv';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
@@ -1122,7 +1122,7 @@ async function api(action,opts){
 function getWeekRange(){
   const t=new Date(),s=new Date(t);s.setDate(s.getDate()+(weekOffset*7));
   const e=new Date(s);e.setDate(e.getDate()+6);
-  return{startDate:s.toISOString().split('T')[0],endDate:e.toISOString().split('T')[0]};
+  return{startDate:localYMD(s),endDate:localYMD(e)};
 }
 
 let savingDone=false;
@@ -1176,13 +1176,13 @@ async function fetchAll(){
     // Compute estimated times from timer history
     estimatedTimes={};
     Object.entries(timers).forEach(([k,t])=>{if(t&&t.duration_minutes){
-      const parts=k.split('_');const lid=RESERVATIONS.find(r=>keyFor(r)===k);
+      const lid=RESERVATIONS.find(r=>keyFor(r)===k);
       if(lid&&lid.listingId){if(!estimatedTimes[lid.listingId])estimatedTimes[lid.listingId]=[];estimatedTimes[lid.listingId].push(t.duration_minutes);}
     }});
     // Load auto-send config
     api('getConfig',{params:{key:'auto_send_cleaners'}}).then(r=>{autoSendCleaners=r.value!=='false';});
     lastUpdate=new Date();
-    const today=new Date().toISOString().split('T')[0];
+    const today=todayLocal();
     if(dates.includes(today)&&selectedDate==='all')selectedDate=today;
     loading=false;render();
     startLiveTimerUpdates();
@@ -1192,6 +1192,10 @@ async function fetchAll(){
 function formatDate(d){const dt=new Date(d+'T00:00:00');return DAYS[dt.getDay()]+' '+dt.getDate()+' '+MONTHS[dt.getMonth()];}
 function formatDateFull(d){const dt=new Date(d+'T00:00:00');return MONTHS[dt.getMonth()]+' '+dt.getDate()+', '+dt.getFullYear();}
 function isToday(d){const t=new Date(),dt=new Date(d+'T00:00:00');return t.getFullYear()===dt.getFullYear()&&t.getMonth()===dt.getMonth()&&t.getDate()===dt.getDate();}
+// Local-date YYYY-MM-DD. Avoids toISOString() which is UTC and shifts the date
+// backwards during 00:00–03:59 Dubai time (UTC+4), giving the wrong "today".
+function localYMD(d){const dt=d||new Date();return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}
+function todayLocal(){return localYMD(new Date());}
 function formatTime(h){if(h==null||h===0)return null;return(h<10?'0':'')+h+':00';}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
@@ -1202,9 +1206,13 @@ function getCleaningFee(r){
   if(r.listingId&&listingPrices[r.listingId]&&listingPrices[r.listingId].custom_price)return listingPrices[r.listingId].custom_price;
   if(r.cleaningFee&&r.cleaningFee>0)return r.cleaningFee;
   if(r.listingId&&listingPrices[r.listingId]&&listingPrices[r.listingId].price)return listingPrices[r.listingId].price;
-  const bedrooms=getBedroomsForListing(r.listingId);
+  const bedrooms=getBedroomsForListing(r.listingId)||0;
   if(CLEANING_FEE_BY_BEDROOMS[bedrooms]!==undefined)return CLEANING_FEE_BY_BEDROOMS[bedrooms];
-  return 250;
+  // 5BR+ has no published default → clamp to the highest defined tier (conservative
+  // floor) rather than falling to the studio price. Real fix = add the tier to the
+  // pricing table / listingPrices, not invent a number here.
+  const maxTier=Math.max(...Object.keys(CLEANING_FEE_BY_BEDROOMS).map(Number));
+  return CLEANING_FEE_BY_BEDROOMS[Math.min(bedrooms,maxTier)];
 }
 // Dashboard revenue: exact Hostaway fee (no fallback — matches rental activity)
 function getRevenueFee(r){return r.cleaningFee||0;}
@@ -1261,7 +1269,11 @@ function computeRevenuePerCleaner(month){
     const revTTC = Number(r.cleaningFee||0);
     const revHT = revTTC / (1 + VAT_RATE);
     const revPerCleaner = revHT / ids.length;
-    const eliteCostHT = eliteCostForListing(r.listingId) / ids.length;
+    // Elite cost is the cost of the JOB — split across the subcontractors only
+    // (staff have cost=0). Dividing by ids.length would under-book the cost when
+    // a subcontractor and staff are co-assigned.
+    const subIds = ids.filter(cid=>byCleaner[cid].role==='subcontractor');
+    const eliteCostHT = subIds.length ? eliteCostForListing(r.listingId) / subIds.length : 0;
     ids.forEach(cid=>{
       byCleaner[cid].cleanings++;
       byCleaner[cid].revenueAED += revPerCleaner;
@@ -1277,8 +1289,10 @@ function computeRevenuePerCleaner(month){
     const revTTC = Number(e.price_billed||0);
     const revHT = revTTC / (1 + VAT_RATE);
     const revPerCleaner = revHT / ids.length;
-    // Pour extra cleanings, use cleaner_price si fourni (négocié à la main), sinon Elite tariff
-    const eliteCostHT = (Number(e.cleaner_price) || eliteCostForListing(e.listing_id)) / ids.length;
+    // Pour extra cleanings, use cleaner_price si fourni (négocié à la main), sinon Elite tariff.
+    // Split sur les subcontractors uniquement (voir loop reservations ci-dessus).
+    const subIds = ids.filter(cid=>byCleaner[cid].role==='subcontractor');
+    const eliteCostHT = subIds.length ? (Number(e.cleaner_price) || eliteCostForListing(e.listing_id)) / subIds.length : 0;
     ids.forEach(cid=>{
       byCleaner[cid].cleanings++;
       byCleaner[cid].revenueAED += revPerCleaner;
@@ -2037,7 +2051,7 @@ function notifyNewAssignment(listing,cleaner){
   if(notifPermission==='granted') new Notification('New Assignment',{body:listing+' assigned to '+cleaner,icon:'📋'});
 }
 function checkUpcomingCheckouts(){
-  const now=new Date(),today=now.toISOString().split('T')[0];
+  const today=todayLocal();
   const todayRes=RESERVATIONS.filter(r=>r.co===today&&!done[keyFor(r)]);
   if(todayRes.length>0&&notifPermission==='granted'){
     new Notification('Housekeeping Planner',{body:todayRes.length+' cleanings remaining today!',icon:'⚠️'});
@@ -2159,15 +2173,25 @@ const MT_PRIORITY_KEYWORDS = {
   high: ['leak','broken','no power','no water','can\'t','cannot','not working','stuck'],
   low: ['cosmetic','minor','small','tiny','later','low']
 };
+// Keyword match: word-boundary for short keywords (≤3 chars like 'ac','tap','tv')
+// so they don't match inside unrelated words ("replace","cracked","between").
+// Longer keywords keep substring matching to preserve prefix matches ('electr','plumb').
+function matchKw(text,kw){
+  if(kw.length<=3){
+    const esc=kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return new RegExp('\\b'+esc+'\\b','i').test(text);
+  }
+  return text.includes(kw);
+}
 function classifyMt(desc){
   const lower=(desc||'').toLowerCase();
   let category='general';
   for(const [cat,kws] of Object.entries(MT_KEYWORDS)){
-    if(kws.some(kw=>lower.includes(kw))){category=cat;break;}
+    if(kws.some(kw=>matchKw(lower,kw))){category=cat;break;}
   }
   let priority='medium';
   for(const [pri,kws] of Object.entries(MT_PRIORITY_KEYWORDS)){
-    if(kws.some(kw=>lower.includes(kw))){priority=pri;break;}
+    if(kws.some(kw=>matchKw(lower,kw))){priority=pri;break;}
   }
   return {category,priority};
 }
@@ -3488,8 +3512,8 @@ async function loadDashHeatmap(){
     const dayOfWeek=today.getDay();
     const startMonday=new Date(today);
     startMonday.setDate(today.getDate()-((dayOfWeek+6)%7)-11*7);
-    const sd=startMonday.toISOString().split('T')[0];
-    const ed=today.toISOString().split('T')[0];
+    const sd=localYMD(startMonday);
+    const ed=localYMD(today);
     const[coRes,allRes]=await Promise.all([
       api('checkouts',{params:{startDate:sd,endDate:ed}}),
       api('getAllData'),
@@ -3728,7 +3752,7 @@ function renderDashboard(){
     mDates.forEach(d=>{
       const dayRes=mRes.filter(r=>r.co===d),dc=dayRes.filter(r=>mDone[keyFor(r)]).length;
       const pct=dayRes.length>0?Math.round(dc/dayRes.length*100):0;
-      const today=new Date().toISOString().split('T')[0];
+      const today=todayLocal();
       h+='<div class="cleaner-stat-row"><div class="cs-name">'+formatDate(d)+(d===today?' 🟢':'')+'</div>'+
         '<div class="cs-bar"><div class="cs-fill" style="width:'+pct+'%;background:var(--primary)"></div></div><div class="cs-count">'+dc+'/'+dayRes.length+'</div></div>';
     });
@@ -4021,7 +4045,7 @@ function renderCompletionHeatmap(){
     for(let d = 0; d < 7; d++){
       const day = new Date(startMonday);
       day.setDate(startMonday.getDate() + w * 7 + d);
-      const ds = day.toISOString().split('T')[0];
+      const ds = localYMD(day);
       const allItems = (src.reservations||[]).concat(src.extras||[]);
       let dones = 0, total = 0;
       allItems.forEach(r => {
@@ -4068,7 +4092,7 @@ function renderTicketsFunnel(){
   if(!el) return;
   const month = (typeof dashYear !== 'undefined' && typeof dashMonth !== 'undefined')
     ? dashYear + '-' + String(dashMonth + 1).padStart(2, '0')
-    : new Date().toISOString().slice(0,7);
+    : todayLocal().slice(0,7);
   const all = (maintenanceTickets || []).concat(resolvedTickets || []);
   const inMonth = all.filter(t => {
     const c = String(t.created_at || '');
@@ -4407,7 +4431,7 @@ function renderRecurring(){
   h+='<button class="issue-submit" data-action="saveRecurringTask">Add Task</button></div>';
 
   // Task list
-  const today=new Date().toISOString().split('T')[0];
+  const today=todayLocal();
   h+='<div class="settings-panel"><h3>📋 Scheduled Tasks ('+recurringTasks.length+')</h3>';
   if(recurringTasks.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">'+icon('repeat',56)+'</div><div class="empty-hero-title">No recurring tasks</div><div class="empty-hero-sub">Automate deep cleans, filter changes, etc. Fill in the form above.</div></div>';
   recurringTasks.forEach(task=>{
@@ -4448,7 +4472,7 @@ function renderCalendar(){
 
   const firstDay=new Date(calYear,calMonth,1).getDay();
   const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
-  const today=new Date().toISOString().split('T')[0];
+  const today=todayLocal();
 
   // Build a map of reservations by date for this month
   const calRes={};
@@ -5785,8 +5809,7 @@ async function generateInvoice(){
   const endDate=invYear+'-'+String(invMonth+1).padStart(2,'0')+'-'+String(lastDay).padStart(2,'0');
   let invData;
   try{
-    const resp=await fetch(API+'?action=checkouts&startDate='+startDate+'&endDate='+endDate);
-    invData=await resp.json();
+    invData=await api('checkouts',{params:{startDate,endDate}});
   }catch(e){toast('Failed to load data','error');return;}
   const allRes=invData.reservations||[];
   const allDone=invData.done||{};
@@ -6167,7 +6190,7 @@ function openExtraModal(editingExtra){
     assigned_cleaner_id: (assignments||{})[editingExtra.reservation_key]||'',
   } : {
     listing_id: '',
-    cleaning_date: new Date().toISOString().split('T')[0],
+    cleaning_date: todayLocal(),
     label: '',
     guest_name: '',
     price_billed: '',
