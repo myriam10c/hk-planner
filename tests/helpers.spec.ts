@@ -77,10 +77,9 @@ test('getBuildingName() normalizes known buildings and strips unit numbers', asy
       riviera: f('315 - Azizi Riviera 33'),
       act: f('A1 - Act One Residence'),
       elysee: f('g8 - elysee 3'),
-      // NOTE: '506 | Act 2' returns 'Act' here, not 'Act One Act Two' — the
-      // trailing-unit-number strip eats the "2" before the 'act 2' rule runs,
-      // so that normalization branch is effectively dead. Pre-existing quirk.
-      act2quirk: f('506 | Act 2'),
+      // 'Act 2' must normalize like the spelled-out variants — guards the fix
+      // for the trailing-unit-number strip running before the 'act 2' rule.
+      act2: f('506 | Act 2'),
       unknown: f('12 - Some New Tower 4'),
       empty: f(''),
     };
@@ -88,7 +87,7 @@ test('getBuildingName() normalizes known buildings and strips unit numbers', asy
   expect(r.riviera).toBe('Azizi Riviera');
   expect(r.act).toBe('Act One Act Two');
   expect(r.elysee).toBe('Elysée');
-  expect(r.act2quirk).toBe('Act'); // documents the dead-branch quirk noted above
+  expect(r.act2).toBe('Act One Act Two');
   // Unknown building: prefix + trailing unit number stripped, name preserved.
   expect(r.unknown).toBe('Some New Tower');
   expect(r.empty).toBe('Other');

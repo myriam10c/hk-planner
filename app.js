@@ -1308,9 +1308,8 @@ function getBuildingName(listing){
   // Format: "315 - Azizi Riviera 33" or "506 | Act 2" or "g8 - elysee 3"
   const m=listing.match(/^[\w\d]+\s*[-|]\s*(.+)$/);
   let bldg=m?m[1].trim():listing;
-  // Remove trailing unit numbers
-  bldg=bldg.replace(/\s+\d+\s*$/,'').trim();
-  // Normalize known duplicates
+  // Normalize known duplicates BEFORE stripping trailing unit numbers — otherwise
+  // e.g. "Act 2" loses its "2" and never matches the 'act 2' rule below.
   const lower=bldg.toLowerCase();
   if(lower.includes('riviera'))return 'Azizi Riviera';
   if(lower.includes('bloom'))return 'Bloom Heights';
@@ -1321,7 +1320,8 @@ function getBuildingName(listing){
   if(lower.includes('dt one')||lower.includes('dt residence'))return 'DT Residence';
   if(lower.includes('sobha wave'))return 'Sobha Waves';
   if(lower.includes('shamal'))return 'Shamal Waves';
-  return bldg;
+  // Unknown building: strip trailing unit number for a clean label.
+  return bldg.replace(/\s+\d+\s*$/,'').trim();
 }
 function getCleanerById(id){return cleaners.find(c=>c.id===id);}
 
