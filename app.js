@@ -941,6 +941,10 @@ let dashKPIs=null,dashKPIsLoading=false;
 let hermesData=null,hermesLoading=false,hermesFilter={handler:'',status:'',days:7};
 // Subcontractors tab (Elite Cleaning accounting)
 let subData=null,subLoading=false,subMonth=null,subAvailableMonths=null;
+// Cleaner Ratings tab (notes propreté)
+let ratingsData=null;       // {cleaners_count, unmatched_count, payload_json:{cleaners:{...}}}
+let ratingsLoading=false;
+let ratingsSelected=null;   // cleaner_id (string) sélectionné pour le drill-down, ou null
 // Heatmap data (12 weeks past, fetched separately because dashData only has the selected month)
 let dashHeatmapData=null,dashHeatmapLoading=false;
 let liveTimerInterval=null;
@@ -1908,6 +1912,18 @@ async function loadSubcontractorMonth(month){
 }
 function setSubMonth(m){loadSubcontractorMonth(m);}
 function refreshSub(){loadSubcontractorMonth(subMonth);}
+// ============== CLEANER RATINGS (notes propreté) ==============
+async function loadCleanerRatings(){
+  ratingsLoading=true;render();
+  try{
+    const res=await api('getCleanerRatings');
+    ratingsData=res.data||{cleaners_count:0,unmatched_count:0,payload_json:{cleaners:{}}};
+  }catch(e){ratingsData=null;console.error('loadCleanerRatings',e);}
+  ratingsLoading=false;render();
+}
+function selectRatingCleaner(cid){ratingsSelected=cid;render();}
+function clearRatingCleaner(){ratingsSelected=null;render();}
+function refreshRatings(){ratingsData=null;loadCleanerRatings();}
 function exportSubCsv(){
   if(!subData||!subData.payload_json||!subData.payload_json.rows){toast('No data','error');return;}
   const rows=subData.payload_json.rows;
