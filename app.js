@@ -2910,6 +2910,10 @@ function render(){
     if(subData===null && !subLoading && subMonth)loadSubcontractorMonth();
     return renderSubcontractors();
   }
+  if(currentTab==='ratings'){
+    if(ratingsData===null && !ratingsLoading) loadCleanerRatings();
+    return renderCleanerRatings();
+  }
   renderPlanner();
 }
 
@@ -2923,6 +2927,7 @@ function renderBottomNav(){
       {id:'maintenance',icon:icon('wrench',22),label:'Maint.'},
       {id:'hermes',icon:icon('zap',22),label:'Hermes'},
       {id:'subcontractors',icon:icon('dollar',22),label:'Subs'},
+      {id:'ratings',icon:icon('star',22),label:'Ratings'},
       {id:'settings',icon:icon('settings',22),label:t('settings')},
       {id:'__more',icon:icon('more',22),label:'More'},
     ];
