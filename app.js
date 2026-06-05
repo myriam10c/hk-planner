@@ -4542,6 +4542,31 @@ function _cleanerName(cid){
   const c=(cleaners||[]).find(x=>String(x.id)===String(cid));
   return c?c.name:('#'+cid);
 }
+function _cleanerRole(cid){
+  const c=(cleaners||[]).find(x=>String(x.id)===String(cid));
+  return (c&&c.role)||'cleaner';
+}
+// Les N derniers mois (clé 'YYYY-MM' + label FR court), du plus ancien au plus récent.
+function _recentMonths(n){
+  const fr=['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
+  const out=[];const d=new Date();d.setDate(1);
+  for(let i=n-1;i>=0;i--){
+    const m=new Date(d.getFullYear(),d.getMonth()-i,1);
+    const key=m.getFullYear()+'-'+String(m.getMonth()+1).padStart(2,'0');
+    out.push({key:key,label:fr[m.getMonth()]+' '+String(m.getFullYear()).slice(2)});
+  }
+  return out;
+}
+// Moyenne de propreté d'un cleaner pour un mois donné, depuis details[].
+function _monthAvg(details,monthKey){
+  let sum=0,cnt=0;
+  (details||[]).forEach(d=>{
+    if(d.cleanliness!=null && typeof d.cleaning_date==='string' && d.cleaning_date.slice(0,7)===monthKey){
+      sum+=d.cleanliness;cnt++;
+    }
+  });
+  return cnt?{avg:Math.round(sum/cnt*10)/10,count:cnt}:null;
+}
 function _ratingColor(v){
   if(v==null) return '#9ca3af';
   if(v>=9) return '#16a34a';
@@ -4563,8 +4588,9 @@ function renderCleanerRatings(){
     return;
   }
   if(ratingsData){
+    const ratedCount=ids.filter(cid=>{const r=_cleanerRole(cid);return r!=='manager'&&r!=='system';}).length;
     h+='<div style="font-size:11px;color:#6b7280;margin-bottom:8px">Source : sync_cleaner_ratings · '+
-       ids.length+' cleaners notés · '+(ratingsData.unmatched_count||0)+' reviews non-attribuées</div>';
+       ratedCount+' cleaners notés · '+(ratingsData.unmatched_count||0)+' reviews non-attribuées</div>';
   }
   // Drill-down d'un cleaner sélectionné
   if(ratingsSelected && cleaners[ratingsSelected]){
@@ -4582,34 +4608,48 @@ function renderCleanerRatings(){
     document.getElementById('app').innerHTML=h;
     return;
   }
-  // Scorecard : un row par cleaner, trié par moyenne 90j desc puis all-time
-  if(ids.length===0){
+  // Scorecard : exclure les non-cleaners (manager/system), une ligne par cleaner.
+  const visibleIds=ids.filter(cid=>{
+    const r=_cleanerRole(cid);
+    return r!=='manager' && r!=='system';
+  });
+  if(visibleIds.length===0){
     h+='<div class="empty">Aucune note disponible.</div>';
     h+='</div>'+renderBottomNav();
     document.getElementById('app').innerHTML=h;
     return;
   }
-  ids.sort((a,b)=>{
-    const va=cleaners[a].avg_cleanliness_90d??cleaners[a].avg_cleanliness_all_time??-1;
-    const vb=cleaners[b].avg_cleanliness_90d??cleaners[b].avg_cleanliness_all_time??-1;
+  // Colonnes par mois : les 3 derniers mois + moyenne all-time.
+  const months=_recentMonths(3);
+  visibleIds.sort((a,b)=>{
+    const va=cleaners[a].avg_cleanliness_all_time??cleaners[a].avg_cleanliness_90d??-1;
+    const vb=cleaners[b].avg_cleanliness_all_time??cleaners[b].avg_cleanliness_90d??-1;
     return vb-va;
   });
-  h+='<table class="data-table"><thead><tr><th>Cleaner</th><th>Propreté 90j</th><th>Moyenne all-time</th><th>Ménages notés</th></tr></thead><tbody>';
-  ids.forEach(cid=>{
+  h+='<div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Cleaner</th>';
+  months.forEach(m=>{h+='<th style="text-align:center">'+esc(m.label)+'</th>';});
+  h+='<th style="text-align:center">All-time</th><th style="text-align:center">Notés</th></tr></thead><tbody>';
+  visibleIds.forEach(cid=>{
     const c=cleaners[cid];
     if(!c.enough_data){
-      h+='<tr style="opacity:.55"><td>'+esc(_cleanerName(cid))+'</td><td colspan="3">Pas assez de données ('+c.count_all_time+')</td></tr>';
+      h+='<tr style="opacity:.55"><td>'+esc(_cleanerName(cid))+'</td><td colspan="'+(months.length+2)+'">Pas assez de données ('+c.count_all_time+')</td></tr>';
       return;
     }
     h+='<tr data-action="selectRatingCleaner" data-arg0="'+cid+'" style="cursor:pointer">'+
-       '<td>'+esc(_cleanerName(cid))+'</td>'+
-       '<td style="color:'+_ratingColor(c.avg_cleanliness_90d)+';font-weight:600">'+
-         (c.avg_cleanliness_90d!=null?c.avg_cleanliness_90d+'/10 ('+c.count_90d+')':'—')+'</td>'+
-       '<td style="color:'+_ratingColor(c.avg_cleanliness_all_time)+'">'+
+       '<td>'+esc(_cleanerName(cid))+'</td>';
+    months.forEach(m=>{
+      const ma=_monthAvg(c.details,m.key);
+      if(ma){
+        h+='<td style="text-align:center;color:'+_ratingColor(ma.avg)+';font-weight:600">'+ma.avg+'<span style="color:#9ca3af;font-size:10px"> ('+ma.count+')</span></td>';
+      }else{
+        h+='<td style="text-align:center;color:#9ca3af">—</td>';
+      }
+    });
+    h+='<td style="text-align:center;color:'+_ratingColor(c.avg_cleanliness_all_time)+';font-weight:600">'+
          (c.avg_cleanliness_all_time!=null?c.avg_cleanliness_all_time+'/10':'—')+'</td>'+
-       '<td>'+c.count_all_time+'</td></tr>';
+       '<td style="text-align:center">'+c.count_all_time+'</td></tr>';
   });
-  h+='</tbody></table>';
+  h+='</tbody></table></div>';
   h+='</div>'+renderBottomNav();
   document.getElementById('app').innerHTML=h;
 }
