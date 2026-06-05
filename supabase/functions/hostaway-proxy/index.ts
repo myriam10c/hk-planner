@@ -17,6 +17,7 @@ const SERVER_ONLY_ACTIONS = new Set([
   "syncReviewsCache",
   "syncHermesActionsCache",
   "syncCleaningAccounting",
+  "syncCleanerRatings",
   "updateHermesCommand",
   "updateMacCommand",
   "submitMacCommand",
@@ -463,6 +464,8 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["getCleaningAccounting", "GET"],
   ["listCleaningAccountingMonths", "GET"],
   ["syncCleaningAccounting", "POST"],
+  ["getCleanerRatings", "GET"],
+  ["syncCleanerRatings", "POST"],
   ["submitHermesCommand", "POST"],
   ["getHermesCommands", "GET"],
   ["updateHermesCommand", "POST"],
@@ -2501,6 +2504,28 @@ Deno.serve(async (req: Request) => {
       const { error } = await sb.from("cleaning_accounting_cache").upsert(row, { onConflict: "month" });
       if (error) throw error;
       return jsonResp({ status: "success", month, rows_count: row.rows_count });
+    }
+
+    // ========== CLEANER RATINGS (notes propreté par cleaner) ==========
+    if (action === "getCleanerRatings") {
+      const { data, error } = await sb.from("cleaner_ratings_cache")
+        .select("*").eq("id", 1).maybeSingle();
+      if (error) throw error;
+      return jsonResp({ status: "success", data: data || null });
+    }
+    if (action === "syncCleanerRatings" && req.method === "POST") {
+      const body = await req.json().catch(() => ({}));
+      const row = {
+        id: 1,
+        payload_json: body.payload_json ?? {},
+        cleaners_count: Number(body.cleaners_count || 0),
+        unmatched_count: Number(body.unmatched_count || 0),
+        computed_at: new Date().toISOString(),
+        synced_at: new Date().toISOString(),
+      };
+      const { error } = await sb.from("cleaner_ratings_cache").upsert(row, { onConflict: "id" });
+      if (error) throw error;
+      return jsonResp({ status: "success", cleaners_count: row.cleaners_count });
     }
 
     // ========== HERMES COMMANDS (HK Planner → VPS bridge) ==========
