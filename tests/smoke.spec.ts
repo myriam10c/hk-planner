@@ -110,6 +110,32 @@ test('container has a desktop max-width on desktop viewport', async ({ page }, t
   expect(w, `.container width was ${w}px — desktop @media rule may be lost in source order`).toBeGreaterThanOrEqual(1000);
 });
 
+test('ratings tab renders without error', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof (window as any).render === 'function', null, { timeout: 10_000 });
+
+  // Invoke the ratings view renderer directly (mirrors how renderPlannerTable test works).
+  // Ensures the view-header + h2 are injected without depending on live Supabase data.
+  await page.evaluate(() => {
+    const w = window as any;
+    // Ensure manager mode (no cleanerMode) so renderCleanerRatings is available.
+    w.cleanerMode = null;
+    // Provide empty-but-valid ratingsData so the scorecard path runs immediately.
+    w.ratingsData = { cleaners_count: 0, unmatched_count: 0, payload_json: { cleaners: {} } };
+    w.ratingsLoading = false;
+    w.ratingsSelected = null;
+    w.currentTab = 'ratings';
+    // renderCleanerRatings() may either set #app.innerHTML directly (fixed build)
+    // or return an HTML string (older build); handle both.
+    const html = w.renderCleanerRatings();
+    if (typeof html === 'string') {
+      document.getElementById('app')!.innerHTML = html;
+    }
+  });
+
+  await expect(page.locator('h2', { hasText: 'Notes propreté' })).toBeVisible();
+});
+
 test('table row apt-stripping helper does not break table-cell layout (regression)', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name === 'mobile', 'Desktop-only check');
   await page.goto('/', { waitUntil: 'domcontentloaded' });

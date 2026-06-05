@@ -4549,12 +4549,19 @@ function _ratingColor(v){
   return '#dc2626';
 }
 function renderCleanerRatings(){
-  if(ratingsLoading && !ratingsData) return '<div class="loading">Chargement…</div>';
   const payload=(ratingsData&&ratingsData.payload_json)||{};
   const cleaners=payload.cleaners||{};
   const ids=Object.keys(cleaners);
-  let h='<div class="view-header"><h2>Notes propreté</h2>'+
+  let h='<div class="header"><div class="header-top"><h1>⭐ Ratings</h1></div></div>';
+  h+='<div class="container">';
+  h+='<div class="view-header"><h2>Notes propreté</h2>'+
     '<button class="btn" data-action="refreshRatings">↻ Refresh</button></div>';
+  if(ratingsLoading && !ratingsData){
+    h+='<div class="loading"><div class="spinner"></div></div>';
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h;
+    return;
+  }
   if(ratingsData){
     h+='<div style="font-size:11px;color:#6b7280;margin-bottom:8px">Source : sync_cleaner_ratings · '+
        ids.length+' cleaners notés · '+(ratingsData.unmatched_count||0)+' reviews non-attribuées</div>';
@@ -4571,12 +4578,16 @@ function renderCleanerRatings(){
          ';font-weight:600">'+(d.cleanliness!=null?d.cleanliness+'/10':'—')+'</td></tr>';
     });
     h+='</tbody></table>';
-    return h;
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h;
+    return;
   }
   // Scorecard : un row par cleaner, trié par moyenne 90j desc puis all-time
   if(ids.length===0){
     h+='<div class="empty">Aucune note disponible.</div>';
-    return h;
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h;
+    return;
   }
   ids.sort((a,b)=>{
     const va=cleaners[a].avg_cleanliness_90d??cleaners[a].avg_cleanliness_all_time??-1;
@@ -4599,7 +4610,8 @@ function renderCleanerRatings(){
        '<td>'+c.count_all_time+'</td></tr>';
   });
   h+='</tbody></table>';
-  return h;
+  h+='</div>'+renderBottomNav();
+  document.getElementById('app').innerHTML=h;
 }
 
 // ============== SUBCONTRACTORS TAB (Elite accounting) ==============
