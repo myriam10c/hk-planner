@@ -4532,6 +4532,71 @@ function renderCalendar(){
 }
 
 // ============ CLEANER STATS ============
+// ============== CLEANER RATINGS VIEW ==============
+function _cleanerName(cid){
+  const c=(cleaners||[]).find(x=>String(x.id)===String(cid));
+  return c?c.name:('#'+cid);
+}
+function _ratingColor(v){
+  if(v==null) return '#9ca3af';
+  if(v>=9) return '#16a34a';
+  if(v>=7) return '#ca8a04';
+  return '#dc2626';
+}
+function renderCleanerRatings(){
+  if(ratingsLoading && !ratingsData) return '<div class="loading">Chargement…</div>';
+  const payload=(ratingsData&&ratingsData.payload_json)||{};
+  const cleaners=payload.cleaners||{};
+  const ids=Object.keys(cleaners);
+  let h='<div class="view-header"><h2>Notes propreté</h2>'+
+    '<button class="btn" data-action="refreshRatings">↻ Refresh</button></div>';
+  if(ratingsData){
+    h+='<div style="font-size:11px;color:#6b7280;margin-bottom:8px">Source : sync_cleaner_ratings · '+
+       ids.length+' cleaners notés · '+(ratingsData.unmatched_count||0)+' reviews non-attribuées</div>';
+  }
+  // Drill-down d'un cleaner sélectionné
+  if(ratingsSelected && cleaners[ratingsSelected]){
+    const c=cleaners[ratingsSelected];
+    h+='<button class="btn" data-action="clearRatingCleaner">← Retour</button>';
+    h+='<h3>'+esc(_cleanerName(ratingsSelected))+'</h3>';
+    h+='<table class="data-table"><thead><tr><th>Date ménage</th><th>Appart</th><th>Guest</th><th>Propreté</th></tr></thead><tbody>';
+    (c.details||[]).forEach(d=>{
+      h+='<tr><td>'+esc(d.cleaning_date||'')+'</td><td>'+esc(String(d.listing_id||''))+
+         '</td><td>'+esc(d.guest||'')+'</td><td style="color:'+_ratingColor(d.cleanliness)+
+         ';font-weight:600">'+(d.cleanliness!=null?d.cleanliness+'/10':'—')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    return h;
+  }
+  // Scorecard : un row par cleaner, trié par moyenne 90j desc puis all-time
+  if(ids.length===0){
+    h+='<div class="empty">Aucune note disponible.</div>';
+    return h;
+  }
+  ids.sort((a,b)=>{
+    const va=cleaners[a].avg_cleanliness_90d??cleaners[a].avg_cleanliness_all_time??-1;
+    const vb=cleaners[b].avg_cleanliness_90d??cleaners[b].avg_cleanliness_all_time??-1;
+    return vb-va;
+  });
+  h+='<table class="data-table"><thead><tr><th>Cleaner</th><th>Propreté 90j</th><th>Moyenne all-time</th><th>Ménages notés</th></tr></thead><tbody>';
+  ids.forEach(cid=>{
+    const c=cleaners[cid];
+    if(!c.enough_data){
+      h+='<tr style="opacity:.55"><td>'+esc(_cleanerName(cid))+'</td><td colspan="3">Pas assez de données ('+c.count_all_time+')</td></tr>';
+      return;
+    }
+    h+='<tr data-action="selectRatingCleaner" data-arg0="'+cid+'" style="cursor:pointer">'+
+       '<td>'+esc(_cleanerName(cid))+'</td>'+
+       '<td style="color:'+_ratingColor(c.avg_cleanliness_90d)+';font-weight:600">'+
+         (c.avg_cleanliness_90d!=null?c.avg_cleanliness_90d+'/10 ('+c.count_90d+')':'—')+'</td>'+
+       '<td style="color:'+_ratingColor(c.avg_cleanliness_all_time)+'">'+
+         (c.avg_cleanliness_all_time!=null?c.avg_cleanliness_all_time+'/10':'—')+'</td>'+
+       '<td>'+c.count_all_time+'</td></tr>';
+  });
+  h+='</tbody></table>';
+  return h;
+}
+
 // ============== SUBCONTRACTORS TAB (Elite accounting) ==============
 function renderSubcontractors(){
   let h='<div class="header"><div class="header-top"><h1>💰 Subcontractors — Elite Cleaning</h1>'+
