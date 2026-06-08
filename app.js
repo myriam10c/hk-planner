@@ -3573,16 +3573,8 @@ function showDashExportMenu(e){
   renderContextMenu();
 }
 function dashGenerateInvoiceForCurrentMonth(){
-  // Invoice was previously a separate <select> — now it just picks the current dashboard month.
-  const m=dashMonth, y=dashYear;
-  // Re-implement lightweight: call existing generateInvoice with synthetic select if it exists
-  const sel=document.createElement('select');
-  sel.id='invoiceMonthSel';
-  const opt=document.createElement('option');
-  opt.value=y+'-'+m;
-  sel.appendChild(opt);
-  document.body.appendChild(sel);
-  try { generateInvoice(); } finally { sel.remove(); }
+  // Invoice always covers the month currently shown on the dashboard (dashMonth/dashYear).
+  generateInvoice();
 }
 
 function renderDashboard(){
@@ -5930,33 +5922,23 @@ async function exportPDF(){
 
 // ============ INVOICE (Manager only) ============
 async function generateInvoice(){
-  const sel=document.getElementById('invoiceMonthSel');
-  if(!sel){toast('Select a month','error');return;}
+  if(!dashData||!dashData.reservations){toast('Load the dashboard first','error');return;}
   try { await ensurePdf(); } catch(e){ toast('PDF library failed to load','error'); return; }
-  const[invYear,invMonth]=sel.value.split('-').map(Number);
+  const invYear=dashYear, invMonth=dashMonth;
 
   // Block if month not finished
   const now=new Date();
   const endOfMonth=new Date(invYear,invMonth+1,0,23,59,59);
-  if(now<=endOfMonth){toast('Month not finished yet','error');return;}
+  if(now<=endOfMonth){toast('Month not finished yet — invoice only for completed months','error');return;}
 
-  // Fetch data for selected month
-  toast('Loading data…','info');
-  const startDate=invYear+'-'+String(invMonth+1).padStart(2,'0')+'-01';
-  const lastDay=new Date(invYear,invMonth+1,0).getDate();
-  const endDate=invYear+'-'+String(invMonth+1).padStart(2,'0')+'-'+String(lastDay).padStart(2,'0');
-  let invData;
-  try{
-    invData=await api('checkouts',{params:{startDate,endDate}});
-  }catch(e){toast('Failed to load data','error');return;}
-  const allRes=invData.reservations||[];
-  const allDone=invData.done||{};
+  // Use the dashboard's already-loaded month (reservations + done map). The 'checkouts'
+  // endpoint never returns the done map, so re-fetching it here always produced an empty
+  // invoice; dashData.done (from getAllData) is the source of truth and its keys match keyFor().
+  const allRes=dashData.reservations||[];
+  const allDone=dashData.done||{};
   if(!allRes.length){toast('No reservations for this month','error');return;}
 
-  // Only completed cleanings (exclude ownerStay from invoice)
-  const valid=['new','modified','confirmed','reserved'];
-  const mRes=allRes.filter(r=>valid.includes(r.status));
-  const doneRes=mRes.filter(r=>allDone[keyFor(r)]).sort((a,b)=>a.co.localeCompare(b.co));
+  const doneRes=allRes.filter(r=>allDone[keyFor(r)]).sort((a,b)=>a.co.localeCompare(b.co));
   if(!doneRes.length){toast('No completed cleanings to invoice','error');return;}
 
   const{jsPDF}=window.jspdf;
