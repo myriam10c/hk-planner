@@ -3811,17 +3811,17 @@ function renderDashboard(){
     // ===== KPI TOP BAR — Focus marge Elite (compta réelle) =====
     h+='<div class="dash-card" style="margin-bottom:14px;background:linear-gradient(135deg,#fafbfc 0%,#fff 100%);border:1px solid #e5e7eb">';
     h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">';
-    h+='<h3 style="margin:0">💰 Marge Elite '+esc(monthName)+'</h3>';
-    h+='<span style="font-size:11px;color:#6b7280">Source : sync_cleaning_accounting · '+eliteCount+' ménages Elite / '+internalCount+' internes</span>';
+    h+='<h3 style="margin:0">💰 Elite Margin '+esc(monthName)+'</h3>';
+    h+='<span style="font-size:11px;color:#6b7280">Source: sync_cleaning_accounting · '+eliteCount+' Elite cleanings / '+internalCount+' internal</span>';
     h+='</div>';
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px">';
     const kpis=[
-      {label:'Marge Elite HT',value:eliteMarginHT,color:'#059669',unit:'AED',primary:true},
-      {label:'Revenue Elite TTC',value:eliteRevTTC,color:'#1f2937',unit:'AED'},
-      {label:'Cost Elite HT',value:eliteCostHT,color:'#dc2626',unit:'AED'},
-      {label:'Marge %',value:eliteMarginPct,color:eliteMarginPct>=30?'#059669':(eliteMarginPct>=20?'#d97706':'#dc2626'),unit:'%'},
-      {label:'TVA nette',value:eliteVatNet,color:'#6b7280',unit:'AED'},
-      {label:'Ménages Elite',value:eliteCount,color:'#1f2937',unit:''},
+      {label:'Elite Margin (excl. VAT)',value:eliteMarginHT,color:'#059669',unit:'AED',primary:true},
+      {label:'Elite Revenue (incl. VAT)',value:eliteRevTTC,color:'#1f2937',unit:'AED'},
+      {label:'Elite Cost (excl. VAT)',value:eliteCostHT,color:'#dc2626',unit:'AED'},
+      {label:'Margin %',value:eliteMarginPct,color:eliteMarginPct>=30?'#059669':(eliteMarginPct>=20?'#d97706':'#dc2626'),unit:'%'},
+      {label:'Net VAT',value:eliteVatNet,color:'#6b7280',unit:'AED'},
+      {label:'Elite Cleanings',value:eliteCount,color:'#1f2937',unit:''},
     ];
     kpis.forEach(k=>{
       const fontSize=k.primary?'24px':'20px';
@@ -3831,14 +3831,14 @@ function renderDashboard(){
       h+='</div>';
     });
     h+='</div>';
-    h+='<div style="font-size:10px;color:#9ca3af;margin-top:10px;line-height:1.4">💡 La <strong>marge Elite HT</strong> est la vraie compta : revenue cleaning fees encaissées sur ménages Elite, moins le coût facturé par Elite. Les ménages internes ne sont pas comptés ici (leur "coût" = salaire fixe, géré séparément).</div>';
+    h+='<div style="font-size:10px;color:#9ca3af;margin-top:10px;line-height:1.4">💡 The <strong>net Elite margin</strong> is the real accounting figure: cleaning fees collected on Elite cleanings, minus the cost billed by Elite. Internal cleanings are not counted here (their "cost" = fixed salary, handled separately).</div>';
     h+='</div>';
 
     // ===== Brut cleanings (info secondaire, mélange interne + Elite) =====
     h+='<div class="dash-card" style="margin-bottom:14px;background:#fafbfc">';
     h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">';
-    h+='<h3 style="margin:0;font-size:14px;color:#6b7280">📊 Cleaning fees brutes (info)</h3>';
-    h+='<span style="font-size:11px;color:#9ca3af">tous cleaners cumulés (internes + Elite + extras)</span>';
+    h+='<h3 style="margin:0;font-size:14px;color:#6b7280">📊 Gross cleaning fees (info)</h3>';
+    h+='<span style="font-size:11px;color:#9ca3af">all cleaners combined (internal + Elite + extras)</span>';
     h+='</div>';
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px">';
     const brutKpis=[
@@ -3875,11 +3875,11 @@ function renderDashboard(){
     h+='<span style="font-size:32px;font-weight:800;color:#059669;line-height:1">'+revPct+'%</span>';
     h+='<span style="font-size:10px;color:#6b7280;font-weight:600;margin-top:2px">EARNED</span></div></div>';
     h+='<div style="flex:1;min-width:0">';
-    h+='<div style="font-size:13px;color:#6b7280;font-weight:600">Vrai revenu Medini (HT) — marge Elite incluse</div>';
-    h+='<div style="font-size:28px;font-weight:800;color:#059669;line-height:1.1">'+Math.round(revNetMedini).toLocaleString()+' <span style="font-size:13px;font-weight:600;color:#6b7280">AED HT</span></div>';
-    h+='<div style="margin-top:8px;font-size:12px;color:#6b7280">on '+Math.round(revNetPotential).toLocaleString()+' AED HT potentiel</div>';
-    h+='<div style="margin-top:4px;font-size:12px;color:#6b7280">à venir : <strong style="color:#1f2937">'+Math.max(0,Math.round(revNetPotential-revNetMedini)).toLocaleString()+' AED HT</strong></div>';
-    h+='<div style="margin-top:8px;font-size:10px;color:#9ca3af;line-height:1.4">💡 Elite : on déduit le coût facturé par Elite. Cleaners internes : on garde la totalité du cleaning fee (salaire fixe géré ailleurs). Hors CA total facturé au guest.</div>';
+    h+='<div style="font-size:13px;color:#6b7280;font-weight:600">Net Medini revenue (excl. VAT) — incl. Elite margin</div>';
+    h+='<div style="font-size:28px;font-weight:800;color:#059669;line-height:1.1">'+Math.round(revNetMedini).toLocaleString()+' <span style="font-size:13px;font-weight:600;color:#6b7280">AED net</span></div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#6b7280">of '+Math.round(revNetPotential).toLocaleString()+' AED net potential</div>';
+    h+='<div style="margin-top:4px;font-size:12px;color:#6b7280">upcoming: <strong style="color:#1f2937">'+Math.max(0,Math.round(revNetPotential-revNetMedini)).toLocaleString()+' AED net</strong></div>';
+    h+='<div style="margin-top:8px;font-size:10px;color:#9ca3af;line-height:1.4">💡 Elite: we deduct the cost billed by Elite. Internal cleaners: we keep the full cleaning fee (fixed salary handled separately). Excludes the total revenue billed to the guest.</div>';
     h+='</div></div></div>';
 
     // Daily Revenue Chart
@@ -3895,7 +3895,7 @@ function renderDashboard(){
     if(revenuePerCleaner.length>0){
       h+='<div class="dash-card"><h3>'+icon('user',18)+' Revenue per cleaner ('+revenuePerCleaner.length+')</h3>';
       h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;min-width:380px">';
-      h+='<thead><tr style="border-bottom:2px solid #e5e7eb"><th style="text-align:left;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleaner</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleanings</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Revenue HT</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cost HT</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Margin HT</th></tr></thead><tbody>';
+      h+='<thead><tr style="border-bottom:2px solid #e5e7eb"><th style="text-align:left;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleaner</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cleanings</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Revenue (net)</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Cost (net)</th><th style="text-align:right;padding:8px 6px;color:#6b7280;font-size:11px;text-transform:uppercase;font-weight:700">Margin (net)</th></tr></thead><tbody>';
       revenuePerCleaner.forEach(c=>{
         const isSub=c.role==='subcontractor';
         const marginColor=c.marginAED>=0?'#059669':'#dc2626';
@@ -3911,7 +3911,7 @@ function renderDashboard(){
           '</tr>';
       });
       h+='</tbody></table></div>';
-      h+='<div style="font-size:10px;color:#9ca3af;margin-top:8px;line-height:1.4">💡 STAFF = salariés Medini (cost mensuel fixe, pas comptabilisé per-cleaning). SUB = sous-traitants Elite (cost = 155 STUDIO / 195 1BHK / 295 2BHK HT par cleaning). Revenue HT = cleaningFee Hostaway TTC ÷ 1,05.</div>';
+      h+='<div style="font-size:10px;color:#9ca3af;margin-top:8px;line-height:1.4">💡 STAFF = Medini employees (fixed monthly cost, not counted per cleaning). SUB = Elite subcontractors (cost = 155 STUDIO / 195 1BHK / 295 2BHK net per cleaning). Net revenue = Hostaway cleaningFee incl. VAT ÷ 1.05.</div>';
       h+='</div>';
     }
 
@@ -4693,9 +4693,9 @@ function renderSubcontractors(){
   h+='<h3 style="margin-bottom:14px;margin-top:4px">📊 '+subMonth+' Summary</h3>';
   h+='<div class="dash-stat-row" style="flex-wrap:wrap">';
   h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--primary)"><div class="ds-num">'+t.cleanings_count+'</div><div class="ds-label">Cleanings</div></div>';
-  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--primary)"><div class="ds-num">'+(t.revenue_ttc||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Revenue TTC</div></div>';
-  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--orange)"><div class="ds-num">'+(t.cost_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Cost HT (Elite)</div></div>';
-  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--green)"><div class="ds-num" style="color:var(--green)">'+(t.margin_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Margin HT ('+(t.margin_pct||0).toFixed(1)+'%)</div></div>';
+  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--primary)"><div class="ds-num">'+(t.revenue_ttc||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Revenue (incl. VAT)</div></div>';
+  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--orange)"><div class="ds-num">'+(t.cost_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Cost excl. VAT (Elite)</div></div>';
+  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--green)"><div class="ds-num" style="color:var(--green)">'+(t.margin_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Margin excl. VAT ('+(t.margin_pct||0).toFixed(1)+'%)</div></div>';
   h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--orange)"><div class="ds-num">'+(t.vat_net||0).toLocaleString('en',{maximumFractionDigits:2})+'</div><div class="ds-label">VAT net (to FTA)</div></div>';
   if(unm>0)h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid #ef4444"><div class="ds-num" style="color:#ef4444">'+unm+'</div><div class="ds-label">Unmatched</div></div>';
   h+='</div>';
@@ -4706,7 +4706,7 @@ function renderSubcontractors(){
   function breakdownTable(title,obj){
     let s='<div class="dash-card" style="margin-bottom:14px"><h3 style="margin-bottom:14px">'+title+'</h3>';
     s+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">';
-    s+='<thead><tr style="border-bottom:2px solid rgba(0,0,0,0.08)"><th style="text-align:left;padding:8px 6px">Category</th><th style="text-align:right;padding:8px 6px">Count</th><th style="text-align:right;padding:8px 6px">Cost HT</th><th style="text-align:right;padding:8px 6px">Revenue HT</th><th style="text-align:right;padding:8px 6px">Margin HT</th><th style="text-align:right;padding:8px 6px">Margin %</th></tr></thead><tbody>';
+    s+='<thead><tr style="border-bottom:2px solid rgba(0,0,0,0.08)"><th style="text-align:left;padding:8px 6px">Category</th><th style="text-align:right;padding:8px 6px">Count</th><th style="text-align:right;padding:8px 6px">Cost (net)</th><th style="text-align:right;padding:8px 6px">Revenue (net)</th><th style="text-align:right;padding:8px 6px">Margin (net)</th><th style="text-align:right;padding:8px 6px">Margin %</th></tr></thead><tbody>';
     const entries=Object.entries(obj||{}).sort((a,b)=>b[1].count-a[1].count);
     entries.forEach(([k,v])=>{
       const pct=v.revenue_ht>0?(v.margin_ht/v.revenue_ht*100).toFixed(1):'?';
@@ -4720,8 +4720,8 @@ function renderSubcontractors(){
     s+='</tbody></table></div></div>';
     return s;
   }
-  if(t.by_service&&Object.keys(t.by_service).length)h+=breakdownTable('🛎 Par service type',t.by_service);
-  if(t.by_bedrooms&&Object.keys(t.by_bedrooms).length)h+=breakdownTable('🛏 Par bedrooms',t.by_bedrooms);
+  if(t.by_service&&Object.keys(t.by_service).length)h+=breakdownTable('🛎 By service type',t.by_service);
+  if(t.by_bedrooms&&Object.keys(t.by_bedrooms).length)h+=breakdownTable('🛏 By bedrooms',t.by_bedrooms);
 
   // Detail table (paginated to first 100)
   h+='<div class="dash-card"><h3 style="margin-bottom:14px">📋 Detail cleanings ('+rows.length+')</h3>';
@@ -4732,9 +4732,9 @@ function renderSubcontractors(){
     '<th style="text-align:left;padding:6px">Guest</th>'+
     '<th style="text-align:left;padding:6px">Service</th>'+
     '<th style="text-align:left;padding:6px">BR</th>'+
-    '<th style="text-align:right;padding:6px">Cost HT</th>'+
-    '<th style="text-align:right;padding:6px">Rev TTC</th>'+
-    '<th style="text-align:right;padding:6px">Margin HT</th>'+
+    '<th style="text-align:right;padding:6px">Cost excl. VAT</th>'+
+    '<th style="text-align:right;padding:6px">Rev incl. VAT</th>'+
+    '<th style="text-align:right;padding:6px">Margin excl. VAT</th>'+
     '<th style="text-align:right;padding:6px">VAT net</th>'+
     '</tr></thead><tbody>';
   rows.slice(0,200).forEach(r=>{
