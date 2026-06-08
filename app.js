@@ -64,7 +64,7 @@ const ensureQRCode = () => loadScript(__CDN.qrcode);
           if (v === undefined) break;
           args.push(coerce(v));
         }
-        if (el.dataset.passEvent === '1') args.push(e);
+        if (el.dataset.passEvent === '1') { e.delegateTarget = el; args.push(e); }
         try { fn.apply(null, args); }
         catch (err) { console.error('[data-action ' + name + ']', err); }
       }
@@ -2711,7 +2711,7 @@ function toggleMtForm(){
 function showMtMoreMenu(e){
   e.preventDefault();
   e.stopPropagation();
-  const rect = e.currentTarget.getBoundingClientRect();
+  const rect = (e.delegateTarget||e.currentTarget).getBoundingClientRect();
   contextMenuState.open = true;
   contextMenuState.x = rect.right;
   contextMenuState.y = rect.bottom + 4;
@@ -3564,7 +3564,7 @@ function changeDashMonth(dir){dashMonth+=dir;if(dashMonth>11){dashMonth=0;dashYe
 function showDashExportMenu(e){
   e.preventDefault();
   e.stopPropagation();
-  const rect=e.currentTarget.getBoundingClientRect();
+  const rect=(e.delegateTarget||e.currentTarget).getBoundingClientRect();
   contextMenuState.open=true;
   contextMenuState.x=rect.right;
   contextMenuState.y=rect.bottom+4;
@@ -5950,7 +5950,22 @@ async function generateInvoice(){
   const monthLabel=MONTH_NAMES[invMonth]+' '+invYear;
   const invoiceNum='INV-'+invYear+String(invMonth+1).padStart(2,'0')+'-001';
   const invoiceDate=new Date().toLocaleDateString('en-GB');
-  const totalAmount=doneRes.reduce((s,r)=>s+getRevenueFee(r),0);
+  // ---- Financials ----
+  // Hostaway cleaningFee = ce qu'on facture au client, TTC (TVA 5% incluse). HT = TTC / 1.05.
+  const billedOf=r=>getRevenueFee(r);
+  const totalTTC=doneRes.reduce((s,r)=>s+billedOf(r),0);
+  const totalHT=totalTTC/(1+VAT_RATE);
+  const totalVAT=totalTTC-totalHT;
+  // Coût sous-traitants : seuls les ménages avec un subcontractor (Elite) assigné portent un coût HT
+  // (staff interne = 0, salaire fixe en OPEX). Même règle que computeRevenuePerCleaner().
+  const asg=dashData.assignments||{};
+  const roleById={};(cleaners||[]).forEach(c=>{roleById[c.id]=c.role;});
+  const idsOf=key=>{const v=asg[key];return Array.isArray(v)?v:(v?[v]:[]);};
+  const eliteCostOf=r=>{const lp=listingPrices[r.listingId];const br=lp?Number(lp.bedrooms||0):0;return ELITE_COST_HT_BY_BR[br]||ELITE_COST_HT_BY_BR[0];};
+  let subCostHT=0;
+  doneRes.forEach(r=>{const ids=idsOf(keyFor(r));if(ids.some(id=>roleById[id]==='subcontractor'))subCostHT+=eliteCostOf(r);});
+  const marginHT=totalHT-subCostHT;
+  const fmt=n=>Math.round(n).toLocaleString();
 
   // ---- Header ----
   doc.setFillColor(124,58,237);
@@ -5973,8 +5988,9 @@ async function generateInvoice(){
   doc.text('Summary',18,y);
   doc.setFont(undefined,'normal');doc.setFontSize(10);
   doc.text('Completed cleanings: '+doneRes.length,18,y+7);
-  doc.text('Total amount: '+totalAmount.toLocaleString()+' AED',18,y+13);
+  doc.text('Billed to client (TTC): '+fmt(totalTTC)+' AED',18,y+13);
   doc.text('Period: 01 — '+(new Date(dashYear,dashMonth+1,0).getDate())+' '+monthLabel,110,y+7);
+  doc.text('Net margin (HT): '+fmt(marginHT)+' AED',110,y+13);
 
   // ---- Table header ----
   y=78;
@@ -5984,14 +6000,12 @@ async function generateInvoice(){
   doc.text('#',18,y);
   doc.text('Date',26,y);
   doc.text('Property',52,y);
-  doc.text('Guest',118,y);
-  doc.text('Type',156,y);
-  doc.text('Fee (AED)',178,y,{align:'right'});
+  doc.text('Type',150,y);
+  doc.text('Billed TTC (AED)',192,y,{align:'right'});
   y+=6;
 
   // ---- Table rows ----
   doc.setTextColor(30,27,75);doc.setFont(undefined,'normal');doc.setFontSize(7.5);
-  let runningTotal=0;
   doneRes.forEach((r,i)=>{
     if(y>272){
       // Footer before page break
@@ -6002,29 +6016,43 @@ async function generateInvoice(){
       doc.setFillColor(124,58,237);doc.setTextColor(255,255,255);
       doc.rect(14,y-5,182,8,'F');
       doc.setFontSize(8);doc.setFont(undefined,'bold');
-      doc.text('#',18,y);doc.text('Date',26,y);doc.text('Property',52,y);doc.text('Guest',118,y);doc.text('Type',156,y);doc.text('Fee (AED)',178,y,{align:'right'});
+      doc.text('#',18,y);doc.text('Date',26,y);doc.text('Property',52,y);doc.text('Type',150,y);doc.text('Billed TTC (AED)',192,y,{align:'right'});
       y+=6;doc.setTextColor(30,27,75);doc.setFont(undefined,'normal');doc.setFontSize(7.5);
     }
-    const fee=getRevenueFee(r);
-    runningTotal+=fee;
     // Alternate row bg
     if(i%2===0){doc.setFillColor(249,250,251);doc.rect(14,y-4,182,6,'F');}
     doc.text(String(i+1),18,y);
     doc.text(r.co,26,y);
-    doc.text((r.listing||'').substring(0,35),52,y);
-    doc.text((r.guest||'').substring(0,20),118,y);
-    doc.text(getUnitType(r.listingId),156,y);
-    doc.text(fee.toLocaleString(),178,y,{align:'right'});
+    doc.text((r.listing||'').substring(0,52),52,y);
+    doc.text(getUnitType(r.listingId),150,y);
+    doc.text(billedOf(r).toLocaleString(),192,y,{align:'right'});
     y+=6;
   });
 
-  // ---- Total bar ----
-  y+=4;
+  // ---- Totals (client billing) + margin blocks ----
+  y+=8;
+  if(y>248){doc.addPage();y=24;}
+  // CLIENT BILLING box
+  doc.setFillColor(245,245,247);
+  doc.roundedRect(110,y-6,86,26,3,3,'F');
+  doc.setTextColor(30,27,75);doc.setFontSize(9);doc.setFont(undefined,'bold');
+  doc.text('CLIENT BILLING',114,y);
+  doc.setFont(undefined,'normal');
+  doc.text('Billed (TTC)',114,y+7);doc.text(fmt(totalTTC)+' AED',192,y+7,{align:'right'});
+  doc.text('VAT 5%',114,y+13);doc.text(fmt(totalVAT)+' AED',192,y+13,{align:'right'});
+  doc.setFont(undefined,'bold');
+  doc.text('Net HT',114,y+19);doc.text(fmt(totalHT)+' AED',192,y+19,{align:'right'});
+  y+=32;
+  // MARGIN box
   doc.setFillColor(124,58,237);doc.setTextColor(255,255,255);
-  doc.rect(14,y-5,182,10,'F');
-  doc.setFontSize(11);doc.setFont(undefined,'bold');
-  doc.text('TOTAL',18,y+1);
-  doc.text(totalAmount.toLocaleString()+' AED',178,y+1,{align:'right'});
+  doc.roundedRect(110,y-6,86,26,3,3,'F');
+  doc.setFontSize(9);doc.setFont(undefined,'bold');
+  doc.text('MARGIN',114,y);
+  doc.setFont(undefined,'normal');
+  doc.text('Revenue HT',114,y+7);doc.text(fmt(totalHT)+' AED',192,y+7,{align:'right'});
+  doc.text('Subcontractors (HT)',114,y+13);doc.text('-'+fmt(subCostHT)+' AED',192,y+13,{align:'right'});
+  doc.setFont(undefined,'bold');doc.setFontSize(10);
+  doc.text('Net margin',114,y+19);doc.text(fmt(marginHT)+' AED',192,y+19,{align:'right'});
 
   // ---- Footer ----
   doc.setFontSize(7);doc.setTextColor(150);
