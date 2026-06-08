@@ -16,6 +16,7 @@ const SERVER_ONLY_ACTIONS = new Set([
   "dispatchMaintenance",
   "syncReviewsCache",
   "syncDisputeAnalysis",
+  "getAnalyzedDisputeIds",
   "syncHermesActionsCache",
   "syncCleaningAccounting",
   "syncCleanerRatings",
@@ -466,6 +467,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["getDisputes", "GET"],
   ["updateDisputeStatus", "POST"],
   ["syncDisputeAnalysis", "POST"],
+  ["getAnalyzedDisputeIds", "GET"],
   ["getCleaningAccounting", "GET"],
   ["listCleaningAccountingMonths", "GET"],
   ["syncCleaningAccounting", "POST"],
@@ -2522,6 +2524,16 @@ Deno.serve(async (req: Request) => {
       const { error } = await sb.from("review_disputes").upsert(slice, { onConflict: "review_id" });
       if (error) throw error;
       return jsonResp({ status: "success", upserted: slice.length });
+    }
+
+    if (action === "getAnalyzedDisputeIds") {
+      // Server-only : all review_ids already classified (analyzed_at set), unbounded by
+      // reviews_cache. The daily job uses this to skip re-classifying — getDisputes is
+      // limited to the 30-day reviews_cache mirror and would force needless re-runs.
+      const { data, error } = await sb.from("review_disputes")
+        .select("review_id").not("analyzed_at", "is", null);
+      if (error) throw error;
+      return jsonResp({ status: "success", ids: (data || []).map((r: any) => r.review_id) });
     }
     if (action === "getHermesActivity") {
       const days = Math.min(Number(url.searchParams.get("days") || 3), 7);
