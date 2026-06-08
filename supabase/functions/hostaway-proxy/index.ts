@@ -15,6 +15,7 @@ const SERVER_ONLY_ACTIONS = new Set([
   "dispatchPendingEvents",
   "dispatchMaintenance",
   "syncReviewsCache",
+  "syncDisputeAnalysis",
   "syncHermesActionsCache",
   "syncCleaningAccounting",
   "syncCleanerRatings",
@@ -461,6 +462,10 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["syncHermesActionsCache", "POST"],
   ["getRecentReviews", "GET"],
   ["getHermesActivity", "GET"],
+  // ===== Review disputes tracker =====
+  ["getDisputes", "GET"],
+  ["updateDisputeStatus", "POST"],
+  ["syncDisputeAnalysis", "POST"],
   ["getCleaningAccounting", "GET"],
   ["listCleaningAccountingMonths", "GET"],
   ["syncCleaningAccounting", "POST"],
@@ -2451,6 +2456,72 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await q;
       if (error) throw error;
       return jsonResp({ status: "success", reviews: data || [] });
+    }
+    if (action === "getDisputes") {
+      // Critical Airbnb reviews still live, with their analysis/status (left-joined in JS).
+      const { data: reviews, error: e1 } = await sb.from("reviews_cache").select("*")
+        .eq("type", "guest-to-host")
+        .eq("channel_id", 2018)
+        .eq("is_hidden", false)
+        .eq("is_cancelled", false)
+        .lte("rating", 6)
+        .order("submitted_at", { ascending: false })
+        .limit(500);
+      if (e1) throw e1;
+      const ids = (reviews || []).map((r: any) => r.id);
+      let disputes: any[] = [];
+      if (ids.length) {
+        const { data: d, error: e2 } = await sb.from("review_disputes").select("*").in("review_id", ids);
+        if (e2) throw e2;
+        disputes = d || [];
+      }
+      const dById = new Map(disputes.map((d: any) => [d.review_id, d]));
+      const rows = (reviews || []).map((r: any) => ({ ...r, dispute: dById.get(r.id) || null }));
+      return jsonResp({ status: "success", reviews: rows });
+    }
+
+    if (action === "updateDisputeStatus" && req.method === "POST") {
+      const body = await req.json();
+      const { review_id, dispute_status, reply_posted, updated_by } = body;
+      if (!review_id) return jsonResp({ error: "review_id required" }, 400);
+      const allowed = new Set(["todo", "submitted", "removed", "rejected", "not_disputable"]);
+      const upd: Record<string, any> = { review_id: Number(review_id), updated_at: new Date().toISOString() };
+      if (dispute_status !== undefined) {
+        if (!allowed.has(dispute_status)) return jsonResp({ error: "invalid dispute_status" }, 400);
+        upd.dispute_status = dispute_status;
+      }
+      if (reply_posted !== undefined) upd.reply_posted = !!reply_posted;
+      if (updated_by !== undefined) upd.updated_by = String(updated_by).slice(0, 40);
+      const { data, error } = await sb.from("review_disputes")
+        .upsert(upd, { onConflict: "review_id" }).select().single();
+      if (error) throw error;
+      return jsonResp({ status: "success", dispute: data });
+    }
+
+    if (action === "syncDisputeAnalysis" && req.method === "POST") {
+      // Server-only : push from the daily Claude Max classifier job.
+      const body = await req.json().catch(() => ({}));
+      const rows: any[] = Array.isArray(body.rows) ? body.rows : [];
+      if (rows.length === 0) return jsonResp({ status: "success", upserted: 0 });
+      const slice = rows.map((r: any) => ({
+        review_id: Number(r.review_id),
+        reservation_id: r.reservation_id != null ? Number(r.reservation_id) : null,
+        removable: !!r.removable,
+        confidence: r.confidence ?? null,
+        ground: r.ground ?? null,
+        template: r.template != null ? Number(r.template) : null,
+        quote: r.quote ?? null,
+        evidence: Array.isArray(r.evidence) ? r.evidence : [],
+        public_reply: r.public_reply ?? null,
+        proposal_count: r.proposal_count != null ? Number(r.proposal_count) : 0,
+        last_proposed: r.last_proposed ?? null,
+        analyzed_at: new Date().toISOString(),
+      }));
+      // NB: payload omits dispute_status/reply_posted/updated_by so UPDATE never
+      // clobbers a human-set status; INSERT lets the trigger set the initial status.
+      const { error } = await sb.from("review_disputes").upsert(slice, { onConflict: "review_id" });
+      if (error) throw error;
+      return jsonResp({ status: "success", upserted: slice.length });
     }
     if (action === "getHermesActivity") {
       const days = Math.min(Number(url.searchParams.get("days") || 3), 7);
