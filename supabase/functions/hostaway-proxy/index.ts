@@ -2494,9 +2494,14 @@ Deno.serve(async (req: Request) => {
       }
       if (reply_posted !== undefined) upd.reply_posted = !!reply_posted;
       if (updated_by !== undefined) upd.updated_by = String(updated_by).slice(0, 40);
+      // UPDATE (not upsert): the analysis row already exists (created by the daily
+      // syncDisputeAnalysis job). An upsert would fire the BEFORE INSERT trigger on its
+      // insert attempt, and since this payload omits `removable` the trigger would read
+      // the column default (false) and clobber dispute_status to 'not_disputable'.
       const { data, error } = await sb.from("review_disputes")
-        .upsert(upd, { onConflict: "review_id" }).select().single();
+        .update(upd).eq("review_id", Number(review_id)).select().maybeSingle();
       if (error) throw error;
+      if (!data) return jsonResp({ error: "review not analyzed yet" }, 404);
       return jsonResp({ status: "success", dispute: data });
     }
 
