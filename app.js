@@ -2914,6 +2914,10 @@ function render(){
     if(ratingsData===null && !ratingsLoading) loadCleanerRatings();
     return renderCleanerRatings();
   }
+  if(currentTab==='reviews'){
+    if(reviewsData===null && !reviewsLoading) loadDisputes();
+    return renderReviews();
+  }
   renderPlanner();
 }
 
@@ -2928,6 +2932,7 @@ function renderBottomNav(){
       {id:'hermes',icon:icon('zap',22),label:'Hermes'},
       {id:'subcontractors',icon:icon('dollar',22),label:'Subs'},
       {id:'ratings',icon:icon('star',22),label:'Ratings'},
+      {id:'reviews',icon:icon('msgSquare',22),label:'Reviews'},
       {id:'settings',icon:icon('settings',22),label:t('settings')},
       {id:'__more',icon:icon('more',22),label:'More'},
     ];
@@ -4644,6 +4649,133 @@ function renderCleanerRatings(){
   h+='</tbody></table></div>';
   h+='</div>'+renderBottomNav();
   document.getElementById('app').innerHTML=h;
+}
+
+// ===== Reviews / Airbnb disputes tab =====
+let reviewsData=null, reviewsLoading=false, reviewsFilter='all';
+const DISPUTE_LABELS={todo:'To file',submitted:'Submitted',removed:'Removed',rejected:'Rejected',not_disputable:'Not disputable'};
+const GROUND_PROC={ // procedure hint per ground (the playbook template to use)
+  'off-topic':'Template 1 — off-topic / not about the stay',
+  'force-majeure':'Template 1 — force majeure / out of host control',
+  'irrelevant':'Template 2 — no relevant information about the stay',
+  'defamatory':'Template 3 — demonstrably false statement (attach proof)',
+  'retaliatory':'Template 4 — retaliatory, tied to a Resolution Center claim'
+};
+
+async function loadDisputes(){
+  reviewsLoading=true;
+  const res=await api('getDisputes');
+  reviewsData=(res&&res.reviews)?res.reviews:[];
+  reviewsLoading=false;
+  render();
+}
+
+function setReviewFilter(f){ reviewsFilter=f; render(); }
+
+async function setDisputeStatus(reviewId,status){
+  await api('updateDisputeStatus',{body:{review_id:reviewId,dispute_status:status,updated_by:'walter'}});
+  const row=(reviewsData||[]).find(r=>String(r.id)===String(reviewId));
+  if(row){ row.dispute=row.dispute||{}; row.dispute.dispute_status=status; }
+  toast('Status updated','success'); render();
+}
+
+async function toggleReplyPosted(reviewId){
+  const row=(reviewsData||[]).find(r=>String(r.id)===String(reviewId));
+  const next=!(row&&row.dispute&&row.dispute.reply_posted);
+  await api('updateDisputeStatus',{body:{review_id:reviewId,reply_posted:next,updated_by:'walter'}});
+  if(row){ row.dispute=row.dispute||{}; row.dispute.reply_posted=next; }
+  toast(next?'Reply marked posted':'Reply unmarked','success'); render();
+}
+
+function copyDisputeText(text){
+  if(navigator.clipboard) navigator.clipboard.writeText(text);
+  toast('Copied','success');
+}
+
+function renderReviews(){
+  const rows=reviewsData||[];
+  if(reviewsLoading && !rows.length){
+    document.getElementById('app').innerHTML='<div class="rv-wrap"><div class="rv-empty">Loading reviews…</div></div>'+renderBottomNav();
+    return;
+  }
+  const analyzed=rows.filter(r=>r.dispute);
+  const submitted=analyzed.filter(r=>['submitted','removed','rejected'].includes(r.dispute.dispute_status));
+  const removed=analyzed.filter(r=>r.dispute.dispute_status==='removed');
+  const rejected=analyzed.filter(r=>r.dispute.dispute_status==='rejected');
+  const successRate=submitted.length?Math.round(removed.length/submitted.length*100):0;
+  const ratings=rows.map(r=>r.rating).filter(v=>v!=null);
+  const avg=ratings.length?(ratings.reduce((a,b)=>a+b,0)/ratings.length).toFixed(2):'—';
+
+  const stat=(n,l)=>'<div class="rv-stat"><div class="rv-stat-n">'+n+'</div><div class="rv-stat-l">'+esc(l)+'</div></div>';
+  let h='<div class="rv-wrap">';
+  h+='<div class="rv-stats">'
+    +stat(rows.length,'Critical')
+    +stat(analyzed.length,'Analyzed')
+    +stat(submitted.length,'Submitted')
+    +stat(removed.length,'Removed')
+    +stat(successRate+'%','Success rate')
+    +stat(avg,'Avg rating')
+    +'</div>';
+
+  const filters=[['all','All'],['todo','To file'],['submitted','Submitted'],['removed','Removed'],['rejected','Rejected'],['not_disputable','Not disputable']];
+  h+='<div class="rv-filters">'+filters.map(([k,l])=>
+    '<button class="rv-fbtn'+(reviewsFilter===k?' active':'')+'" data-action="setReviewFilter" data-arg0="'+k+'">'+esc(l)+'</button>'
+  ).join('')+'</div>';
+
+  let list=rows.slice();
+  if(reviewsFilter!=='all'){
+    list=list.filter(r=>r.dispute && r.dispute.dispute_status===reviewsFilter);
+  }
+  list.sort((a,b)=>(a.rating||0)-(b.rating||0));
+  if(!list.length){ h+='<div class="rv-empty">No reviews in this filter.</div>'; }
+  for(const r of list){ h+=renderDisputeCard(r); }
+  h+='</div>';
+  document.getElementById('app').innerHTML=h+renderBottomNav();
+}
+
+function renderDisputeCard(r){
+  const d=r.dispute;
+  const name=esc((r.listing_name||'').replace('[ARCHIVED 2026-06-01] ','').replace(' V2 - ok','').replace(' (new)',''));
+  const status=d?d.dispute_status:'todo';
+  const chip='<span class="rv-chip rv-'+status+'">'+esc(DISPUTE_LABELS[status]||status)+'</span>';
+  const ratingCls=(r.rating<=2)?'bad':(r.rating<=4?'mid':'warn');
+  let h='<div class="rv-card">';
+  h+='<div class="rv-head"><span class="rv-rating '+ratingCls+'">'+(r.rating!=null?r.rating:'?')+'</span>'
+     +'<div class="rv-meta"><div class="rv-listing">'+name+'</div>'
+     +'<div class="rv-sub">'+esc(r.reviewer_name||'')+' · '+esc((r.submitted_at||'').slice(0,10))+' · reservation '+esc(String(r.reservation_id||''))+'</div></div>'
+     +chip+'</div>';
+  h+='<div class="rv-verbatim">"'+esc(r.public_review||'(no text)')+'"</div>';
+
+  if(!d){
+    h+='<div class="rv-note">Not analyzed yet — the daily job will classify it.</div>';
+    h+='</div>'; return h;
+  }
+
+  if(d.removable){
+    const proc=GROUND_PROC[d.ground]||('Ground: '+esc(d.ground||'—'));
+    h+='<div class="rv-block"><div class="rv-lbl">Dispute — '+esc((d.confidence||'').toLowerCase())+', '+esc(d.ground||'')+'</div>'
+      +'<div class="rv-proc">'+esc(proc)+'</div>';
+    if(d.quote) h+='<div class="rv-quote">Quote to cite: "'+esc(d.quote)+'" <button class="rv-copy" data-action="copyDisputeText" data-arg0="'+esc(d.quote).replace(/"/g,'&quot;')+'">Copy</button></div>';
+    const ev=Array.isArray(d.evidence)?d.evidence:[];
+    if(ev.length) h+='<div class="rv-ev">Attach: '+ev.map(x=>esc(x)).join('; ')+'</div>';
+    if(d.proposal_count) h+='<div class="rv-attempts">Filed '+d.proposal_count+'×'+(d.last_proposed?(' (last '+esc(d.last_proposed)+')'):'')+' — Airbnb allows 2 attempts</div>';
+    h+='</div>';
+    h+='<div class="rv-actions">';
+    for(const s of ['todo','submitted','removed','rejected']){
+      h+='<button class="rv-sbtn'+(status===s?' active':'')+'" data-action="setDisputeStatus" data-arg0="'+r.id+'" data-arg1="'+s+'">'+esc(DISPUTE_LABELS[s])+'</button>';
+    }
+    h+='</div>';
+  }
+
+  if(d.public_reply){
+    h+='<div class="rv-reply"><div class="rv-lbl">Public reply'+(d.reply_posted?' · posted ✓':'')+'</div>'
+      +'<div class="rv-reply-txt">'+esc(d.public_reply)+'</div>'
+      +'<div class="rv-reply-actions">'
+      +'<button class="rv-copy" data-action="copyDisputeText" data-arg0="'+esc(d.public_reply).replace(/"/g,'&quot;')+'">Copy reply</button>'
+      +'<button class="rv-sbtn'+(d.reply_posted?' active':'')+'" data-action="toggleReplyPosted" data-arg0="'+r.id+'">'+(d.reply_posted?'Posted ✓':'Mark posted')+'</button>'
+      +'</div></div>';
+  }
+  h+='</div>'; return h;
 }
 
 // ============== SUBCONTRACTORS TAB (Elite accounting) ==============
