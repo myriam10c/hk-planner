@@ -5,7 +5,7 @@
 //  - API calls (Supabase functions, Hostaway, etc.) bypass the cache entirely.
 //  - Bump VERSION to force all clients to drop the old cache.
 
-const VERSION = 'v7-2026-06-08-invoice-diag';
+const VERSION = 'v8-2026-06-08-sw-cdn-fix';
 const CACHE = 'hk-planner-' + VERSION;
 const PRECACHE = ['/', '/index.html', '/app.js', '/styles.css', '/manifest.json'];
 
@@ -37,17 +37,12 @@ self.addEventListener('fetch', (e) => {
   if (url.hostname.includes('green-api.com')) return;
   if (!['http:', 'https:'].includes(url.protocol)) return;
 
-  // Same-origin: stale-while-revalidate
+  // Only handle same-origin GETs (stale-while-revalidate). Cross-origin requests
+  // (cdnjs libs, Google Fonts) are left to the browser: intercepting opaque
+  // no-cors script responses here made them fail with net::ERR_FAILED, which
+  // silently broke jsPDF/xlsx/Chart/QRCode (invoice + exports) for returning users.
   if (url.origin === location.origin) {
     e.respondWith(staleWhileRevalidate(req));
-    return;
-  }
-
-  // Cross-origin (CDN libs, fonts): cache-first — these are versioned URLs
-  if (url.hostname.includes('cdnjs.cloudflare.com') ||
-      url.hostname.includes('fonts.googleapis.com') ||
-      url.hostname.includes('fonts.gstatic.com')) {
-    e.respondWith(cacheFirst(req));
   }
 });
 
@@ -59,13 +54,4 @@ async function staleWhileRevalidate(req) {
     return res;
   }).catch(() => cached);
   return cached || networkPromise;
-}
-
-async function cacheFirst(req) {
-  const cache = await caches.open(CACHE);
-  const cached = await cache.match(req);
-  if (cached) return cached;
-  const res = await fetch(req);
-  if (res && res.ok) cache.put(req, res.clone()).catch(() => {});
-  return res;
 }
