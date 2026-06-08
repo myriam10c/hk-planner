@@ -5984,9 +5984,9 @@ async function generateInvoice(){
   let y=44;
   const cardY=y, cardH=28;
   const _cards=[
-    {x:14,  bg:[209,250,229], fg:[6,95,70],   lbl:"CHIFFRE D'AFFAIRES (HT)", val:fmt(totalHT)},
-    {x:77,  bg:[254,243,199], fg:[146,64,14],  lbl:"TVA A REVERSER (5%)",     val:fmt(totalVAT)},
-    {x:140, bg:[243,244,246], fg:[55,65,81],   lbl:"TOTAL FACTURE (TTC)",     val:fmt(totalTTC)}
+    {x:14,  bg:[209,250,229], fg:[6,95,70],   lbl:"REVENUE (EXCL. VAT)",       val:fmt(totalHT)},
+    {x:77,  bg:[254,243,199], fg:[146,64,14],  lbl:"VAT PAYABLE (5%)",          val:fmt(totalVAT)},
+    {x:140, bg:[243,244,246], fg:[55,65,81],   lbl:"TOTAL INVOICED (INCL. VAT)",val:fmt(totalTTC)}
   ];
   _cards.forEach(c=>{
     doc.setFillColor(c.bg[0],c.bg[1],c.bg[2]);
@@ -6011,7 +6011,7 @@ async function generateInvoice(){
   doc.text('Date',26,y);
   doc.text('Property',52,y);
   doc.text('Type',150,y);
-  doc.text('Billed TTC (AED)',192,y,{align:'right'});
+  doc.text('Billed (incl. VAT)',192,y,{align:'right'});
   y+=6;
 
   // ---- Table rows ----
@@ -6026,7 +6026,7 @@ async function generateInvoice(){
       doc.setFillColor(124,58,237);doc.setTextColor(255,255,255);
       doc.rect(14,y-5,182,8,'F');
       doc.setFontSize(8);doc.setFont(undefined,'bold');
-      doc.text('#',18,y);doc.text('Date',26,y);doc.text('Property',52,y);doc.text('Type',150,y);doc.text('Billed TTC (AED)',192,y,{align:'right'});
+      doc.text('#',18,y);doc.text('Date',26,y);doc.text('Property',52,y);doc.text('Type',150,y);doc.text('Billed (incl. VAT)',192,y,{align:'right'});
       y+=6;doc.setTextColor(30,27,75);doc.setFont(undefined,'normal');doc.setFontSize(7.5);
     }
     // Alternate row bg
@@ -6043,25 +6043,26 @@ async function generateInvoice(){
   y+=10;
   if(y>250){doc.addPage();y=24;}
   doc.setTextColor(30,27,75);doc.setFontSize(9);doc.setFont(undefined,'normal');
-  doc.text('Subtotal (HT)',130,y);doc.text(fmt(totalHT)+' AED',192,y,{align:'right'});
+  doc.text('Subtotal (excl. VAT)',130,y);doc.text(fmt(totalHT)+' AED',192,y,{align:'right'});
   doc.text('VAT 5%',130,y+6);doc.text(fmt(totalVAT)+' AED',192,y+6,{align:'right'});
   y+=12;
   doc.setFillColor(124,58,237);doc.setTextColor(255,255,255);
   doc.roundedRect(122,y-5,74,10,2,2,'F');
   doc.setFontSize(11);doc.setFont(undefined,'bold');
-  doc.text('TOTAL (TTC)',126,y+1.5);doc.text(fmt(totalTTC)+' AED',192,y+1.5,{align:'right'});
+  doc.text('TOTAL (incl. VAT)',126,y+1.5);doc.text(fmt(totalTTC)+' AED',192,y+1.5,{align:'right'});
 
   // ---- Internal margin box (NOT for client / tax) ----
   y+=18;
-  if(y>258){doc.addPage();y=24;}
+  if(y>254){doc.addPage();y=24;}
   doc.setFillColor(245,245,247);
-  doc.roundedRect(14,y-5,182,20,3,3,'F');
+  doc.roundedRect(14,y-5,182,26,3,3,'F');
   doc.setTextColor(124,58,237);doc.setFontSize(8);doc.setFont(undefined,'bold');
   doc.text('INTERNAL — MARGIN (not for client / tax)',18,y);
   doc.setTextColor(30,27,75);doc.setFont(undefined,'normal');doc.setFontSize(9);
-  doc.text('Revenue HT '+fmt(totalHT)+'  -  Subcontractor cost HT '+fmt(subCostHT),18,y+8);
-  doc.setFont(undefined,'bold');
-  doc.text('Net margin: '+fmt(marginHT)+' AED',130,y+8);
+  doc.text('Revenue (excl. VAT): '+fmt(totalHT)+' AED',18,y+8);
+  doc.text('Subcontractor cost: '+fmt(subCostHT)+' AED',110,y+8);
+  doc.setFont(undefined,'bold');doc.setFontSize(10);
+  doc.text('Net margin: '+fmt(marginHT)+' AED',18,y+16);
 
   // ---- Footer ----
   doc.setFontSize(7);doc.setTextColor(150);
