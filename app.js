@@ -5922,7 +5922,8 @@ async function exportPDF(){
 
 // ============ INVOICE (Manager only) ============
 async function generateInvoice(){
-  if(!dashData||!dashData.reservations){toast('Load the dashboard first','error');return;}
+  toast('Préparation de la facture…','info');
+  if(!dashData||!dashData.reservations){toast('Charge d’abord le Dashboard (dashData vide)','error');return;}
   try { await ensurePdf(); } catch(e){ toast('PDF library failed to load','error'); return; }
   const invYear=dashYear, invMonth=dashMonth;
 
@@ -5939,8 +5940,10 @@ async function generateInvoice(){
   if(!allRes.length){toast('No reservations for this month','error');return;}
 
   const doneRes=allRes.filter(r=>allDone[keyFor(r)]).sort((a,b)=>a.co.localeCompare(b.co));
-  if(!doneRes.length){toast('No completed cleanings to invoice','error');return;}
+  if(!doneRes.length){toast('Aucun ménage terminé à facturer ('+allRes.length+' résa chargées, '+Object.keys(allDone).length+' done en base)','error');return;}
 
+  if(!window.jspdf||!window.jspdf.jsPDF){toast('jsPDF non chargé (window.jspdf absent)','error');return;}
+  try{
   const{jsPDF}=window.jspdf;
   const doc=new jsPDF();
   const companyName='HILLAL MEDINI VACATION HOMES RENTAL LLC';
@@ -6028,7 +6031,8 @@ async function generateInvoice(){
   doc.text(companyName+' — '+invoiceNum+' — Generated '+invoiceDate,105,290,{align:'center'});
 
   doc.save('invoice_'+MONTH_NAMES[invMonth]+'_'+invYear+'.pdf');
-  toast('Invoice generated ✓','success');
+  toast('Facture générée ✓ ('+doneRes.length+' ménages)','success');
+  }catch(e){ console.error('[invoice]',e); toast('Erreur génération PDF: '+((e&&e.message)||e),'error'); }
 }
 
 // ============ DESKTOP UX: keyboard shortcuts + sidebar toggle ============
