@@ -10,7 +10,7 @@ set -euo pipefail
 
 PROJECT_REF="${1:-dqjnqvbxfwtvrjwnnmns}"   # havn-stays-guide (HK Planner prod)
 FUNCTION_NAME="hostaway-proxy"
-SOURCE_FILE="hostaway-proxy-patched.ts"
+SOURCE_FILE="supabase/functions/$FUNCTION_NAME/index.ts"
 TOKEN_FILE="$HOME/.supabase/access-token"
 
 cd "$(dirname "$0")"
@@ -26,11 +26,6 @@ if [[ ! -f "$SOURCE_FILE" ]]; then
   echo "❌ Source not found: $SOURCE_FILE"
   exit 1
 fi
-
-# Supabase CLI expects functions in supabase/functions/<name>/index.ts.
-# Mirror the patched file there each deploy so we don't drift.
-mkdir -p "supabase/functions/$FUNCTION_NAME"
-cp "$SOURCE_FILE" "supabase/functions/$FUNCTION_NAME/index.ts"
 
 export SUPABASE_ACCESS_TOKEN="$(cat "$TOKEN_FILE")"
 

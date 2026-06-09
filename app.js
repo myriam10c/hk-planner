@@ -4717,7 +4717,7 @@ function renderReviews(){
     +stat(avg,'Avg rating')
     +'</div>';
 
-  const filters=[['all','All'],['todo','To file'],['submitted','Submitted'],['removed','Removed'],['rejected','Rejected'],['not_disputable','Not disputable']];
+  const filters=[['all','All'],['todo','To file'],['submitted','Submitted'],['removed','Removed'],['rejected','Rejected']];
   h+='<div class="rv-filters">'+filters.map(([k,l])=>
     '<button class="rv-fbtn'+(reviewsFilter===k?' active':'')+'" data-action="setReviewFilter" data-arg0="'+k+'">'+esc(l)+'</button>'
   ).join('')+'</div>';
@@ -4760,10 +4760,15 @@ function renderDisputeCard(r){
     h+='</div>'; return h;
   }
 
-  if(d.removable){
+  if(d.public_review_en && d.public_review_en.trim()!==(r.public_review||'').trim()){
+    h+='<div class="rv-trans"><span class="rv-trans-lbl">EN</span> '+esc(d.public_review_en)+'</div>';
+  }
+
+  {
     const proc=GROUND_PROC[d.ground]||('Ground: '+esc(d.ground||'—'));
-    h+='<div class="rv-block"><div class="rv-lbl">Dispute — '+esc((d.confidence||'').toLowerCase())+', '+esc(d.ground||'')+'</div>'
-      +'<div class="rv-proc">'+esc(proc)+'</div>';
+    h+='<div class="rv-block"><div class="rv-lbl">Dispute — '+esc((d.confidence||'').toLowerCase())+', '+esc(d.ground||'')+'</div>';
+    if(d.angle) h+='<div class="rv-angle">'+esc(d.angle)+'</div>';
+    h+='<div class="rv-proc">'+esc(proc)+'</div>';
     if(d.quote) h+='<div class="rv-quote">Quote to cite: "'+esc(d.quote)+'" <button class="rv-copy" data-action="copyDisputeText" data-arg0="'+esc(d.quote).replace(/"/g,'&quot;')+'">Copy</button></div>';
     const ev=Array.isArray(d.evidence)?d.evidence:[];
     if(ev.length) h+='<div class="rv-ev">Attach: '+ev.map(x=>esc(x)).join('; ')+'</div>';
