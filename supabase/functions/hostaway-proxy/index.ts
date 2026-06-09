@@ -2460,25 +2460,39 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", reviews: data || [] });
     }
     if (action === "getDisputes") {
-      // Critical Airbnb reviews still live, with their analysis/status (left-joined in JS).
-      const { data: reviews, error: e1 } = await sb.from("reviews_cache").select("*")
-        .eq("type", "guest-to-host")
-        .eq("channel_id", 2018)
-        .eq("is_hidden", false)
-        .eq("is_cancelled", false)
-        .lte("rating", 6)
-        .order("submitted_at", { ascending: false })
-        .limit(500);
+      // Base = review_disputes (every analyzed dispute, ~180 days). reviews_cache only
+      // mirrors ~30 days, so it can't drive the list. We merge the cache when the review
+      // is still mirrored there: it gives the freshest text and the is_hidden/is_cancelled
+      // signal used to drop reviews Airbnb already pulled.
+      const { data: disputes, error: e1 } = await sb.from("review_disputes").select("*")
+        .order("submitted_at", { ascending: false, nullsFirst: false });
       if (e1) throw e1;
-      const ids = (reviews || []).map((r: any) => r.id);
-      let disputes: any[] = [];
+      const ids = (disputes || []).map((d: any) => d.review_id);
+      let cache: any[] = [];
       if (ids.length) {
-        const { data: d, error: e2 } = await sb.from("review_disputes").select("*").in("review_id", ids);
+        const { data: c, error: e2 } = await sb.from("reviews_cache").select("*").in("id", ids);
         if (e2) throw e2;
-        disputes = d || [];
+        cache = c || [];
       }
-      const dById = new Map(disputes.map((d: any) => [d.review_id, d]));
-      const rows = (reviews || []).map((r: any) => ({ ...r, dispute: dById.get(r.id) || null }));
+      const cById = new Map(cache.map((c: any) => [c.id, c]));
+      const rows = (disputes || [])
+        .filter((d: any) => {
+          const c = cById.get(d.review_id);
+          return !(c && (c.is_hidden || c.is_cancelled));
+        })
+        .map((d: any) => {
+          const c = cById.get(d.review_id) || {};
+          return {
+            id: d.review_id,
+            rating: c.rating ?? d.rating,
+            listing_name: c.listing_name ?? d.listing_name,
+            reviewer_name: c.reviewer_name ?? d.reviewer_name,
+            public_review: c.public_review ?? d.public_review,
+            submitted_at: c.submitted_at ?? d.submitted_at,
+            reservation_id: c.reservation_id ?? d.reservation_id,
+            dispute: d,
+          };
+        });
       return jsonResp({ status: "success", reviews: rows });
     }
 
@@ -2522,6 +2536,11 @@ Deno.serve(async (req: Request) => {
         public_reply: r.public_reply ?? null,
         proposal_count: r.proposal_count != null ? Number(r.proposal_count) : 0,
         last_proposed: r.last_proposed ?? null,
+        listing_name: r.listing_name ?? null,
+        reviewer_name: r.reviewer_name ?? null,
+        rating: r.rating != null ? Number(r.rating) : null,
+        public_review: r.public_review ?? null,
+        submitted_at: r.submitted_at ?? null,
         analyzed_at: new Date().toISOString(),
       }));
       // NB: payload omits dispute_status/reply_posted/updated_by so UPDATE never

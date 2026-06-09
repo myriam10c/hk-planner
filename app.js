@@ -4751,7 +4751,7 @@ function renderDisputeCard(r){
   let h='<div class="rv-card">';
   h+='<div class="rv-head"><span class="rv-rating '+ratingCls+'">'+(r.rating!=null?r.rating:'?')+'</span>'
      +'<div class="rv-meta"><div class="rv-listing">'+name+'</div>'
-     +'<div class="rv-sub">'+esc(r.reviewer_name||'')+' · '+esc((r.submitted_at||'').slice(0,10))+' · reservation '+esc(String(r.reservation_id||''))+'</div></div>'
+     +'<div class="rv-sub">'+esc(r.reviewer_name||'')+' · '+esc((r.submitted_at||'').slice(0,10))+(r.reservation_id?(' · reservation '+esc(String(r.reservation_id))):'')+'</div></div>'
      +chip+'</div>';
   h+='<div class="rv-verbatim">"'+esc(r.public_review||'(no text)')+'"</div>';
 
