@@ -3227,4 +3227,5 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 .rv-sbtn.active{background:#1a2433;color:#fff;border-color:#1a2433}
 .rv-copy{border:1px solid #2d6cdf;background:#fff;color:#2d6cdf;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer}
 .rv-note,.rv-empty{color:#8a95a6;font-size:12px;padding:8px 0}
+.rv-day{font-size:12px;font-weight:700;color:#5a6678;text-transform:uppercase;letter-spacing:.04em;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--border,#e2e7ee)}
 @media(max-width:600px){.rv-stats{grid-template-columns:repeat(2,1fr)}}

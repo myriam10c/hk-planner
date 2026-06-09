@@ -4725,10 +4725,19 @@ function renderReviews(){
   let list=rows.slice();
   if(reviewsFilter!=='all'){
     list=list.filter(r=>r.dispute && r.dispute.dispute_status===reviewsFilter);
+  } else {
+    list=list.filter(r=>!(r.dispute && r.dispute.dispute_status==='removed'));
   }
-  list.sort((a,b)=>(a.rating||0)-(b.rating||0));
   if(!list.length){ h+='<div class="rv-empty">No reviews in this filter.</div>'; }
-  for(const r of list){ h+=renderDisputeCard(r); }
+  else {
+    const byDay={};
+    for(const r of list){ const day=(r.submitted_at||'').slice(0,10)||'—'; (byDay[day]=byDay[day]||[]).push(r); }
+    for(const day of Object.keys(byDay).sort((a,b)=>b.localeCompare(a))){
+      byDay[day].sort((a,b)=>(a.rating||0)-(b.rating||0));
+      h+='<div class="rv-day">'+esc(day)+'</div>';
+      for(const r of byDay[day]){ h+=renderDisputeCard(r); }
+    }
+  }
   h+='</div>';
   document.getElementById('app').innerHTML=h+renderBottomNav();
 }
