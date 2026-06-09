@@ -1,0 +1,8 @@
+project_id = "dqjnqvbxfwtvrjwnnmns"
+
+# The proxy does its own auth (X-App-Secret / X-Server-Secret), so platform JWT
+# verification must stay OFF — otherwise every request 401s before reaching the
+# function. Without this, `supabase functions deploy` defaults verify_jwt to true
+# and takes the whole proxy down.
+[functions.hostaway-proxy]
+verify_jwt = false
