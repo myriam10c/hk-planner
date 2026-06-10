@@ -1,6 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+// Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
+declare const Deno: any;
+
 const HOSTAWAY_ACCOUNT_ID = Deno.env.get("HOSTAWAY_ACCOUNT_ID") ?? "";
 const HOSTAWAY_API_SECRET = Deno.env.get("HOSTAWAY_API_KEY") ?? "";
 const APP_SHARED_SECRET = Deno.env.get("APP_SHARED_SECRET") ?? "";
@@ -1758,12 +1761,17 @@ Deno.serve(async (req: Request) => {
     // ==================== DASHBOARD KPIs ====================
     if (action === "getDashboardKPIs") {
       const month = url.searchParams.get("month"); // YYYY-MM
+      if (month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return jsonResp({ error: "invalid month, expected YYYY-MM" }, 400);
+      // Tri par récence + limit : PostgREST clampe de toute façon à max-rows (1000 par
+      // défaut), donc sans ORDER BY la troncature jetterait des lignes arbitraires et
+      // fausserait les KPIs fenêtrés (7 jours / mois courant). Trié desc, le cap ne
+      // coupe que du vieux.
       const [timerRes, assignRes, doneRes, cleanerRes, ticketRes] = await Promise.all([
-        sb.from("cleaning_timer").select("reservation_key, cleaner_id, started_at, finished_at, duration_minutes").not("duration_minutes", "is", null),
-        sb.from("cleaning_assignments").select("reservation_key, cleaner_id"),
-        sb.from("menage_done").select("reservation_key, done, updated_at"),
-        sb.from("cleaners").select("id, name, color, role").eq("is_active", true),
-        sb.from("maintenance_tickets").select("id, status, priority, category, created_at, resolved_at"),
+        sb.from("cleaning_timer").select("reservation_key, cleaner_id, started_at, finished_at, duration_minutes").not("duration_minutes", "is", null).order("started_at", { ascending: false }).limit(5000),
+        sb.from("cleaning_assignments").select("reservation_key, cleaner_id").order("assigned_at", { ascending: false }).limit(5000),
+        sb.from("menage_done").select("reservation_key, done, updated_at").order("updated_at", { ascending: false }).limit(5000),
+        sb.from("cleaners").select("id, name, color, role").eq("is_active", true).limit(200),
+        sb.from("maintenance_tickets").select("id, status, priority, category, created_at, resolved_at").order("created_at", { ascending: false }).limit(5000),
       ]);
       const timers = timerRes.data || [];
       const assigns = assignRes.data || [];
@@ -1886,13 +1894,15 @@ Deno.serve(async (req: Request) => {
 
     // ========== PROPERTY HEATMAP ==========
     if (action === "getPropertyHeatmap") {
+      // Même logique que getDashboardKPIs : tri desc pour que le cap (limit / max-rows
+      // PostgREST) ne tronque que l'historique ancien, pas l'activité récente.
       const [ticketsRes, costsRes, timerRes, assignRes, feedbackRes, listingRes] = await Promise.all([
-        sb.from("maintenance_tickets").select("id, listing_id, status, priority, created_at, resolved_at"),
-        sb.from("maintenance_costs").select("listing_id, amount"),
-        sb.from("cleaning_timer").select("reservation_key, duration_minutes").not("duration_minutes", "is", null),
-        sb.from("cleaning_assignments").select("reservation_key, cleaner_id"),
-        sb.from("guest_feedback").select("listing_id, rating"),
-        sb.from("listing_config").select("listing_id, listing_name, bedrooms, price, custom_price"),
+        sb.from("maintenance_tickets").select("id, listing_id, status, priority, created_at, resolved_at").order("created_at", { ascending: false }).limit(5000),
+        sb.from("maintenance_costs").select("listing_id, amount").order("created_at", { ascending: false }).limit(5000),
+        sb.from("cleaning_timer").select("reservation_key, duration_minutes").not("duration_minutes", "is", null).order("started_at", { ascending: false }).limit(5000),
+        sb.from("cleaning_assignments").select("reservation_key, cleaner_id").order("assigned_at", { ascending: false }).limit(5000),
+        sb.from("guest_feedback").select("listing_id, rating").order("created_at", { ascending: false }).limit(5000),
+        sb.from("listing_config").select("listing_id, listing_name, bedrooms, price, custom_price").limit(500),
       ]);
       const byListing: Record<string, any> = {};
       (listingRes.data || []).forEach((l: any) => {
@@ -2560,12 +2570,12 @@ Deno.serve(async (req: Request) => {
       // is still mirrored there: it gives the freshest text and the is_hidden/is_cancelled
       // signal used to drop reviews Airbnb already pulled.
       const { data: disputes, error: e1 } = await sb.from("review_disputes").select("*")
-        .order("submitted_at", { ascending: false, nullsFirst: false });
+        .order("submitted_at", { ascending: false, nullsFirst: false }).limit(500);
       if (e1) throw e1;
       const ids = (disputes || []).map((d: any) => d.review_id);
       let cache: any[] = [];
       if (ids.length) {
-        const { data: c, error: e2 } = await sb.from("reviews_cache").select("*").in("id", ids);
+        const { data: c, error: e2 } = await sb.from("reviews_cache").select("*").in("id", ids).limit(500);
         if (e2) throw e2;
         cache = c || [];
       }

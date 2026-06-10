@@ -594,7 +594,7 @@ function renderPlannerTable(items){
     const listingFull = formatPropLabel(r.listingId, r.listing) || '';
     const cleanerFull = cleanersForRow.length ? cleanersForRow.map(c=>c.name).join(' + ') : 'Unassigned';
     const trCls = (isSelected?'selected ':'') + (isBulk?'bulk-selected':'');
-    h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1">';
+    h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,this.dataset.kbId,\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,this.dataset.kbId,\'cleaning\')" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1">';
     // Checkbox
     h += '<td class="col-select" data-action="togglePlannerBulk" data-arg0="'+sk+'" data-stop-propagation="1"><input type="checkbox"'+(isBulk?' checked':'')+' data-action="togglePlannerBulk" data-arg0="'+sk+'" data-stop-propagation="1"/></td>';
     // Date
@@ -3164,7 +3164,7 @@ function renderPlanner(){
       // Cleaner color for left border
       const cleanerColor=isCancelled?'var(--red)':(cleaner?cleaner.color:(urgency==='urgent'?'var(--red)':urgency==='warning'?'var(--orange)':'transparent'));
 
-      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" draggable="true" ondragstart="onDragStart(event,\''+sk+'\',\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,\''+sk+'\',\'cleaning\')" data-action="handleCardClick" data-arg0="'+sk+'" data-pass-event="1" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleCardClick(\''+sk+'\',event);}">';
+      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" draggable="true" ondragstart="onDragStart(event,this.dataset.kbId,\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,this.dataset.kbId,\'cleaning\')" data-action="handleCardClick" data-arg0="'+sk+'" data-pass-event="1" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleCardClick(this.dataset.kbId,event);}">';
       h+='<div class="swipe-cancel-bg"><span class="swipe-cancel-icon">'+(isCancelled?'↩️':'🚫')+'</span></div>';
 
       // Card content wrapper
@@ -3533,7 +3533,7 @@ function renderCardDetail(key,r){
   // Notes
   h+='<div class="detail-title" style="margin-top:10px">📝 Notes ('+notes.length+')</div>';
   notes.forEach(n=>{h+='<div class="note-item">'+esc(n.note_text)+'<div class="note-meta">'+(n.author?esc(n.author)+' — ':'')+new Date(n.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</div></div>';});
-  h+='<div class="note-input-row"><input id="note-'+safeId+'" placeholder="Add a note..." onkeydown="if(event.key===\'Enter\')addNote(\''+sk+'\')"/><button data-action="addNote" data-arg0="'+sk+'">Add</button></div>';
+  h+='<div class="note-input-row"><input id="note-'+safeId+'" placeholder="Add a note..." data-rkey="'+sk+'" onkeydown="if(event.key===\'Enter\')addNote(this.dataset.rkey)"/><button data-action="addNote" data-arg0="'+sk+'">Add</button></div>';
   // Before/After photo comparison
   const beforeP=photos.find(p=>p.photo_type==='before');
   const afterP=photos.find(p=>p.photo_type==='after');
