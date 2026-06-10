@@ -8,7 +8,7 @@
 
 const VERSION = 'v-20260610-0333-1a2fdac';
 const CACHE = 'hk-planner-' + VERSION;
-const PRECACHE = ['/', '/index.html', '/app.js', '/styles.css', '/manifest.json'];
+const PRECACHE = ['/', '/index.html', '/app.js', '/styles.css', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();

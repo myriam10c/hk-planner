@@ -4,23 +4,29 @@
 // are loaded on demand instead of upfront. Cleaner mode never needs them, so
 // the initial page weight drops by ~1.5MB for the cleaner journey.
 const __CDN = Object.freeze({
-  chart:  'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js',
-  pdf:    'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
-  xlsx:   'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
-  qrcode: 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
+  chart:  { src: 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js',
+            sri: 'sha384-bs/nf9FbdNouRbMiFcrcZfLXYPKiPaGVGplVbv7dLGECccEXDW+S3zjqSKR5ZEaD' },
+  pdf:    { src: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+            sri: 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk' },
+  xlsx:   { src: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+            sri: 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw' },
+  qrcode: { src: 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
+            sri: 'sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU' },
 });
 const __loadedScripts = new Map(); // src -> Promise
-function loadScript(src){
-  if (__loadedScripts.has(src)) return __loadedScripts.get(src);
+function loadScript(lib){
+  if (__loadedScripts.has(lib.src)) return __loadedScripts.get(lib.src);
   const p = new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = src;
+    s.src = lib.src;
+    s.integrity = lib.sri;
+    s.crossOrigin = 'anonymous';
     s.async = true;
     s.onload = () => resolve();
-    s.onerror = () => { __loadedScripts.delete(src); reject(new Error('Failed to load ' + src)); };
+    s.onerror = () => { __loadedScripts.delete(lib.src); reject(new Error('Failed to load ' + lib.src)); };
     document.head.appendChild(s);
   });
-  __loadedScripts.set(src, p);
+  __loadedScripts.set(lib.src, p);
   return p;
 }
 const ensureChart  = () => loadScript(__CDN.chart);
