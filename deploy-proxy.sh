@@ -30,7 +30,7 @@ fi
 export SUPABASE_ACCESS_TOKEN="$(cat "$TOKEN_FILE")"
 
 echo "→ Deploying $FUNCTION_NAME to project $PROJECT_REF..."
-npx -y supabase@latest functions deploy "$FUNCTION_NAME" \
+npx -y supabase@2 functions deploy "$FUNCTION_NAME" \
   --project-ref "$PROJECT_REF" \
   --no-verify-jwt
 # Note: --no-verify-jwt because the function does its own X-App-Secret auth.

@@ -1,11 +1,12 @@
-// HK Planner Service Worker — stale-while-revalidate for static assets.
+// HK Planner Service Worker.
 // Strategy:
-//  - First visit: full network, populates cache as side effect.
-//  - Subsequent visits: instant render from cache, background revalidate.
+//  - Navigations + core app shell (/app.js, /styles.css): network-first with
+//    cache fallback, so returning users always get the latest deploy.
+//  - Other same-origin static assets: stale-while-revalidate.
 //  - API calls (Supabase functions, Hostaway, etc.) bypass the cache entirely.
 //  - Bump VERSION to force all clients to drop the old cache.
 
-const VERSION = 'v16-2026-06-08-subs-screen-english';
+const VERSION = 'v17-2026-06-10-audit-fixes';
 const CACHE = 'hk-planner-' + VERSION;
 const PRECACHE = ['/', '/index.html', '/app.js', '/styles.css', '/manifest.json'];
 
@@ -37,14 +38,33 @@ self.addEventListener('fetch', (e) => {
   if (url.hostname.includes('green-api.com')) return;
   if (!['http:', 'https:'].includes(url.protocol)) return;
 
-  // Only handle same-origin GETs (stale-while-revalidate). Cross-origin requests
+  // Only handle same-origin GETs. Cross-origin requests
   // (cdnjs libs, Google Fonts) are left to the browser: intercepting opaque
   // no-cors script responses here made them fail with net::ERR_FAILED, which
   // silently broke jsPDF/xlsx/Chart/QRCode (invoice + exports) for returning users.
   if (url.origin === location.origin) {
-    e.respondWith(staleWhileRevalidate(req));
+    // Navigations + core app shell: network-first so a fresh deploy is picked up
+    // immediately; cached copy is only a fallback when offline.
+    if (req.mode === 'navigate' || url.pathname === '/app.js' || url.pathname === '/styles.css') {
+      e.respondWith(networkFirst(req));
+    } else {
+      e.respondWith(staleWhileRevalidate(req));
+    }
   }
 });
+
+async function networkFirst(req) {
+  const cache = await caches.open(CACHE);
+  try {
+    const res = await fetch(req);
+    if (res && res.ok) cache.put(req, res.clone()).catch(() => {});
+    return res;
+  } catch (err) {
+    const cached = await cache.match(req);
+    if (cached) return cached;
+    throw err;
+  }
+}
 
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(CACHE);

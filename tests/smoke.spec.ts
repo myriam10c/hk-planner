@@ -12,16 +12,19 @@ const consoleErrors: string[] = [];
 test.beforeEach(async ({ page }) => {
   consoleErrors.length = 0;
   page.on('console', msg => {
-    if (msg.type() === 'error') consoleErrors.push(msg.text());
+    // Include the source URL: for 'Failed to load resource' the URL lives in
+    // msg.location(), not the text — needed to filter favicon/manifest noise.
+    if (msg.type() === 'error') consoleErrors.push(`${msg.text()} [${msg.location()?.url || ''}]`);
   });
   page.on('pageerror', err => consoleErrors.push(`pageerror: ${err.message}`));
 });
 
 test.afterEach(async () => {
-  // Ignore expected noise — Supabase auth pings, manifest 404s on subdomain, etc.
+  // Ignore known noise only: favicon.ico / manifest icon 404s on the Netlify
+  // subdomain, workbox/SW registration chatter. Do NOT blanket-drop
+  // 'Failed to load resource' — that masks real 404/CSP failures.
   const meaningful = consoleErrors.filter(e =>
-    !/favicon|manifest|workbox|service[\s-]?worker/i.test(e)
-    && !/Failed to load resource/i.test(e)
+    !/favicon\.ico|manifest|icon-\d+|workbox|service[\s-]?worker/i.test(e)
   );
   expect.soft(meaningful, `Unexpected console errors:\n${meaningful.join('\n')}`).toEqual([]);
 });

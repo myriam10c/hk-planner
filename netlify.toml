@@ -2,15 +2,7 @@
   publish = "."
   # Pas de build step — index.html à la racine
 
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Frame-Options = "DENY"
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# Headers: définis dans _headers (source unique — inclut la CSP).
+# Pas de redirect SPA catch-all : le routing est 100% query-param (app.js),
+# et le catch-all faisait répondre index.html (200) aux assets 404,
+# que le service worker mettait ensuite en cache.

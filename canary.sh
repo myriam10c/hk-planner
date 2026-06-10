@@ -31,22 +31,39 @@ fi
 
 cd "$(dirname "$0")"
 
-# 1) Find the two most-recent "ready" deploys (current + previous good)
+# 1) Find the currently PUBLISHED deploy (authoritative — survives rollbacks,
+#    where the newest "ready" deploy in the list is NOT the live one),
+#    plus the most recent other ready deploy as rollback candidate.
+PUBLISHED_ID=$(curl -sS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+  "https://api.netlify.com/api/v1/sites/$SITE_ID" | python3 -c '
+import sys, json
+site = json.load(sys.stdin)
+pub = site.get("published_deploy") or {}
+if not pub.get("id"):
+    sys.exit("no published deploy found for site")
+print(pub["id"])
+')
+
 DEPLOY_INFO=$(curl -sS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
   "https://api.netlify.com/api/v1/sites/$SITE_ID/deploys?per_page=20" | python3 -c '
 import sys, json
+published_id = sys.argv[1]
 def first_line(s):  # commit messages can have newlines; canary metadata is one-line only
     return (s or "").splitlines()[0] if s else ""
 ready = [d for d in json.load(sys.stdin) if d.get("state") == "ready"]
 if not ready:
     sys.exit("no ready deploys found")
-cur = ready[0]
-prev = ready[1] if len(ready) > 1 else None
+cur = next((d for d in ready if d["id"] == published_id), ready[0])
+# Rollback candidate: the newest ready deploy OLDER than the published one
+# (list is newest-first). Never pick a newer deploy — after a rollback that
+# would be the broken build we just rolled away from.
+cur_idx = ready.index(cur)
+prev = ready[cur_idx + 1] if cur_idx + 1 < len(ready) else None
 print(cur["id"])
 print(first_line(cur.get("title","")))
 print(prev["id"] if prev else "")
 print(first_line(prev.get("title","")) if prev else "")
-')
+' "$PUBLISHED_ID")
 
 CURRENT_ID=$(echo "$DEPLOY_INFO" | sed -n '1p')
 CURRENT_TITLE=$(echo "$DEPLOY_INFO" | sed -n '2p')
