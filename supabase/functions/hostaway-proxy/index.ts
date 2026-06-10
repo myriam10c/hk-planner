@@ -4,7 +4,6 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const HOSTAWAY_ACCOUNT_ID = Deno.env.get("HOSTAWAY_ACCOUNT_ID") ?? "";
 const HOSTAWAY_API_SECRET = Deno.env.get("HOSTAWAY_API_KEY") ?? "";
 const APP_SHARED_SECRET = Deno.env.get("APP_SHARED_SECRET") ?? "";
-const STRICT_AUTH = (Deno.env.get("STRICT_AUTH") ?? "true") !== "false";
 // Server-to-server secret, NEVER shipped in the client bundle. Gates the
 // server-only routes below (sync/dispatch/command-queue), which the browser
 // never calls. Until it is configured these routes keep their previous
@@ -209,13 +208,6 @@ function generateSessionToken(): string {
 async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-function getClientIp(req: Request): string {
-  return req.headers.get("cf-connecting-ip")
-      ?? req.headers.get("x-real-ip")
-      ?? req.headers.get("x-forwarded-for")?.split(',')[0]?.trim()
-      ?? "unknown";
 }
 
 // Validate X-Cleaner-Token, return cleaner info or null (no error if token missing)
@@ -529,17 +521,16 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
-  // Soft/strict app-level auth
+  // App-level auth — toujours stricte (pas de kill-switch env : un STRICT_AUTH=false
+  // oublié désactiverait silencieusement toute l'auth).
   const providedSecret = req.headers.get("x-app-secret") ?? "";
   const hasSecret = APP_SHARED_SECRET !== "" && providedSecret === APP_SHARED_SECRET;
-  if (STRICT_AUTH && !hasSecret) {
+  if (!hasSecret) {
+    console.log("[hostaway-proxy] missing/invalid X-App-Secret from origin=" + origin);
     return new Response(JSON.stringify({ error: "unauthorized" }), {
       status: 401,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
-  }
-  if (!hasSecret) {
-    console.log("[hostaway-proxy] missing/invalid X-App-Secret from origin=" + origin);
   }
   try {
     const url = new URL(req.url);
@@ -699,6 +690,13 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", cleaners: data });
     }
     if (action === "saveCleaner" && req.method === "POST") {
+      // X-App-Secret est embarqué dans le bundle JS public : insuffisant pour
+      // créer/modifier des comptes (PIN inclus → escalade de privilèges). On exige
+      // une session valide (X-Cleaner-Token) appartenant à un cleaner role=manager.
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (!me || me.role !== 'manager') {
+        return jsonResp({ error: "manager auth required" }, 403);
+      }
       const body = await req.json();
       const { id, name, phone, color, pin, role, telegram_chat_id } = body;
       if (!name || typeof name !== 'string' || name.length > 100) return jsonResp({ error: "name required" }, 400);
@@ -758,21 +756,34 @@ Deno.serve(async (req: Request) => {
       if (!pin || typeof pin !== 'string' || pin.length < 3 || pin.length > 20) {
         return jsonResp({ error: "pin required" }, 400);
       }
-      // Rate limit : max 5 failed attempts / 60 sec / IP
-      const ip = getClientIp(req);
-      const ipHash = await sha256Hex(ip);
-      const since = new Date(Date.now() - 60_000).toISOString();
-      const { count: failedCount } = await sb.from("login_attempts")
+      // Rate limit GLOBAL, persistant en DB : max 25 échecs / 15 min toutes IPs
+      // confondues (~5 utilisateurs réels). L'IP venait d'en-têtes falsifiables
+      // (x-forwarded-for & co), donc un seuil par IP était contournable — un seuil
+      // global tue le brute-force de PIN quel que soit le spoofing de headers.
+      const since = new Date(Date.now() - 15 * 60_000).toISOString();
+      const { count: failedCount, error: rlErr } = await sb.from("login_attempts")
         .select("*", { count: "exact", head: true })
-        .eq("ip_hash", ipHash).eq("success", false)
+        .eq("success", false)
         .gte("attempted_at", since);
-      if ((failedCount ?? 0) >= 5) {
+      if (rlErr) throw rlErr;
+      if ((failedCount ?? 0) >= 25) {
+        // Message inchangé : le front (app.js) matche cette string exacte pour la traduction.
         return jsonResp({ error: "Too many attempts. Try again in 1 minute." }, 429);
       }
+      // Purge opportuniste (fire-and-forget, ne bloque pas le login) : >24h inutile.
+      const purgeCutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
+      sb.from("login_attempts").delete().lt("attempted_at", purgeCutoff)
+        .then(({ error }: any) => { if (error) console.warn("[login_attempts] purge failed:", error); },
+              (e: any) => console.warn("[login_attempts] purge failed:", e));
       // Verify PIN via stored proc (bcrypt compare)
       const { data: verifyData, error: verifyErr } = await sb.rpc('verify_cleaner_pin', { p_pin: pin });
       if (verifyErr || !verifyData || verifyData.length === 0) {
-        await sb.from("login_attempts").insert({ ip_hash: ipHash, success: false });
+        // Hash SHA-256 du PIN tenté (échecs uniquement, pour le debug) — JAMAIS le PIN en clair.
+        // Un SHA-256 non salé d'un PIN à 4 chiffres serait réversible : on ne stocke donc
+        // jamais le hash d'un PIN valide (login réussi).
+        const { error: insErr } = await sb.from("login_attempts")
+          .insert({ pin_hash: await sha256Hex(pin), success: false });
+        if (insErr) console.warn("[login_attempts] insert failed:", insErr);
         return jsonResp({ error: "Invalid PIN" }, 401);
       }
       const cleaner = verifyData[0];
@@ -783,7 +794,8 @@ Deno.serve(async (req: Request) => {
         token, cleaner_id: cleaner.id, user_agent: ua,
       });
       if (sessErr) throw sessErr;
-      await sb.from("login_attempts").insert({ ip_hash: ipHash, success: true });
+      const { error: okErr } = await sb.from("login_attempts").insert({ success: true });
+      if (okErr) console.warn("[login_attempts] insert failed:", okErr);
       return jsonResp({
         status: "success",
         token,

@@ -1966,7 +1966,11 @@ function exportSubCsv(){
 }
 
 async function saveCleaner(id,name,phone,color,pin,role){
-  await api('saveCleaner',{body:{id:id||undefined,name,phone,color,pin:pin||null,role:role||'cleaner'}});
+  const r=await api('saveCleaner',{body:{id:id||undefined,name,phone,color,pin:pin||null,role:role||'cleaner'}});
+  if(r&&r.error){
+    toast(r.error==='manager auth required'?'Login required — open Cleaner Login and enter your manager PIN':r.error,'error');
+    return;
+  }
   const res=await api('getCleaners');cleaners=res.cleaners||[];render();toast('Saved ✓','success');
 }
 async function deleteCleaner(id){
@@ -2865,10 +2869,21 @@ async function cleanerLogin(){
   if(pin.length!==4)return;
   const res=await api('cleanerLogin',{body:{pin}});
   if(res.status==='success'){
-    cleanerMode=res.cleaner;
     cleanerToken=res.token||null;
-    localStorage.setItem('cleanerMode',JSON.stringify(cleanerMode));
     if(cleanerToken) localStorage.setItem('cleanerToken',cleanerToken);
+    if(res.cleaner.role==='manager'){
+      // Login manager : garder le token (saveCleaner exige une session role=manager
+      // côté proxy) mais rester sur la vue manager, pas la vue cleaner.
+      cleanerMode=null;
+      localStorage.removeItem('cleanerMode');
+      if(window.location.hash==='#cleaner') window.location.hash='';
+      toast('Welcome '+res.cleaner.name+'!','success');
+      haptic('heavy');
+      fetchAll();
+      return;
+    }
+    cleanerMode=res.cleaner;
+    localStorage.setItem('cleanerMode',JSON.stringify(cleanerMode));
     toast('Welcome '+res.cleaner.name+'!','success');
     haptic('heavy');
     // #10 First login onboarding
