@@ -1353,7 +1353,7 @@ Deno.serve(async (req: Request) => {
     }
     if (action === "createTicket" && req.method === "POST") {
       const body = await req.json();
-      const { listing_id, equipment_id, title, description, category, priority, assigned_vendor_id, assigned_technician_id, reported_by, photo_data, estimated_cost } = body;
+      const { listing_id, equipment_id, title, description, category, priority, assigned_vendor_id, assigned_technician_id, reported_by, photo_data, estimated_cost, source, source_ref } = body;
       if (!title) return jsonResp({ error: "title required" }, 400);
       // Get SLA deadline
       const cat = category || 'general';
@@ -1366,6 +1366,7 @@ Deno.serve(async (req: Request) => {
         title, description: description || null, category: cat, priority: pri,
         assigned_vendor_id: assigned_vendor_id || null, assigned_technician_id: assigned_technician_id || null,
         reported_by: reported_by || null,
+        ...(source ? { source } : {}), source_ref: source_ref || null,
         estimated_cost: estimated_cost || null, sla_deadline: slaDeadline,
         status: assigned_technician_id ? 'assigned' : 'open',
       }).select().single();
