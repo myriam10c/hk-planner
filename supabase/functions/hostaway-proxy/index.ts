@@ -48,8 +48,21 @@ function corsHeaders(origin: string | null): Record<string, string> {
   }
   return DEFAULT_CORS_HEADERS;
 }
-// Alias pour code existant qui utilise CORS_HEADERS
-const CORS_HEADERS = DEFAULT_CORS_HEADERS;
+// Per-request CORS headers consumed by jsonResp(). Set at the top of the request
+// handler so allowed non-prod origins (localhost, deploy previews) get the right
+// Access-Control-Allow-Origin on actual responses, not only on preflight.
+let REQUEST_CORS_HEADERS: Record<string, string> = DEFAULT_CORS_HEADERS;
+
+// Error with a user-facing message + HTTP status. Anything thrown as HttpError is
+// relayed to the client as-is by the catch-all; every other thrown error is logged
+// server-side and genericized (no Postgres/Hostaway details leaked).
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 let cachedToken: string | null = null;
 let tokenExpiry = 0;
@@ -64,8 +77,23 @@ function getSupabase() {
 function jsonResp(data: any, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    headers: { ...REQUEST_CORS_HEADERS, "Content-Type": "application/json" },
   });
+}
+
+// PostgREST caps responses at 1000 rows : un .select() non borné tronque en silence
+// sur les tables qui grossissent. Pagine via .range() jusqu'à épuisement.
+// NB: les query builders supabase-js sont one-shot — construire une query NEUVE dans
+// le callback, avec un .order(...) stable pour que la pagination soit déterministe.
+async function fetchAllRows<T>(buildQuery: (from: number, to: number) => any, pageSize = 1000): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) throw error;
+    out.push(...(data ?? []));
+    if (!data || data.length < pageSize) break;
+  }
+  return out;
 }
 
 async function getAccessToken(): Promise<string> {
@@ -140,11 +168,23 @@ function extractAptNumber(s: string | null | undefined): string | null {
 async function fetchAllPages(baseUrl: string, authHeaders: Record<string, string>, pageSize = 200): Promise<any[]> {
   let all: any[] = [];
   let offset = 0;
+  const headers = { ...authHeaders };
+  let retriedAuth = false;
   while (true) {
     const sep = baseUrl.includes("?") ? "&" : "?";
     const pageUrl = baseUrl + sep + "limit=" + pageSize + "&offset=" + offset;
-    const resp = await fetch(pageUrl, { headers: authHeaders });
-    if (!resp.ok) break;
+    let resp = await fetch(pageUrl, { headers });
+    if (resp.status === 401 && cachedToken && !retriedAuth) {
+      // Cached token revoked/expired server-side : clear cache, mint a new one, retry once.
+      retriedAuth = true;
+      cachedToken = null;
+      tokenExpiry = 0;
+      headers["Authorization"] = "Bearer " + (await getAccessToken());
+      resp = await fetch(pageUrl, { headers });
+    }
+    // Ne JAMAIS retourner une liste partielle comme un succès (assignments/cleanings
+    // disparaîtraient silencieusement côté front).
+    if (!resp.ok) throw new HttpError(502, "Hostaway API error " + resp.status);
     const data = await resp.json();
     const results = data.result || [];
     all = all.concat(results);
@@ -154,7 +194,7 @@ async function fetchAllPages(baseUrl: string, authHeaders: Record<string, string
   return all;
 }
 
-async function addLog(sb: any, key: string, action: string, actor?: string, details?: any) {
+async function addLog(sb: any, key: string, action: string, actor?: string | null, details?: any) {
   await sb.from("cleaning_log").insert({ reservation_key: key, action, actor: actor || null, details: details || {} });
 }
 
@@ -485,6 +525,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get("origin");
   const CORS_HEADERS = corsHeaders(origin);
+  REQUEST_CORS_HEADERS = CORS_HEADERS; // consumed by jsonResp() for this request
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -517,13 +558,16 @@ Deno.serve(async (req: Request) => {
     }
 
     // Server-only routes: require a secret that never ships to the browser.
-    // If SERVER_SHARED_SECRET is unset, keep the previous X-App-Secret gating
-    // (already validated above) so the VPS jobs are not broken before the env
-    // var is configured on both the edge function and the callers.
+    // If SERVER_SHARED_SECRET is unset, HARD FAIL (403) — falling back to
+    // X-App-Secret would let anyone with the public JS bundle hit routes like
+    // getMacCommands (pushed credentials). Configure the env var on the edge
+    // function AND the callers before deploying server-only jobs.
     if (action !== null && SERVER_ONLY_ACTIONS.has(action)) {
       if (SERVER_SHARED_SECRET === "") {
-        console.warn(`[hostaway-proxy] SERVER_SHARED_SECRET not set — "${action}" still gated by X-App-Secret only; configure it to harden.`);
-      } else if ((req.headers.get("x-server-secret") ?? "") !== SERVER_SHARED_SECRET) {
+        console.error(`[hostaway-proxy] SERVER_SHARED_SECRET not set — refusing server-only action "${action}".`);
+        return jsonResp({ error: "server auth required" }, 403);
+      }
+      if ((req.headers.get("x-server-secret") ?? "") !== SERVER_SHARED_SECRET) {
         console.log(`[hostaway-proxy] missing/invalid X-Server-Secret for "${action}" from origin=${origin}`);
         return jsonResp({ error: "server auth required" }, 403);
       }
@@ -534,6 +578,10 @@ Deno.serve(async (req: Request) => {
       const startDate = url.searchParams.get("startDate");
       const endDate = url.searchParams.get("endDate");
       if (!startDate || !endDate) return jsonResp({ error: "startDate and endDate required" }, 400);
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
+        return jsonResp({ error: "startDate and endDate must be YYYY-MM-DD" }, 400);
+      }
       const token = await getAccessToken();
       const validStatuses = ['new','modified','confirmed','ownerStay','reserved'];
       const departuresUrl = API_BASE + "/reservations?departureStartDate=" + startDate + "&departureEndDate=" + endDate + "&sortOrder=departureDate&orderDirection=asc";
@@ -579,10 +627,7 @@ Deno.serve(async (req: Request) => {
     if (action === "syncListings") {
       const token = await getAccessToken();
       const authHeaders = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
-      const listResp = await fetch(API_BASE + "/listings?limit=200", { headers: authHeaders });
-      if (!listResp.ok) throw new Error("Failed to fetch listings: " + listResp.status);
-      const listData = await listResp.json();
-      const listings = listData.result || [];
+      const listings = await fetchAllPages(API_BASE + "/listings", authHeaders);
       let synced = 0;
       // Pre-load existing rows to know which ones have manual overrides locked.
       // For locked rows we only refresh metadata that's safe (apt_number, internal_name,
@@ -610,10 +655,10 @@ Deno.serve(async (req: Request) => {
 
     // ==================== DONE STATES ====================
     if (action === "getDone") {
-      const { data, error } = await sb.from("menage_done").select("reservation_key, done");
-      if (error) throw error;
+      const data = await fetchAllRows<any>((from, to) =>
+        sb.from("menage_done").select("reservation_key, done").order("reservation_key").range(from, to));
       const doneMap: Record<string, boolean> = {};
-      (data || []).forEach((row: any) => { doneMap[row.reservation_key] = row.done; });
+      data.forEach((row: any) => { doneMap[row.reservation_key] = row.done; });
       return jsonResp({ status: "success", done: doneMap });
     }
     if (action === "setDone" && req.method === "POST") {
@@ -659,6 +704,12 @@ Deno.serve(async (req: Request) => {
       if (!name || typeof name !== 'string' || name.length > 100) return jsonResp({ error: "name required" }, 400);
       if (pin !== undefined && pin !== null && pin !== "" && (typeof pin !== 'string' || !/^\d{3,8}$/.test(pin))) {
         return jsonResp({ error: "pin must be 3-8 digits" }, 400);
+      }
+      // role : allowlist stricte (valeurs utilisées par le front : select manager/cleaner/maintenance
+      // + subcontractor pour Elite). Tout le reste → 400.
+      const ALLOWED_ROLES = new Set(['cleaner', 'manager', 'maintenance', 'subcontractor']);
+      if (role !== undefined && role !== null && (typeof role !== 'string' || !ALLOWED_ROLES.has(role))) {
+        return jsonResp({ error: "invalid role" }, 400);
       }
       // telegram_chat_id : optionnel. Doit être numérique (positif ou négatif pour les groupes).
       let normalizedTgChat: string | null | undefined = undefined;
@@ -755,12 +806,13 @@ Deno.serve(async (req: Request) => {
 
     // ==================== ASSIGNMENTS ====================
     if (action === "getAssignments") {
-      const { data, error } = await sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type");
-      if (error) throw error;
+      const data = await fetchAllRows<any>((from, to) =>
+        sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type")
+          .order("reservation_key").order("cleaner_id").range(from, to));
       // Multi-assign model: each reservation_key maps to an array of cleaner_ids.
       const map: Record<string, number[]> = {};
       const meta: Record<string, Record<string, string>> = {};
-      (data || []).forEach((r: any) => {
+      data.forEach((r: any) => {
         if (!map[r.reservation_key]) map[r.reservation_key] = [];
         map[r.reservation_key].push(r.cleaner_id);
         if (!meta[r.reservation_key]) meta[r.reservation_key] = {};
@@ -973,6 +1025,9 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { reservation_key, cleaner_id } = body;
       if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
+      // Ne pas écraser un timer déjà terminé (l'upsert effacerait duration_minutes).
+      const { data: existingTimer } = await sb.from("cleaning_timer").select("finished_at").eq("reservation_key", reservation_key).maybeSingle();
+      if (existingTimer?.finished_at) return jsonResp({ error: "Timer already finished" }, 400);
       const { error } = await sb.from("cleaning_timer").upsert({
         reservation_key, cleaner_id: cleaner_id || null,
         started_at: new Date().toISOString(),
@@ -1043,10 +1098,10 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", duration_minutes: duration, pause_count: pauseCount });
     }
     if (action === "getTimers") {
-      const { data, error } = await sb.from("cleaning_timer").select("*");
-      if (error) throw error;
+      const data = await fetchAllRows<any>((from, to) =>
+        sb.from("cleaning_timer").select("*").order("reservation_key").range(from, to));
       const map: Record<string, any> = {};
-      (data || []).forEach((t: any) => { map[t.reservation_key] = t; });
+      data.forEach((t: any) => { map[t.reservation_key] = t; });
       return jsonResp({ status: "success", timers: map });
     }
 
@@ -1398,9 +1453,12 @@ Deno.serve(async (req: Request) => {
     if (action === "getMaintenanceCosts") {
       const listingId = url.searchParams.get("listingId");
       const month = url.searchParams.get("month"); // YYYY-MM
+      if (month && !/^\d{4}-\d{2}$/.test(month)) return jsonResp({ error: "month must be YYYY-MM" }, 400);
       let query = sb.from("maintenance_costs").select("*").order("date", { ascending: false }).limit(200);
       if (listingId) query = query.eq("listing_id", listingId);
-      if (month) { query = query.gte("date", month + "-01").lte("date", month + "-31"); }
+      // Borne haute exclusive sur le 1er du mois suivant ("-31" est une date invalide
+      // pour les mois de 30 jours / février → erreur Postgres).
+      if (month) { query = query.gte("date", month + "-01").lt("date", nextMonthISO(month)); }
       const { data, error } = await query;
       if (error) throw error;
       return jsonResp({ status: "success", costs: data });
@@ -1523,11 +1581,12 @@ Deno.serve(async (req: Request) => {
 
     // ==================== RECURRING ISSUES ====================
     if (action === "getRecurringIssues") {
-      const { data, error } = await sb.from("maintenance_tickets").select("listing_id, category, title, priority, status, created_at").order("created_at", { ascending: false });
-      if (error) throw error;
+      const data = await fetchAllRows<any>((from, to) =>
+        sb.from("maintenance_tickets").select("id, listing_id, category, title, priority, status, created_at")
+          .order("created_at", { ascending: false }).order("id").range(from, to));
       // Detect patterns: same listing+category with 2+ tickets in last 90 days
       const patterns: Record<string, any[]> = {};
-      (data || []).forEach((t: any) => {
+      data.forEach((t: any) => {
         const key = (t.listing_id || 'none') + '_' + t.category;
         if (!patterns[key]) patterns[key] = [];
         patterns[key].push(t);
@@ -1758,13 +1817,17 @@ Deno.serve(async (req: Request) => {
 
     // ==================== BULK LOAD ====================
     if (action === "getAllData") {
-      const [doneRes, assignRes, cleanerRes, templateRes, listingRes, timerRes, issueRes, recurRes, ticketRes, vendorRes, equipRes, prevRes, profileRes, cancelledRes, extraRes] = await Promise.all([
-        sb.from("menage_done").select("reservation_key, done"),
-        sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type"),
+      // Tables qui grossissent à chaque ménage (menage_done, cleaning_assignments,
+      // cleaning_timer, cleaning_cancelled) : paginer pour éviter la troncature
+      // silencieuse PostgREST à 1000 rows.
+      const [doneRows, assignRows, timerRows, cancelledRows, cleanerRes, templateRes, listingRes, issueRes, recurRes, ticketRes, vendorRes, equipRes, prevRes, profileRes, extraRes] = await Promise.all([
+        fetchAllRows<any>((from, to) => sb.from("menage_done").select("reservation_key, done").order("reservation_key").range(from, to)),
+        fetchAllRows<any>((from, to) => sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type").order("reservation_key").order("cleaner_id").range(from, to)),
+        fetchAllRows<any>((from, to) => sb.from("cleaning_timer").select("*").order("reservation_key").range(from, to)),
+        fetchAllRows<any>((from, to) => sb.from("cleaning_cancelled").select("reservation_key, reason, cancelled_by, cancelled_at").order("reservation_key").range(from, to)),
         sb.from("cleaners").select("*").eq("is_active", true).order("name"),
         sb.from("checklist_templates").select("*").order("name"),
         sb.from("listing_config").select("listing_id, listing_name, bedrooms, price, custom_price, unit_type, apt_number, internal_name"),
-        sb.from("cleaning_timer").select("*"),
         sb.from("cleaning_issues").select("*").in("status", ["open", "in_progress"]).order("created_at", { ascending: false }),
         sb.from("recurring_tasks").select("*").eq("is_active", true).order("next_due_at"),
         // Active tickets only (anything not closed). The dedicated /refreshMaintenance flow
@@ -1775,17 +1838,16 @@ Deno.serve(async (req: Request) => {
         sb.from("equipment").select("*").order("listing_id, name"),
         sb.from("preventive_maintenance").select("*").eq("is_active", true).order("next_due_at"),
         sb.from("property_profiles").select("*"),
-        sb.from("cleaning_cancelled").select("reservation_key, reason, cancelled_by, cancelled_at"),
         sb.from("extra_cleanings").select("*").gte("cleaning_date", new Date(Date.now() - 30*86400000).toISOString().split('T')[0]).lte("cleaning_date", new Date(Date.now() + 60*86400000).toISOString().split('T')[0]).order("cleaning_date"),
       ]);
       const cancelledMap: Record<string, any> = {};
-      (cancelledRes.data || []).forEach((r: any) => { cancelledMap[r.reservation_key] = { reason: r.reason, cancelled_by: r.cancelled_by, cancelled_at: r.cancelled_at }; });
+      cancelledRows.forEach((r: any) => { cancelledMap[r.reservation_key] = { reason: r.reason, cancelled_by: r.cancelled_by, cancelled_at: r.cancelled_at }; });
       const doneMap: Record<string, boolean> = {};
-      (doneRes.data || []).forEach((r: any) => { doneMap[r.reservation_key] = r.done; });
+      doneRows.forEach((r: any) => { doneMap[r.reservation_key] = r.done; });
       // Multi-assign: assignments[reservation_key] is now a number[].
       const assignMap: Record<string, number[]> = {};
       const assignMeta: Record<string, Record<string, string>> = {};
-      (assignRes.data || []).forEach((r: any) => {
+      assignRows.forEach((r: any) => {
         if (!assignMap[r.reservation_key]) assignMap[r.reservation_key] = [];
         assignMap[r.reservation_key].push(r.cleaner_id);
         if (!assignMeta[r.reservation_key]) assignMeta[r.reservation_key] = {};
@@ -1794,7 +1856,7 @@ Deno.serve(async (req: Request) => {
       const listingPrices: Record<string, any> = {};
       (listingRes.data || []).forEach((r: any) => { listingPrices[r.listing_id] = { bedrooms: r.bedrooms, price: r.price, custom_price: r.custom_price, listing_name: r.listing_name, unit_type: r.unit_type, apt_number: r.apt_number, internal_name: r.internal_name }; });
       const timerMap: Record<string, any> = {};
-      (timerRes.data || []).forEach((t: any) => { timerMap[t.reservation_key] = t; });
+      timerRows.forEach((t: any) => { timerMap[t.reservation_key] = t; });
       const profileMap: Record<string, any> = {};
       (profileRes.data || []).forEach((p: any) => { profileMap[p.listing_id] = p; });
       return jsonResp({
@@ -1894,7 +1956,9 @@ Deno.serve(async (req: Request) => {
       const headers = Object.keys(rows[0]);
       const escape = (v: any) => {
         if (v == null) return "";
-        const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+        let s = typeof v === "object" ? JSON.stringify(v) : String(v);
+        // Neutralise l'injection de formules tableur (=, +, -, @ en début de cellule).
+        if (/^[=+\-@]/.test(s)) s = "'" + s;
         if (s.includes('"') || s.includes(',') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
         return s;
       };
@@ -1921,33 +1985,43 @@ Deno.serve(async (req: Request) => {
 
     if (action === "exportCleaningsCsv") {
       const month = url.searchParams.get("month"); // YYYY-MM optionnel
-      let q = sb.from("cleaning_timer").select("reservation_key, cleaner_id, started_at, finished_at, duration_minutes").order("started_at", { ascending: false });
-      if (month) q = q.gte("started_at", month + "-01").lt("started_at", nextMonthISO(month));
-      const [timerRes, cleanerRes, assignRes, doneRes, cancelRes] = await Promise.all([
-        q,
+      const timerQuery = (from: number, to: number) => {
+        let q = sb.from("cleaning_timer").select("reservation_key, cleaner_id, started_at, finished_at, duration_minutes")
+          .order("started_at", { ascending: false }).order("reservation_key");
+        if (month) q = q.gte("started_at", month + "-01").lt("started_at", nextMonthISO(month));
+        return q.range(from, to);
+      };
+      const [timerRows, cleanerRes, assignRows, doneRows, cancelRows] = await Promise.all([
+        fetchAllRows<any>(timerQuery),
         sb.from("cleaners").select("id, name"),
-        sb.from("cleaning_assignments").select("reservation_key, cleaner_id"),
-        sb.from("menage_done").select("reservation_key, done, updated_at"),
-        sb.from("cleaning_cancelled").select("reservation_key, reason, cancelled_by, cancelled_at"),
+        fetchAllRows<any>((from, to) => sb.from("cleaning_assignments").select("reservation_key, cleaner_id").order("reservation_key").order("cleaner_id").range(from, to)),
+        fetchAllRows<any>((from, to) => sb.from("menage_done").select("reservation_key, done, updated_at").order("reservation_key").range(from, to)),
+        fetchAllRows<any>((from, to) => sb.from("cleaning_cancelled").select("reservation_key, reason, cancelled_by, cancelled_at").order("reservation_key").range(from, to)),
       ]);
-      if (timerRes.error) throw timerRes.error;
       const cleanerMap: Record<number, string> = {};
       (cleanerRes.data || []).forEach((c: any) => { cleanerMap[c.id] = c.name; });
-      const assignMap: Record<string, number> = {};
-      (assignRes.data || []).forEach((a: any) => { assignMap[a.reservation_key] = a.cleaner_id; });
+      // Multi-assign : agrège TOUS les cleaners co-assignés (avant : un seul, last-wins).
+      const assignMap: Record<string, number[]> = {};
+      assignRows.forEach((a: any) => {
+        if (!assignMap[a.reservation_key]) assignMap[a.reservation_key] = [];
+        assignMap[a.reservation_key].push(a.cleaner_id);
+      });
+      const cleanerNames = (key: string, fallbackId?: number | null): string => {
+        const ids = (assignMap[key] && assignMap[key].length > 0) ? assignMap[key] : (fallbackId ? [fallbackId] : []);
+        return ids.map((id) => cleanerMap[id] || String(id)).join(" + ");
+      };
       const doneMap: Record<string, any> = {};
-      (doneRes.data || []).forEach((d: any) => { doneMap[d.reservation_key] = d; });
+      doneRows.forEach((d: any) => { doneMap[d.reservation_key] = d; });
       const cancelMap: Record<string, any> = {};
-      (cancelRes.data || []).forEach((c: any) => { cancelMap[c.reservation_key] = c; });
-      const rows = (timerRes.data || []).map((t: any) => {
+      cancelRows.forEach((c: any) => { cancelMap[c.reservation_key] = c; });
+      const rows = timerRows.map((t: any) => {
         const parts = t.reservation_key.split('_');
         const date = parts[0] || '';
         const guest = parts.slice(1).join(' ') || '';
-        const cleanerId = t.cleaner_id ?? assignMap[t.reservation_key];
         return {
           checkout_date: date,
           guest_name: guest,
-          cleaner: cleanerId ? (cleanerMap[cleanerId] || cleanerId) : '',
+          cleaner: cleanerNames(t.reservation_key, t.cleaner_id),
           started_at: t.started_at || '',
           finished_at: t.finished_at || '',
           duration_minutes: t.duration_minutes ?? '',
@@ -1958,16 +2032,15 @@ Deno.serve(async (req: Request) => {
         };
       });
       // Récupérer aussi les extras pour la période
-      let qExtra = sb.from("extra_cleanings").select("*").order("cleaning_date", { ascending: false });
-      if (month) qExtra = qExtra.gte("cleaning_date", month + "-01").lt("cleaning_date", nextMonthISO(month));
-      const extraCsvRes = await qExtra;
-      const extraRows = (extraCsvRes.data || []).map((e: any) => ({
+      const extraCsvRows = await fetchAllRows<any>((from, to) => {
+        let qExtra = sb.from("extra_cleanings").select("*").order("cleaning_date", { ascending: false }).order("id");
+        if (month) qExtra = qExtra.gte("cleaning_date", month + "-01").lt("cleaning_date", nextMonthISO(month));
+        return qExtra.range(from, to);
+      });
+      const extraRows = extraCsvRows.map((e: any) => ({
         checkout_date: e.cleaning_date,
         guest_name: e.guest_name || e.label || 'Extra',
-        cleaner: (() => {
-          const a = assignMap[e.reservation_key];
-          return a ? (cleanerMap[a] || a) : '';
-        })(),
+        cleaner: cleanerNames(e.reservation_key),
         started_at: '',
         finished_at: '',
         duration_minutes: '',
@@ -2034,9 +2107,13 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
 
       if (assigned_cleaner_id) {
-        await sb.from("cleaning_assignments").upsert({
+        // Unique constraint = (reservation_key, cleaner_id) depuis la migration
+        // multi_cleaner_per_cleaning — un onConflict "reservation_key" seul fait
+        // échouer l'upsert (42P10) et perdait l'assignation en silence.
+        const { error: assignErr } = await sb.from("cleaning_assignments").upsert({
           reservation_key, cleaner_id: assigned_cleaner_id, assigned_at: new Date().toISOString(),
-        }, { onConflict: "reservation_key" });
+        }, { onConflict: "reservation_key,cleaner_id" });
+        if (assignErr) throw assignErr;
       }
       await addLog(sb, reservation_key, "extra_created", created_by, { listing_id, label, price_billed, assigned_cleaner_id });
       return jsonResp({ status: "success", extra: data });
@@ -2251,6 +2328,10 @@ Deno.serve(async (req: Request) => {
           console.warn(`[dispatch] decide failed ev=${ev.id}:`, e);
         }
 
+        // Marquer dispatché si : ignoré, déjà créé, insert OK, ou doublon (23505).
+        // Une VRAIE erreur d'insert laisse task_dispatched=false pour retenter au
+        // prochain run (avant : l'event était perdu définitivement).
+        let markDispatched = true;
         if (decision) {
           const sourceRef = `monit:${ev.id}`;
           // Upsert idempotent
@@ -2268,6 +2349,7 @@ Deno.serve(async (req: Request) => {
             if (insErr) {
               if (insErr.code !== "23505") {
                 results.errors++;
+                markDispatched = false;
                 console.warn(`[dispatch] insert failed ev=${ev.id}:`, insErr);
               }
             } else {
@@ -2280,10 +2362,11 @@ Deno.serve(async (req: Request) => {
           results.ignored++;
         }
 
-        // Toujours marquer comme dispatché (même si on a ignoré → ne pas reboucler)
-        await sb.from("monitoring_events")
-          .update({ task_dispatched: true, task_dispatched_at: new Date().toISOString() })
-          .eq("id", ev.id);
+        if (markDispatched) {
+          await sb.from("monitoring_events")
+            .update({ task_dispatched: true, task_dispatched_at: new Date().toISOString() })
+            .eq("id", ev.id);
+        }
       }
 
       return jsonResp({ status: "success", ...results });
@@ -2556,10 +2639,10 @@ Deno.serve(async (req: Request) => {
       // Server-only : all review_ids already classified (analyzed_at set), unbounded by
       // reviews_cache. The daily job uses this to skip re-classifying — getDisputes is
       // limited to the 30-day reviews_cache mirror and would force needless re-runs.
-      const { data, error } = await sb.from("review_disputes")
-        .select("review_id").not("analyzed_at", "is", null);
-      if (error) throw error;
-      return jsonResp({ status: "success", ids: (data || []).map((r: any) => r.review_id) });
+      const data = await fetchAllRows<any>((from, to) =>
+        sb.from("review_disputes").select("review_id").not("analyzed_at", "is", null)
+          .order("review_id").range(from, to));
+      return jsonResp({ status: "success", ids: data.map((r: any) => r.review_id) });
     }
     if (action === "getHermesActivity") {
       const days = Math.min(Number(url.searchParams.get("days") || 3), 7);
@@ -2737,8 +2820,16 @@ Deno.serve(async (req: Request) => {
     }
 
     return jsonResp({ error: "Unknown action" }, 400);
-  } catch (error) {
-    return jsonResp({ error: error.message }, 500);
+  } catch (error: unknown) {
+    // HttpError = message volontairement user-facing (ex. Hostaway down) → relayé tel quel.
+    if (error instanceof HttpError) {
+      return jsonResp({ error: error.message }, error.status);
+    }
+    // Tout le reste (erreurs Postgres, bugs…) : log complet côté serveur, réponse
+    // générique au client avec un id de corrélation pour retrouver le log.
+    const errorId = crypto.randomUUID().slice(0, 8);
+    console.error(`[hostaway-proxy] unhandled error id=${errorId}:`, error);
+    return jsonResp({ error: "Internal error", error_id: errorId }, 500);
   }
 });
 
