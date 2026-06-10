@@ -82,7 +82,7 @@ const ensureQRCode = () => loadScript(__CDN.qrcode);
 // patterns like multi-call sequences, conditional dispatch, backdrop close, or DOM form lookups.
 // Each `__wrap*` function is the canonical handler invoked by the event-delegation router.
 function __closeCmdkBackdrop(e){ if(e.target.classList.contains('cmdk-overlay'))closeCmdk(); }
-function __closeExtraModalBackdrop(e){ if(e.target.classList.contains('extra-modal-overlay'))closeExtraModal(); }
+function __closeExtraModalBackdrop(e){ if(e.target.classList.contains('modal-overlay'))closeExtraModal(); }
 function __closeMoreMenuBackdrop(e){ if(e.target.classList.contains('more-menu-overlay'))closeMoreMenu(); }
 function __resolveOrQuick(id, e){ if(e.shiftKey)resolveTicket(id); else quickResolveTicket(id); }
 function __closeMtModalThenCreatePreventive(lid, cat, ln){ closeMtModal(); createPreventiveFromInsight(lid, cat, ln); }
@@ -123,6 +123,11 @@ function __resetSearchFilters(){ search=''; filterCleaner=0; setSelectedDate('al
 function __closeSearchAndRender(){ search=''; searchOpen=false; render(); }
 function __setDateAndShowPlanner(dateStr){ selectedDate=dateStr; setTab('planner'); }
 function __sendDailyWhatsAppFromJson(cleanerJson){ try{ sendDailyWhatsApp(JSON.parse(cleanerJson)); } catch(e){ console.error('sendDailyWhatsApp parse', e); } }
+function __updateCleanerRole(id, role){
+  const c=(cleaners||[]).find(x=>String(x.id)===String(id));
+  if(!c){ toast('Cleaner not found','error'); return; }
+  saveCleaner(c.id, c.name, c.phone||'', c.color, c.pin||'', role);
+}
 
 // === Context menu item registry ===
 // Each ctxmenu item registers a real JS closure here at render time; the
@@ -1130,12 +1135,15 @@ function getWeekRange(){
 }
 
 let savingDone=false;
+let __fetchAllReqId=0;
 async function fetchAll(){
   if(savingDone)return;
+  const myReq=++__fetchAllReqId;
   loading=true;error=null;render();
   try{
     const{startDate,endDate}=getWeekRange();
     const[coRes,allRes]=await Promise.all([api('checkouts',{params:{startDate,endDate}}),api('getAllData')]);
+    if(myReq!==__fetchAllReqId)return; // a newer fetchAll superseded this one
     if(savingDone){loading=false;return;}
     if(coRes.status!=='success') throw new Error(coRes.error||'Unknown error');
     const valid=['new','modified','confirmed','ownerStay','reserved'];
@@ -1190,7 +1198,7 @@ async function fetchAll(){
     if(dates.includes(today)&&selectedDate==='all')selectedDate=today;
     loading=false;render();
     startLiveTimerUpdates();
-  }catch(e){loading=false;error=e.message;render();}
+  }catch(e){if(myReq!==__fetchAllReqId)return;loading=false;error=e.message;render();}
 }
 
 function formatDate(d){const dt=new Date(d+'T00:00:00');return DAYS[dt.getDay()]+' '+dt.getDate()+' '+MONTHS[dt.getMonth()];}
@@ -1377,7 +1385,7 @@ function formatPropLabel(listingId, listingName){
   if(!apt || !name) return name;
   // If the name already starts with the apt_number (or contains it as a leading prefix
   // followed by a separator), don't double up.
-  const re = new RegExp('^' + apt.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&') + '\\b', 'i');
+  const re = new RegExp('^' + apt.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '\\b', 'i');
   if(re.test(name)) return name;
   return apt + ' · ' + name;
 }
@@ -1399,14 +1407,26 @@ function handleCardClick(key,e){
   render();
 }
 let undoTimer=null,undoKey=null;
+async function flushPendingDone(){
+  // Persist the currently-pending undo key immediately (used when a new markDone
+  // arrives within the 5s window — without this, the previous key never saves).
+  if(!undoTimer||!undoKey)return;
+  clearTimeout(undoTimer);undoTimer=null;
+  const pk=undoKey;undoKey=null;hideUndoToast();
+  if(!done[pk])return; // already undone
+  savingDone=true;
+  try{await api('setDone',{body:{key:pk,done:true,actor:cleanerMode?cleanerMode.name:'Manager'}});}
+  catch(err){delete done[pk];toast('Error, reverted','error');render();}
+  savingDone=false;
+}
 async function markDone(key){
   if(savingDone)return;
   const nw=!done[key];
   // If marking done → show undo toast with 5s window
   if(nw){
     done[key]=true;render();
-    // Clear previous undo timer
-    if(undoTimer){clearTimeout(undoTimer);undoTimer=null;}
+    // Flush previous pending save BEFORE clearing its timer (no data loss on bulk)
+    if(undoTimer) await flushPendingDone();
     undoKey=key;
     showUndoToast(key);
     undoTimer=setTimeout(async()=>{
@@ -1527,6 +1547,11 @@ function showUncancelConfirm(key){
 }
 
 function closeCancelModal(){document.getElementById('cancelModal').innerHTML='';}
+
+async function toggleCancel(key){
+  if(cancelled[key]) showUncancelConfirm(key);
+  else showCancelConfirm(key);
+}
 
 async function confirmCancel(key){
   const reason=document.getElementById('cancelReason')?document.getElementById('cancelReason').value:'';
@@ -1665,7 +1690,7 @@ async function autoAssign(){
 // #11 Timer with double confirmation
 function confirmAction(title,msg,onConfirm){
   const ov=document.createElement('div');ov.className='confirm-overlay';
-  ov.innerHTML='<div class="confirm-box"><h3>'+title+'</h3><p>'+msg+'</p><div class="btn-row"><button class="btn-cancel" id="cfmNo">Cancel</button><button class="btn-confirm" id="cfmYes">Confirm</button></div></div>';
+  ov.innerHTML='<div class="confirm-box"><h3>'+esc(title)+'</h3><p>'+esc(msg)+'</p><div class="btn-row"><button class="btn-cancel" id="cfmNo">Cancel</button><button class="btn-confirm" id="cfmYes">Confirm</button></div></div>';
   document.body.appendChild(ov);
   ov.querySelector('#cfmNo').onclick=()=>ov.remove();
   ov.querySelector('#cfmYes').onclick=()=>{ov.remove();onConfirm();};
@@ -1733,7 +1758,7 @@ function showDoneAfterStop(key,label,mins){
   ov.innerHTML='<div class="confirm-box" style="padding:28px">'+
     '<div style="font-size:36px;margin-bottom:8px">✅</div>'+
     '<h3 style="font-size:18px;margin-bottom:4px">'+mins+' min</h3>'+
-    '<p style="margin-bottom:6px;font-size:13px;color:var(--text2)">'+label+'</p>'+
+    '<p style="margin-bottom:6px;font-size:13px;color:var(--text2)">'+esc(label)+'</p>'+
     '<p style="margin-bottom:20px;font-size:14px;font-weight:600">Mark as done?</p>'+
     '<div class="btn-row" style="gap:10px">'+
     '<button class="btn-cancel" id="doneNo" style="padding:12px;font-size:14px">Not yet</button>'+
@@ -2356,9 +2381,13 @@ async function quickResolveTicket(id){
 // (kept in DB for audit; hidden from Open by default).
 async function cancelTicket(id, reasonHint){
   haptic('medium');
-  const reason = reasonHint!==undefined ? reasonHint
-    : (prompt('Cancel reason (optional):', 'duplicate / not a real issue') || '');
-  if(reason === null) return; // user dismissed
+  let reason;
+  if(reasonHint!==undefined){ reason=reasonHint; }
+  else {
+    const raw=prompt('Cancel reason (optional):', 'duplicate / not a real issue');
+    if(raw===null) return; // user dismissed
+    reason=raw||'';
+  }
   const actor=cleanerMode?cleanerMode.name:'Manager';
   await api('updateTicket',{body:{id,status:'cancelled',resolution_notes:reason||null,actor}});
   toastAction('Cancelled','warning','Undo', async ()=>{
@@ -2501,17 +2530,21 @@ async function submitReopen(id){
 }
 
 async function refreshMaintenance(){
-  const[tRes,vRes,eRes,pRes,rRes,riRes]=await Promise.all([
-    api('getMaintenanceTickets',{params:{status:'open'}}),
-    api('getVendors'),
-    api('getEquipment'),
-    api('getPreventiveMaintenance'),
-    api('getMaintenanceTickets',{params:{status:'resolved'}}),
-    api('getRecurringIssues')
-  ]);
-  maintenanceTickets=tRes.tickets||[];vendors=vRes.vendors||[];equipment=eRes.equipment||[];preventiveMaint=pRes.schedules||[];
-  resolvedTickets=rRes.tickets||[];recurringIssues=riRes.recurring||[];
-  await loadAllTicketComments();
+  try{
+    const[tRes,vRes,eRes,pRes,rRes,riRes]=await Promise.all([
+      api('getMaintenanceTickets',{params:{status:'open'}}),
+      api('getVendors'),
+      api('getEquipment'),
+      api('getPreventiveMaintenance'),
+      api('getMaintenanceTickets',{params:{status:'resolved'}}),
+      api('getRecurringIssues')
+    ]);
+    maintenanceTickets=tRes.tickets||[];vendors=vRes.vendors||[];equipment=eRes.equipment||[];preventiveMaint=pRes.schedules||[];
+    resolvedTickets=rRes.tickets||[];recurringIssues=riRes.recurring||[];
+    await loadAllTicketComments();
+  }catch(err){
+    toast('Refresh failed','error');
+  }
   render();
 }
 
@@ -2586,11 +2619,13 @@ async function createPreventiveFromInsight(listingId,category,listingName){
 }
 
 function showRelatedTickets(listingId,category){
+  mtFilterProp=String(listingId||'');
   mtFilterCat=category;
   mtFilterStatus='all_open';
   toast('Filtered to '+category+' tickets at this property','info');
   render();
 }
+function clearMtFilterProp(){ mtFilterProp=''; render(); }
 function mtPhotoUpload(){
   const inp=document.createElement('input');inp.type='file';inp.accept='image/*';
   inp.onchange=function(){const f=this.files[0];if(!f)return;
@@ -3132,7 +3167,7 @@ function renderPlanner(){
       // Row 2: Type + Cleaner name (or guest name)
       h+='<div class="card-row-2">';
       h+='<span class="guest-name">'+esc(r.guest)+'</span>';
-      h+='<span class="tag-pill type" style="margin-left:6px">'+getUnitType(r.listingId)+'</span>';
+      h+='<span class="tag-pill type" style="margin-left:6px">'+esc(getUnitType(r.listingId))+'</span>';
       if(estTime) h+='<span class="est-time" style="margin-left:6px;font-size:11px;color:var(--text3)">~'+estTime+'min</span>';
       // Multi-assign display: 1 cleaner → name; 2+ → joined names with " + " separator,
       // colored as the first cleaner's color (the "primary" visually)
@@ -4213,9 +4248,9 @@ function renderSettings(){
     h+='<div class="cleaner-row"><div class="c-dot" style="background:'+c.color+'"></div>'+
       '<div class="c-name">'+esc(c.name)+'</div>'+
       '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(ROLE_COLOR[role]||'#999')+'22;color:'+(ROLE_COLOR[role]||'#999')+';font-weight:600">'+(ROLE_BADGE[role]||role)+'</span>'+
-      '<div class="c-phone">'+(c.phone||'')+'</div>'+
+      '<div class="c-phone">'+esc(c.phone||'')+'</div>'+
       '<div class="c-pin">'+(c.pin?'PIN: '+c.pin:'No PIN')+'</div>'+
-      '<select onchange="saveCleaner('+c.id+',\''+esc(c.name)+'\',\''+esc(c.phone||'')+'\',\''+c.color+'\',\''+esc(c.pin||'')+'\',this.value)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
+      '<select onchange="__updateCleanerRole('+c.id+',this.value)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
     ['manager','cleaner','maintenance'].forEach(r=>{h+='<option value="'+r+'"'+(role===r?' selected':'')+'>'+r+'</option>';});
     h+='</select>'+
       '<button data-action="__sendDailyWhatsAppFromJson" data-arg0="'+JSON.stringify(c).replace(/"/g,'&quot;')+'" title="Send WhatsApp">📱</button>'+
@@ -4272,8 +4307,13 @@ function renderSettings(){
 // ============ HISTORY (#9) ============
 let historyLogs=null;
 async function loadHistory(){
-  const res=await api('getLogs',{params:{limit:'100'}});
-  historyLogs=res.logs||[];render();
+  try{
+    const res=await api('getLogs',{params:{limit:'100'}});
+    historyLogs=res.logs||[];
+  }catch(err){
+    historyLogs=[];toast('History failed to load','error');
+  }
+  render();
 }
 function renderHistory(){
   let h='<div class="header"><div class="header-top"><h1>📜 History</h1><div class="header-actions"></div></div></div>';
@@ -4301,8 +4341,13 @@ function renderHistory(){
 // ============ INVENTORY (#13) ============
 let inventoryItems=null,inventoryAlerts=null;
 async function loadInventory(){
-  const[itemsRes,alertsRes]=await Promise.all([api('getInventory'),api('getAlerts')]);
-  inventoryItems=itemsRes.items||[];inventoryAlerts=alertsRes.alerts||[];render();
+  try{
+    const[itemsRes,alertsRes]=await Promise.all([api('getInventory'),api('getAlerts')]);
+    inventoryItems=itemsRes.items||[];inventoryAlerts=alertsRes.alerts||[];
+  }catch(err){
+    inventoryItems=[];inventoryAlerts=[];toast('Inventory failed to load','error');
+  }
+  render();
 }
 async function saveInventoryItem(id,name,qty,minQty,unit,listingId){
   await api('saveInventoryItem',{body:{id:id||undefined,listing_id:listingId||null,item_name:name,current_qty:Number(qty),min_qty:Number(minQty),unit}});
@@ -4351,7 +4396,7 @@ function renderInventory(){
       h+='<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">'+
         '<strong>'+(a.inventory_items?esc(a.inventory_items.item_name):'Item #'+a.inventory_item_id)+'</strong>'+
         (a.note?' — '+esc(a.note):'')+
-        '<div style="font-size:10px;color:var(--text3)">Reported by '+(a.reported_by||'Unknown')+' · '+new Date(a.created_at).toLocaleDateString()+'</div></div>';
+        '<div style="font-size:10px;color:var(--text3)">Reported by '+esc(a.reported_by||'Unknown')+' · '+new Date(a.created_at).toLocaleDateString()+'</div></div>';
     });
     h+='</div>';
   }
@@ -4652,7 +4697,7 @@ function renderCleanerRatings(){
 }
 
 // ===== Reviews / Airbnb disputes tab =====
-let reviewsData=null, reviewsLoading=false, reviewsFilter='all';
+let reviewsData=null, reviewsLoading=false, reviewsFilter='all', reviewsError=false;
 const DISPUTE_LABELS={todo:'To file',submitted:'Submitted',removed:'Removed',rejected:'Rejected',not_disputable:'Not disputable'};
 const GROUND_PROC={ // procedure hint per ground (the playbook template to use)
   'off-topic':'Template 1 — off-topic / not about the stay',
@@ -4663,28 +4708,40 @@ const GROUND_PROC={ // procedure hint per ground (the playbook template to use)
 };
 
 async function loadDisputes(){
-  reviewsLoading=true;
-  const res=await api('getDisputes');
-  reviewsData=(res&&res.reviews)?res.reviews:[];
-  reviewsLoading=false;
-  render();
+  reviewsLoading=true;reviewsError=false;
+  try{
+    const res=await api('getDisputes');
+    reviewsData=(res&&res.reviews)?res.reviews:[];
+  }catch(err){
+    reviewsError=true;
+    reviewsData=reviewsData||[];
+    toast('Reviews failed to load','error');
+  }finally{
+    reviewsLoading=false;
+    render();
+  }
 }
+function retryLoadDisputes(){ reviewsError=false; reviewsData=null; loadDisputes(); }
 
 function setReviewFilter(f){ reviewsFilter=f; render(); }
 
 async function setDisputeStatus(reviewId,status){
-  await api('updateDisputeStatus',{body:{review_id:reviewId,dispute_status:status,updated_by:'walter'}});
-  const row=(reviewsData||[]).find(r=>String(r.id)===String(reviewId));
-  if(row){ row.dispute=row.dispute||{}; row.dispute.dispute_status=status; }
-  toast('Status updated','success'); render();
+  try{
+    await api('updateDisputeStatus',{body:{review_id:reviewId,dispute_status:status,updated_by:'walter'}});
+    const row=(reviewsData||[]).find(r=>String(r.id)===String(reviewId));
+    if(row){ row.dispute=row.dispute||{}; row.dispute.dispute_status=status; }
+    toast('Status updated','success'); render();
+  }catch(err){ toast('Update failed','error'); }
 }
 
 async function toggleReplyPosted(reviewId){
   const row=(reviewsData||[]).find(r=>String(r.id)===String(reviewId));
   const next=!(row&&row.dispute&&row.dispute.reply_posted);
-  await api('updateDisputeStatus',{body:{review_id:reviewId,reply_posted:next,updated_by:'walter'}});
-  if(row){ row.dispute=row.dispute||{}; row.dispute.reply_posted=next; }
-  toast(next?'Reply marked posted':'Reply unmarked','success'); render();
+  try{
+    await api('updateDisputeStatus',{body:{review_id:reviewId,reply_posted:next,updated_by:'walter'}});
+    if(row){ row.dispute=row.dispute||{}; row.dispute.reply_posted=next; }
+    toast(next?'Reply marked posted':'Reply unmarked','success'); render();
+  }catch(err){ toast('Update failed','error'); }
 }
 
 function copyDisputeText(text){
@@ -4696,6 +4753,10 @@ function renderReviews(){
   const rows=reviewsData||[];
   if(reviewsLoading && !rows.length){
     document.getElementById('app').innerHTML='<div class="rv-wrap"><div class="rv-empty">Loading reviews…</div></div>'+renderBottomNav();
+    return;
+  }
+  if(reviewsError && !rows.length){
+    document.getElementById('app').innerHTML='<div class="rv-wrap"><div class="rv-empty">Failed to load reviews. <button class="btn-secondary" data-action="retryLoadDisputes" style="margin-left:8px">Retry</button></div></div>'+renderBottomNav();
     return;
   }
   const analyzed=rows.filter(r=>r.dispute);
@@ -4724,14 +4785,14 @@ function renderReviews(){
 
   let list=rows.slice();
   if(reviewsFilter!=='all'){
-    list=list.filter(r=>r.dispute && r.dispute.dispute_status===reviewsFilter);
+    list=list.filter(r=>{const s=r.dispute?r.dispute.dispute_status:'todo';return s===reviewsFilter;});
   } else {
     list=list.filter(r=>!(r.dispute && r.dispute.dispute_status==='removed'));
   }
   if(!list.length){ h+='<div class="rv-empty">No reviews in this filter.</div>'; }
   else {
     const byDay={};
-    for(const r of list){ const day=(r.submitted_at||'').slice(0,10)||'—'; (byDay[day]=byDay[day]||[]).push(r); }
+    for(const r of list){ const day=r.submitted_at?localYMD(new Date(r.submitted_at)):'—'; (byDay[day]=byDay[day]||[]).push(r); }
     for(const day of Object.keys(byDay).sort((a,b)=>b.localeCompare(a))){
       byDay[day].sort((a,b)=>(a.rating||0)-(b.rating||0));
       h+='<div class="rv-day">'+esc(day)+'</div>';
@@ -4747,7 +4808,7 @@ function renderDisputeCard(r){
   const name=esc((r.listing_name||'').replace('[ARCHIVED 2026-06-01] ','').replace(' V2 - ok','').replace(' (new)',''));
   const status=d?d.dispute_status:'todo';
   const chip='<span class="rv-chip rv-'+status+'">'+esc(DISPUTE_LABELS[status]||status)+'</span>';
-  const ratingCls=(r.rating<=2)?'bad':(r.rating<=4?'mid':'warn');
+  const ratingCls=(r.rating!=null && r.rating<=2)?'bad':(r.rating<=4?'mid':'warn');
   let h='<div class="rv-card">';
   h+='<div class="rv-head"><span class="rv-rating '+ratingCls+'">'+(r.rating!=null?r.rating:'?')+'</span>'
      +'<div class="rv-meta"><div class="rv-listing">'+name+'</div>'
@@ -4982,11 +5043,11 @@ function renderHermes(){
   const byDay={};
   for(let i=days-1;i>=0;i--){
     const d=new Date(now-i*86400000);
-    const k=d.toISOString().slice(0,10);
+    const k=localYMD(d);
     byDay[k]={cost:0,count:0};
   }
   acts.forEach(a=>{
-    const k=(a.ts||'').slice(0,10);
+    const k=a.ts?localYMD(new Date(a.ts)):'';
     if(byDay[k]){byDay[k].cost+=Number(a.cost_usd_est||0);byDay[k].count+=1;}
   });
   const dayKeys=Object.keys(byDay).sort();
@@ -5121,7 +5182,7 @@ function renderMaintenance(){
   // Big quiet header: just "Maintenance" + ticket count + bell (= more menu).
   // Lang selector / logout move into the bell dropdown to stay out of the way.
   const _openCount=(maintenanceTickets||[]).filter(x=>x.status!=='resolved'&&x.status!=='cancelled').length;
-  h='<div class="header mt-page-header"><div class="header-top">';
+  let h='<div class="header mt-page-header"><div class="header-top">';
   h+='<h1>Maintenance</h1>';
   h+='<div class="header-actions">';
   if(isManager) h+='<button class="icon-btn" data-action="showMtMoreMenu" data-pass-event="1" data-stop-propagation="1" title="More actions" aria-label="More">'+icon('bell',18)+'</button>';
@@ -5203,7 +5264,7 @@ function clearMtSelection(){
   render();
 }
 
-async function bulkAssignSelected(){
+async function bulkAssignTicketsSelected(){
   if(mtSelected.size === 0) return;
   const techs = (cleaners||[]).filter(c => c.is_active && (c.role==='maintenance' || c.role==='cleaner'));
   const vendors_ = (vendors||[]).filter(v => v.is_active);
@@ -5449,7 +5510,6 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
 function renderMtTickets(isManager){
   let h='';
   const allProps=getAllProperties();
-  if(mtViewMode!=='list')mtViewMode='list';
 
   // === Counts (used by the chips below) ===
   const allOpen=maintenanceTickets.filter(t=>t.status!=='resolved'&&t.status!=='cancelled');
@@ -5480,6 +5540,15 @@ function renderMtTickets(isManager){
     h+='<button class="mt-qf review'+(mtFilterStatus==='to_confirm'?' active':'')+'" data-action="setMtStatFilter" data-arg0="to_confirm" title="Gemini-flagged tickets that need a human eye">Review<span class="mt-qf-count">'+toConfirmCount+'</span></button>';
   }
   h+='</div>';
+
+  // === Active property filter chip (from showRelatedTickets) ===
+  if(mtFilterProp){
+    const _pname=(Object.values(listingPrices||{}).find(l=>String(l.listing_id||'')===mtFilterProp)||{}).listing_name
+      || (listingPrices&&listingPrices[mtFilterProp]&&listingPrices[mtFilterProp].listing_name)
+      || mtFilterProp;
+    h+='<div class="mt-filters"><div class="mt-filter-chip active">🏠 '+esc(_pname)+'</div>';
+    h+='<button class="mt-filter-clear" data-action="clearMtFilterProp" title="Clear property filter">'+icon('x',12)+'</button></div>';
+  }
 
   // === Category filter — collapsed pill until used ===
   if(typeof window.mtCatFiltersOpen === 'undefined') window.mtCatFiltersOpen = false;
@@ -5565,86 +5634,42 @@ function renderMtTickets(isManager){
   else if(mtFilterStatus==='in_progress'||mtFilterStatus==='waiting_parts'){toShow=toShow.filter(t=>t.status===mtFilterStatus);}
   // 'resolved' and 'all_history' use the source-set selection above; no further status filtering.
   if(mtFilterCat){toShow=toShow.filter(t=>t.category===mtFilterCat);}
+  if(mtFilterProp){toShow=toShow.filter(t=>String(t.listing_id||'')===mtFilterProp);}
   // Sort: when viewing resolved/history, newest-resolved first; otherwise newest-created first.
   if(mtFilterStatus==='resolved'||mtFilterStatus==='all_history'){
     toShow.sort((a,b)=>new Date(b.resolved_at||b.created_at)-new Date(a.resolved_at||a.created_at));
   }
   if(mtSearch.trim()){const q=mtSearch.toLowerCase();toShow=toShow.filter(t=>(t.title||'').toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q));}
 
-  if(mtViewMode==='board'){
-    // === Kanban board ===
-    const cols=[['open','Open','#3b82f6'],['assigned','Assigned','#8b5cf6'],['in_progress','In Progress','#f97316'],['waiting_parts','Waiting Parts','#ca8a04']];
-    h+='<div class="mt-kanban">';
-    cols.forEach(([status,label,color])=>{
-      const colTickets=toShow.filter(t=>t.status===status);
-      h+='<div class="mt-kb-col">';
-      h+='<div class="mt-kb-header"><span style="color:'+color+'">'+label+'</span><span class="mt-kb-count">'+colTickets.length+'</span></div>';
-      if(colTickets.length===0){h+='<div style="font-size:11px;color:var(--text3);text-align:center;padding:20px 0">No tickets</div>';}
-      colTickets.forEach(t=>{
-        const sla=getSLAStatus(t);
-        const propName = formatPropLabel(t.listing_id, t.listing_name) || formatPropLabel(t.listing_id, (allProps.find(p=>String(p.id)===String(t.listing_id))||{}).name) || (t.listing_id ? '#'+t.listing_id : null);
-        h+='<div class="mt-kb-card '+t.priority+'" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
-        h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><strong style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.title)+'</strong><span class="mt-pri-badge '+t.priority+'">'+t.priority+'</span></div>';
-        h+='<div style="font-size:10px;color:var(--text2);margin-bottom:4px">🏠 '+(propName?esc(propName):'<em style="color:var(--text3)">No property</em>')+'</div>';
-        if(t.sla_deadline)h+='<div style="margin-bottom:4px"><span class="mt-sla '+sla.cls+'" style="font-size:9px">'+sla.label+'</span></div>';
-        const tech=t.assigned_technician_id?cleaners.find(c=>c.id===t.assigned_technician_id):null;
-        if(tech)h+='<div style="font-size:10px;color:var(--text3)">👤 '+esc(tech.name)+'</div>';
-        // Expanded inline
-        if(mtExpandedTicket===t.id){
-          h+='<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px" data-action="__noop" data-stop-propagation="1">';
-          h+='<div class="mt-timeline" style="margin:4px 0 4px 6px;padding:6px 0 2px 14px">';
-          h+='<div class="mt-tl-item"><div class="mt-tl-dot" style="background:var(--blue)"></div>Created<div class="mt-tl-date">'+new Date(t.created_at).toLocaleString()+'</div></div>';
-          if(t.started_at)h+='<div class="mt-tl-item"><div class="mt-tl-dot" style="background:var(--orange)"></div>Started<div class="mt-tl-date">'+new Date(t.started_at).toLocaleString()+'</div></div>';
-          h+='</div>';
-          h+='<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">';
-          if(isManager){
-            const kbAssignLabel = (t.assigned_technician_id || t.assigned_vendor_id) ? 'Reassign…' : 'Assign…';
-            h+='<button class="btn-secondary" style="font-size:10px;padding:4px 8px" data-action="openAssignPicker" data-arg0="'+t.id+'" data-stop-propagation="1">'+icon('user',10)+' '+kbAssignLabel+'</button>';
-            if(['open','assigned'].includes(t.status))h+='<button data-action="updateTicketStatus" data-arg0="'+t.id+'" data-arg1="in_progress" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
-            if(['in_progress','waiting_parts'].includes(t.status))h+='<button data-action="resolveTicket" data-arg0="'+t.id+'" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
-          }else{
-            if(t.status==='assigned')h+='<button data-action="updateTicketStatus" data-arg0="'+t.id+'" data-arg1="in_progress" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Start</button>';
-            if(t.status==='in_progress'||t.status==='waiting_parts')h+='<button data-action="resolveTicket" data-arg0="'+t.id+'" style="background:var(--green);color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">Resolve</button>';
-          }
-          h+='<button data-action="viewTicketComments" data-arg0="'+t.id+'" style="background:var(--bg);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">💬</button>';
-          h+='</div></div>';
-        }
-        h+='</div>';
-      });
-      h+='</div>';
+  // === List view ===
+  // S3/S4: Desktop view toggle (Cards / Table / Kanban)
+  h+=renderMtViewToggle();
+  if(mtViewModeUI==='kanban' && isDesktop()){
+    h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
+    h+=renderMtKanban(toShow);
+    h+='</div>';
+  } else if(mtViewModeUI==='table' && isDesktop()){
+    h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
+    h+=renderMtTable(toShow);
+    h+='</div>';
+  } else {
+    // Cards mode (default + only on mobile) — no panel wrapper, no "Tickets (N)" heading.
+    // The chip already shows the count, the cards stand on their own.
+    h+='<div class="mt-card-list">';
+    if(toShow.length===0){
+      const hasFilter = mtFilterStatus||mtFilterCat||mtFilterProp||mtSearch.trim();
+      if(hasFilter){ h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No tickets</div><div class="empty-hero-sub">No ticket matches this filter.</div></div>'; }
+      else { h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('wrench',56)+'</div><div class="empty-hero-title">All clear — no open tickets</div><div class="empty-hero-sub">All properties are in good shape.</div></div>'; }
+    }
+    toShow.forEach(t=>{
+      h+=renderMtTicketCard(t,allProps,isManager,mtExpandedTicket===t.id);
     });
     h+='</div>';
-  }else{
-    // === List view ===
-    // S3/S4: Desktop view toggle (Cards / Table / Kanban)
-    h+=renderMtViewToggle();
-    if(mtViewModeUI==='kanban' && isDesktop()){
-      h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
-      h+=renderMtKanban(toShow);
-      h+='</div>';
-    } else if(mtViewModeUI==='table' && isDesktop()){
-      h+='<div class="settings-panel"><h3>Tickets <span style="font-weight:400;color:var(--text3);font-size:13px">('+toShow.length+')</span></h3>';
-      h+=renderMtTable(toShow);
-      h+='</div>';
-    } else {
-      // Cards mode (default + only on mobile) — no panel wrapper, no "Tickets (N)" heading.
-      // The chip already shows the count, the cards stand on their own.
-      h+='<div class="mt-card-list">';
-      if(toShow.length===0){
-        const hasFilter = mtFilterStatus||mtFilterCat||mtSearch.trim();
-        if(hasFilter){ h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('search',56)+'</div><div class="empty-hero-title">No tickets</div><div class="empty-hero-sub">No ticket matches this filter.</div></div>'; }
-        else { h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('wrench',56)+'</div><div class="empty-hero-title">All clear — no open tickets</div><div class="empty-hero-sub">All properties are in good shape.</div></div>'; }
-      }
-      toShow.forEach(t=>{
-        h+=renderMtTicketCard(t,allProps,isManager,mtExpandedTicket===t.id);
-      });
-      h+='</div>';
-    }
   }
   if(mtSelectMode && mtSelected.size > 0){
     h += '<div class="mt-bulk-bar">';
     h += '<div class="mt-bulk-count">'+mtSelected.size+' selected</div>';
-    h += '<button class="btn-secondary" data-action="bulkAssignSelected" style="font-size:13px;padding:7px 14px">'+icon('user',14)+' Assign…</button>';
+    h += '<button class="btn-secondary" data-action="bulkAssignTicketsSelected" style="font-size:13px;padding:7px 14px">'+icon('user',14)+' Assign…</button>';
     // 1-click bulk Resolve / Cancel — shortcuts to bulkApplyStatus (was buried in "Status…" picker)
     h += '<button class="btn-secondary" data-action="bulkResolveSelected" style="font-size:13px;padding:7px 14px;color:var(--green);border-color:var(--green-light)">'+icon('check',14)+' Resolve all</button>';
     h += '<button class="btn-secondary" data-action="bulkCancelSelected" style="font-size:13px;padding:7px 14px;color:var(--text-3)">'+icon('x',14)+' Cancel all</button>';
@@ -5723,7 +5748,7 @@ function renderMtEquipment(){
     items.forEach(e=>{
       h+='<div class="equip-card">';
       h+='<div style="display:flex;justify-content:space-between;align-items:start">';
-      h+='<div><strong>'+esc(e.name)+'</strong><br/><span style="font-size:11px;color:var(--text2)">'+e.brand+' '+e.model+' ('+e.serial_number+')</span></div>';
+      h+='<div><strong>'+esc(e.name)+'</strong><br/><span style="font-size:11px;color:var(--text2)">'+esc(e.brand||'')+' '+esc(e.model||'')+' ('+esc(e.serial_number||'')+')</span></div>';
       h+='<span class="equip-condition '+e.condition+'">'+e.condition.toUpperCase()+'</span>';
       h+='</div>';
       h+='<div style="font-size:11px;color:var(--text3);margin-top:6px">Service interval: '+e.service_interval_days+' days</div>';
@@ -6026,9 +6051,13 @@ async function exportExcel(){
   try { await ensureXlsx(); } catch(e){ toast('Excel library failed to load','error'); return; }
   const mRes=dashData.reservations,mDone=dashData.done,mAssign=dashData.assignments;
   const rows=mRes.map(r=>{
-    const cl=mAssign[keyFor(r)]?getCleanerById(mAssign[keyFor(r)]):null;
+    const _k=keyFor(r);
+    const _v=mAssign[_k];
+    const _ids=Array.isArray(_v)?_v:(_v?[_v]:[]);
+    const _cls=_ids.map(id=>getCleanerById(id)).filter(Boolean);
+    const cleanerName=_cls.length?_cls.map(x=>x.name).join(', '):'Unassigned';
     return{Date:r.co,Guest:r.guest,Listing:r.listing,Type:getUnitType(r.listingId),
-      'Cleaning Fee':getRevenueFee(r),Status:mDone[keyFor(r)]?'Done':'Pending',Cleaner:cl?cl.name:'Unassigned'};
+      'Cleaning Fee':getRevenueFee(r),Status:mDone[_k]?'Done':'Pending',Cleaner:cleanerName};
   });
   const ws=XLSX.utils.json_to_sheet(rows);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Cleanings');
