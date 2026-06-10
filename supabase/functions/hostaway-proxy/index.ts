@@ -1453,7 +1453,7 @@ Deno.serve(async (req: Request) => {
     if (action === "getMaintenanceCosts") {
       const listingId = url.searchParams.get("listingId");
       const month = url.searchParams.get("month"); // YYYY-MM
-      if (month && !/^\d{4}-\d{2}$/.test(month)) return jsonResp({ error: "month must be YYYY-MM" }, 400);
+      if (month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return jsonResp({ error: "month must be YYYY-MM" }, 400);
       let query = sb.from("maintenance_costs").select("*").order("date", { ascending: false }).limit(200);
       if (listingId) query = query.eq("listing_id", listingId);
       // Borne haute exclusive sur le 1er du mois suivant ("-31" est une date invalide
