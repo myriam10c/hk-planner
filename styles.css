@@ -903,6 +903,7 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 .next-guest.same-day { background:var(--red-light); color:var(--red); }
 .next-guest.next-day { background:var(--orange-light); color:var(--orange); }
 .next-guest.later { background:var(--bg2); color:var(--text2); }
+.next-guest.none { background:var(--bg2); color:var(--text3); font-weight:500; }
 
 /* CTA buttons */
 .card-cta { padding:8px 16px; border-radius:var(--radius-sm); font-size:var(--fs-sm); font-weight:700; cursor:pointer; border:none; white-space:nowrap; transition:var(--transition); }

@@ -3213,6 +3213,8 @@ function renderPlanner(){
         const ngT=formatTime(r.nextGuest.checkInTime);
         const ngDate=(r.nextGuest.sameDay||ngNextDay)?'':' '+formatDate(r.nextGuest.date);
         h+='<div class="card-row-3"><span class="next-guest '+nc+'" style="margin:0;padding:2px 8px;font-size:10px">'+nl+' '+esc(r.nextGuest.guest)+ngDate+(ngT?' '+ngT:'')+'</span></div>';
+      }else if(!r._isExtra){
+        h+='<div class="card-row-3"><span class="next-guest none" style="margin:0;padding:2px 8px;font-size:10px">🔓 No check-in yet</span></div>';
       }
 
       // Timer display (if running, paused or finished)
@@ -3353,6 +3355,7 @@ function renderCleaningDetailPane(r){
   if(r.numberOfGuests) h += '<div>'+icon('user',12)+' '+r.numberOfGuests+' guest'+(r.numberOfGuests>1?'s':'')+'</div>';
   h += '<div>'+icon('clock',12)+' Checkout '+esc(r.co||'')+(formatTime(r.checkOutTime)?' &middot; '+formatTime(r.checkOutTime):'')+'</div>';
   if(r.nextGuest) h += '<div>🛬 Next guest '+esc(r.nextGuest.guest)+' &middot; '+esc(r.nextGuest.date)+(formatTime(r.nextGuest.checkInTime)?' '+formatTime(r.nextGuest.checkInTime):'')+'</div>';
+  else if(!isExtra) h += '<div>🔓 No upcoming check-in</div>';
   if(r.cleaningFee) h += '<div>'+icon('dollar',12)+' '+r.cleaningFee+' AED</div>';
   h += '</div>';
 
