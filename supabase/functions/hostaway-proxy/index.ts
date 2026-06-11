@@ -579,7 +579,12 @@ Deno.serve(async (req: Request) => {
       const token = await getAccessToken();
       const validStatuses = ['new','modified','confirmed','ownerStay','reserved'];
       const departuresUrl = API_BASE + "/reservations?departureStartDate=" + startDate + "&departureEndDate=" + endDate + "&sortOrder=departureDate&orderDirection=asc";
-      const arrivalsUrl = API_BASE + "/reservations?arrivalStartDate=" + startDate + "&arrivalEndDate=" + endDate + "&sortOrder=arrivalDate&orderDirection=asc";
+      // Arrivals window extends 14 days past endDate so each departure can be
+      // matched to the NEXT arrival even when it falls outside the queried week.
+      const arrEndD = new Date(endDate + "T00:00:00Z");
+      arrEndD.setUTCDate(arrEndD.getUTCDate() + 14);
+      const arrivalsEnd = arrEndD.toISOString().split("T")[0];
+      const arrivalsUrl = API_BASE + "/reservations?arrivalStartDate=" + startDate + "&arrivalEndDate=" + arrivalsEnd + "&sortOrder=arrivalDate&orderDirection=asc";
       const authHeaders = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
       const [depResults, arrResults] = await Promise.all([
         fetchAllPages(departuresUrl, authHeaders),
@@ -596,13 +601,12 @@ Deno.serve(async (req: Request) => {
       const reservations = depResults.filter((r: any) => validStatuses.includes(r.status)).map((r: any) => {
         const listingId = String(r.listingMapId || r.listingId || "");
         const depDate = r.departureDate;
+        // Next guest = earliest arrival on/after the departure date (list is
+        // already sorted by arrivalDate asc). Same-day flagged for urgency.
         let nextGuest: any = null;
         const arrivals = arrivalsMap[listingId] || [];
         for (const arr of arrivals) {
-          if (arr.date === depDate) { nextGuest = arr; break; }
-          const depD = new Date(depDate + "T00:00:00Z"); const nextDay = new Date(depD); nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-          const nextDayStr = nextDay.toISOString().split("T")[0];
-          if (arr.date === nextDayStr) { if (!nextGuest) nextGuest = arr; }
+          if (arr.date >= depDate) { nextGuest = arr; break; }
         }
         return {
           id: r.id, guest: r.guestName || ((r.guestFirstName || "") + " " + (r.guestLastName || "")).trim(),

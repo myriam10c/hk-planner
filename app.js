@@ -1215,6 +1215,7 @@ function isToday(d){const t=new Date(),dt=new Date(d+'T00:00:00');return t.getFu
 function localYMD(d){const dt=d||new Date();return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}
 function todayLocal(){return localYMD(new Date());}
 function formatTime(h){if(h==null||h===0)return null;return(h<10?'0':'')+h+':00';}
+function isNextDayOf(baseDate,date){const d=new Date(baseDate+'T00:00:00');d.setDate(d.getDate()+1);return localYMD(d)===date;}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
 // Default cleaning fee by bedroom count (fallback when listing not in pricing table)
@@ -3125,7 +3126,7 @@ function renderPlanner(){
       const timer=timers[key],isRunning=timer&&timer.started_at&&!timer.finished_at;
       if(isRunning)return 5;
       if(r.nextGuest&&r.nextGuest.sameDay)return 0;
-      if(r.nextGuest)return 1;
+      if(r.nextGuest&&isNextDayOf(r.co,r.nextGuest.date))return 1;
       if(!hasAnyAssignee(key)&&!cleanerMode)return 2;
       return 3;
     };
@@ -3149,7 +3150,7 @@ function renderPlanner(){
       const cleanersForCard=getAssignees(key);
       const cleaner=cleanersForCard[0]||null;
       const timer=timers[key];
-      const urgency=r.nextGuest?(r.nextGuest.sameDay?'urgent':'warning'):'ok';
+      const urgency=r.nextGuest?(r.nextGuest.sameDay?'urgent':(isNextDayOf(r.co,r.nextGuest.date)?'warning':'ok')):'ok';
       const bedrooms=getBedroomsForListing(r.listingId);
       const isCancelled=!!cancelled[key];
       const isRunning=timer&&timer.started_at&&!timer.finished_at;
@@ -3183,12 +3184,15 @@ function renderPlanner(){
       h+='<div class="status-dot '+cardStatus+'"></div>';
       h+='<div class="listing-name">'+esc(formatPropLabel(r.listingId, r.listing))+(r._isExtra?' <span class="badge-extra">➕ '+esc(r._extraLabel||'EXTRA')+(r.price_billed?' · '+r.price_billed+' AED':'')+'</span>':'')+'</div>';
       if(coT) h+='<span class="tag-pill" style="margin-left:auto;flex-shrink:0">'+coT+'</span>';
+      else if(!r._isExtra) h+='<span class="tag-pill" style="margin-left:auto;flex-shrink:0;color:var(--text3)" title="Checkout time not set in Hostaway">—:—</span>';
       h+='</div>';
 
       // Row 2: Type + Cleaner name (or guest name)
       h+='<div class="card-row-2">';
       h+='<span class="guest-name">'+esc(r.guest)+'</span>';
       h+='<span class="tag-pill type" style="margin-left:6px">'+esc(getUnitType(r.listingId))+'</span>';
+      const ciT=formatTime(r.checkInTime);
+      if(ciT) h+='<span style="margin-left:6px;font-size:11px;color:var(--text3);flex-shrink:0" title="Guest check-in time">in '+ciT+'</span>';
       if(estTime) h+='<span class="est-time" style="margin-left:6px;font-size:11px;color:var(--text3)">~'+estTime+'min</span>';
       // Multi-assign display: 1 cleaner → name; 2+ → joined names with " + " separator,
       // colored as the first cleaner's color (the "primary" visually)
@@ -3204,8 +3208,11 @@ function renderPlanner(){
 
       // Row 3: Alert line (turnover info) — only if next guest
       if(r.nextGuest){
-        const nc=r.nextGuest.sameDay?'same-day':'next-day',nl=r.nextGuest.sameDay?'⚡':'📋';
-        h+='<div class="card-row-3"><span class="next-guest '+nc+'" style="margin:0;padding:2px 8px;font-size:10px">'+nl+' '+esc(r.nextGuest.guest)+(r.nextGuest.checkInTime!=null?' '+formatTime(r.nextGuest.checkInTime):'')+'</span></div>';
+        const ngNextDay=isNextDayOf(r.co,r.nextGuest.date);
+        const nc=r.nextGuest.sameDay?'same-day':(ngNextDay?'next-day':'later'),nl=r.nextGuest.sameDay?'⚡':(ngNextDay?'📋':'🛬');
+        const ngT=formatTime(r.nextGuest.checkInTime);
+        const ngDate=(r.nextGuest.sameDay||ngNextDay)?'':' '+formatDate(r.nextGuest.date);
+        h+='<div class="card-row-3"><span class="next-guest '+nc+'" style="margin:0;padding:2px 8px;font-size:10px">'+nl+' '+esc(r.nextGuest.guest)+ngDate+(ngT?' '+ngT:'')+'</span></div>';
       }
 
       // Timer display (if running, paused or finished)
@@ -3344,7 +3351,8 @@ function renderCleaningDetailPane(r){
   h += '<div style="font-size:var(--fs-sm);color:var(--text-2);line-height:1.7;margin-bottom:18px">';
   if(r.channel) h += '<div>'+icon('msgSquare',12)+' '+esc(r.channel)+'</div>';
   if(r.numberOfGuests) h += '<div>'+icon('user',12)+' '+r.numberOfGuests+' guest'+(r.numberOfGuests>1?'s':'')+'</div>';
-  h += '<div>'+icon('clock',12)+' Checkout '+esc(r.co||'')+'</div>';
+  h += '<div>'+icon('clock',12)+' Checkout '+esc(r.co||'')+(formatTime(r.checkOutTime)?' &middot; '+formatTime(r.checkOutTime):'')+'</div>';
+  if(r.nextGuest) h += '<div>🛬 Next guest '+esc(r.nextGuest.guest)+' &middot; '+esc(r.nextGuest.date)+(formatTime(r.nextGuest.checkInTime)?' '+formatTime(r.nextGuest.checkInTime):'')+'</div>';
   if(r.cleaningFee) h += '<div>'+icon('dollar',12)+' '+r.cleaningFee+' AED</div>';
   h += '</div>';
 
