@@ -213,6 +213,7 @@ const ICONS_SVG = {
   moreVertical: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>',
   x:           '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
   edit:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+  phone:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
 };
 function icon(name, size){
   let svg = ICONS_SVG[name];
@@ -3573,7 +3574,7 @@ function renderCardDetail(key,r){
   // #8 WhatsApp for this cleaning — one button per assigned cleaner
   if(!cleanerMode){
     getAssignees(key).forEach(cl=>{
-      if(cl.phone) h+='<button class="wa-btn" style="margin-top:8px" data-action="__sendWhatsAppReminder" data-arg0="'+esc(cl.phone)+'" data-arg1="'+esc(r.listing)+'" data-arg2="'+esc(r.guest)+'" data-stop-propagation="1">📱 WhatsApp '+esc(cl.name)+'</button>';
+      if(cl.phone) h+='<button class="wa-btn" style="margin-top:8px" data-action="__sendWhatsAppReminder" data-arg0="'+esc(cl.phone)+'" data-arg1="'+esc(r.listing)+'" data-arg2="'+esc(r.guest)+'" data-stop-propagation="1">'+icon('phone',14)+' WhatsApp '+esc(cl.name)+'</button>';
     });
   }
   h+='</div></div>';
@@ -4289,8 +4290,8 @@ function renderSettings(){
       '<select onchange="__updateCleanerRole('+c.id+',this.value)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
     ['manager','cleaner','maintenance'].forEach(r=>{h+='<option value="'+r+'"'+(role===r?' selected':'')+'>'+r+'</option>';});
     h+='</select>'+
-      '<button data-action="__sendDailyWhatsAppFromJson" data-arg0="'+JSON.stringify(c).replace(/"/g,'&quot;')+'" title="Send WhatsApp">📱</button>'+
-      '<button data-action="deleteCleaner" data-arg0="'+c.id+'" title="Remove">🗑</button></div>';
+      '<button data-action="__sendDailyWhatsAppFromJson" data-arg0="'+JSON.stringify(c).replace(/"/g,'&quot;')+'" title="Send WhatsApp" aria-label="Send WhatsApp" style="color:var(--green)">'+icon('phone',16)+'</button>'+
+      '<button data-action="deleteCleaner" data-arg0="'+c.id+'" title="Remove" aria-label="Remove" style="color:var(--red)">'+icon('trash',16)+'</button></div>';
   });
   h+='<div class="add-form">'+
     '<input id="newName" placeholder="Name"/>'+
@@ -4300,7 +4301,7 @@ function renderSettings(){
     '<input id="newColor" type="color" value="#7c3aed" style="width:40px"/>'+
     '<button data-action="__saveCleanerFromForm">Add</button></div>';
   // #8 Send all daily WhatsApp
-  if(cleaners.length>0) h+='<button class="wa-btn" style="margin-top:10px" data-action="__sendDailyToAllCleaners">📱 Send daily recap to all</button>';
+  if(cleaners.length>0) h+='<button class="wa-btn" style="margin-top:10px" data-action="__sendDailyToAllCleaners">'+icon('phone',14)+' Send daily recap to all</button>';
   h+='<div style="margin-top:10px"><a href="#cleaner" data-action="render" style="color:var(--primary);font-size:12px;font-weight:600">🔑 Open Cleaner Login View</a></div></div>';
 
   // WhatsApp preference removed — not needed in ops tool
@@ -4552,7 +4553,7 @@ function renderRecurring(){
     if(task.last_done_at)h+='<div class="recurring-meta">Last done: '+new Date(task.last_done_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})+'</div>';
     h+='<span class="recurring-due '+dueClass+'">'+dueLabel+'</span>';
     h+='</div>';
-    h+='<div class="recurring-actions"><button data-action="completeRecurringTask" data-arg0="'+task.id+'" title="Mark done">✅</button><button data-action="deleteRecurringTask" data-arg0="'+task.id+'" title="Remove">🗑</button></div>';
+    h+='<div class="recurring-actions"><button data-action="completeRecurringTask" data-arg0="'+task.id+'" title="Mark done" aria-label="Mark done" style="color:var(--green)">'+icon('checkCircle',18)+'</button><button data-action="deleteRecurringTask" data-arg0="'+task.id+'" title="Remove" aria-label="Remove" style="color:var(--red)">'+icon('trash',18)+'</button></div>';
     h+='</div>';
   });
   h+='</div>';
@@ -5918,7 +5919,7 @@ function renderMtReports(){
 
   // Full report button
   h+='<div style="display:flex;flex-direction:column;gap:10px">';
-  h+='<button data-action="shareMaintenanceReport" data-arg0="full" style="background:#25D366;color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;">📱 Share Full Report via WhatsApp</button>';
+  h+='<button data-action="shareMaintenanceReport" data-arg0="full" style="background:#25D366;color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;display:inline-flex;align-items:center;justify-content:center;gap:6px">'+icon('phone',16)+' Share Full Report via WhatsApp</button>';
   h+='<button data-action="shareMaintenanceReport" data-arg0="open" style="background:var(--orange);color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;">⚠️ Share Open Tickets Only</button>';
   h+='<button data-action="shareMaintenanceReport" data-arg0="resolved" style="background:var(--green);color:white;border:none;border-radius:8px;padding:12px;cursor:pointer;font-weight:600;font-size:14px;">✅ Share Resolved Tickets Only</button>';
   h+='</div>';
@@ -6668,7 +6669,7 @@ function renderExtraModal(){
         '</div>'+
       '</div>'+
       '<div class="modal-footer">'+
-        (isEdit?'<button class="btn-danger" data-action="deleteExtra" data-arg0="'+f.id+'">🗑 Delete</button>':'')+
+        (isEdit?'<button class="btn-danger" data-action="deleteExtra" data-arg0="'+f.id+'" style="display:inline-flex;align-items:center;gap:4px">'+icon('trash',14)+' Delete</button>':'')+
         '<button class="btn-secondary" data-action="closeExtraModal">Cancel</button>'+
         '<button class="btn-primary" data-action="saveExtra">'+(isEdit?'💾 Save':'➕ Create')+'</button>'+
       '</div>'+

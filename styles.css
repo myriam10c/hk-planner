@@ -1181,7 +1181,7 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
 .recurring-due.today { background:var(--orange-light); color:var(--orange); }
 .recurring-due.upcoming { background:var(--green-light); color:var(--green); }
 .recurring-actions { display:flex; gap:var(--sp-1); }
-.recurring-actions button { font-size:18px; background:none; border:none; cursor:pointer; padding:var(--sp-1); transition:var(--transition); border-radius:var(--radius-sm); }
+.recurring-actions button { font-size:18px; background:none; border:1px solid var(--border); cursor:pointer; min-width:40px; min-height:40px; display:inline-flex; align-items:center; justify-content:center; padding:var(--sp-1); transition:var(--transition); border-radius:var(--radius-sm); }
 .recurring-actions button:hover { background:var(--bg-2); }
 .recurring-actions button:active { transform:scale(0.98); }
 .recurring-form { background:var(--card); border-radius:var(--radius-md); padding:var(--sp-4); margin-bottom:var(--sp-3); border:1px solid var(--border); }
