@@ -1145,16 +1145,45 @@ function getWeekRange(){
 
 let savingDone=false;
 let __fetchAllReqId=0;
+// Stale-while-revalidate : la dernière semaine consultée est servie instantanément
+// depuis localStorage pendant que Hostaway rafraîchit en arrière-plan.
+const PLANNER_CACHE_KEY='hkPlannerCache';
+let plannerRefreshing=false;
+function readPlannerCache(range){try{const c=JSON.parse(localStorage.getItem(PLANNER_CACHE_KEY)||'null');return(c&&c.range===range&&c.coRes&&c.allRes)?c:null;}catch(e){return null;}}
+function writePlannerCache(range,coRes,allRes){try{localStorage.setItem(PLANNER_CACHE_KEY,JSON.stringify({range:range,coRes:coRes,allRes:allRes,ts:Date.now()}));}catch(e){/* quota plein : on vit sans cache */}}
 async function fetchAll(){
   if(savingDone)return;
   const myReq=++__fetchAllReqId;
-  loading=true;error=null;render();
+  const{startDate,endDate}=getWeekRange();
+  const rangeKey=startDate+'_'+endDate;
+  const cached=readPlannerCache(rangeKey);
+  if(cached){
+    try{
+      __applyPlannerData(cached.coRes,cached.allRes,startDate,endDate,new Date(cached.ts));
+      loading=false;error=null;plannerRefreshing=true;
+      startLiveTimerUpdates();
+    }catch(e){loading=true;error=null;}
+  }else{loading=true;error=null;}
+  render();
   try{
-    const{startDate,endDate}=getWeekRange();
     const[coRes,allRes]=await Promise.all([api('checkouts',{params:{startDate,endDate}}),api('getAllData')]);
     if(myReq!==__fetchAllReqId)return; // a newer fetchAll superseded this one
-    if(savingDone){loading=false;return;}
+    if(savingDone){loading=false;plannerRefreshing=false;return;}
     if(coRes.status!=='success') throw new Error(coRes.error||'Unknown error');
+    __applyPlannerData(coRes,allRes,startDate,endDate,new Date());
+    writePlannerCache(rangeKey,coRes,allRes);
+    // Load auto-send config
+    api('getConfig',{params:{key:'auto_send_cleaners'}}).then(r=>{autoSendCleaners=r.value!=='false';});
+    loading=false;plannerRefreshing=false;render();
+    startLiveTimerUpdates();
+  }catch(e){
+    if(myReq!==__fetchAllReqId)return;
+    plannerRefreshing=false;loading=false;
+    if(!cached)error=e.message; // si on a du cache, on garde l'affichage stale
+    render();
+  }
+}
+function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
     const valid=['new','modified','confirmed','ownerStay','reserved'];
     RESERVATIONS=(coRes.reservations||[]).filter(r=>valid.includes(r.status)).map(r=>({
       co:r.checkOut,guest:r.guest||'Guest',listing:r.listing||'',listingId:r.listingId||'',channel:r.channel||'',
@@ -1200,14 +1229,9 @@ async function fetchAll(){
       const lid=RESERVATIONS.find(r=>keyFor(r)===k);
       if(lid&&lid.listingId){if(!estimatedTimes[lid.listingId])estimatedTimes[lid.listingId]=[];estimatedTimes[lid.listingId].push(t.duration_minutes);}
     }});
-    // Load auto-send config
-    api('getConfig',{params:{key:'auto_send_cleaners'}}).then(r=>{autoSendCleaners=r.value!=='false';});
-    lastUpdate=new Date();
+    lastUpdate=fetchedAt||new Date();
     const today=todayLocal();
     if(dates.includes(today)&&selectedDate==='all')selectedDate=today;
-    loading=false;render();
-    startLiveTimerUpdates();
-  }catch(e){if(myReq!==__fetchAllReqId)return;loading=false;error=e.message;render();}
 }
 
 function formatDate(d){const dt=new Date(d+'T00:00:00');return DAYS[dt.getDay()]+' '+dt.getDate()+' '+MONTHS[dt.getMonth()];}
@@ -3070,6 +3094,7 @@ function renderPlanner(){
   h+='<h1>'+(cleanerMode?'👋 '+esc(cleanerMode.name):selectedDate==='all'?rangeLabel:'<span style="font-weight:500;color:var(--text2)">'+rangeLabel+'</span>')+'</h1>';
   h+='<div style="flex:1"></div>';
   h+='<div class="header-actions">';
+  if(plannerRefreshing) h+='<span class="sync-indicator" title="Refreshing from Hostaway">'+icon('refresh',13)+' Updating…</span>';
   if(cleanerMode) h+='<button class="icon-btn" data-action="cleanerLogout" title="Logout" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='<button class="cmdk-trigger" data-action="openCmdk" title="Global search (⌘K)" aria-label="Open global search">⌘K</button>';
   h+='<button class="icon-btn" data-action="toggleSearch" title="Search" aria-label="Search">'+icon('search',18)+'</button>';
