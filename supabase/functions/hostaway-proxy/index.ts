@@ -167,6 +167,55 @@ function extractAptNumber(s: string | null | undefined): string | null {
   return null;
 }
 
+const CHECKOUTS_FRESH_MS = 2 * 60 * 1000;   // newer: serve as-is, no revalidate
+const CHECKOUTS_STALE_MS = 10 * 60 * 1000;  // older: fetch Hostaway synchronously
+
+async function buildCheckoutsPayload(startDate: string, endDate: string) {
+  const token = await getAccessToken();
+  const validStatuses = ['new','modified','confirmed','ownerStay','reserved'];
+  const departuresUrl = API_BASE + "/reservations?departureStartDate=" + startDate + "&departureEndDate=" + endDate + "&sortOrder=departureDate&orderDirection=asc";
+  // Arrivals window extends 14 days past endDate so each departure can be
+  // matched to the NEXT arrival even when it falls outside the queried week.
+  const arrEndD = new Date(endDate + "T00:00:00Z");
+  arrEndD.setUTCDate(arrEndD.getUTCDate() + 14);
+  const arrivalsEnd = arrEndD.toISOString().split("T")[0];
+  const arrivalsUrl = API_BASE + "/reservations?arrivalStartDate=" + startDate + "&arrivalEndDate=" + arrivalsEnd + "&sortOrder=arrivalDate&orderDirection=asc";
+  const authHeaders = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
+  const [depResults, arrResults] = await Promise.all([
+    fetchAllPages(departuresUrl, authHeaders),
+    fetchAllPages(arrivalsUrl, authHeaders),
+  ]);
+  const arrivalsMap: Record<string, Array<{ date: string; guest: string; checkInTime: number | null }>> = {};
+  arrResults.forEach((r: any) => {
+    if (!validStatuses.includes(r.status)) return;
+    const listingId = String(r.listingMapId || r.listingId || "");
+    if (!listingId) return;
+    if (!arrivalsMap[listingId]) arrivalsMap[listingId] = [];
+    arrivalsMap[listingId].push({ date: r.arrivalDate, guest: r.guestName || ((r.guestFirstName || "") + " " + (r.guestLastName || "")).trim() || "Guest", checkInTime: r.checkInTime != null ? Number(r.checkInTime) : null });
+  });
+  const reservations = depResults.filter((r: any) => validStatuses.includes(r.status)).map((r: any) => {
+    const listingId = String(r.listingMapId || r.listingId || "");
+    const depDate = r.departureDate;
+    // Next guest = earliest arrival on/after the departure date (list is
+    // already sorted by arrivalDate asc). Same-day flagged for urgency.
+    let nextGuest: any = null;
+    const arrivals = arrivalsMap[listingId] || [];
+    for (const arr of arrivals) {
+      if (arr.date >= depDate) { nextGuest = arr; break; }
+    }
+    return {
+      id: r.id, guest: r.guestName || ((r.guestFirstName || "") + " " + (r.guestLastName || "")).trim(),
+      listing: r.listingName || "", listingId, checkIn: r.arrivalDate, checkOut: r.departureDate,
+      checkInTime: r.checkInTime != null ? Number(r.checkInTime) : null,
+      checkOutTime: r.checkOutTime != null ? Number(r.checkOutTime) : null,
+      status: r.status, channel: r.channelName || "", phone: r.phone || r.guestPhone || "",
+      numberOfGuests: r.numberOfGuests || 0, cleaningFee: r.cleaningFee != null ? Number(r.cleaningFee) : 0,
+      nextGuest: nextGuest ? { guest: nextGuest.guest, date: nextGuest.date, checkInTime: nextGuest.checkInTime, sameDay: nextGuest.date === depDate } : null,
+    };
+  });
+  return { status: "success", count: reservations.length, reservations };
+}
+
 async function fetchAllPages(baseUrl: string, authHeaders: Record<string, string>, pageSize = 500): Promise<any[]> {
   const headers = { ...authHeaders };
   let retriedAuth = false;
@@ -592,49 +641,36 @@ Deno.serve(async (req: Request) => {
       if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
         return jsonResp({ error: "startDate and endDate must be YYYY-MM-DD" }, 400);
       }
-      const token = await getAccessToken();
-      const validStatuses = ['new','modified','confirmed','ownerStay','reserved'];
-      const departuresUrl = API_BASE + "/reservations?departureStartDate=" + startDate + "&departureEndDate=" + endDate + "&sortOrder=departureDate&orderDirection=asc";
-      // Arrivals window extends 14 days past endDate so each departure can be
-      // matched to the NEXT arrival even when it falls outside the queried week.
-      const arrEndD = new Date(endDate + "T00:00:00Z");
-      arrEndD.setUTCDate(arrEndD.getUTCDate() + 14);
-      const arrivalsEnd = arrEndD.toISOString().split("T")[0];
-      const arrivalsUrl = API_BASE + "/reservations?arrivalStartDate=" + startDate + "&arrivalEndDate=" + arrivalsEnd + "&sortOrder=arrivalDate&orderDirection=asc";
-      const authHeaders = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
-      const [depResults, arrResults] = await Promise.all([
-        fetchAllPages(departuresUrl, authHeaders),
-        fetchAllPages(arrivalsUrl, authHeaders),
-      ]);
-      const arrivalsMap: Record<string, Array<{ date: string; guest: string; checkInTime: number | null }>> = {};
-      arrResults.forEach((r: any) => {
-        if (!validStatuses.includes(r.status)) return;
-        const listingId = String(r.listingMapId || r.listingId || "");
-        if (!listingId) return;
-        if (!arrivalsMap[listingId]) arrivalsMap[listingId] = [];
-        arrivalsMap[listingId].push({ date: r.arrivalDate, guest: r.guestName || ((r.guestFirstName || "") + " " + (r.guestLastName || "")).trim() || "Guest", checkInTime: r.checkInTime != null ? Number(r.checkInTime) : null });
-      });
-      const reservations = depResults.filter((r: any) => validStatuses.includes(r.status)).map((r: any) => {
-        const listingId = String(r.listingMapId || r.listingId || "");
-        const depDate = r.departureDate;
-        // Next guest = earliest arrival on/after the departure date (list is
-        // already sorted by arrivalDate asc). Same-day flagged for urgency.
-        let nextGuest: any = null;
-        const arrivals = arrivalsMap[listingId] || [];
-        for (const arr of arrivals) {
-          if (arr.date >= depDate) { nextGuest = arr; break; }
+      // Server-side stale-while-revalidate: the Hostaway pagination is the slow
+      // path (~5-10s on month ranges). Serve a recent snapshot instantly and
+      // revalidate in background; only fetch synchronously when too old.
+      const cacheKey = "checkouts:" + startDate + "_" + endDate;
+      if (url.searchParams.get("fresh") !== "1") {
+        try {
+          const { data: row } = await sb.from("proxy_cache").select("payload, updated_at").eq("key", cacheKey).maybeSingle();
+          if (row && row.payload) {
+            const age = Date.now() - new Date(row.updated_at).getTime();
+            if (age < CHECKOUTS_STALE_MS) {
+              if (age > CHECKOUTS_FRESH_MS) {
+                const revalidate = buildCheckoutsPayload(startDate, endDate)
+                  .then((payload) => sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() }))
+                  .catch((e) => console.error("[hostaway-proxy] checkouts revalidate failed:", e));
+                try { (globalThis as any).EdgeRuntime?.waitUntil?.(revalidate); } catch (_e) { /* best effort */ }
+              }
+              return jsonResp({ ...row.payload, cachedAt: row.updated_at });
+            }
+          }
+        } catch (e) {
+          console.error("[hostaway-proxy] proxy_cache read failed:", e);
         }
-        return {
-          id: r.id, guest: r.guestName || ((r.guestFirstName || "") + " " + (r.guestLastName || "")).trim(),
-          listing: r.listingName || "", listingId, checkIn: r.arrivalDate, checkOut: r.departureDate,
-          checkInTime: r.checkInTime != null ? Number(r.checkInTime) : null,
-          checkOutTime: r.checkOutTime != null ? Number(r.checkOutTime) : null,
-          status: r.status, channel: r.channelName || "", phone: r.phone || r.guestPhone || "",
-          numberOfGuests: r.numberOfGuests || 0, cleaningFee: r.cleaningFee != null ? Number(r.cleaningFee) : 0,
-          nextGuest: nextGuest ? { guest: nextGuest.guest, date: nextGuest.date, checkInTime: nextGuest.checkInTime, sameDay: nextGuest.date === depDate } : null,
-        };
-      });
-      return jsonResp({ status: "success", count: reservations.length, reservations });
+      }
+      const payload = await buildCheckoutsPayload(startDate, endDate);
+      try {
+        await sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() });
+      } catch (e) {
+        console.error("[hostaway-proxy] proxy_cache write failed:", e);
+      }
+      return jsonResp(payload);
     }
 
     // ==================== SYNC LISTINGS ====================
