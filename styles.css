@@ -1930,6 +1930,29 @@ h3 svg { margin-right:6px; vertical-align:-3px; color:var(--text2); }
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
 
+.mt-detail-photos {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.mt-detail-photos img {
+  width: 160px;
+  height: 120px;
+  max-width: 100%;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  display: block;
+}
+.mt-detail-photos.loading {
+  font-size: 11px;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .mt-detail-resolution {
   background: var(--green-light);
   border-left: 3px solid var(--green);

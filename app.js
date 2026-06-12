@@ -395,6 +395,7 @@ let mtSelectMode=false;
 let mtSelected=new Set(); // ticket ids
 let recurringIssues=[];
 let mtComments={};
+let mtPhotoUrls={}; // ticket id -> {photo, resolutionPhoto} signed URLs (1h)
 
 // === DESKTOP S3: View toggle (cards <-> table), context menu, drag-drop ===
 let plannerViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('plannerViewMode')) || 'cards'; // 'cards' | 'table'
@@ -3466,6 +3467,23 @@ function renderCleaningDetailPane(r){
   return h;
 }
 
+function loadTicketPhoto(id){
+  if(mtPhotoUrls[id])return;
+  mtPhotoUrls[id]={loading:true};
+  api('getTicketPhoto',{params:{id}}).then(r=>{
+    mtPhotoUrls[id]={photo:r.photo||null,resolutionPhoto:r.resolutionPhoto||null};
+    render();
+  }).catch(()=>{mtPhotoUrls[id]={photo:null,resolutionPhoto:null};});
+}
+function mtPhotoSectionHtml(t){
+  if(!t.photo_path && !t.resolution_photo_path) return '';
+  const p=mtPhotoUrls[t.id];
+  if(!p || p.loading){ loadTicketPhoto(t.id); return '<div class="mt-detail-photos loading">'+icon('refresh',12)+' Loading photo…</div>'; }
+  let h='';
+  if(p.photo) h+='<a href="'+esc(p.photo)+'" target="_blank" rel="noopener"><img src="'+esc(p.photo)+'" alt="Ticket photo" loading="lazy"/></a>';
+  if(p.resolutionPhoto) h+='<a href="'+esc(p.resolutionPhoto)+'" target="_blank" rel="noopener"><img src="'+esc(p.resolutionPhoto)+'" alt="Resolution photo" loading="lazy"/></a>';
+  return h ? '<div class="mt-detail-photos">'+h+'</div>' : '';
+}
 function renderTicketDetailPane(t, isManager){
   // Reading-optimised layout. Order: title → meta strip → description → timeline → comments → actions
   // Actions are at the BOTTOM — reading the ticket comes first.
@@ -3505,6 +3523,8 @@ function renderTicketDetailPane(t, isManager){
   if(t.description && t.description !== t.title){
     h += '<div class="mt-detail-desc">'+esc(t.description)+'</div>';
   }
+
+  h += mtPhotoSectionHtml(t);
 
   // Resolution notes — surfaced when present, separate from the comment thread
   if(t.resolution_notes){
@@ -5546,6 +5566,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   if(expanded && !isDesktop()){
     h+='<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px" data-action="__noop" data-stop-propagation="1">';
     if(t.description&&t.description!==t.title)h+='<div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.4">'+esc(t.description)+'</div>';
+    h+=mtPhotoSectionHtml(t);
     // Timeline
     h+='<div class="mt-timeline">';
     h+='<div class="mt-tl-item"><div class="mt-tl-dot" style="background:var(--blue)"></div><strong>Created</strong><div class="mt-tl-date">'+new Date(t.created_at).toLocaleString()+'</div></div>';

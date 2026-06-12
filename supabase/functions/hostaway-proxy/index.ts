@@ -503,6 +503,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["deleteRecurringTask", "POST"],
   // ===== Maintenance tickets =====
   ["getMaintenanceTickets", "GET"],
+  ["getTicketPhoto", "GET"],
   ["createTicket", "POST"],
   ["updateTicket", "POST"],
   // ===== Vendors =====
@@ -1406,6 +1407,17 @@ Deno.serve(async (req: Request) => {
         listing_name: t.listing_id ? (listingMap[String(t.listing_id)] || null) : null,
       }));
       return jsonResp({ status: "success", tickets });
+    }
+    if (action === "getTicketPhoto") {
+      const tid = url.searchParams.get("id");
+      if (!tid) return jsonResp({ error: "id required" }, 400);
+      const { data, error } = await sb.from("maintenance_tickets").select("photo_path, resolution_photo_path").eq("id", Number(tid)).single();
+      if (error) throw error;
+      const [photo, resolutionPhoto] = await Promise.all([
+        getPhotoUrl(sb, data.photo_path),
+        getPhotoUrl(sb, data.resolution_photo_path),
+      ]);
+      return jsonResp({ status: "success", photo, resolutionPhoto });
     }
     if (action === "createTicket" && req.method === "POST") {
       const body = await req.json();
