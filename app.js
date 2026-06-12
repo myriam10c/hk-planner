@@ -2575,7 +2575,7 @@ function ensureMtFresh(){
   // First open of the Maintenance tab: tickets are already on screen from the
   // planner's getAllData cache — refresh comments/resolved/vendors in background.
   if(mtLoadedOnce)return;
-  mtLoadedOnce=true;mtRefreshing=true;
+  mtLoadedOnce=true;mtRefreshing=true;render();
   refreshMaintenance().finally(()=>{mtRefreshing=false;render();});
 }
 
