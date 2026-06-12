@@ -361,7 +361,7 @@ function renderSavedViewsBar(){
 }
 let currentTab='planner',filterCleaner=null;
 let dashMonth=new Date().getMonth(),dashYear=new Date().getFullYear();
-let dashData=null,dashLoading=false;
+let dashData=null,dashLoading=false,dashRefreshing=false,dashLoadSeq=0;
 let dashSection='ops'; // 'ops' | 'revenue' | 'properties'
 function setDashSection(s){
   dashSection=s;
@@ -1896,12 +1896,15 @@ async function savePropertyProfile(listingId){
 
 // Load dashboard KPIs
 async function loadDashKPIs(){
-  dashKPIsLoading=true;
   const month=dashYear+'-'+String(dashMonth+1).padStart(2,'0');
+  const cached=readDashCache(month);
+  if(cached&&cached.kpis){dashKPIs=cached.kpis;dashKPIsLoading=false;}
+  else dashKPIsLoading=true;
   try{
     const res=await api('getDashboardKPIs',{params:{month}});
     dashKPIs=res.kpis||null;
-  }catch(e){dashKPIs=null;}
+    if(dashKPIs)writeDashCache(month,{kpis:dashKPIs});
+  }catch(e){if(!(cached&&cached.kpis))dashKPIs=null;}
   dashKPIsLoading=false;render();
 }
 
@@ -3582,13 +3585,27 @@ function renderCardDetail(key,r){
 }
 
 // ============ DASHBOARD (#4) ============
+// Stale-while-revalidate cache : le dernier mois consulté est servi instantanément
+// depuis localStorage pendant que les données fraîches arrivent en arrière-plan.
+const DASH_CACHE_KEY='hkDashCache';
+function readDashCache(month){try{const c=JSON.parse(localStorage.getItem(DASH_CACHE_KEY)||'null');return(c&&c.month===month)?c:null;}catch(e){return null;}}
+function writeDashCache(month,patch){try{const c=readDashCache(month)||{month:month};Object.assign(c,patch,{ts:Date.now()});localStorage.setItem(DASH_CACHE_KEY,JSON.stringify(c));}catch(e){/* quota plein : on vit sans cache */}}
 async function loadDashMonth(){
-  dashLoading=true;render();
-  const sd=dashYear+'-'+String(dashMonth+1).padStart(2,'0')+'-01';
+  const seq=++dashLoadSeq;
+  const monthKey=dashYear+'-'+String(dashMonth+1).padStart(2,'0');
+  const cached=readDashCache(monthKey);
+  if(cached&&cached.dashData){
+    dashData=cached.dashData;
+    if(cached.listingPrices)listingPrices=cached.listingPrices;
+    dashLoading=false;dashRefreshing=true;
+  }else{dashLoading=true;dashRefreshing=false;}
+  render();
+  const sd=monthKey+'-01';
   const lastDay=new Date(dashYear,dashMonth+1,0).getDate();
-  const ed=dashYear+'-'+String(dashMonth+1).padStart(2,'0')+'-'+String(lastDay).padStart(2,'0');
+  const ed=monthKey+'-'+String(lastDay).padStart(2,'0');
   try{
     const[coRes,allRes]=await Promise.all([api('checkouts',{params:{startDate:sd,endDate:ed}}),api('getAllData')]);
+    if(seq!==dashLoadSeq)return; // l'utilisateur a changé de mois entre-temps
     const valid=['new','modified','confirmed','reserved'];
     const res=(coRes.reservations||[]).filter(r=>valid.includes(r.status)).map(r=>({
       co:r.checkOut,guest:r.guest||'Guest',listing:r.listing||'',listingId:r.listingId||'',
@@ -3596,8 +3613,12 @@ async function loadDashMonth(){
     }));
     listingPrices=allRes.listingPrices||{};timers=allRes.timers||{};
     dashData={reservations:res,done:allRes.done||{},assignments:allRes.assignments||{},timers:allRes.timers||{}};
-  }catch(e){dashData={reservations:[],done:{},assignments:{},timers:{},error:e.message};}
-  dashLoading=false;render();
+    writeDashCache(monthKey,{dashData:dashData,listingPrices:listingPrices});
+  }catch(e){
+    if(seq!==dashLoadSeq)return;
+    if(!(cached&&cached.dashData))dashData={reservations:[],done:{},assignments:{},timers:{},error:e.message};
+  }
+  dashLoading=false;dashRefreshing=false;render();
 }
 
 // Load 12 weeks of checkouts for the heatmap (Operations tab desktop only).
@@ -3660,6 +3681,7 @@ function renderDashboard(){
   // maintenance/Invoice) is now consolidated into one dropdown — see showDashExportMenu().
   let h='<div class="header"><div class="header-top"><h1>📊 Dashboard</h1>'+
     '<div style="flex:1"></div>'+
+    (dashRefreshing?'<span class="sync-indicator" style="margin-right:8px" title="Refreshing from Hostaway">'+icon('refresh',13)+' Updating…</span>':'')+
     (syncD?'<span class="sync-indicator" style="margin-right:8px">📡 '+syncD+'</span>':'')+
     '<button class="icon-btn" data-action="showDashExportMenu" data-pass-event="1" data-stop-propagation="1" title="Export…">'+icon('download',18)+'</button>'+
     '</div></div>';
