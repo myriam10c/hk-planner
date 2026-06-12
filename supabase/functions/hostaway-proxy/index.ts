@@ -167,12 +167,10 @@ function extractAptNumber(s: string | null | undefined): string | null {
   return null;
 }
 
-async function fetchAllPages(baseUrl: string, authHeaders: Record<string, string>, pageSize = 200): Promise<any[]> {
-  let all: any[] = [];
-  let offset = 0;
+async function fetchAllPages(baseUrl: string, authHeaders: Record<string, string>, pageSize = 500): Promise<any[]> {
   const headers = { ...authHeaders };
   let retriedAuth = false;
-  while (true) {
+  const fetchPage = async (offset: number): Promise<any> => {
     const sep = baseUrl.includes("?") ? "&" : "?";
     const pageUrl = baseUrl + sep + "limit=" + pageSize + "&offset=" + offset;
     let resp = await fetch(pageUrl, { headers });
@@ -187,11 +185,29 @@ async function fetchAllPages(baseUrl: string, authHeaders: Record<string, string
     // Ne JAMAIS retourner une liste partielle comme un succès (assignments/cleanings
     // disparaîtraient silencieusement côté front).
     if (!resp.ok) throw new HttpError(502, "Hostaway API error " + resp.status);
-    const data = await resp.json();
-    const results = data.result || [];
-    all = all.concat(results);
-    if (results.length < pageSize) break;
-    offset += pageSize;
+    return await resp.json();
+  };
+  const first = await fetchPage(0);
+  let all: any[] = first.result || [];
+  const total = typeof first.count === "number" ? first.count : null;
+  if (total != null && total > all.length && all.length > 0) {
+    // Hostaway gives the total count: fetch remaining pages in parallel.
+    // Step by the ACTUAL first-page size in case the API caps `limit` below pageSize.
+    const step = all.length;
+    const offsets: number[] = [];
+    for (let o = step; o < total; o += step) offsets.push(o);
+    const rest = await Promise.all(offsets.map(fetchPage));
+    for (const d of rest) all = all.concat(d.result || []);
+  } else if (total == null && all.length === pageSize) {
+    // No count field: sequential fallback.
+    let offset = pageSize;
+    while (true) {
+      const d = await fetchPage(offset);
+      const results = d.result || [];
+      all = all.concat(results);
+      if (results.length < pageSize) break;
+      offset += pageSize;
+    }
   }
   return all;
 }
