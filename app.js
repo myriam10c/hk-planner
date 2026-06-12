@@ -89,7 +89,7 @@ const ensureQRCode = () => loadScript(__CDN.qrcode);
 // Each `__wrap*` function is the canonical handler invoked by the event-delegation router.
 function __closeCmdkBackdrop(e){ if(e.target.classList.contains('cmdk-overlay'))closeCmdk(); }
 function __closeExtraModalBackdrop(e){ if(e.target.classList.contains('modal-overlay'))closeExtraModal(); }
-function __closeMoreMenuBackdrop(e){ if(e.target.classList.contains('more-menu-overlay'))closeMoreMenu(); }
+function __closeMoreMenuBackdrop(e){ if(e.target.classList.contains('more-overlay'))closeMoreMenu(); }
 function __resolveOrQuick(id, e){ if(e.shiftKey)resolveTicket(id); else quickResolveTicket(id); }
 function __closeMtModalThenCreatePreventive(lid, cat, ln){ closeMtModal(); createPreventiveFromInsight(lid, cat, ln); }
 function __closeMtModalThenShowRelated(lid, cat){ closeMtModal(); showRelatedTickets(lid, cat); }
@@ -1011,7 +1011,7 @@ en:{
   trashInstructions:'Trash Instructions',checkoutInstructions:'Checkout Instructions',saveProfile:'Save Profile',
   noProfiles:'No property profiles yet',editProfile:'Edit Profile',
   avgCleanTime:'Avg Clean Time',performance:'Performance',completionRate:'Completion Rate',
-  openTickets:'Open Tickets',resolvedMonth:'Resolved/Month',avgResolution:'Avg Resolution',
+  openTickets:'Open Tickets',resolvedMonth:'Resolved/mo',avgResolution:'Avg Resolution',
   trend7Days:'7-Day Trend',cleanerLeaderboard:'Cleaner Leaderboard',fastest:'Fastest',slowest:'Slowest'
 }
 };
@@ -2843,6 +2843,10 @@ function renderMoreMenu(){
   if(!el){ el=document.createElement('div'); el.id='moreMenu'; document.body.appendChild(el); }
   if(!moreOpen){ el.innerHTML=''; return; }
   const items=[
+    {id:'subcontractors',icon:icon('dollar',22),label:'Subs',color:'#16a34a'},
+    {id:'ratings',icon:icon('star',22),label:'Ratings',color:'#ca8a04'},
+    {id:'reviews',icon:icon('msgSquare',22),label:'Reviews',color:'#4f46e5'},
+    {id:'settings',icon:icon('settings',22),label:'Settings',color:'#475569'},
     {id:'inventory',icon:icon('package',22),label:'Inventory',color:'#2563eb'},
     {id:'properties',icon:icon('home',22),label:'Properties',color:'#7c3aed'},
     {id:'recurring',icon:icon('repeat',22),label:'Recurring',color:'#d97706'},
@@ -2941,8 +2945,11 @@ function scoreClass(s){return s>=80?'high':s>=50?'mid':'low';}
 function renderLangSelector(){return '';}
 function renderNotifBanner(){
   if(notifPermission==='granted'||typeof Notification==='undefined')return'';
-  return '<div class="notif-banner">🔔 '+t('enableNotif')+'<button data-action="requestNotifPermission">'+t('enable')+'</button></div>';
+  if(localStorage.getItem('notifBannerDismissed'))return'';
+  return '<div class="notif-banner">🔔 '+t('enableNotif')+'<button data-action="requestNotifPermission">'+t('enable')+'</button>'+
+    '<button data-action="dismissNotifBanner" aria-label="Dismiss" title="Dismiss" style="background:none;border:none;color:inherit;font-size:16px;line-height:1;padding:4px 8px;cursor:pointer;opacity:0.7">✕</button></div>';
 }
+function dismissNotifBanner(){localStorage.setItem('notifBannerDismissed','1');render();}
 
 // ============ RENDER ============
 function render(){
@@ -2987,10 +2994,6 @@ function renderBottomNav(){
       {id:'dashboard',icon:icon('chart',22),label:t('dashboard')},
       {id:'maintenance',icon:icon('wrench',22),label:'Maint.'},
       {id:'hermes',icon:icon('zap',22),label:'Hermes'},
-      {id:'subcontractors',icon:icon('dollar',22),label:'Subs'},
-      {id:'ratings',icon:icon('star',22),label:'Ratings'},
-      {id:'reviews',icon:icon('msgSquare',22),label:'Reviews'},
-      {id:'settings',icon:icon('settings',22),label:t('settings')},
       {id:'__more',icon:icon('more',22),label:'More'},
     ];
   }else if(cleanerMode.role==='maintenance'){
@@ -3000,8 +3003,9 @@ function renderBottomNav(){
     // Cleaner view (default)
     tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'issues',icon:icon('alertTriangle',22),label:t('issues')},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')}];
   }
+  const mainIds=tabs.map(tb=>tb.id);
   return '<nav class="bottom-nav">'+tabs.map(tab=>
-    '<button class="nav-item'+(currentTab===tab.id?' active':'')+'" data-action="setTab" data-arg0="'+tab.id+'" data-label="'+esc(tab.label)+'" aria-label="'+esc(tab.label)+'"><span class="nav-icon">'+tab.icon+'</span>'+tab.label+'</button>'
+    '<button class="nav-item'+((currentTab===tab.id||(tab.id==='__more'&&!mainIds.includes(currentTab)))?' active':'')+'" data-action="setTab" data-arg0="'+tab.id+'" data-label="'+esc(tab.label)+'" aria-label="'+esc(tab.label)+'"><span class="nav-icon">'+tab.icon+'</span>'+tab.label+'</button>'
   ).join('')+'<button class="sidebar-toggle" data-action="toggleSidebar" title="Toggle sidebar" aria-label="Toggle sidebar">'+icon('chevronLeft',16)+'</button>'+'</nav>';
 }
 
@@ -3201,8 +3205,8 @@ function renderPlanner(){
           ? esc(cleanersForCard[0].name)
           : esc(cleanersForCard.map(c=>c.name).join(' + '));
         const labelColor = cleanersForCard[0].color;
-        if(!cleanerMode) h+='<span class="cleaner-tap" data-action="showAssignPicker" data-arg0="'+sk+'" data-stop-propagation="1" style="margin-left:auto;font-size:11px;color:'+labelColor+';font-weight:600;flex-shrink:0;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px">'+labelCleaner+'</span>';
-        else h+='<span style="margin-left:auto;font-size:11px;color:'+labelColor+';font-weight:600;flex-shrink:0">'+labelCleaner+'</span>';
+        if(!cleanerMode) h+='<span class="cleaner-tap cleaner-label" data-action="showAssignPicker" data-arg0="'+sk+'" data-stop-propagation="1" style="margin-left:auto;font-size:11px;color:'+labelColor+';font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px">'+labelCleaner+'</span>';
+        else h+='<span class="cleaner-label" style="margin-left:auto;font-size:11px;color:'+labelColor+';font-weight:600">'+labelCleaner+'</span>';
       }
       h+='</div>';
 
@@ -3668,7 +3672,7 @@ function renderDashboard(){
   '</div>';
 
   if(dashLoading){
-    const skeletons='<div>'+Array(5).fill('').map(()=>'<div class="skel-card"><div class="skeleton skel-circle"></div><div style="flex:1"><div class="skeleton skel-line med"></div><div class="skeleton skel-line short"></div></div></div>').join('')+'</div>';
+    const skeletons='<div><div style="text-align:center;font-size:12px;color:var(--text3);margin-bottom:10px">Loading month data from Hostaway… this can take a few seconds</div>'+Array(5).fill('').map(()=>'<div class="skel-card"><div class="skeleton skel-circle"></div><div style="flex:1"><div class="skeleton skel-line med"></div><div class="skeleton skel-line short"></div></div></div>').join('')+'</div>';
     h+=skeletons;h+='</div>'+renderBottomNav();document.getElementById('app').innerHTML=h;return;
   }
   if(!dashData){h+='</div>'+renderBottomNav();document.getElementById('app').innerHTML=h;loadDashMonth();return;}
@@ -4281,7 +4285,7 @@ function renderSettings(){
       '<div class="c-name">'+esc(c.name)+'</div>'+
       '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(ROLE_COLOR[role]||'#999')+'22;color:'+(ROLE_COLOR[role]||'#999')+';font-weight:600">'+(ROLE_BADGE[role]||role)+'</span>'+
       '<div class="c-phone">'+esc(c.phone||'')+'</div>'+
-      '<div class="c-pin">'+(c.pin?'PIN: '+c.pin:'No PIN')+'</div>'+
+      '<div class="c-pin'+(c.pin?'':' no-pin')+'">'+(c.pin?'PIN: '+c.pin:'No PIN')+'</div>'+
       '<select onchange="__updateCleanerRole('+c.id+',this.value)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
     ['manager','cleaner','maintenance'].forEach(r=>{h+='<option value="'+r+'"'+(role===r?' selected':'')+'>'+r+'</option>';});
     h+='</select>'+
@@ -4671,13 +4675,13 @@ function renderCleanerRatings(){
     const c=cleaners[ratingsSelected];
     h+='<button class="btn" data-action="clearRatingCleaner">← Retour</button>';
     h+='<h3>'+esc(_cleanerName(ratingsSelected))+'</h3>';
-    h+='<table class="data-table"><thead><tr><th>Date ménage</th><th>Appart</th><th>Guest</th><th>Propreté</th></tr></thead><tbody>';
+    h+='<div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Date ménage</th><th>Appart</th><th>Guest</th><th>Propreté</th></tr></thead><tbody>';
     (c.details||[]).forEach(d=>{
       h+='<tr><td>'+esc(d.cleaning_date||'')+'</td><td>'+esc(String(d.listing_id||''))+
          '</td><td>'+esc(d.guest||'')+'</td><td style="color:'+_ratingColor(d.cleanliness)+
          ';font-weight:600">'+(d.cleanliness!=null?d.cleanliness+'/10':'—')+'</td></tr>';
     });
-    h+='</tbody></table>';
+    h+='</tbody></table></div>';
     h+='</div>'+renderBottomNav();
     document.getElementById('app').innerHTML=h;
     return;
@@ -4930,13 +4934,13 @@ function renderSubcontractors(){
   h+='<div class="dash-card" style="border:1px solid rgba(16,185,129,0.15);overflow:hidden;position:relative;margin-bottom:14px">';
   h+='<div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#10b981,#059669)"></div>';
   h+='<h3 style="margin-bottom:14px;margin-top:4px">📊 '+subMonth+' Summary</h3>';
-  h+='<div class="dash-stat-row" style="flex-wrap:wrap">';
-  h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--primary)"><div class="ds-num">'+t.cleanings_count+'</div><div class="ds-label">Cleanings</div></div>';
-  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--primary)"><div class="ds-num">'+(t.revenue_ttc||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Revenue (incl. VAT)</div></div>';
-  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--orange)"><div class="ds-num">'+(t.cost_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Cost excl. VAT (Elite)</div></div>';
-  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--green)"><div class="ds-num" style="color:var(--green)">'+(t.margin_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Margin excl. VAT ('+(t.margin_pct||0).toFixed(1)+'%)</div></div>';
-  h+='<div class="dash-stat" style="min-width:90px;border-left:3px solid var(--orange)"><div class="ds-num">'+(t.vat_net||0).toLocaleString('en',{maximumFractionDigits:2})+'</div><div class="ds-label">VAT net (to FTA)</div></div>';
-  if(unm>0)h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid #ef4444"><div class="ds-num" style="color:#ef4444">'+unm+'</div><div class="ds-label">Unmatched</div></div>';
+  h+='<div class="dash-stat-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:8px">';
+  h+='<div class="dash-stat" style="min-width:0;border-left:3px solid var(--primary)"><div class="ds-num">'+t.cleanings_count+'</div><div class="ds-label">Cleanings</div></div>';
+  h+='<div class="dash-stat" style="min-width:0;border-left:3px solid var(--primary)" title="Revenue including VAT"><div class="ds-num">'+(t.revenue_ttc||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Revenue incl. VAT</div></div>';
+  h+='<div class="dash-stat" style="min-width:0;border-left:3px solid var(--orange)" title="Elite cost excluding VAT"><div class="ds-num">'+(t.cost_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Elite cost net</div></div>';
+  h+='<div class="dash-stat" style="min-width:0;border-left:3px solid var(--green)" title="Margin excluding VAT"><div class="ds-num" style="color:var(--green)">'+(t.margin_ht||0).toLocaleString('en',{maximumFractionDigits:0})+'</div><div class="ds-label">Margin net · '+(t.margin_pct||0).toFixed(1)+'%</div></div>';
+  h+='<div class="dash-stat" style="min-width:0;border-left:3px solid var(--orange)" title="Net VAT payable to FTA"><div class="ds-num">'+(t.vat_net||0).toLocaleString('en',{maximumFractionDigits:2})+'</div><div class="ds-label">VAT due (FTA)</div></div>';
+  if(unm>0)h+='<div class="dash-stat" style="min-width:0;border-left:3px solid #ef4444"><div class="ds-num" style="color:#ef4444">'+unm+'</div><div class="ds-label">Unmatched</div></div>';
   h+='</div>';
   h+='<div style="margin-top:10px;font-size:11px;color:var(--text3)">Computed at '+(subData.computed_at||'?').slice(0,16)+' UTC · Source: cleaning_assignments + Hostaway cleaningFee + subcontractor_pricing</div>';
   h+='</div>';
@@ -5015,7 +5019,7 @@ function renderHermes(){
   });
   h+='</div>';
   // Status picker
-  h+='<div style="display:flex;gap:4px;align-items:center;margin-left:12px"><span style="font-size:12px;color:var(--text3);font-weight:700">Status:</span>';
+  h+='<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;min-width:0">'+'<span style="font-size:12px;color:var(--text3);font-weight:700">Status:</span>';
   [['','All'],['auto_done','Auto'],['proposed','Proposed'],['approved','Approved'],['rejected','Rejected'],['alerted','Alerted'],['failed','Failed']].forEach(([v,lbl])=>{
     h+='<button class="dash-tab'+(hermesFilter.status===v?' active':'')+'" data-action="setHermesFilter" data-arg0="status" data-arg1="'+v+'" style="padding:4px 10px;font-size:12px">'+lbl+'</button>';
   });
@@ -5058,8 +5062,8 @@ function renderHermes(){
   h+='<div class="dash-card" style="border:1px solid rgba(233,69,96,0.15);overflow:hidden;position:relative;margin-bottom:14px">';
   h+='<div style="position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent-gradient)"></div>';
   h+='<h3 style="margin-bottom:14px;margin-top:4px">⚡ Key Metrics</h3>';
-  h+='<div class="dash-stat-row" style="flex-wrap:wrap">';
-  h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--primary)"><div class="ds-num" style="color:var(--primary)">'+todayActs.length+'</div><div class="ds-label">Actions today</div></div>';
+  h+='<div class="dash-stat-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px">';
+  h+='<div class="dash-stat" style="min-width:0;border-left:3px solid var(--primary)"><div class="ds-num" style="color:var(--primary)">'+todayActs.length+'</div><div class="ds-label">Actions today</div></div>';
   h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--primary)"><div class="ds-num">'+weekActs.length+'</div><div class="ds-label">Actions 7d</div></div>';
   h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--green)"><div class="ds-num" style="color:var(--green)">$'+todayCost.toFixed(2)+'</div><div class="ds-label">LLM cost today</div></div>';
   h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--green)"><div class="ds-num">$'+weekCost.toFixed(2)+'</div><div class="ds-label">LLM cost 7d</div></div>';
@@ -5448,13 +5452,14 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   h+='<h3 class="mt-card-title">'+esc(titleClean)+'</h3>';
   // Property name on its own line
   if(propName) h+='<div class="mt-card-property">'+esc(propName)+'</div>';
-  // Sub-meta: unit type + location hint with home icon
-  if(unitType || locHint){
+  // Sub-meta: unit type + location hint — skip locHint when it just repeats the property line
+  const locShow = locHint && !(propName && (locHint.toLowerCase().includes(propName.toLowerCase()) || propName.toLowerCase().includes(locHint.toLowerCase())));
+  if(unitType || locShow){
     h+='<div class="mt-card-meta">'+icon('home',13);
     h+=' <span>';
     if(unitType) h+=esc(unitType);
-    if(unitType && locHint) h+=' · ';
-    if(locHint) h+=esc(locHint);
+    if(unitType && locShow) h+=' · ';
+    if(locShow) h+=esc(locHint);
     h+='</span></div>';
   }
   // Footer divider + 3-column row: category · SLA · assignee
