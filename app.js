@@ -384,6 +384,7 @@ if(cleanerMode && !cleanerToken){
 let issues=[],recurringTasks=[],estimatedTimes={};
 let issuePhotoData=null;
 let maintenanceTickets=[],vendors=[],equipment=[],preventiveMaint=[];
+let mtRefreshing=false,mtLoadedOnce=false;
 let mtTicketPhoto=null,mtSubTab='tickets';
 let mtTicketFilter='open'; // open, resolved, all
 let resolvedTickets=[];
@@ -2570,6 +2571,14 @@ async function submitReopen(id){
   toast('Ticket reopened','success');await refreshMaintenance();
 }
 
+function ensureMtFresh(){
+  // First open of the Maintenance tab: tickets are already on screen from the
+  // planner's getAllData cache — refresh comments/resolved/vendors in background.
+  if(mtLoadedOnce)return;
+  mtLoadedOnce=true;mtRefreshing=true;
+  refreshMaintenance().finally(()=>{mtRefreshing=false;render();});
+}
+
 async function refreshMaintenance(){
   try{
     const[tRes,vRes,eRes,pRes,rRes,riRes]=await Promise.all([
@@ -2583,6 +2592,7 @@ async function refreshMaintenance(){
     maintenanceTickets=tRes.tickets||[];vendors=vRes.vendors||[];equipment=eRes.equipment||[];preventiveMaint=pRes.schedules||[];
     resolvedTickets=rRes.tickets||[];recurringIssues=riRes.recurring||[];
     await loadAllTicketComments();
+    mtLoadedOnce=true;
   }catch(err){
     toast('Refresh failed','error');
   }
@@ -2875,7 +2885,7 @@ function getFiltered(){
 
 function countByDate(d){return RESERVATIONS.filter(r=>r.co===d&&!cancelled[keyFor(r)]).length;}
 function countDoneForDate(d){return RESERVATIONS.filter(r=>r.co===d&&done[keyFor(r)]&&!cancelled[keyFor(r)]).length;}
-function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}}
+function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();}
 let moreOpen=false;
 function openMoreMenu(){ moreOpen=true; renderMoreMenu(); }
 function closeMoreMenu(){ moreOpen=false; renderMoreMenu(); }
@@ -5282,6 +5292,7 @@ function renderMaintenance(){
   let h='<div class="header mt-page-header"><div class="header-top">';
   h+='<h1>Maintenance</h1>';
   h+='<div class="header-actions">';
+  if(mtRefreshing) h+='<span class="sync-indicator" title="Refreshing tickets">'+icon('refresh',13)+' Updating…</span>';
   if(isManager) h+='<button class="icon-btn" data-action="showMtMoreMenu" data-pass-event="1" data-stop-propagation="1" title="More actions" aria-label="More">'+icon('bell',18)+'</button>';
   if(cleanerMode) h+='<button class="icon-btn" data-action="cleanerLogout" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='</div></div>';
@@ -6538,19 +6549,19 @@ function cmdkSearch(q){
   // Maintenance tickets
   (maintenanceTickets||[]).forEach(t=>{
     if((t.title||'').toLowerCase().includes(query)||(t.description||'').toLowerCase().includes(query)){
-      res.push({group:'Maintenance',icon:'🔧',title:t.title||'Ticket',meta:'#'+t.id+' · '+(t.status||''),onClick:()=>{currentTab='maintenance';mtSubTab='tickets';closeCmdk();render();}});
+      res.push({group:'Maintenance',icon:'🔧',title:t.title||'Ticket',meta:'#'+t.id+' · '+(t.status||''),onClick:()=>{currentTab='maintenance';mtSubTab='tickets';closeCmdk();render();ensureMtFresh();}});
     }
   });
   // Vendors
   (vendors||[]).forEach(v=>{
     if((v.name||'').toLowerCase().includes(query)){
-      res.push({group:'Vendors',icon:'🏢',title:v.name,meta:v.specialty||'',onClick:()=>{currentTab='maintenance';mtSubTab='vendors';closeCmdk();render();}});
+      res.push({group:'Vendors',icon:'🏢',title:v.name,meta:v.specialty||'',onClick:()=>{currentTab='maintenance';mtSubTab='vendors';closeCmdk();render();ensureMtFresh();}});
     }
   });
   // Equipment
   (equipment||[]).forEach(e=>{
     if((e.name||'').toLowerCase().includes(query)||(e.brand||'').toLowerCase().includes(query)){
-      res.push({group:'Equipment',icon:'🛠️',title:e.name||'Equipment',meta:(e.brand||'')+(e.model?' '+e.model:''),onClick:()=>{currentTab='maintenance';mtSubTab='equipment';closeCmdk();render();}});
+      res.push({group:'Equipment',icon:'🛠️',title:e.name||'Equipment',meta:(e.brand||'')+(e.model?' '+e.model:''),onClick:()=>{currentTab='maintenance';mtSubTab='equipment';closeCmdk();render();ensureMtFresh();}});
     }
   });
   // Properties
