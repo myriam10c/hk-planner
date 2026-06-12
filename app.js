@@ -680,8 +680,9 @@ function renderMtTable(tickets){
     const isSelected = (mtExpandedTicket === t.id);
     h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
     h += '<td class="muted">'+(t.created_at?new Date(t.created_at).toLocaleDateString():'')+'</td>';
-    h += '<td><strong>'+esc(t.title||'')+'</strong></td>';
-    h += '<td class="muted">'+esc(formatPropLabel(t.listing_id, t.listing_name)||t.listing_id||'—')+'</td>';
+    const _propLbl = formatPropLabel(t.listing_id, t.listing_name);
+    h += '<td><strong>'+esc(stripPropFromTitle(t.title, _propLbl, t.listing_id))+'</strong></td>';
+    h += '<td class="muted">'+esc(_propLbl||t.listing_id||'—')+'</td>';
     h += '<td class="muted">'+esc(t.category||'')+'</td>';
     h += '<td><span class="row-status '+(t.priority||'medium')+'">'+esc(t.priority||'medium')+'</span></td>';
     h += '<td><span class="row-status '+(t.status||'open')+'">'+esc((t.status||'open').replace(/_/g,' '))+'</span></td>';
@@ -721,8 +722,9 @@ function renderMtKanban(tickets){
         const isSel = (mtExpandedTicket === t.id);
         const pri = t.priority || 'medium';
         h += '<div class="kanban-card '+pri+(isSel?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
-        h += '<div class="kc-title">'+esc(t.title||'')+'</div>';
-        h += '<div class="kc-meta">'+esc(formatPropLabel(t.listing_id, t.listing_name)||t.listing_id||'No property')+'</div>';
+        const _propLbl = formatPropLabel(t.listing_id, t.listing_name);
+        h += '<div class="kc-title">'+esc(stripPropFromTitle(t.title, _propLbl, t.listing_id))+'</div>';
+        h += '<div class="kc-meta">'+esc(_propLbl||t.listing_id||'No property')+'</div>';
         h += '<div class="kc-footer">';
         h += '<span class="kc-pri '+pri+'">'+esc(pri)+'</span>';
         const tech = t.assigned_technician_id ? (cleaners||[]).find(c => c.id === t.assigned_technician_id) : null;
@@ -2717,26 +2719,37 @@ function statusLabel(s){return STATUS_LABELS[s]||(s||'').replace(/_/g,' ');}
 // (e.g. "2411B - Bloom Height — WiFi not working"). The card already shows the
 // property on its own line — strip the prefix from the title so the issue stands
 // alone. Tries common separators: em-dash, en-dash, hyphen, pipe, colon.
-function stripPropFromTitle(title, propName){
+function stripPropFromTitle(title, propName, listingId){
   if(!title) return '';
   const t = String(title).trim();
-  if(!propName) return t;
-  const p = String(propName).trim();
-  if(!p) return t;
-  // Build candidate prefixes: full property name, and apt-number-only fallbacks
-  const seps = [' — ', ' – ', ' - ', ' | ', ': ', ' • ', ' · '];
-  for(const sep of seps){
-    const prefix = p + sep;
-    if(t.length > prefix.length && t.toLowerCase().startsWith(prefix.toLowerCase())){
-      return t.substring(prefix.length).trim();
+  const p = propName ? String(propName).trim() : '';
+  if(p){
+    const seps = [' — ', ' – ', ' - ', ' | ', ': ', ' • ', ' · '];
+    for(const sep of seps){
+      const prefix = p + sep;
+      if(t.length > prefix.length && t.toLowerCase().startsWith(prefix.toLowerCase())){
+        return t.substring(prefix.length).trim();
+      }
+    }
+    // Fallback: if the title's start matches the property up to a separator (any of the above)
+    if(t.toLowerCase().startsWith(p.toLowerCase())){
+      const rest = t.substring(p.length);
+      const m = rest.match(/^\s*[—–\-|:•·]\s*(.+)$/);
+      if(m) return m[1].trim();
     }
   }
-  // Fallback: if the title's start matches the property up to a separator (any of the above)
-  const lower = t.toLowerCase();
-  if(lower.startsWith(p.toLowerCase())){
-    const rest = t.substring(p.length);
-    const m = rest.match(/^\s*[—–\-|:•·]\s*(.+)$/);
-    if(m) return m[1].trim();
+  // Fallback 2 : les titres du job WhatsApp utilisent "<apt> - <building>" (nom interne)
+  // qui ne correspond jamais au listing_name Hostaway — on matche sur l'apt_number seul.
+  const lp = (listingId && typeof listingPrices !== 'undefined' && listingPrices[listingId]) ? listingPrices[listingId] : null;
+  const apt = lp && lp.apt_number ? String(lp.apt_number).trim() : '';
+  if(apt.length >= 2){
+    const aptEsc = apt.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    // "430 - elysee 3 — Toilet keeps flushing" → "Toilet keeps flushing"
+    let m = t.match(new RegExp('^\\s*'+aptEsc+'\\b[^—–]*[—–]\\s*(.+)$','i'));
+    if(m && m[1].trim()) return m[1].trim();
+    // "Access card missing — 439 Elysée 1" → "Access card missing"
+    m = t.match(new RegExp('^(.+?)\\s*[—–]\\s*'+aptEsc+'\\b[^—–]*$','i'));
+    if(m && m[1].trim()) return m[1].trim();
   }
   return t;
 }
@@ -3432,7 +3445,7 @@ function renderTicketDetailPane(t, isManager){
 
   let h = '<div class="detail-pane mt-detail">';
   h += '<div class="detail-pane-header">';
-  h += '<div class="detail-pane-title">'+esc(t.title)+'</div>';
+  h += '<div class="detail-pane-title">'+esc(stripPropFromTitle(t.title, propName, t.listing_id))+'</div>';
   h += '<button class="detail-pane-close" data-action="closeDetailPane" title="Close">'+icon('xCircle',16)+'</button>';
   h += '</div>';
   h += '<div class="detail-pane-body">';
@@ -5451,7 +5464,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
   const _cmts=(mtComments[t.id]||[]);
   const _cmtCount=_cmts.length;
   // Strip the "<property> — " prefix from titles since the property is shown separately
-  const titleClean = stripPropFromTitle(t.title, propName);
+  const titleClean = stripPropFromTitle(t.title, propName, t.listing_id);
   // Subtitle: unit type + extras pulled from the listing's marketing name
   const lp = t.listing_id && listingPrices[t.listing_id] ? listingPrices[t.listing_id] : null;
   const unitType = lp ? (lp.unit_type || (lp.bedrooms ? lp.bedrooms+' BR' : '')) : (typeof getUnitType==='function' ? getUnitType(t.listing_id) : '');
