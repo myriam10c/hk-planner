@@ -110,6 +110,11 @@ const ensureQRCode = () => loadScript(__CDN.qrcode);
     makeHandler('data-action-input',   'input');
     makeHandler('data-action-change',  'change');
     makeHandler('data-action-keydown', 'keydown');
+    makeHandler('data-action-dragstart',   'dragstart');
+    makeHandler('data-action-dragover',    'dragover');
+    makeHandler('data-action-dragleave',   'dragleave');
+    makeHandler('data-action-drop',        'drop');
+    makeHandler('data-action-contextmenu', 'contextmenu');
   })();
 })();
 
@@ -181,6 +186,18 @@ function __cmdkInput(e){ cmdkSearch(e.target.value); }
 function __cmdkKeydown(e){ cmdkKeyDown(e); }
 function __efListingChange(e){ extraModalState.form.listing_id=e.target.value; syncExtraPriceDefaults(); }
 function __efSet(field,e){ extraModalState.form[field]=e.target.value; }
+
+// === Phase 4 drag & contextmenu delegated wrappers ===
+function __dragStartCard(e,el){ onDragStart(e, el.dataset.kbId, el.dataset.kbType); }
+function __ctxCard(e,el){ e.preventDefault(); showCardContextMenu(e, el.dataset.kbId, el.dataset.kbType); }
+function __ctxPrevent(e){ e.preventDefault(); }
+function __dragOver(e,el){ if(!dragState.id) return; e.preventDefault(); try{ e.dataTransfer.dropEffect='move'; }catch(_){ } el.classList.add('drop-hover'); }
+function __dragLeave(e,el){ el.classList.remove('drop-hover'); }
+function __dropOnCleaner(id,e,el){ el.classList.remove('drop-hover'); onDropOnCleaner(e, id); }
+function __dropUnassign(e,el){ el.classList.remove('drop-hover'); onDropOnCleaner(e, null); }
+function __dragOverCol(e,el){ if(!dragState||!dragState.id) return; if(dragState.type!=='ticket') return; e.preventDefault(); el.classList.add('kc-drop-hover'); }
+function __dragLeaveCol(e,el){ el.classList.remove('kc-drop-hover'); }
+function __dropKanbanCol(key,e,el){ el.classList.remove('kc-drop-hover'); onDropOnKanbanCol(e, key); }
 
 // === Context menu item registry ===
 // Each ctxmenu item registers a real JS closure here at render time; the
@@ -650,7 +667,7 @@ function renderPlannerTable(items){
     const listingFull = formatPropLabel(r.listingId, r.listing) || '';
     const cleanerFull = cleanersForRow.length ? cleanersForRow.map(c=>c.name).join(' + ') : 'Unassigned';
     const trCls = (isSelected?'selected ':'') + (isBulk?'bulk-selected':'');
-    h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" ondragstart="onDragStart(event,this.dataset.kbId,\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,this.dataset.kbId,\'cleaning\')" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1">';
+    h += '<tr class="'+trCls.trim()+'" data-kb-id="'+sk+'" data-kb-type="cleaning" draggable="true" data-action-dragstart="__dragStartCard" data-action-contextmenu="__ctxCard" data-action="toggleExpand" data-arg0="'+sk+'" data-pass-event="1">';
     // Checkbox
     h += '<td class="col-select" data-action="togglePlannerBulk" data-arg0="'+sk+'" data-stop-propagation="1"><input type="checkbox"'+(isBulk?' checked':'')+' data-action="togglePlannerBulk" data-arg0="'+sk+'" data-stop-propagation="1"/></td>';
     // Date
@@ -684,7 +701,7 @@ function renderPlannerTable(items){
       if(isDone) h += '<button class="row-action-btn" title="Mark undone" data-action="markDone" data-arg0="'+sk+'" data-stop-propagation="1">'+icon('refresh',13)+'</button>';
       else h += '<button class="row-action-btn success" title="Mark done" data-action="markDone" data-arg0="'+sk+'" data-stop-propagation="1">'+icon('check',13)+'</button>';
     }
-    h += '<button class="row-action-btn" title="More actions" oncontextmenu="event.preventDefault()" data-action="showCardContextMenu" data-arg0="'+sk+'" data-arg1="cleaning" data-pass-event="1" data-stop-propagation="1">'+icon('moreVertical',13)+'</button>';
+    h += '<button class="row-action-btn" title="More actions" data-action-contextmenu="__ctxPrevent" data-action="showCardContextMenu" data-arg0="'+sk+'" data-arg1="cleaning" data-pass-event="1" data-stop-propagation="1">'+icon('moreVertical',13)+'</button>';
     h += '</span>';
     h += '</td>';
     h += '</tr>';
@@ -727,7 +744,7 @@ function renderMtTable(tickets){
   h += '</tr></thead><tbody>';
   sorted.forEach(t => {
     const isSelected = (mtExpandedTicket === t.id);
-    h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
+    h += '<tr class="'+(isSelected?'selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" data-action-dragstart="__dragStartCard" data-action-contextmenu="__ctxCard" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
     h += '<td class="muted">'+(t.created_at?new Date(t.created_at).toLocaleDateString():'')+'</td>';
     const _propLbl = formatPropLabel(t.listing_id, t.listing_name);
     h += '<td><strong>'+esc(stripPropFromTitle(t.title, _propLbl, t.listing_id))+'</strong></td>';
@@ -758,7 +775,7 @@ function renderMtKanban(tickets){
       if(col.key === 'open') return t.status === 'open' || t.status === 'assigned';
       return t.status === col.key;
     });
-    h += '<div class="kanban-col" ondragover="onDragOverCol(event)" ondragleave="onDragLeaveCol(event)" ondrop="onDropOnKanbanCol(event,\''+col.key+'\')">';
+    h += '<div class="kanban-col" data-action-dragover="__dragOverCol" data-action-dragleave="__dragLeaveCol" data-action-drop="__dropKanbanCol" data-arg0="'+col.key+'">';
     h += '<div class="kanban-col-header" style="border-color:'+col.color+'">';
     h += '<span class="kc-label">'+esc(col.label)+'</span>';
     h += '<span class="kc-count">'+colTickets.length+'</span>';
@@ -770,7 +787,7 @@ function renderMtKanban(tickets){
       colTickets.forEach(t => {
         const isSel = (mtExpandedTicket === t.id);
         const pri = t.priority || 'medium';
-        h += '<div class="kanban-card '+pri+(isSel?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
+        h += '<div class="kanban-card '+pri+(isSel?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" data-action-dragstart="__dragStartCard" data-action-contextmenu="__ctxCard" data-action="toggleMtExpand" data-arg0="'+t.id+'">';
         const _propLbl = formatPropLabel(t.listing_id, t.listing_name);
         h += '<div class="kc-title">'+esc(stripPropFromTitle(t.title, _propLbl, t.listing_id))+'</div>';
         h += '<div class="kc-meta">'+esc(_propLbl||t.listing_id||'No property')+'</div>';
@@ -789,15 +806,6 @@ function renderMtKanban(tickets){
   return h;
 }
 
-function onDragOverCol(e){
-  if(!dragState || !dragState.id) return;
-  if(dragState.type !== 'ticket') return;
-  e.preventDefault();
-  e.currentTarget.classList.add('kc-drop-hover');
-}
-function onDragLeaveCol(e){
-  e.currentTarget.classList.remove('kc-drop-hover');
-}
 async function onDropOnKanbanCol(e, status){
   e.preventDefault();
   e.currentTarget.classList.remove('kc-drop-hover');
@@ -947,17 +955,6 @@ function onDragEnd(){
   document.body.classList.remove('dragging');
   document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-hover'));
   dragState = { id: null, type: null };
-}
-
-function onDragOver(e){
-  if(!dragState.id) return;
-  e.preventDefault();
-  try { e.dataTransfer.dropEffect = 'move'; } catch(err){}
-  e.currentTarget.classList.add('drop-hover');
-}
-
-function onDragLeave(e){
-  e.currentTarget.classList.remove('drop-hover');
 }
 
 async function onDropOnCleaner(e, cleanerId){
@@ -3182,10 +3179,10 @@ function renderPlanner(){
     h+='<div class="cleaner-chip'+(filterCleaner===0?' active':'')+'" role="button" tabindex="0" aria-label="Show all cleaners" data-action="setFilterCleaner" data-arg0="0" data-action-keydown="__chipKeyFilterCleaner">All</div>';
     cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
       const cnt=RESERVATIONS.filter(r=>isAssignedTo(keyFor(r), c.id)).length;
-      h+='<div class="cleaner-chip drop-target'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,'+c.id+')" data-action="setFilterCleaner" data-arg0="'+c.id+'" data-action-keydown="__chipKeyFilterCleaner"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
+      h+='<div class="cleaner-chip drop-target'+(filterCleaner===c.id?' active':'')+'" role="button" tabindex="0" aria-label="Filter by '+esc(c.name)+'" data-action-dragover="__dragOver" data-action-dragleave="__dragLeave" data-action-drop="__dropOnCleaner" data-action="setFilterCleaner" data-arg0="'+c.id+'" data-action-keydown="__chipKeyFilterCleaner"><span class="cleaner-dot" style="background:'+c.color+'"></span>'+esc(c.name)+' '+cnt+'</div>';
     });
     const una=RESERVATIONS.filter(r=>!hasAnyAssignee(keyFor(r))).length;
-    if(una>0) h+='<div class="cleaner-chip drop-target'+(filterCleaner===-1?' active':'')+'" role="button" tabindex="0" aria-label="Show unassigned cleanings" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDropOnCleaner(event,null)" data-action="setFilterCleaner" data-arg0="-1" data-action-keydown="__chipKeyFilterCleaner">Unassigned '+una+'</div>';
+    if(una>0) h+='<div class="cleaner-chip drop-target'+(filterCleaner===-1?' active':'')+'" role="button" tabindex="0" aria-label="Show unassigned cleanings" data-action-dragover="__dragOver" data-action-dragleave="__dragLeave" data-action-drop="__dropUnassign" data-action="setFilterCleaner" data-arg0="-1" data-action-keydown="__chipKeyFilterCleaner">Unassigned '+una+'</div>';
     h+='</div>';
   }
   h+='</div>';
@@ -3275,7 +3272,7 @@ function renderPlanner(){
       // Cleaner color for left border
       const cleanerColor=isCancelled?'var(--red)':(cleaner?cleaner.color:(urgency==='urgent'?'var(--red)':urgency==='warning'?'var(--orange)':'transparent'));
 
-      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" draggable="true" ondragstart="onDragStart(event,this.dataset.kbId,\'cleaning\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,this.dataset.kbId,\'cleaning\')" data-action="handleCardClick" data-arg0="'+sk+'" data-pass-event="1" data-action-keydown="__cardKeyActivate">';
+      h+='<div class="'+cc+'" role="button" tabindex="0" aria-label="'+esc((r.guest||'Guest')+' at '+(r.listing||''))+'" data-status="'+cardStatus+'" data-key="'+sk+'" data-kb-id="'+sk+'" data-kb-type="cleaning" style="border-left:4px solid '+cleanerColor+'" draggable="true" data-action-dragstart="__dragStartCard" data-action-contextmenu="__ctxCard" data-action="handleCardClick" data-arg0="'+sk+'" data-pass-event="1" data-action-keydown="__cardKeyActivate">';
       h+='<div class="swipe-cancel-bg"><span class="swipe-cancel-icon">'+(isCancelled?'↩️':'🚫')+'</span></div>';
 
       // Card content wrapper
@@ -5578,7 +5575,7 @@ function renderMtTicketCard(t,allProps,isManager,expanded){
     if(apt) n = n.replace(new RegExp('^\\s*'+apt.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*[-—–|:·•]\\s*','i'),'');
     return n.length>40 ? n.substring(0,40)+'…' : n;
   })() : '';
-  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" ondragstart="onDragStart(event,'+t.id+',\'ticket\')" ondragend="onDragEnd()" oncontextmenu="event.preventDefault();showCardContextMenu(event,'+t.id+',\'ticket\')" data-action="__mtCardClick" data-arg0="'+t.id+'" data-pass-event="1">';
+  let h='<div class="mt-card '+t.priority+(isResolved?' resolved-card':'')+(mtSelectMode&&mtSelected.has(t.id)?' selected':'')+(isDesktop()&&mtExpandedTicket===t.id?' detail-selected':'')+'" data-kb-id="'+t.id+'" data-kb-type="ticket" draggable="true" data-action-dragstart="__dragStartCard" data-action-contextmenu="__ctxCard" data-action="__mtCardClick" data-arg0="'+t.id+'" data-pass-event="1">';
   if(mtSelectMode){
     h+='<div class="mt-select-checkbox'+(mtSelected.has(t.id)?' checked':'')+'" data-action="toggleMtSelected" data-arg0="'+t.id+'" data-stop-propagation="1"></div>';
   }
