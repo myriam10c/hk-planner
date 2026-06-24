@@ -1780,8 +1780,21 @@ function startTimer(key){
   confirmAction('▶ Start Timer','Start the timer for '+label+'?',async()=>{
     // For the timer record we attach the first assignee (timers are per-cleaning, not per-cleaner).
     const cid=getAssigneeIds(key)[0]||null;
+    const prev=timers[key];
     timers[key]={started_at:new Date().toISOString(),finished_at:null,duration_minutes:null};render();
-    await api('startTimer',{body:{reservation_key:key,cleaner_id:cid}});toast('Timer started','success');
+    try{
+      const res=await api('startTimer',{body:{reservation_key:key,cleaner_id:cid}});
+      // api() returns server errors as {error} instead of throwing, so a resolved promise is NOT proof of success.
+      if(res&&res.error) throw new Error(res.error);
+      toast('Timer started','success');haptic('light');
+      // Reconcile local state + cache with the server (like pause/resume/stop) so the 5-min poll can't revert it.
+      await fetchAll();
+    }catch(e){
+      // Start didn't persist — revert the optimistic timer so the card shows its real state and the agent can retry.
+      if(prev===undefined) delete timers[key]; else timers[key]=prev;
+      render();
+      toast('Could not start timer — '+(e.message||'check connection')+'. Tap Start again.','error');
+    }
   });
 }
 function stopTimer(key){

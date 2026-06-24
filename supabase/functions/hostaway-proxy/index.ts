@@ -1097,9 +1097,8 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { reservation_key, cleaner_id } = body;
       if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
-      // Ne pas écraser un timer déjà terminé (l'upsert effacerait duration_minutes).
-      const { data: existingTimer } = await sb.from("cleaning_timer").select("finished_at").eq("reservation_key", reservation_key).maybeSingle();
-      if (existingTimer?.finished_at) return jsonResp({ error: "Timer already finished" }, 400);
+      // Re-starting a finished cleaning resets the timer for a fresh run (re-clean, or restart
+      // after an accidental stop). The previous run stays in cleaning_log (timer_stopped event).
       const { error } = await sb.from("cleaning_timer").upsert({
         reservation_key, cleaner_id: cleaner_id || null,
         started_at: new Date().toISOString(),
