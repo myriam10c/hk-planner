@@ -808,7 +808,6 @@ function renderMtKanban(tickets){
 
 async function onDropOnKanbanCol(e, status){
   e.preventDefault();
-  e.currentTarget.classList.remove('kc-drop-hover');
   if(!dragState || dragState.type !== 'ticket' || !dragState.id){ if(typeof onDragEnd==='function') onDragEnd(); return; }
   const id = Number(dragState.id);
   try {
@@ -959,7 +958,6 @@ function onDragEnd(){
 
 async function onDropOnCleaner(e, cleanerId){
   e.preventDefault();
-  e.currentTarget.classList.remove('drop-hover');
   const { id, type } = dragState;
   if(!id) { onDragEnd(); return; }
   if(type === 'cleaning'){
