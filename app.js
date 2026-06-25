@@ -1170,7 +1170,19 @@ async function api(action,opts){
   const init=opts&&opts.body
     ?{method:'POST',headers:{...baseHeaders,'Content-Type':'application/json'},body:JSON.stringify(opts.body)}
     :{headers:baseHeaders};
-  const resp=await fetch(url,init);
+  // Mobile networks drop silently; without a timeout fetch can hang forever and the
+  // action is lost with no feedback. Abort after 15s so callers' catch blocks fire.
+  const ctrl=new AbortController();
+  const timeoutId=setTimeout(()=>ctrl.abort(),15000);
+  init.signal=ctrl.signal;
+  let resp;
+  try{
+    resp=await fetch(url,init);
+  }catch(e){
+    throw new Error(e&&e.name==='AbortError'?'Request timed out — check connection':'Network error — check connection');
+  }finally{
+    clearTimeout(timeoutId);
+  }
   if(resp.status===401 && cleanerToken){
     // Session expired or revoked — force re-login
     cleanerMode=null; cleanerToken=null;
@@ -1493,8 +1505,8 @@ async function flushPendingDone(){
   const pk=undoKey;undoKey=null;hideUndoToast();
   if(!done[pk])return; // already undone
   savingDone=true;
-  try{await api('setDone',{body:{key:pk,done:true,actor:cleanerMode?cleanerMode.name:'Manager'}});}
-  catch(err){delete done[pk];toast('Error, reverted','error');render();}
+  try{const r=await api('setDone',{body:{key:pk,done:true,actor:cleanerMode?cleanerMode.name:'Manager'}});if(r&&r.error)throw new Error(r.error);}
+  catch(err){delete done[pk];toast('Could not save — reverted','error');render();}
   savingDone=false;
 }
 async function markDone(key){
@@ -1510,8 +1522,8 @@ async function markDone(key){
     undoTimer=setTimeout(async()=>{
       undoKey=null;hideUndoToast();
       savingDone=true;
-      try{await api('setDone',{body:{key,done:true,actor:cleanerMode?cleanerMode.name:'Manager'}});haptic('medium');}catch(err){
-        delete done[key];toast('Error, reverted','error');render();
+      try{const r=await api('setDone',{body:{key,done:true,actor:cleanerMode?cleanerMode.name:'Manager'}});if(r&&r.error)throw new Error(r.error);haptic('medium');}catch(err){
+        delete done[key];toast('Could not save — reverted','error');render();
       }
       savingDone=false;
       const date=key.split('_')[0];
@@ -1522,8 +1534,8 @@ async function markDone(key){
     // Direct undo (from Undo button)
     delete done[key];render();toast('Undone','success');
     savingDone=true;
-    try{await api('setDone',{body:{key,done:false,actor:cleanerMode?cleanerMode.name:'Manager'}});}catch(err){
-      done[key]=true;toast('Error, reverted','error');render();
+    try{const r=await api('setDone',{body:{key,done:false,actor:cleanerMode?cleanerMode.name:'Manager'}});if(r&&r.error)throw new Error(r.error);}catch(err){
+      done[key]=true;toast('Could not save — reverted','error');render();
     }
     savingDone=false;
   }
@@ -1636,8 +1648,8 @@ async function confirmCancel(key){
   closeCancelModal();
   cancelled[key]={reason,cancelled_by:cleanerMode?cleanerMode.name:'Manager',cancelled_at:new Date().toISOString()};
   render();toast('Cleaning cancelled','success');
-  try{await api('setCancelled',{body:{key,cancelled:true,reason,actor:cleanerMode?cleanerMode.name:'Manager'}});}
-  catch(err){delete cancelled[key];render();toast('Error','error');}
+  try{const r=await api('setCancelled',{body:{key,cancelled:true,reason,actor:cleanerMode?cleanerMode.name:'Manager'}});if(r&&r.error)throw new Error(r.error);}
+  catch(err){delete cancelled[key];render();toast('Could not save — reverted','error');}
 }
 
 async function confirmUncancel(key){
@@ -1645,8 +1657,8 @@ async function confirmUncancel(key){
   const prev=cancelled[key];
   delete cancelled[key];
   render();toast('Cleaning restored','success');
-  try{await api('setCancelled',{body:{key,cancelled:false,actor:cleanerMode?cleanerMode.name:'Manager'}});}
-  catch(err){cancelled[key]=prev;render();toast('Error','error');}
+  try{const r=await api('setCancelled',{body:{key,cancelled:false,actor:cleanerMode?cleanerMode.name:'Manager'}});if(r&&r.error)throw new Error(r.error);}
+  catch(err){cancelled[key]=prev;render();toast('Could not save — reverted','error');}
 }
 
 function toggleExpand(key,e){e.stopPropagation();expandedKey=expandedKey===key?null:key;if(expandedKey)loadDetail(key);render();}
@@ -2218,29 +2230,6 @@ function uploadAfterPhoto(rkey){
 }
 
 // Per-property custom checklist
-let propChecklists={};
-async function loadPropChecklist(listingId){
-  if(!propChecklists[listingId]){
-    const res=await api('getChecklistTemplate',{params:{listingId}});
-    propChecklists[listingId]=res.items||[];
-  }
-  return propChecklists[listingId];
-}
-async function addPropChecklistItem(listingId){
-  const inp=document.getElementById('propClItem_'+listingId);
-  if(!inp||!inp.value.trim())return;
-  const item=inp.value.trim();inp.value='';
-  if(!propChecklists[listingId])propChecklists[listingId]=[];
-  propChecklists[listingId].push(item);
-  await api('saveChecklistTemplate',{body:{listing_id:listingId,items:propChecklists[listingId]}});
-  toast(t('saved'),'success');render();
-}
-async function removePropChecklistItem(listingId,idx){
-  propChecklists[listingId].splice(idx,1);
-  await api('saveChecklistTemplate',{body:{listing_id:listingId,items:propChecklists[listingId]}});
-  toast(t('removed'),'success');render();
-}
-
 // QR code for inventory (lazy-loads qrcodejs CDN on first call)
 async function generateQR(elementId,text){
   try { await ensureQRCode(); } catch(e){ console.error('generateQR: lib load failed', e); return; }
