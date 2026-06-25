@@ -1192,6 +1192,14 @@ async function api(action,opts){
   }
   return resp.json();
 }
+// Pour les écritures : api() renvoie les erreurs serveur en {error} (pas de throw) et
+// throw déjà sur réseau/timeout. apiWrite() unifie : throw sur les deux, pour que les
+// appelants enveloppés dans try/catch puissent revert l'état et prévenir l'agent.
+async function apiWrite(action,opts){
+  const r=await api(action,opts);
+  if(r&&r.error) throw new Error(r.error);
+  return r;
+}
 
 function getWeekRange(){
   const t=new Date(),s=new Date(t);s.setDate(s.getDate()+(weekOffset*7));
@@ -1819,8 +1827,8 @@ function stopTimer(key){
     started=Math.max(0,Math.round((Date.now()-new Date(t.started_at).getTime()-pauseSec*1000)/60000));
   }
   confirmAction('⏹ Stop Timer','Stop timer for '+label+'? ('+started+' min elapsed)',async()=>{
-    const res=await api('stopTimer',{body:{reservation_key:key}});
-    if(res.status==='success'){
+    try{
+      const res=await apiWrite('stopTimer',{body:{reservation_key:key}});
       timers[key].finished_at=new Date().toISOString();timers[key].duration_minutes=res.duration_minutes;
       if(res.pause_count!=null)timers[key].pause_count=res.pause_count;
       timers[key].paused_at=null;
@@ -1828,22 +1836,24 @@ function stopTimer(key){
       render();
       // Propose "Mark as done?" popup
       showDoneAfterStop(key,label,res.duration_minutes);
+    }catch(e){
+      toast('Could not stop timer — '+(e.message||'check connection')+'. Tap Stop again.','error');
     }
   });
 }
 async function pauseTimer(key){
   try{
-    await api('pauseTimer',{body:{reservation_key:key}});
+    await apiWrite('pauseTimer',{body:{reservation_key:key}});
     if(timers[key])timers[key].paused_at=new Date().toISOString();
     toast('Paused ⏸️','success');
     haptic('light');
     render();
     fetchAll();
-  }catch(e){toast('Pause failed','error');}
+  }catch(e){toast('Could not pause — '+(e.message||'check connection'),'error');}
 }
 async function resumeTimer(key){
   try{
-    await api('resumeTimer',{body:{reservation_key:key}});
+    await apiWrite('resumeTimer',{body:{reservation_key:key}});
     if(timers[key]&&timers[key].paused_at){
       const pauseSec=Math.max(0,Math.round((Date.now()-new Date(timers[key].paused_at).getTime())/1000));
       timers[key].total_pause_seconds=(timers[key].total_pause_seconds||0)+pauseSec;
@@ -1854,7 +1864,7 @@ async function resumeTimer(key){
     haptic('light');
     render();
     fetchAll();
-  }catch(e){toast('Resume failed','error');}
+  }catch(e){toast('Could not resume — '+(e.message||'check connection'),'error');}
 }
 function showDoneAfterStop(key,label,mins){
   const ov=document.createElement('div');ov.className='confirm-overlay';
