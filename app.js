@@ -858,7 +858,7 @@ function renderContextMenu(){
       { divider: true },
       cleanerMode || cancelled[id] ? null : (postponed[id]
         ? { label: 'Restore original date', icon: 'refresh', handler: function(){ closeContextMenu(); restoreCleaningDate(id); } }
-        : { label: 'Postpone to tomorrow', icon: 'clock', handler: function(){ closeContextMenu(); postponeCleaning(id); } }),
+        : { label: 'Postpone to tomorrow', icon: 'clock', handler: function(){ closeContextMenu(); showPostponeConfirm(id); } }),
       cleanerMode || cancelled[id] ? null : { label: 'Cancel cleaning', icon: 'xCircle', danger: true, handler: function(){ closeContextMenu(); if(typeof toggleCancel === 'function') toggleCancel(id); } },
     ].filter(Boolean);
   } else if(type === '__mt_header__'){
@@ -1695,9 +1695,32 @@ async function confirmUncancel(key){
   catch(err){cancelled[key]=prev;render();toast('Could not save — reverted','error');}
 }
 
-// Postpone a cleaning to the next day. Reversible (see restoreCleaningDate). Moves the card
+// Step 1 of postpone: confirmation popup (double validation). Shows the date change and
+// asks to confirm before anything is moved. Reuses the cancel-modal host + styling.
+function showPostponeConfirm(key){
+  const r=(RESERVATIONS||[]).find(x=>keyFor(x)===key);
+  if(!r){toast('Cleaning not found','error');return;}
+  if(cancelled[key]){toast('Restore the cleaning before postponing it','error');return;}
+  const newDate=nextYMD(r.co);
+  const prop=esc(formatPropLabel(r.listingId, r.listing)||r.guest||'');
+  const h='<div class="modal-overlay" data-action="closePostponeModal">'+
+    '<div class="wa-chooser" data-action="__noop" data-stop-propagation="1" style="width:300px;text-align:center">'+
+    '<div style="font-size:32px;margin-bottom:8px">🕒</div>'+
+    '<div style="font-weight:700;font-size:15px;margin-bottom:6px">Postpone to tomorrow?</div>'+
+    '<div style="font-size:12px;color:var(--text2);margin-bottom:4px">'+prop+'</div>'+
+    '<div style="font-size:13px;font-weight:600;margin-bottom:12px">'+esc(formatDate(r.co))+' &rarr; '+esc(formatDate(newDate))+'</div>'+
+    '<div style="display:flex;gap:8px">'+
+    '<button data-action="closePostponeModal" style="flex:1;padding:10px;border:1px solid rgba(0,0,0,0.1);border-radius:10px;background:rgba(0,0,0,0.03);color:var(--text2);font-weight:600;font-size:13px;cursor:pointer">Cancel</button>'+
+    '<button data-action="confirmPostpone" data-arg0="'+esc(key)+'" style="flex:1;padding:10px;border:none;border-radius:10px;background:#c47e1a;color:white;font-weight:700;font-size:13px;cursor:pointer">Postpone</button>'+
+    '</div></div></div>';
+  document.getElementById('cancelModal').innerHTML=h;
+}
+function closePostponeModal(){document.getElementById('cancelModal').innerHTML='';}
+
+// Step 2 of postpone: apply the move. Reversible (see restoreCleaningDate). Moves the card
 // forward one day from its CURRENT effective date, so postponing twice pushes it +2.
-async function postponeCleaning(key){
+async function confirmPostpone(key){
+  closePostponeModal();
   const r=(RESERVATIONS||[]).find(x=>keyFor(x)===key);
   if(!r){toast('Cleaning not found','error');return;}
   if(cancelled[key]){toast('Restore the cleaning before postponing it','error');return;}
@@ -3577,7 +3600,7 @@ function renderCleaningDetailPane(r){
     if(postponed[k]){
       h += '<button class="btn-secondary" style="font-size:var(--fs-xs);padding:5px 12px;color:#c47e1a;border-color:rgba(230,149,43,0.4)" data-action="restoreCleaningDate" data-arg0="'+esc(k)+'">'+icon('refresh',12)+' Restore original date ('+esc(formatDate(r._origCo||r.co))+')</button>';
     }else{
-      h += '<button class="btn-secondary" style="font-size:var(--fs-xs);padding:5px 12px" data-action="postponeCleaning" data-arg0="'+esc(k)+'">'+icon('clock',12)+' Postpone to tomorrow</button>';
+      h += '<button class="btn-secondary" style="font-size:var(--fs-xs);padding:5px 12px" data-action="showPostponeConfirm" data-arg0="'+esc(k)+'">'+icon('clock',12)+' Postpone to tomorrow</button>';
     }
     h += '</div>';
   }
@@ -3742,7 +3765,7 @@ function renderCardDetail(key,r){
     if(postponed[key]){
       h+='<button style="width:100%;margin-bottom:10px;padding:9px;border-radius:10px;border:1px solid rgba(230,149,43,0.4);background:rgba(230,149,43,0.1);color:#c47e1a;font-weight:700;font-size:13px;cursor:pointer" data-action="restoreCleaningDate" data-arg0="'+sk+'" data-stop-propagation="1">↩ Restore original date ('+esc(formatDate(r._origCo||r.co))+')</button>';
     }else{
-      h+='<button style="width:100%;margin-bottom:10px;padding:9px;border-radius:10px;border:1px solid var(--border);background:rgba(0,0,0,0.03);color:var(--text);font-weight:700;font-size:13px;cursor:pointer" data-action="postponeCleaning" data-arg0="'+sk+'" data-stop-propagation="1">🕒 Postpone to tomorrow</button>';
+      h+='<button style="width:100%;margin-bottom:10px;padding:9px;border-radius:10px;border:1px solid var(--border);background:rgba(0,0,0,0.03);color:var(--text);font-weight:700;font-size:13px;cursor:pointer" data-action="showPostponeConfirm" data-arg0="'+sk+'" data-stop-propagation="1">🕒 Postpone to tomorrow</button>';
     }
   }
   // Property info for cleaner
