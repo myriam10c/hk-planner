@@ -3571,6 +3571,17 @@ function renderCleaningDetailPane(r){
   }
   h += '</div>';
 
+  // Manager-only: postpone this cleaning to the next day (or restore it).
+  if(!cleanerMode && !isCancelled){
+    h += '<div style="margin-bottom:18px">';
+    if(postponed[k]){
+      h += '<button class="btn-secondary" style="font-size:var(--fs-xs);padding:5px 12px;color:#c47e1a;border-color:rgba(230,149,43,0.4)" data-action="restoreCleaningDate" data-arg0="'+esc(k)+'">'+icon('refresh',12)+' Restore original date ('+esc(formatDate(r._origCo||r.co))+')</button>';
+    }else{
+      h += '<button class="btn-secondary" style="font-size:var(--fs-xs);padding:5px 12px" data-action="postponeCleaning" data-arg0="'+esc(k)+'">'+icon('clock',12)+' Postpone to tomorrow</button>';
+    }
+    h += '</div>';
+  }
+
   // Timer
   if(t){
     h += '<div style="margin-bottom:18px">';
@@ -3726,6 +3737,14 @@ function renderCardDetail(key,r){
   const score=getQualityScore(key,r);
 
   let h='<div class="card-detail" data-action="__noop" data-stop-propagation="1"><div>';
+  // Manager-only: postpone this cleaning to the next day (or restore it).
+  if(!cleanerMode && !cancelled[key]){
+    if(postponed[key]){
+      h+='<button style="width:100%;margin-bottom:10px;padding:9px;border-radius:10px;border:1px solid rgba(230,149,43,0.4);background:rgba(230,149,43,0.1);color:#c47e1a;font-weight:700;font-size:13px;cursor:pointer" data-action="restoreCleaningDate" data-arg0="'+sk+'" data-stop-propagation="1">↩ Restore original date ('+esc(formatDate(r._origCo||r.co))+')</button>';
+    }else{
+      h+='<button style="width:100%;margin-bottom:10px;padding:9px;border-radius:10px;border:1px solid var(--border);background:rgba(0,0,0,0.03);color:var(--text);font-weight:700;font-size:13px;cursor:pointer" data-action="postponeCleaning" data-arg0="'+sk+'" data-stop-propagation="1">🕒 Postpone to tomorrow</button>';
+    }
+  }
   // Property info for cleaner
   const ppf=propertyProfiles[r.listingId];
   if(ppf&&(ppf.access_code||ppf.wifi_name||ppf.special_instructions||ppf.checkout_instructions)){
