@@ -450,6 +450,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["getDone", "GET"],
   ["setDone", "POST"],
   ["setCancelled", "POST"],
+  ["setPostponed", "POST"],
   // ===== Cleaners CRUD + auth =====
   ["getCleaners", "GET"],
   ["saveCleaner", "POST"],
@@ -741,6 +742,25 @@ Deno.serve(async (req: Request) => {
       }
       await addLog(sb, key, cancelled ? "cancelled" : "uncancelled", actor);
       return jsonResp({ status: "success", key, cancelled });
+    }
+
+    // ==================== POSTPONE CLEANING ====================
+    // Date override : déplace un ménage à un jour ultérieur sans toucher Hostaway.
+    // postpone=true → upsert (new_date/original_date) ; postpone=false → retire l'override.
+    if (action === "setPostponed" && req.method === "POST") {
+      const body = await req.json();
+      const { key, postpone, new_date, original_date, actor } = body;
+      if (!key || typeof postpone !== "boolean") return jsonResp({ error: "key and postpone required" }, 400);
+      if (postpone) {
+        if (!new_date || !original_date) return jsonResp({ error: "new_date and original_date required" }, 400);
+        const { error } = await sb.from("cleaning_postponed").upsert({ reservation_key: key, original_date, new_date, postponed_by: actor || "Manager", postponed_at: new Date().toISOString() }, { onConflict: "reservation_key" });
+        if (error) throw error;
+      } else {
+        const { error } = await sb.from("cleaning_postponed").delete().eq("reservation_key", key);
+        if (error) throw error;
+      }
+      await addLog(sb, key, postpone ? "postponed" : "unpostponed", actor, postpone ? { new_date, original_date } : null);
+      return jsonResp({ status: "success", key, postpone });
     }
 
     // ==================== CLEANERS ====================
@@ -1908,11 +1928,12 @@ Deno.serve(async (req: Request) => {
       // Tables qui grossissent à chaque ménage (menage_done, cleaning_assignments,
       // cleaning_timer, cleaning_cancelled) : paginer pour éviter la troncature
       // silencieuse PostgREST à 1000 rows.
-      const [doneRows, assignRows, timerRows, cancelledRows, cleanerRes, templateRes, listingRes, issueRes, recurRes, ticketRes, vendorRes, equipRes, prevRes, profileRes, extraRes] = await Promise.all([
+      const [doneRows, assignRows, timerRows, cancelledRows, postponedRows, cleanerRes, templateRes, listingRes, issueRes, recurRes, ticketRes, vendorRes, equipRes, prevRes, profileRes, extraRes] = await Promise.all([
         fetchAllRows<any>((from, to) => sb.from("menage_done").select("reservation_key, done").order("reservation_key").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type").order("reservation_key").order("cleaner_id").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_timer").select("*").order("reservation_key").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_cancelled").select("reservation_key, reason, cancelled_by, cancelled_at").order("reservation_key").range(from, to)),
+        fetchAllRows<any>((from, to) => sb.from("cleaning_postponed").select("reservation_key, original_date, new_date, postponed_by, postponed_at").order("reservation_key").range(from, to)),
         sb.from("cleaners").select("*").eq("is_active", true).order("name"),
         sb.from("checklist_templates").select("*").order("name"),
         sb.from("listing_config").select("listing_id, listing_name, bedrooms, price, custom_price, unit_type, apt_number, internal_name"),
@@ -1930,6 +1951,8 @@ Deno.serve(async (req: Request) => {
       ]);
       const cancelledMap: Record<string, any> = {};
       cancelledRows.forEach((r: any) => { cancelledMap[r.reservation_key] = { reason: r.reason, cancelled_by: r.cancelled_by, cancelled_at: r.cancelled_at }; });
+      const postponedMap: Record<string, any> = {};
+      postponedRows.forEach((r: any) => { postponedMap[r.reservation_key] = { original_date: r.original_date, new_date: r.new_date, postponed_by: r.postponed_by, postponed_at: r.postponed_at }; });
       const doneMap: Record<string, boolean> = {};
       doneRows.forEach((r: any) => { doneMap[r.reservation_key] = r.done; });
       // Multi-assign: assignments[reservation_key] is now a number[].
@@ -1956,6 +1979,7 @@ Deno.serve(async (req: Request) => {
         equipment: equipRes.data || [], preventiveMaintenance: prevRes.data || [],
         propertyProfiles: profileMap,
         cancelled: cancelledMap,
+        postponed: postponedMap,
         extraCleanings: extraRes.data || [],
       });
     }

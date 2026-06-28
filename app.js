@@ -436,6 +436,7 @@ function setDashSection(s){
 }
 let searchOpen=false;
 let cancelled={}; // {key: {reason,cancelled_by,cancelled_at}}
+let postponed={}; // {key: {original_date,new_date,postponed_by,postponed_at}} — cleanings moved to a later day
 let swipeState=null; // {key,startX,startY,el,swiping}
 let cleanerMode=JSON.parse(localStorage.getItem('cleanerMode')||'null'); // null=manager, {id,name,color,role}=logged in user (#6)
 let cleanerToken=localStorage.getItem('cleanerToken')||null; // Phase 1: server-signed session token
@@ -855,6 +856,9 @@ function renderContextMenu(){
       cleanerMode ? null : { label: 'Assign cleaner…', icon: 'user', handler: function(){ closeContextMenu(); showAssignPicker(id); } },
       { label: 'View details', icon: 'clipboard', handler: function(e){ closeContextMenu(); toggleExpand(id, e); } },
       { divider: true },
+      cleanerMode || cancelled[id] ? null : (postponed[id]
+        ? { label: 'Restore original date', icon: 'refresh', handler: function(){ closeContextMenu(); restoreCleaningDate(id); } }
+        : { label: 'Postpone to tomorrow', icon: 'clock', handler: function(){ closeContextMenu(); postponeCleaning(id); } }),
       cleanerMode || cancelled[id] ? null : { label: 'Cancel cleaning', icon: 'xCircle', danger: true, handler: function(){ closeContextMenu(); if(typeof toggleCancel === 'function') toggleCancel(id); } },
     ].filter(Boolean);
   } else if(type === '__mt_header__'){
@@ -964,28 +968,28 @@ async function onDropOnCleaner(e, cleanerId){
     if(cleanerId == null){
       // Dropped on "Unassigned" → clear all assignees
       try {
-        await api('assignCleaner',{body:{reservation_key:id, mode:'clear', actor:cleanerMode?cleanerMode.name:'Manager'}});
+        await apiWrite('assignCleaner',{body:{reservation_key:id, mode:'clear', actor:cleanerMode?cleanerMode.name:'Manager'}});
         toast('Unassigned','success');
         haptic('medium');
         if(typeof fetchAll === 'function') fetchAll();
-      } catch(err){ toast('Error','error'); }
+      } catch(err){ toast('Could not unassign — '+(err.message||'check connection'),'error'); if(typeof fetchAll==='function') fetchAll(); }
     } else {
       // Drop on a cleaner = ADD them to the team (Shift = replace existing list)
       const mode = e.shiftKey ? 'set' : 'add';
       try {
-        await api('assignCleaner',{body:{reservation_key:id, cleaner_id:cleanerId, mode, actor:cleanerMode?cleanerMode.name:'Manager'}});
+        await apiWrite('assignCleaner',{body:{reservation_key:id, cleaner_id:cleanerId, mode, actor:cleanerMode?cleanerMode.name:'Manager'}});
         toast(e.shiftKey ? 'Reassigned ✓' : 'Added ✓','success');
         haptic('medium');
         if(typeof fetchAll === 'function') fetchAll();
-      } catch(err){ toast('Error','error'); }
+      } catch(err){ toast('Could not assign — '+(err.message||'check connection'),'error'); if(typeof fetchAll==='function') fetchAll(); }
     }
   } else if(type === 'ticket'){
     try {
-      await api('updateTicket',{body:{id:Number(id), assigned_technician_id:cleanerId, assigned_vendor_id:null, status:'assigned', actor:cleanerMode?cleanerMode.name:'Manager'}});
+      await apiWrite('updateTicket',{body:{id:Number(id), assigned_technician_id:cleanerId, assigned_vendor_id:null, status:'assigned', actor:cleanerMode?cleanerMode.name:'Manager'}});
       toast('Reassigned ✓','success');
       haptic('medium');
       if(typeof refreshMaintenance === 'function') refreshMaintenance();
-    } catch(err){ toast('Error','error'); }
+    } catch(err){ toast('Could not reassign — '+(err.message||'check connection'),'error'); if(typeof refreshMaintenance==='function') refreshMaintenance(); }
   }
   onDragEnd();
 }
@@ -1257,6 +1261,7 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
     })).sort((a,b)=>a.co.localeCompare(b.co));
     done=allRes.done||{};assignments=allRes.assignments||{};cleaners=allRes.cleaners||[];templates=allRes.templates||{};listingPrices=allRes.listingPrices||{};timers=allRes.timers||{};
     cancelled=allRes.cancelled||{};
+    postponed=allRes.postponed||{};
     extraCleanings=allRes.extraCleanings||[];
     // Inject extras into RESERVATIONS as pseudo-reservations so the full workflow applies
     const extrasAsRes=(extraCleanings||[])
@@ -1283,7 +1288,9 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
         _reservationKey:e.reservation_key,
       }));
     RESERVATIONS=RESERVATIONS.concat(extrasAsRes).sort((a,b)=>a.co.localeCompare(b.co));
-    dates=[];const seen={};RESERVATIONS.forEach(r=>{if(!seen[r.co]){seen[r.co]=true;dates.push(r.co);}});dates.sort();
+    applyPostponements();
+    RESERVATIONS.sort((a,b)=>a.co.localeCompare(b.co));
+    rebuildDates();
     issues=allRes.issues||[];recurringTasks=allRes.recurringTasks||[];
     maintenanceTickets=allRes.maintenanceTickets||[];vendors=allRes.vendors||[];equipment=allRes.equipment||[];preventiveMaint=allRes.preventiveMaintenance||[];
     propertyProfiles=allRes.propertyProfiles||{};
@@ -1307,6 +1314,25 @@ function localYMD(d){const dt=d||new Date();return dt.getFullYear()+'-'+String(d
 function todayLocal(){return localYMD(new Date());}
 function formatTime(h){if(h==null||h===0)return null;return(h<10?'0':'')+h+':00';}
 function isNextDayOf(baseDate,date){const d=new Date(baseDate+'T00:00:00');d.setDate(d.getDate()+1);return localYMD(d)===date;}
+function nextYMD(dateStr){const d=new Date(dateStr+'T00:00:00');d.setDate(d.getDate()+1);return localYMD(d);}
+// Rebuild the unique sorted day list from RESERVATIONS (used by the day tabs).
+function rebuildDates(){dates=[];const seen={};RESERVATIONS.forEach(r=>{if(!seen[r.co]){seen[r.co]=true;dates.push(r.co);}});dates.sort();}
+// Apply postpone overrides: shift each postponed reservation's co to its new_date while
+// FREEZING its key (via _reservationKey) so assignment/done/checklist stay attached.
+// Hostaway keys are date-derived (co_guest), so without freezing, moving co would orphan
+// every overlay keyed on the original key.
+function applyPostponements(){
+  RESERVATIONS.forEach(r=>{
+    const k=keyFor(r);
+    const p=postponed[k];
+    if(p&&p.new_date){
+      r._reservationKey=k;
+      if(r._origCo===undefined) r._origCo=(p.original_date||r.co);
+      r.co=p.new_date;
+      r._postponed=true;
+    }
+  });
+}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
 // Default cleaning fee by bedroom count (fallback when listing not in pricing table)
@@ -1669,6 +1695,54 @@ async function confirmUncancel(key){
   catch(err){cancelled[key]=prev;render();toast('Could not save — reverted','error');}
 }
 
+// Postpone a cleaning to the next day. Reversible (see restoreCleaningDate). Moves the card
+// forward one day from its CURRENT effective date, so postponing twice pushes it +2.
+async function postponeCleaning(key){
+  const r=(RESERVATIONS||[]).find(x=>keyFor(x)===key);
+  if(!r){toast('Cleaning not found','error');return;}
+  if(cancelled[key]){toast('Restore the cleaning before postponing it','error');return;}
+  const newDate=nextYMD(r.co);
+  const originalDate=(postponed[key]&&postponed[key].original_date)||r._origCo||r.co;
+  // snapshot for revert
+  const prevPost=postponed[key],prevCo=r.co,prevOrig=r._origCo,prevFlag=r._postponed,prevFrozen=r._reservationKey;
+  postponed[key]={original_date:originalDate,new_date:newDate,postponed_by:cleanerMode?cleanerMode.name:'Manager',postponed_at:new Date().toISOString()};
+  r._reservationKey=key;
+  if(r._origCo===undefined) r._origCo=originalDate;
+  r.co=newDate;
+  r._postponed=true;
+  rebuildDates();render();toast('Postponed to '+formatDate(newDate),'success');
+  try{
+    const res=await api('setPostponed',{body:{key,postpone:true,new_date:newDate,original_date:originalDate,actor:cleanerMode?cleanerMode.name:'Manager'}});
+    if(res&&res.error)throw new Error(res.error);
+  }catch(err){
+    if(prevPost)postponed[key]=prevPost;else delete postponed[key];
+    r.co=prevCo;r._origCo=prevOrig;r._postponed=prevFlag;
+    if(prevFrozen===undefined)delete r._reservationKey;else r._reservationKey=prevFrozen;
+    rebuildDates();render();toast('Could not save — reverted','error');
+  }
+}
+
+// Remove a postpone override: the cleaning returns to its original (Hostaway/extra) date.
+async function restoreCleaningDate(key){
+  const r=(RESERVATIONS||[]).find(x=>keyFor(x)===key);
+  const prevPost=postponed[key];
+  if(!r||!prevPost)return;
+  const originalDate=prevPost.original_date||r._origCo||r.co;
+  const prevCo=r.co,prevOrig=r._origCo,prevFlag=r._postponed,prevFrozen=r._reservationKey;
+  delete postponed[key];
+  r.co=originalDate;r._origCo=undefined;r._postponed=false;
+  if(!r._isExtra)delete r._reservationKey; // Hostaway: key reverts to (co_guest)=original
+  rebuildDates();render();toast('Date restored','success');
+  try{
+    const res=await api('setPostponed',{body:{key,postpone:false,actor:cleanerMode?cleanerMode.name:'Manager'}});
+    if(res&&res.error)throw new Error(res.error);
+  }catch(err){
+    postponed[key]=prevPost;
+    r.co=prevCo;r._origCo=prevOrig;r._postponed=prevFlag;r._reservationKey=prevFrozen;
+    rebuildDates();render();toast('Could not save — reverted','error');
+  }
+}
+
 function toggleExpand(key,e){e.stopPropagation();expandedKey=expandedKey===key?null:key;if(expandedKey)loadDetail(key);render();}
 
 async function loadDetail(key){
@@ -1741,15 +1815,24 @@ async function toggleAssignee(rkey, cid){
   const cleanerId=Number(cid);
   const ids=new Set(getAssigneeIds(rkey));
   const adding=!ids.has(cleanerId);
+  const prev=assignments[rkey];
   if(adding) ids.add(cleanerId); else ids.delete(cleanerId);
   assignments[rkey]=Array.from(ids);
   // Re-render the picker contents in place (don't close it)
   const overlay=document.querySelector('.assign-picker-overlay');
   if(overlay){ overlay.remove(); showAssignPicker(rkey); }
   render();
-  // Server: incremental add/remove keeps audit trail clean
-  await api('assignCleaner',{body:{reservation_key:rkey, cleaner_id:cleanerId, mode: adding?'add':'remove'}});
-  toast(adding?'Added ✓':'Removed','success');
+  try{
+    // Server: incremental add/remove keeps audit trail clean
+    await apiWrite('assignCleaner',{body:{reservation_key:rkey, cleaner_id:cleanerId, mode: adding?'add':'remove'}});
+    toast(adding?'Added ✓':'Removed','success');
+  }catch(e){
+    if(prev===undefined) delete assignments[rkey]; else assignments[rkey]=prev;
+    const ov=document.querySelector('.assign-picker-overlay');
+    if(ov){ ov.remove(); showAssignPicker(rkey); }
+    render();
+    toast('Could not save — '+(e.message||'check connection'),'error');
+  }
 }
 
 // Replace the entire assignment list (used by "Clear all" and legacy single-set callers).
@@ -3293,7 +3376,7 @@ function renderPlanner(){
       const estTime=getEstTime(r.listingId);
       h+='<div class="card-row-1">';
       h+='<div class="status-dot '+cardStatus+'"></div>';
-      h+='<div class="listing-name">'+esc(formatPropLabel(r.listingId, r.listing))+(r._isExtra?' <span class="badge-extra">➕ '+esc(r._extraLabel||'EXTRA')+(r.price_billed?' · '+r.price_billed+' AED':'')+'</span>':'')+'</div>';
+      h+='<div class="listing-name">'+esc(formatPropLabel(r.listingId, r.listing))+(r._isExtra?' <span class="badge-extra">➕ '+esc(r._extraLabel||'EXTRA')+(r.price_billed?' · '+r.price_billed+' AED':'')+'</span>':'')+(r._postponed?' <span style="display:inline-block;margin-left:4px;padding:1px 6px;border-radius:6px;background:rgba(230,149,43,0.15);color:#c47e1a;font-size:10px;font-weight:700;vertical-align:middle" title="Postponed — originally '+esc(formatDateFull(r._origCo||r.co))+'">↪ Postponed</span>':'')+'</div>';
       if(coT) h+='<span class="tag-pill" style="margin-left:auto;flex-shrink:0">'+coT+'</span>';
       else if(!r._isExtra) h+='<span class="tag-pill" style="margin-left:auto;flex-shrink:0;color:var(--text3)" title="Checkout time not set in Hostaway">—:—</span>';
       h+='</div>';
