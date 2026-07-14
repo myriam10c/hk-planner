@@ -1130,7 +1130,7 @@ function renderOnboarding(){
   if(!onboardingOpen){ el.innerHTML=''; return; }
   const slides = [
     {icon:icon('wave',56),title:'Welcome!',text:'Here are your cleanings for today. Tap a card to see the reservation details.'},
-    {icon:icon('fingerUp',56),title:'Swipe to cancel',text:'Swipe a card to the right to report that the cleaning can\'t be done (guest still there, no key, etc.)'},
+    {icon:icon('phone',56),title:'Can\'t do a cleaning?',text:'Contact your manager — only managers can cancel or postpone a cleaning.'},
     {icon:icon('timer',56),title:'Timer & photos',text:'Start the timer, pause during waits, and add before/after photos to prove the job is done.'}
   ];
   const s = slides[onboardingStep];
@@ -1592,6 +1592,7 @@ function initSwipe(){
   document.addEventListener('touchend',onSwipeEnd,{passive:true});
 }
 function onSwipeStart(e){
+  if(cleanerMode)return; // cancel is manager-only
   const card=e.target.closest('.checkout-card');
   if(!card||card.classList.contains('done'))return;
   const key=card.getAttribute('data-key');
@@ -1640,6 +1641,7 @@ function onSwipeEnd(e){
 }
 
 function showCancelConfirm(key){
+  if(cleanerMode){toast('Only managers can cancel a cleaning','error');return;}
   const parts=key.split('_');
   const guest=parts.slice(1).join('_');
   const h='<div class="modal-overlay" data-action="closeCancelModal">'+
@@ -1656,6 +1658,7 @@ function showCancelConfirm(key){
 }
 
 function showUncancelConfirm(key){
+  if(cleanerMode){toast('Only managers can restore a cleaning','error');return;}
   const parts=key.split('_');
   const guest=parts.slice(1).join('_');
   const h='<div class="modal-overlay" data-action="closeCancelModal">'+
@@ -1678,6 +1681,7 @@ async function toggleCancel(key){
 }
 
 async function confirmCancel(key){
+  if(cleanerMode){toast('Only managers can cancel a cleaning','error');return;}
   const reason=document.getElementById('cancelReason')?document.getElementById('cancelReason').value:'';
   closeCancelModal();
   cancelled[key]={reason,cancelled_by:cleanerMode?cleanerMode.name:'Manager',cancelled_at:new Date().toISOString()};
@@ -1687,6 +1691,7 @@ async function confirmCancel(key){
 }
 
 async function confirmUncancel(key){
+  if(cleanerMode){toast('Only managers can restore a cleaning','error');return;}
   closeCancelModal();
   const prev=cancelled[key];
   delete cancelled[key];
@@ -1698,6 +1703,7 @@ async function confirmUncancel(key){
 // Step 1 of postpone: confirmation popup (double validation). Shows the date change and
 // asks to confirm before anything is moved. Reuses the cancel-modal host + styling.
 function showPostponeConfirm(key){
+  if(cleanerMode){toast('Only managers can postpone a cleaning','error');return;}
   const r=(RESERVATIONS||[]).find(x=>keyFor(x)===key);
   if(!r){toast('Cleaning not found','error');return;}
   if(cancelled[key]){toast('Restore the cleaning before postponing it','error');return;}
@@ -1720,6 +1726,7 @@ function closePostponeModal(){document.getElementById('cancelModal').innerHTML='
 // Step 2 of postpone: apply the move. Reversible (see restoreCleaningDate). Moves the card
 // forward one day from its CURRENT effective date, so postponing twice pushes it +2.
 async function confirmPostpone(key){
+  if(cleanerMode){toast('Only managers can postpone a cleaning','error');return;}
   closePostponeModal();
   const r=(RESERVATIONS||[]).find(x=>keyFor(x)===key);
   if(!r){toast('Cleaning not found','error');return;}
@@ -1747,6 +1754,7 @@ async function confirmPostpone(key){
 
 // Remove a postpone override: the cleaning returns to its original (Hostaway/extra) date.
 async function restoreCleaningDate(key){
+  if(cleanerMode){toast('Only managers can postpone a cleaning','error');return;}
   const r=(RESERVATIONS||[]).find(x=>keyFor(x)===key);
   const prevPost=postponed[key];
   if(!r||!prevPost)return;
@@ -3455,7 +3463,7 @@ function renderPlanner(){
       // CTA button column (right side)
       h+='<div class="card-cta-col">';
       if(isCancelled){
-        h+='<button class="card-cta restore" data-action="toggleCancel" data-arg0="'+sk+'" data-stop-propagation="1">Restore</button>';
+        if(!cleanerMode) h+='<button class="card-cta restore" data-action="toggleCancel" data-arg0="'+sk+'" data-stop-propagation="1">Restore</button>';
       }else if(isPaused){
         h+='<button class="card-cta resume" data-action="resumeTimer" data-arg0="'+sk+'" data-stop-propagation="1" title="Resume">'+icon('play',14)+'</button>';
         h+='<button class="card-cta stop" data-action="stopTimer" data-arg0="'+sk+'" data-stop-propagation="1">Stop</button>';

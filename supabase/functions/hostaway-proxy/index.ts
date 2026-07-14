@@ -729,7 +729,11 @@ Deno.serve(async (req: Request) => {
     }
 
     // ==================== CANCEL CLEANING ====================
+    // Manager-only : une session authentifiée non-manager (cleaner/maintenance/subcontractor)
+    // est rejetée. Pas de token = vue manager historique (sans login) → autorisé.
     if (action === "setCancelled" && req.method === "POST") {
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
       const body = await req.json();
       const { key, cancelled, reason, actor } = body;
       if (!key || typeof cancelled !== "boolean") return jsonResp({ error: "key and cancelled required" }, 400);
@@ -748,6 +752,9 @@ Deno.serve(async (req: Request) => {
     // Date override : déplace un ménage à un jour ultérieur sans toucher Hostaway.
     // postpone=true → upsert (new_date/original_date) ; postpone=false → retire l'override.
     if (action === "setPostponed" && req.method === "POST") {
+      // Manager-only (même règle que setCancelled).
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
       const body = await req.json();
       const { key, postpone, new_date, original_date, actor } = body;
       if (!key || typeof postpone !== "boolean") return jsonResp({ error: "key and postpone required" }, 400);
