@@ -980,7 +980,6 @@ async function onDropOnCleaner(e, cleanerId){
 document.addEventListener('dragend', onDragEnd);
 
 let autoSendCleaners=true;
-let propertyProfiles={};
 let dashKPIs=null,dashKPIsLoading=false;
 // Hermes Activity tab (auto-agent observability)
 let hermesData=null,hermesLoading=false,hermesFilter={handler:'',status:'',days:7};
@@ -1032,10 +1031,6 @@ en:{
   customChecklist:'Custom Checklist',addItem:'Add item',
   myPerformance:'My Performance',cleaningsTotal:'Total Cleanings',avgTimeLabel:'Avg Time',qualityScore:'Quality Score',
   thisMonth:'This Month',allTime:'All Time',
-  properties:'Properties',propertyProfile:'Property Profile',accessCode:'Access Code',wifiName:'WiFi Name',wifiPassword:'WiFi Password',
-  specialInstructions:'Special Instructions',contactName:'Contact Name',contactPhone:'Contact Phone',parkingInfo:'Parking Info',
-  trashInstructions:'Trash Instructions',checkoutInstructions:'Checkout Instructions',saveProfile:'Save Profile',
-  noProfiles:'No property profiles yet',editProfile:'Edit Profile',
   avgCleanTime:'Avg Clean Time',performance:'Performance',completionRate:'Completion Rate',
   openTickets:'Open Tickets',resolvedMonth:'Resolved/mo',avgResolution:'Avg Resolution',
   trend7Days:'7-Day Trend',cleanerLeaderboard:'Cleaner Leaderboard',fastest:'Fastest',slowest:'Slowest'
@@ -1267,7 +1262,6 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
     RESERVATIONS.sort((a,b)=>a.co.localeCompare(b.co));
     rebuildDates();
     maintenanceTickets=allRes.maintenanceTickets||[];vendors=allRes.vendors||[];equipment=allRes.equipment||[];preventiveMaint=allRes.preventiveMaintenance||[];
-    propertyProfiles=allRes.propertyProfiles||{};
     // Compute estimated times from timer history
     estimatedTimes={};
     Object.entries(timers).forEach(([k,t])=>{if(t&&t.duration_minutes){
@@ -2062,29 +2056,6 @@ function startLiveTimerUpdates(){
       });
     }
   },30000);
-}
-
-// Property profile CRUD
-async function savePropertyProfile(listingId){
-  const f=id=>document.getElementById(id)?document.getElementById(id).value.trim():'';
-  const body={
-    listing_id:listingId,
-    listing_name:f('pp_name_'+listingId),
-    access_code:f('pp_code_'+listingId),
-    wifi_name:f('pp_wifi_'+listingId),
-    wifi_password:f('pp_wifipw_'+listingId),
-    special_instructions:f('pp_instr_'+listingId),
-    contact_name:f('pp_contact_'+listingId),
-    contact_phone:f('pp_cphone_'+listingId),
-    parking_info:f('pp_parking_'+listingId),
-    trash_instructions:f('pp_trash_'+listingId),
-    checkout_instructions:f('pp_checkout_'+listingId),
-    notes:f('pp_notes_'+listingId)
-  };
-  toast('Saving...');
-  await api('savePropertyProfile',{body});
-  propertyProfiles[listingId]={...propertyProfiles[listingId],...body};
-  toast(t('saved'),'success');render();
 }
 
 // Load dashboard KPIs
@@ -2970,7 +2941,6 @@ function renderMoreMenu(){
     {id:'ratings',icon:icon('star',22),label:'Ratings',color:'#ca8a04'},
     {id:'reviews',icon:icon('msgSquare',22),label:'Reviews',color:'#4f46e5'},
     {id:'settings',icon:icon('settings',22),label:'Settings',color:'#475569'},
-    {id:'properties',icon:icon('home',22),label:'Properties',color:'#7c3aed'},
     {id:'history',icon:icon('history',22),label:'History',color:'#059669'},
     {id:'calendar',icon:icon('calendar',22),label:'Calendar',color:'#0891b2'},
     {id:'stats',icon:icon('trending',22),label:'Stats',color:'#be185d'},
@@ -3079,7 +3049,6 @@ function render(){
   try { writeUrlState(); } catch(e) {}
   try { applyPlannerLayoutMode(); } catch(e) {}
   if(currentTab==='maintenance')return renderMaintenance();
-  // properties tab removed
   if(currentTab==='dashboard')return renderDashboard();
   if(currentTab==='settings')return renderSettings();
   if(currentTab==='history')return renderHistory();
@@ -3672,20 +3641,6 @@ function renderCardDetail(key,r){
     }else{
       h+='<button style="width:100%;margin-bottom:10px;padding:9px;border-radius:10px;border:1px solid var(--border);background:rgba(0,0,0,0.03);color:var(--text);font-weight:700;font-size:13px;cursor:pointer" data-action="showPostponeConfirm" data-arg0="'+sk+'" data-stop-propagation="1">🕒 Postpone to tomorrow</button>';
     }
-  }
-  // Property info for cleaner
-  const ppf=propertyProfiles[r.listingId];
-  if(ppf&&(ppf.access_code||ppf.wifi_name||ppf.special_instructions||ppf.checkout_instructions)){
-    h+='<div style="background:var(--primary-light);border-radius:10px;padding:10px;margin-bottom:10px;border-left:3px solid var(--primary)">';
-    h+='<div style="font-weight:700;font-size:12px;margin-bottom:6px">🏠 '+t('propertyProfile')+'</div>';
-    if(ppf.access_code)h+='<div style="font-size:11px;margin-bottom:3px">🔑 <strong>'+t('accessCode')+':</strong> '+esc(ppf.access_code)+'</div>';
-    if(ppf.wifi_name)h+='<div style="font-size:11px;margin-bottom:3px">📶 <strong>WiFi:</strong> '+esc(ppf.wifi_name)+(ppf.wifi_password?' / '+esc(ppf.wifi_password):'')+'</div>';
-    if(ppf.parking_info)h+='<div style="font-size:11px;margin-bottom:3px">🅿️ '+esc(ppf.parking_info)+'</div>';
-    if(ppf.special_instructions)h+='<div style="font-size:11px;margin-bottom:3px;color:var(--red)">⚠️ '+esc(ppf.special_instructions)+'</div>';
-    if(ppf.checkout_instructions)h+='<div style="font-size:11px;margin-bottom:3px">📋 '+esc(ppf.checkout_instructions)+'</div>';
-    if(ppf.trash_instructions)h+='<div style="font-size:11px;margin-bottom:3px">🗑️ '+esc(ppf.trash_instructions)+'</div>';
-    if(ppf.contact_name||ppf.contact_phone)h+='<div style="font-size:11px">📞 '+(ppf.contact_name?esc(ppf.contact_name):'')+(ppf.contact_phone?' '+esc(ppf.contact_phone):'')+'</div>';
-    h+='</div>';
   }
   // Quality score (#12)
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="detail-title">☑️ Checklist'+(tmpl?' ('+esc(tmpl.name)+')':'')+'  '+doneCnt+'/'+items.length+'</div>'+
@@ -4389,59 +4344,6 @@ function renderTicketsFunnel(){
   });
   html += '</div>';
   el.innerHTML = html;
-}
-
-// ============ PROPERTY PROFILES ============
-let ppEditId=null;
-function togglePpEdit(lid){ppEditId=ppEditId===lid?null:lid;render();}
-function renderProperties(){
-  let h='<div class="header"><div class="header-top"><h1>🏠 '+t('properties')+'</h1><div class="header-actions"></div></div></div>';
-  h+='<div class="container">';
-  // Collect all unique listings
-  const allListings={};
-  Object.entries(listingPrices).forEach(([lid,lp])=>{allListings[lid]={name:lp.listing_name||'#'+lid,bedrooms:lp.bedrooms};});
-  RESERVATIONS.forEach(r=>{if(r.listingId&&!allListings[r.listingId])allListings[r.listingId]={name:r.listing,bedrooms:getBedroomsForListing(r.listingId)};
-    if(r.listingId&&allListings[r.listingId]&&!allListings[r.listingId].name)allListings[r.listingId].name=r.listing;});
-  const listArr=Object.entries(allListings).sort((a,b)=>(a[1].name||'').localeCompare(b[1].name||''));
-  if(listArr.length===0){h+='<div class="empty-state"><div class="icon">🏠</div><div class="msg">'+t('noProfiles')+'</div></div>';}
-  listArr.forEach(([lid,info])=>{
-    const pp=propertyProfiles[lid]||{};
-    const hasProfile=pp.access_code||pp.wifi_name||pp.special_instructions;
-    const isEdit=ppEditId===lid;
-    h+='<div class="settings-panel" style="border-left:3px solid '+(hasProfile?'var(--green)':'var(--border))')+'">';
-    h+='<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" data-action="togglePpEdit" data-arg0="'+lid+'">';
-    h+='<div><h3 style="font-size:14px;margin:0">'+esc(info.name)+'</h3><span style="font-size:10px;color:var(--text3)">'+getBedroomLabel(info.bedrooms)+' · ID: '+lid+'</span></div>';
-    h+='<div style="display:flex;align-items:center;gap:6px">'+(hasProfile?'<span style="font-size:10px;background:var(--green-light);color:var(--green);padding:2px 8px;border-radius:10px;font-weight:600">✓ Configured</span>':'<span style="font-size:10px;color:var(--text3)">Not configured</span>');
-    h+='<span style="font-size:16px">'+(isEdit?'▲':'▼')+'</span></div></div>';
-    // Quick info when collapsed
-    if(!isEdit&&hasProfile){
-      h+='<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">';
-      if(pp.access_code)h+='<span style="font-size:10px;background:rgba(124,58,237,0.06);padding:3px 8px;border-radius:6px">🔑 '+esc(pp.access_code)+'</span>';
-      if(pp.wifi_name)h+='<span style="font-size:10px;background:rgba(124,58,237,0.06);padding:3px 8px;border-radius:6px">📶 '+esc(pp.wifi_name)+'</span>';
-      if(pp.special_instructions)h+='<span style="font-size:10px;background:var(--orange-light);padding:3px 8px;border-radius:6px;color:var(--orange)">⚠️ Has instructions</span>';
-      h+='</div>';
-    }
-    // Edit form
-    if(isEdit){
-      h+='<div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px">';
-      h+='<div><label style="font-size:10px;font-weight:600;color:var(--text2)">🔑 '+t('accessCode')+'</label><input id="pp_code_'+lid+'" value="'+esc(pp.access_code||'')+'" placeholder="e.g. 1234#" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)"/></div>';
-      h+='<div><label style="font-size:10px;font-weight:600;color:var(--text2)">📶 '+t('wifiName')+'</label><input id="pp_wifi_'+lid+'" value="'+esc(pp.wifi_name||'')+'" placeholder="Network name" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)"/></div>';
-      h+='<div><label style="font-size:10px;font-weight:600;color:var(--text2)">🔒 '+t('wifiPassword')+'</label><input id="pp_wifipw_'+lid+'" value="'+esc(pp.wifi_password||'')+'" placeholder="Password" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)"/></div>';
-      h+='<div><label style="font-size:10px;font-weight:600;color:var(--text2)">📞 '+t('contactName')+'</label><input id="pp_contact_'+lid+'" value="'+esc(pp.contact_name||'')+'" placeholder="Owner/Guardian" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)"/></div>';
-      h+='<div><label style="font-size:10px;font-weight:600;color:var(--text2)">📱 '+t('contactPhone')+'</label><input id="pp_cphone_'+lid+'" value="'+esc(pp.contact_phone||'')+'" placeholder="+971..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)"/></div>';
-      h+='<div><label style="font-size:10px;font-weight:600;color:var(--text2)">🅿️ '+t('parkingInfo')+'</label><input id="pp_parking_'+lid+'" value="'+esc(pp.parking_info||'')+'" placeholder="Parking spot #" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)"/></div>';
-      h+='</div>';
-      h+='<div style="margin-top:8px"><label style="font-size:10px;font-weight:600;color:var(--text2)">⚠️ '+t('specialInstructions')+'</label><textarea id="pp_instr_'+lid+'" placeholder="Fragile floors, no shoes, etc." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;min-height:50px;background:var(--bg2);color:var(--text)">'+esc(pp.special_instructions||'')+'</textarea></div>';
-      h+='<div style="margin-top:6px"><label style="font-size:10px;font-weight:600;color:var(--text2)">📋 '+t('checkoutInstructions')+'</label><textarea id="pp_checkout_'+lid+'" placeholder="Close all windows, AC off, etc." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;min-height:50px;background:var(--bg2);color:var(--text)">'+esc(pp.checkout_instructions||'')+'</textarea></div>';
-      h+='<div style="margin-top:6px"><label style="font-size:10px;font-weight:600;color:var(--text2)">🗑️ '+t('trashInstructions')+'</label><input id="pp_trash_'+lid+'" value="'+esc(pp.trash_instructions||'')+'" placeholder="Trash room: basement level" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)"/></div>';
-      h+='<div style="margin-top:6px"><label style="font-size:10px;font-weight:600;color:var(--text2)">📝 Notes</label><textarea id="pp_notes_'+lid+'" placeholder="Any other info..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;min-height:40px;background:var(--bg2);color:var(--text)">'+esc(pp.notes||'')+'</textarea></div>';
-      h+='<input type="hidden" id="pp_name_'+lid+'" value="'+esc(info.name)+'"/>';
-      h+='<button data-action="savePropertyProfile" data-arg0="'+lid+'" style="margin-top:10px;background:var(--primary);color:white;border:none;border-radius:8px;padding:10px 20px;font-weight:700;cursor:pointer;width:100%">💾 '+t('saveProfile')+'</button>';
-    }
-    h+='</div>';
-  });
-  h+='</div>'+renderBottomNav();
-  document.getElementById('app').innerHTML=h;
 }
 
 // ============ SETTINGS ============
@@ -6501,12 +6403,6 @@ function cmdkSearch(q){
   (equipment||[]).forEach(e=>{
     if((e.name||'').toLowerCase().includes(query)||(e.brand||'').toLowerCase().includes(query)){
       res.push({group:'Equipment',icon:'🛠️',title:e.name||'Equipment',meta:(e.brand||'')+(e.model?' '+e.model:''),onClick:()=>{currentTab='maintenance';mtSubTab='equipment';closeCmdk();render();ensureMtFresh();}});
-    }
-  });
-  // Properties
-  Object.entries(listingPrices||{}).forEach(([id,l])=>{
-    if((((l.listing_name||'')+' '+id)).toLowerCase().includes(query)){
-      res.push({group:'Properties',icon:'🏘️',title:l.listing_name||id,meta:(l.bedrooms||0)+' BR · '+((l.custom_price||l.price)||0)+' AED',onClick:()=>{currentTab='properties';closeCmdk();render();}});
     }
   });
   cmdkResults=res.slice(0,30);
