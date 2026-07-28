@@ -430,7 +430,7 @@ if(cleanerMode && !cleanerToken){
   localStorage.removeItem('cleanerMode');
   if(window.location.hash!=='#cleaner') window.location.hash='#cleaner';
 }
-let recurringTasks=[],estimatedTimes={};
+let estimatedTimes={};
 let maintenanceTickets=[],vendors=[],equipment=[],preventiveMaint=[];
 let mtRefreshing=false,mtLoadedOnce=false;
 let mtTicketPhoto=null,mtSubTab='tickets';
@@ -1001,7 +1001,7 @@ let notifPermission=typeof Notification!=='undefined'?Notification.permission:'d
 // i18n
 const T={
 en:{
-  planner:'Planner',myTasks:'My Tasks',dashboard:'Dashboard',recurring:'Recurring',settings:'Settings',
+  planner:'Planner',myTasks:'My Tasks',dashboard:'Dashboard',settings:'Settings',
   history:'History',calendar:'Calendar',stats:'My Stats',
   total:'Total',done:'Done',left:'Left',assigned:'Assigned',progress:'Progress',
   search:'Search guest or property...',autoAssign:'Auto-assign',smartAssign:'Smart Assign',
@@ -1012,10 +1012,6 @@ en:{
   team:'Team Members',add:'Add',remove:'Remove',name:'Name',phone:'Phone',
   severity:'Severity',low:'Low',medium:'Medium',high:'High',urgent:'Urgent',
   confirmResolve:'Tap again to confirm',
-  addRecurring:'Add Recurring Task',taskName:'Task name',every:'Every',days:'days',
-  weekly:'Weekly',biweekly:'Bi-weekly',monthly:'Monthly',quarterly:'Quarterly',
-  scheduledTasks:'Scheduled Tasks',noTasks:'No recurring tasks yet',lastDone:'Last done',
-  overdue:'Overdue',dueToday:'Due Today',
   propertyReports:'Property Reports',generatePdf:'PDF Report',
   exportExcel:'Export Excel',exportPdf:'Export PDF',
   overview:'Overview',realFees:'Real cleaning fees from Hostaway',
@@ -1270,7 +1266,6 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
     applyPostponements();
     RESERVATIONS.sort((a,b)=>a.co.localeCompare(b.co));
     rebuildDates();
-    recurringTasks=allRes.recurringTasks||[];
     maintenanceTickets=allRes.maintenanceTickets||[];vendors=allRes.vendors||[];equipment=allRes.equipment||[];preventiveMaint=allRes.preventiveMaintenance||[];
     propertyProfiles=allRes.propertyProfiles||{};
     // Compute estimated times from timer history
@@ -2194,26 +2189,6 @@ async function setCustomPrice(lid,price){
   toast('Price updated ✓','success');
 }
 
-// #17 Recurring Tasks
-async function saveRecurringTask(){
-  const name=document.getElementById('recName').value.trim();
-  const freq=document.getElementById('recFreq').value;
-  const listingId=document.getElementById('recListing').value;
-  const assignedId=document.getElementById('recCleaner').value;
-  const desc=document.getElementById('recDesc')?document.getElementById('recDesc').value.trim():'';
-  if(!name){toast('Please enter task name','error');return;}
-  await api('saveRecurringTask',{body:{task_name:name,description:desc,frequency_days:Number(freq),listing_id:listingId||null,assigned_cleaner_id:assignedId?Number(assignedId):null}});
-  toast('Task saved ✓','success');const res=await api('getRecurringTasks');recurringTasks=res.tasks||[];render();
-}
-async function completeRecurringTask(id){
-  await api('completeRecurringTask',{body:{id}});
-  toast('Completed ✓','success');confetti();const res=await api('getRecurringTasks');recurringTasks=res.tasks||[];render();
-}
-async function deleteRecurringTask(id){
-  await api('deleteRecurringTask',{body:{id}});
-  toast('Removed','success');const res=await api('getRecurringTasks');recurringTasks=res.tasks||[];render();
-}
-
 // Smart scheduling (#5 improved) — balances workload + estimated time
 async function smartAssign(){
   const unassigned=RESERVATIONS.filter(r=>!hasAnyAssignee(keyFor(r)));
@@ -2996,7 +2971,6 @@ function renderMoreMenu(){
     {id:'reviews',icon:icon('msgSquare',22),label:'Reviews',color:'#4f46e5'},
     {id:'settings',icon:icon('settings',22),label:'Settings',color:'#475569'},
     {id:'properties',icon:icon('home',22),label:'Properties',color:'#7c3aed'},
-    {id:'recurring',icon:icon('repeat',22),label:'Recurring',color:'#d97706'},
     {id:'history',icon:icon('history',22),label:'History',color:'#059669'},
     {id:'calendar',icon:icon('calendar',22),label:'Calendar',color:'#0891b2'},
     {id:'stats',icon:icon('trending',22),label:'Stats',color:'#be185d'},
@@ -3109,7 +3083,6 @@ function render(){
   if(currentTab==='dashboard')return renderDashboard();
   if(currentTab==='settings')return renderSettings();
   if(currentTab==='history')return renderHistory();
-  if(currentTab==='recurring')return renderRecurring();
   if(currentTab==='calendar')return renderCalendar();
   if(currentTab==='stats')return renderCleanerStats();
   if(currentTab==='hermes'){if(hermesData===null && !hermesLoading)loadHermesActivity();return renderHermes();}
@@ -4607,56 +4580,6 @@ async function loadPropertyHeatmap(){
     '</div>';
   }catch(e){ el.innerHTML='<div class="empty">Error: '+e.message+'</div>'; }
 }
-// ============ RECURRING TASKS (#17) ============
-function renderRecurring(){
-  let h='<div class="header"><div class="header-top"><h1>🔄 Recurring Tasks</h1><div class="header-actions"></div></div></div>';
-  h+='<div class="container">';
-
-  // Add form
-  h+='<div class="recurring-form"><h3>🆕 Add Recurring Task</h3>';
-  h+='<input id="recName" placeholder="Task name (e.g. Deep clean kitchen, AC filter change)"/>';
-  h+='<input id="recDesc" placeholder="Description (optional)"/>';
-  h+='<div class="form-row" style="display:flex;gap:8px"><select id="recFreq"><option value="7">Weekly (7 days)</option><option value="14">Bi-weekly (14 days)</option><option value="30" selected>Monthly (30 days)</option><option value="60">Every 2 months</option><option value="90">Quarterly (90 days)</option></select>';
-  h+='<select id="recListing"><option value="">All Properties</option>';
-  const seen2={};RESERVATIONS.forEach(r=>{if(!seen2[r.listingId]){seen2[r.listingId]=true;h+='<option value="'+r.listingId+'">'+esc(formatPropLabel(r.listingId, r.listing))+'</option>';}});
-  h+='</select></div>';
-  h+='<select id="recCleaner"><option value="">Unassigned</option>';
-  cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{h+='<option value="'+c.id+'">'+esc(c.name)+'</option>';});
-  h+='</select>';
-  h+='<button class="issue-submit" data-action="saveRecurringTask">Add Task</button></div>';
-
-  // Task list
-  const today=todayLocal();
-  h+='<div class="settings-panel"><h3>📋 Scheduled Tasks ('+recurringTasks.length+')</h3>';
-  if(recurringTasks.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">'+icon('repeat',56)+'</div><div class="empty-hero-title">No recurring tasks</div><div class="empty-hero-sub">Automate deep cleans, filter changes, etc. Fill in the form above.</div></div>';
-  recurringTasks.forEach(task=>{
-    const dueDate=task.next_due_at?task.next_due_at.split('T')[0]:null;
-    let dueClass='upcoming',dueLabel='';
-    if(dueDate){
-      if(dueDate<today){dueClass='overdue';dueLabel='⚠️ Overdue';}
-      else if(dueDate===today){dueClass='today';dueLabel='📌 Due Today';}
-      else{const days=Math.ceil((new Date(dueDate)-new Date(today))/(86400000));dueLabel='In '+days+' days';}
-    }
-    h+='<div class="recurring-card">';
-    h+='<div class="recurring-info"><div class="recurring-name">'+esc(task.task_name)+'</div>';
-    h+='<div class="recurring-meta">';
-    if(task.description)h+=esc(task.description)+' · ';
-    h+='Every '+task.frequency_days+' days';
-    if(task.listing_id){const lr=RESERVATIONS.find(r=>r.listingId==task.listing_id);if(lr)h+=' · 🏠 '+esc(lr.listing);}
-    if(task.assigned_cleaner_id){const cl=getCleanerById(task.assigned_cleaner_id);if(cl)h+=' · 👤 '+esc(cl.name);}
-    h+='</div>';
-    if(task.last_done_at)h+='<div class="recurring-meta">Last done: '+new Date(task.last_done_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})+'</div>';
-    h+='<span class="recurring-due '+dueClass+'">'+dueLabel+'</span>';
-    h+='</div>';
-    h+='<div class="recurring-actions"><button data-action="completeRecurringTask" data-arg0="'+task.id+'" title="Mark done" aria-label="Mark done" style="color:var(--green)">'+icon('checkCircle',18)+'</button><button data-action="deleteRecurringTask" data-arg0="'+task.id+'" title="Remove" aria-label="Remove" style="color:var(--red)">'+icon('trash',18)+'</button></div>';
-    h+='</div>';
-  });
-  h+='</div>';
-
-  h+='</div>'+renderBottomNav();
-  document.getElementById('app').innerHTML=h;
-}
-
 // ============ CALENDAR VIEW ============
 function changeCalMonth(dir){calMonth+=dir;if(calMonth>11){calMonth=0;calYear++;}if(calMonth<0){calMonth=11;calYear--;}render();}
 function renderCalendar(){
