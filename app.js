@@ -446,8 +446,7 @@ if(cleanerMode && !cleanerToken){
   localStorage.removeItem('cleanerMode');
   if(window.location.hash!=='#cleaner') window.location.hash='#cleaner';
 }
-let issues=[],recurringTasks=[],estimatedTimes={};
-let issuePhotoData=null;
+let recurringTasks=[],estimatedTimes={};
 let maintenanceTickets=[],vendors=[],equipment=[],preventiveMaint=[];
 let mtRefreshing=false,mtLoadedOnce=false;
 let mtTicketPhoto=null,mtSubTab='tickets';
@@ -1018,7 +1017,7 @@ let notifPermission=typeof Notification!=='undefined'?Notification.permission:'d
 // i18n
 const T={
 en:{
-  planner:'Planner',myTasks:'My Tasks',dashboard:'Dashboard',issues:'Issues',recurring:'Recurring',settings:'Settings',
+  planner:'Planner',myTasks:'My Tasks',dashboard:'Dashboard',recurring:'Recurring',settings:'Settings',
   history:'History',calendar:'Calendar',stats:'My Stats',inventory:'Inventory',
   total:'Total',done:'Done',left:'Left',assigned:'Assigned',progress:'Progress',
   search:'Search guest or property...',autoAssign:'Auto-assign',smartAssign:'Smart Assign',
@@ -1027,9 +1026,7 @@ en:{
   cleaningFees:'Cleaning Fees',earned:'Earned',potential:'Potential',
   byType:'By Type',perCleaner:'Per Cleaner',perDay:'Per Day',
   team:'Team Members',add:'Add',remove:'Remove',name:'Name',phone:'Phone',
-  reportIssue:'Report an Issue',issueTitle:'Issue title',description:'Description',
   severity:'Severity',low:'Low',medium:'Medium',high:'High',urgent:'Urgent',
-  openIssues:'Open Issues',noIssues:'No open issues',resolve:'Resolve',startWork:'Start Work',
   confirmResolve:'Tap again to confirm',
   addRecurring:'Add Recurring Task',taskName:'Task name',every:'Every',days:'days',
   weekly:'Weekly',biweekly:'Bi-weekly',monthly:'Monthly',quarterly:'Quarterly',
@@ -1291,7 +1288,7 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
     applyPostponements();
     RESERVATIONS.sort((a,b)=>a.co.localeCompare(b.co));
     rebuildDates();
-    issues=allRes.issues||[];recurringTasks=allRes.recurringTasks||[];
+    recurringTasks=allRes.recurringTasks||[];
     maintenanceTickets=allRes.maintenanceTickets||[];vendors=allRes.vendors||[];equipment=allRes.equipment||[];preventiveMaint=allRes.preventiveMaintenance||[];
     propertyProfiles=allRes.propertyProfiles||{};
     // Compute estimated times from timer history
@@ -2215,49 +2212,6 @@ async function setCustomPrice(lid,price){
   toast('Price updated ✓','success');
 }
 
-// #16 Issue Reporting
-async function reportIssue(){
-  const title=document.getElementById('issueTitle').value.trim();
-  const desc=document.getElementById('issueDesc').value.trim();
-  const severity=document.getElementById('issueSeverity').value;
-  const listingId=document.getElementById('issueListing').value;
-  if(!title){toast('Please enter a title','error');return;}
-  toast('Reporting issue...');
-  const body={title,description:desc,severity,listing_id:listingId||null,
-    cleaner_id:cleanerMode?cleanerMode.id:null,photo_data:issuePhotoData||null};
-  const res=await api('reportIssue',{body});
-  if(res.status==='success'){toast('Issue reported ✓','success');issuePhotoData=null;
-    const iRes=await api('getIssues');issues=iRes.issues||[];render();
-  }else toast(res.error||'Error','error');
-}
-let pendingResolveId=null;
-function resolveIssue(id){
-  if(pendingResolveId===id){confirmResolveIssue(id);return;}
-  pendingResolveId=id;render();
-  setTimeout(()=>{if(pendingResolveId===id){pendingResolveId=null;render();}},5000);
-}
-async function confirmResolveIssue(id){
-  pendingResolveId=null;
-  toast('Resolving...');
-  await api('updateIssue',{body:{id,status:'resolved',resolved_by:cleanerMode?cleanerMode.name:'Manager'}});
-  toast('Resolved ✓','success');const iRes=await api('getIssues');issues=iRes.issues||[];render();
-}
-async function startIssueWork(id){
-  await api('updateIssue',{body:{id,status:'in_progress'}});
-  toast('In progress','success');const iRes=await api('getIssues');issues=iRes.issues||[];render();
-}
-function viewIssuePhoto(issueId){
-  const issue=issues.find(i=>i.id===issueId);
-  if(issue&&issue.photo_data) document.getElementById('modal').innerHTML='<div class="modal-overlay" data-action="closeModal"><span class="modal-close">&times;</span><img src="'+issue.photo_data+'"/></div>';
-}
-function issuePhotoUpload(){
-  const inp=document.createElement('input');inp.type='file';inp.accept='image/*';
-  inp.onchange=function(){const file=this.files[0];if(!file)return;
-    const reader=new FileReader();reader.onload=function(){issuePhotoData=reader.result;
-      document.getElementById('issuePhotoPreview').innerHTML='<div style="color:var(--green);font-size:12px">📷 Photo attached ✓</div>';
-    };reader.readAsDataURL(file);};inp.click();
-}
-
 // #17 Recurring Tasks
 async function saveRecurringTask(){
   const name=document.getElementById('recName').value.trim();
@@ -3070,7 +3024,6 @@ function renderMoreMenu(){
     {id:'inventory',icon:icon('package',22),label:'Inventory',color:'#2563eb'},
     {id:'properties',icon:icon('home',22),label:'Properties',color:'#7c3aed'},
     {id:'recurring',icon:icon('repeat',22),label:'Recurring',color:'#d97706'},
-    {id:'issues',icon:icon('alertTriangle',22),label:'Issues',color:'#dc2626'},
     {id:'history',icon:icon('history',22),label:'History',color:'#059669'},
     {id:'calendar',icon:icon('calendar',22),label:'Calendar',color:'#0891b2'},
     {id:'stats',icon:icon('trending',22),label:'Stats',color:'#be185d'},
@@ -3184,7 +3137,6 @@ function render(){
   if(currentTab==='settings')return renderSettings();
   if(currentTab==='history')return renderHistory();
   if(currentTab==='inventory')return renderInventory();
-  if(currentTab==='issues')return renderIssues();
   if(currentTab==='recurring')return renderRecurring();
   if(currentTab==='calendar')return renderCalendar();
   if(currentTab==='stats')return renderCleanerStats();
@@ -3218,10 +3170,10 @@ function renderBottomNav(){
     ];
   }else if(cleanerMode.role==='maintenance'){
     // Maintenance view
-    tabs=[{id:'maintenance',icon:icon('wrench',22),label:'Maintenance'},{id:'issues',icon:icon('alertTriangle',22),label:t('issues')},{id:'history',icon:icon('history',22),label:t('history')}];
+    tabs=[{id:'maintenance',icon:icon('wrench',22),label:'Maintenance'},{id:'history',icon:icon('history',22),label:t('history')}];
   }else{
     // Cleaner view (default)
-    tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'issues',icon:icon('alertTriangle',22),label:t('issues')},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')}];
+    tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')}];
   }
   const mainIds=tabs.map(tb=>tb.id);
   return '<nav class="bottom-nav">'+tabs.map(tab=>
@@ -4736,53 +4688,6 @@ function renderInventory(){
     '<input id="invMin" type="number" placeholder="Min" style="width:60px" value="2"/>'+
     '<input id="invUnit" placeholder="Unit" style="width:60px" value="pcs"/>'+
     '<button data-action="__saveInventoryItemFromForm">Add</button></div>';
-  h+='</div>';
-
-  h+='</div>'+renderBottomNav();
-  document.getElementById('app').innerHTML=h;
-}
-
-// ============ ISSUES (#16) ============
-function renderIssues(){
-  let h='<div class="header"><div class="header-top"><h1>⚠️ Issues</h1><div class="header-actions"></div></div></div>';
-  h+='<div class="container">';
-
-  // Report form
-  h+='<div class="issue-form"><h3>🆕 Report an Issue</h3>';
-  h+='<input id="issueTitle" placeholder="Issue title (e.g. Broken AC, Missing towels)"/>';
-  h+='<textarea id="issueDesc" placeholder="Description (optional)"></textarea>';
-  h+='<div class="form-row"><select id="issueSeverity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select>';
-  // Listing select from known properties
-  h+='<select id="issueListing"><option value="">Property (optional)</option>';
-  const listingIds=[...new Set(RESERVATIONS.map(r=>r.listingId))];
-  RESERVATIONS.forEach(r=>{if(listingIds.includes(r.listingId)){listingIds.splice(listingIds.indexOf(r.listingId),1);h+='<option value="'+r.listingId+'">'+esc(formatPropLabel(r.listingId, r.listing))+'</option>';}});
-  h+='</select></div>';
-  h+='<div style="margin-bottom:8px"><button data-action="issuePhotoUpload" style="background:white;border:1px dashed var(--border);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;color:var(--text)">📷 Attach Photo</button><span id="issuePhotoPreview" style="margin-left:8px"></span></div>';
-  h+='<button class="issue-submit" data-action="reportIssue">Report Issue</button></div>';
-
-  // Open issues
-  const openIssues=issues.filter(i=>i.status!=='resolved');
-  h+='<div class="settings-panel"><h3>🔴 Open Issues ('+openIssues.length+')</h3>';
-  if(openIssues.length===0) h+='<div class="empty-hero" style="padding:40px 20px"><div class="empty-hero-icon">'+icon('sparkles',56)+'</div><div class="empty-hero-title">All clear!</div><div class="empty-hero-sub">No open issues. Nice teamwork.</div></div>';
-  openIssues.forEach(issue=>{
-    h+='<div class="issue-card '+issue.severity+'">';
-    h+='<div class="issue-header"><div class="issue-title">'+esc(issue.title)+'</div><span class="issue-severity '+issue.severity+'">'+issue.severity+'</span></div>';
-    if(issue.description) h+='<div class="issue-desc">'+esc(issue.description)+'</div>';
-    h+='<div class="issue-meta">';
-    if(issue.listing_id){const lr=RESERVATIONS.find(r=>r.listingId==issue.listing_id);if(lr)h+='🏠 '+esc(lr.listing)+' · ';}
-    h+='Reported '+new Date(issue.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'});
-    if(issue.cleaner_id){const cl=getCleanerById(issue.cleaner_id);if(cl)h+=' by '+esc(cl.name);}
-    h+='</div>';
-    if(issue.photo_data) h+='<div style="margin-top:6px"><div class="photo-thumb" data-action="viewIssuePhoto" data-arg0="'+issue.id+'">📸</div></div>';
-    if(!cleanerMode){
-      h+='<div class="issue-actions">';
-      if(issue.status==='open')h+='<button data-action="startIssueWork" data-arg0="'+issue.id+'">🔧 Start Work</button>';
-      if(pendingResolveId===issue.id) h+='<button class="resolve" style="background:var(--orange);animation:pulse 1s infinite" data-action="resolveIssue" data-arg0="'+issue.id+'">⚠️ Tap again to confirm</button>';
-      else h+='<button class="resolve" data-action="resolveIssue" data-arg0="'+issue.id+'">✅ Resolve</button>';
-      h+='</div>';
-    }
-    h+='</div>';
-  });
   h+='</div>';
 
   h+='</div>'+renderBottomNav();
@@ -6326,18 +6231,6 @@ async function generateOwnerReport(listingId){
     doc.text(mDone[key]?'Done':'Pending',185,y);
     y+=6;
   });
-
-  // Issues section if any
-  const propIssues=issues.filter(i=>i.listing_id==listingId);
-  if(propIssues.length>0){
-    if(y>240){doc.addPage();y=20;}
-    y+=5;doc.setFontSize(14);doc.text('Issues Reported ('+propIssues.length+')',14,y);y+=8;
-    doc.setFontSize(9);
-    propIssues.forEach(i=>{
-      if(y>275){doc.addPage();y=20;}
-      doc.text('• ['+i.severity.toUpperCase()+'] '+i.title.substring(0,60)+' — '+i.status,14,y);y+=5;
-    });
-  }
 
   doc.save('report_'+listingName.replace(/[^a-zA-Z0-9]/g,'_')+'_'+MONTH_NAMES[dashMonth]+'_'+dashYear+'.pdf');
   toast('Report generated ✓','success');
