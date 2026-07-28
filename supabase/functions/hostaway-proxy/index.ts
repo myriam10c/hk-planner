@@ -484,24 +484,9 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   // ===== Pricing / apt number =====
   ["setCustomPrice", "POST"],
   ["setAptNumber", "POST"],
-  // ===== Inventory =====
-  ["getInventory", "GET"],
-  ["saveInventoryItem", "POST"],
-  ["reportLowStock", "POST"],
-  // ===== Alerts =====
-  ["getAlerts", "GET"],
   // ===== Guest feedback =====
   ["saveGuestFeedback", "POST"],
   ["getGuestFeedback", "GET"],
-  // ===== Issues / Tickets =====
-  ["reportIssue", "POST"],
-  ["getIssues", "GET"],
-  ["updateIssue", "POST"],
-  // ===== Recurring tasks =====
-  ["getRecurringTasks", "GET"],
-  ["saveRecurringTask", "POST"],
-  ["completeRecurringTask", "POST"],
-  ["deleteRecurringTask", "POST"],
   // ===== Maintenance tickets =====
   ["getMaintenanceTickets", "GET"],
   ["getTicketPhoto", "GET"],
@@ -534,9 +519,6 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["setConfig", "POST"],
   // ===== Autopilot =====
   ["runAutopilot", "GET"],
-  // ===== Property profiles =====
-  ["getPropertyProfiles", "GET"],
-  ["savePropertyProfile", "POST"],
   // ===== Dashboard / aggregates =====
   ["getDashboardKPIs", "GET"],
   ["getAllData", "GET"],
@@ -1234,40 +1216,6 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success" });
     }
 
-    // ==================== INVENTORY ====================
-    if (action === "getInventory") {
-      const listingId = url.searchParams.get("listingId");
-      let query = sb.from("inventory_items").select("*").order("item_name");
-      if (listingId) query = query.eq("listing_id", listingId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return jsonResp({ status: "success", items: data });
-    }
-    if (action === "saveInventoryItem" && req.method === "POST") {
-      const body = await req.json();
-      const { id, listing_id, item_name, current_qty, min_qty, unit } = body;
-      if (id) {
-        const { error } = await sb.from("inventory_items").update({ item_name, current_qty, min_qty, unit, updated_at: new Date().toISOString() }).eq("id", id);
-        if (error) throw error;
-      } else {
-        const { error } = await sb.from("inventory_items").insert({ listing_id, item_name, current_qty: current_qty || 0, min_qty: min_qty || 1, unit: unit || "pcs" });
-        if (error) throw error;
-      }
-      return jsonResp({ status: "success" });
-    }
-    if (action === "reportLowStock" && req.method === "POST") {
-      const body = await req.json();
-      const { inventory_item_id, reservation_key, reported_by, note } = body;
-      const { error } = await sb.from("inventory_alerts").insert({ inventory_item_id, reservation_key, reported_by, note });
-      if (error) throw error;
-      return jsonResp({ status: "success" });
-    }
-    if (action === "getAlerts") {
-      const { data, error } = await sb.from("inventory_alerts").select("*, inventory_items(item_name, listing_id)").eq("resolved", false).order("created_at", { ascending: false });
-      if (error) throw error;
-      return jsonResp({ status: "success", alerts: data });
-    }
-
     // ==================== GUEST FEEDBACK ====================
     if (action === "saveGuestFeedback" && req.method === "POST") {
       const body = await req.json();
@@ -1285,128 +1233,6 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await query;
       if (error) throw error;
       return jsonResp({ status: "success", feedback: data });
-    }
-
-    // ==================== ISSUES ====================
-    if (action === "reportIssue" && req.method === "POST") {
-      const body = await req.json();
-      const { reservation_key, listing_id, reported_by, cleaner_id, title, description, photo_data, severity, create_ticket } = body;
-      if (!title) return jsonResp({ error: "title required" }, 400);
-      const { data, error } = await sb.from("cleaning_issues").insert({
-        reservation_key: reservation_key || null, listing_id: listing_id || null,
-        reported_by: reported_by || null, cleaner_id: cleaner_id || null,
-        title, description: description || null,
-        severity: severity || "medium",
-      }).select().single();
-      if (error) throw error;
-      // Phase 3 : upload photo vers bucket si data URL
-      if (photo_data) {
-        const issuePath = await uploadPhotoDataUrl(sb, photo_data, "cleaning_issues", "photo_data", data.id);
-        if (issuePath) {
-          await sb.from("cleaning_issues").update({ photo_path: issuePath }).eq("id", data.id);
-        }
-      }
-      // Auto-create maintenance ticket if flagged
-      if (create_ticket || severity === 'urgent' || severity === 'high') {
-        const catMap: Record<string, string> = { 'ac': 'ac', 'plumb': 'plumbing', 'electr': 'electrical', 'water': 'plumbing', 'leak': 'plumbing', 'pipe': 'plumbing', 'drain': 'plumbing', 'power': 'electrical', 'light': 'electrical', 'pest': 'pest', 'paint': 'painting' };
-        let category = 'general';
-        const titleLower = (title + ' ' + (description || '')).toLowerCase();
-        // Word-boundary match for short keywords (e.g. 'ac') so they don't match
-        // inside unrelated words like "replace"/"cracked"/"back".
-        const matchKw = (text: string, kw: string) => {
-          if (kw.length <= 3) {
-            const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            return new RegExp('\\b' + esc + '\\b', 'i').test(text);
-          }
-          return text.includes(kw);
-        };
-        for (const [keyword, cat] of Object.entries(catMap)) {
-          if (matchKw(titleLower, keyword)) { category = cat; break; }
-        }
-        // Get SLA
-        const { data: slaData } = await sb.from("maintenance_sla").select("max_hours").eq("category", category).eq("priority", severity || 'medium').single();
-        const slaHours = slaData ? slaData.max_hours : 72;
-        const slaDeadline = new Date(Date.now() + slaHours * 3600000).toISOString();
-        const { data: ticketData } = await sb.from("maintenance_tickets").insert({
-          listing_id: listing_id || null, title: '[Cleaning] ' + title,
-          description: description || null, category, priority: severity || 'medium',
-          source: 'cleaning_issue', source_issue_id: data.id,
-          reported_by: reported_by || (cleaner_id ? 'cleaner_' + cleaner_id : null),
-          sla_deadline: slaDeadline,
-        }).select().single();
-        if (ticketData && photo_data) {
-          const ticketPath = await uploadPhotoDataUrl(sb, photo_data, "maintenance_tickets", "photo_data", ticketData.id);
-          if (ticketPath) {
-            await sb.from("maintenance_tickets").update({ photo_path: ticketPath }).eq("id", ticketData.id);
-          }
-        }
-      }
-      if (reservation_key) await addLog(sb, reservation_key, "issue_reported", reported_by, { title, severity });
-      return jsonResp({ status: "success", issue: data });
-    }
-    if (action === "getIssues") {
-      const status_filter = url.searchParams.get("status") || "open";
-      const listingId = url.searchParams.get("listingId");
-      let query = sb.from("cleaning_issues").select("*").order("created_at", { ascending: false }).limit(100);
-      if (status_filter !== "all") {
-        if (status_filter === "open") query = query.in("status", ["open", "in_progress"]);
-        else query = query.eq("status", status_filter);
-      }
-      if (listingId) query = query.eq("listing_id", listingId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return jsonResp({ status: "success", issues: data });
-    }
-    if (action === "updateIssue" && req.method === "POST") {
-      const body = await req.json();
-      const { id, status: newStatus, resolved_by } = body;
-      if (!id) return jsonResp({ error: "id required" }, 400);
-      const upd: any = {};
-      if (newStatus) upd.status = newStatus;
-      if (newStatus === "resolved") { upd.resolved_at = new Date().toISOString(); upd.resolved_by = resolved_by || null; }
-      const { error } = await sb.from("cleaning_issues").update(upd).eq("id", id);
-      if (error) throw error;
-      return jsonResp({ status: "success" });
-    }
-
-    // ==================== RECURRING TASKS ====================
-    if (action === "getRecurringTasks") {
-      const { data, error } = await sb.from("recurring_tasks").select("*").eq("is_active", true).order("next_due_at", { ascending: true });
-      if (error) throw error;
-      return jsonResp({ status: "success", tasks: data });
-    }
-    if (action === "saveRecurringTask" && req.method === "POST") {
-      const body = await req.json();
-      const { id, listing_id, task_name, description, frequency_days, assigned_cleaner_id } = body;
-      if (!task_name) return jsonResp({ error: "task_name required" }, 400);
-      const nextDue = new Date(); nextDue.setDate(nextDue.getDate() + (frequency_days || 30));
-      if (id) {
-        const { error } = await sb.from("recurring_tasks").update({ listing_id, task_name, description, frequency_days, assigned_cleaner_id: assigned_cleaner_id || null }).eq("id", id);
-        if (error) throw error;
-      } else {
-        const { error } = await sb.from("recurring_tasks").insert({ listing_id: listing_id || null, task_name, description: description || null, frequency_days: frequency_days || 30, assigned_cleaner_id: assigned_cleaner_id || null, next_due_at: nextDue.toISOString() });
-        if (error) throw error;
-      }
-      return jsonResp({ status: "success" });
-    }
-    if (action === "completeRecurringTask" && req.method === "POST") {
-      const body = await req.json();
-      const { id, actor } = body;
-      if (!id) return jsonResp({ error: "id required" }, 400);
-      const { data: task } = await sb.from("recurring_tasks").select("*").eq("id", id).single();
-      if (!task) return jsonResp({ error: "Task not found" }, 404);
-      const nextDue = new Date(); nextDue.setDate(nextDue.getDate() + (task.frequency_days || 30));
-      const { error } = await sb.from("recurring_tasks").update({ last_done_at: new Date().toISOString(), next_due_at: nextDue.toISOString() }).eq("id", id);
-      if (error) throw error;
-      await addLog(sb, "recurring_" + id, "recurring_completed", actor, { task_name: task.task_name });
-      return jsonResp({ status: "success" });
-    }
-    if (action === "deleteRecurringTask" && req.method === "POST") {
-      const body = await req.json();
-      if (!body.id) return jsonResp({ error: "id required" }, 400);
-      const { error } = await sb.from("recurring_tasks").update({ is_active: false }).eq("id", body.id);
-      if (error) throw error;
-      return jsonResp({ status: "success" });
     }
 
     // ==================== MAINTENANCE TICKETS ====================
@@ -1825,34 +1651,6 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ==================== PROPERTY PROFILES ====================
-    if (action === "getPropertyProfiles") {
-      const listingId = url.searchParams.get("listingId");
-      if (listingId) {
-        const { data, error } = await sb.from("property_profiles").select("*").eq("listing_id", listingId).single();
-        if (error && error.code !== 'PGRST116') throw error;
-        return jsonResp({ status: "success", profile: data || null });
-      }
-      const { data, error } = await sb.from("property_profiles").select("*").order("listing_name");
-      if (error) throw error;
-      return jsonResp({ status: "success", profiles: data || [] });
-    }
-    if (action === "savePropertyProfile" && req.method === "POST") {
-      const body = await req.json();
-      const { listing_id, listing_name, access_code, wifi_name, wifi_password, special_instructions, contact_name, contact_phone, parking_info, trash_instructions, checkout_instructions, notes } = body;
-      if (!listing_id) return jsonResp({ error: "listing_id required" }, 400);
-      const { error } = await sb.from("property_profiles").upsert({
-        listing_id, listing_name: listing_name || null,
-        access_code: access_code || null, wifi_name: wifi_name || null, wifi_password: wifi_password || null,
-        special_instructions: special_instructions || null, contact_name: contact_name || null,
-        contact_phone: contact_phone || null, parking_info: parking_info || null,
-        trash_instructions: trash_instructions || null, checkout_instructions: checkout_instructions || null,
-        notes: notes || null, updated_at: new Date().toISOString(),
-      }, { onConflict: "listing_id" });
-      if (error) throw error;
-      return jsonResp({ status: "success" });
-    }
-
     // ==================== DASHBOARD KPIs ====================
     if (action === "getDashboardKPIs") {
       const month = url.searchParams.get("month"); // YYYY-MM
@@ -1935,7 +1733,7 @@ Deno.serve(async (req: Request) => {
       // Tables qui grossissent à chaque ménage (menage_done, cleaning_assignments,
       // cleaning_timer, cleaning_cancelled) : paginer pour éviter la troncature
       // silencieuse PostgREST à 1000 rows.
-      const [doneRows, assignRows, timerRows, cancelledRows, postponedRows, cleanerRes, templateRes, listingRes, issueRes, recurRes, ticketRes, vendorRes, equipRes, prevRes, profileRes, extraRes] = await Promise.all([
+      const [doneRows, assignRows, timerRows, cancelledRows, postponedRows, cleanerRes, templateRes, listingRes, ticketRes, vendorRes, equipRes, prevRes, extraRes] = await Promise.all([
         fetchAllRows<any>((from, to) => sb.from("menage_done").select("reservation_key, done").order("reservation_key").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type").order("reservation_key").order("cleaner_id").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_timer").select("*").order("reservation_key").range(from, to)),
@@ -1944,8 +1742,6 @@ Deno.serve(async (req: Request) => {
         sb.from("cleaners").select("*").eq("is_active", true).order("name"),
         sb.from("checklist_templates").select("*").order("name"),
         sb.from("listing_config").select("listing_id, listing_name, bedrooms, price, custom_price, unit_type, apt_number, internal_name"),
-        sb.from("cleaning_issues").select("*").in("status", ["open", "in_progress"]).order("created_at", { ascending: false }),
-        sb.from("recurring_tasks").select("*").eq("is_active", true).order("next_due_at"),
         // Active tickets only (anything not closed). The dedicated /refreshMaintenance flow
         // fetches resolved/cancelled separately into resolvedTickets. Returning everything
         // here was the root cause of resolved tickets leaking into the "Open" view.
@@ -1953,7 +1749,6 @@ Deno.serve(async (req: Request) => {
         sb.from("vendors").select("*").eq("is_active", true).order("name"),
         sb.from("equipment").select("*").order("listing_id, name"),
         sb.from("preventive_maintenance").select("*").eq("is_active", true).order("next_due_at"),
-        sb.from("property_profiles").select("*"),
         sb.from("extra_cleanings").select("*").gte("cleaning_date", new Date(Date.now() - 30*86400000).toISOString().split('T')[0]).lte("cleaning_date", new Date(Date.now() + 60*86400000).toISOString().split('T')[0]).order("cleaning_date"),
       ]);
       const cancelledMap: Record<string, any> = {};
@@ -1975,16 +1770,12 @@ Deno.serve(async (req: Request) => {
       (listingRes.data || []).forEach((r: any) => { listingPrices[r.listing_id] = { bedrooms: r.bedrooms, price: r.price, custom_price: r.custom_price, listing_name: r.listing_name, unit_type: r.unit_type, apt_number: r.apt_number, internal_name: r.internal_name }; });
       const timerMap: Record<string, any> = {};
       timerRows.forEach((t: any) => { timerMap[t.reservation_key] = t; });
-      const profileMap: Record<string, any> = {};
-      (profileRes.data || []).forEach((p: any) => { profileMap[p.listing_id] = p; });
       return jsonResp({
         status: "success", done: doneMap, assignments: assignMap, assignmentMeta: assignMeta,
         cleaners: cleanerRes.data || [], templates: templateRes.data || [],
         listingPrices, timers: timerMap,
-        issues: issueRes.data || [], recurringTasks: recurRes.data || [],
         maintenanceTickets: ticketRes.data || [], vendors: vendorRes.data || [],
         equipment: equipRes.data || [], preventiveMaintenance: prevRes.data || [],
-        propertyProfiles: profileMap,
         cancelled: cancelledMap,
         postponed: postponedMap,
         extraCleanings: extraRes.data || [],
