@@ -6,7 +6,7 @@
 //  - API calls (Supabase functions, Hostaway, etc.) bypass the cache entirely.
 //  - Bump VERSION to force all clients to drop the old cache.
 
-const VERSION = 'v-20260728-1331-1616e1a';
+const VERSION = 'v-20260728-1623-64a8ce8';
 const CACHE = 'hk-planner-' + VERSION;
 const PRECACHE = ['/', '/index.html', '/app.js', '/styles.css', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
 
