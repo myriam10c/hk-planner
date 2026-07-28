@@ -4945,8 +4945,10 @@ function renderCleanerRatings(){
   }
   if(ratingsData){
     const ratedCount=ids.filter(cid=>{const r=_cleanerRole(cid);return r!=='manager'&&r!=='system';}).length;
+    const outOfHistory=payload.out_of_history_count||0;
     h+='<div style="font-size:11px;color:#6b7280;margin-bottom:8px">Source : sync_cleaner_ratings · '+
-       ratedCount+' cleaners notés · '+(ratingsData.unmatched_count||0)+' reviews non-attribuées</div>';
+       ratedCount+' cleaners notés · '+(ratingsData.unmatched_count||0)+' reviews non-attribuées'+
+       (outOfHistory?' · '+outOfHistory+' hors historique (avant HK Planner)':'')+'</div>';
   }
   // Drill-down d'un cleaner sélectionné
   if(ratingsSelected && cleaners[ratingsSelected]){
