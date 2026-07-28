@@ -41,7 +41,7 @@ self.addEventListener('fetch', (e) => {
   // Only handle same-origin GETs. Cross-origin requests
   // (cdnjs libs, Google Fonts) are left to the browser: intercepting opaque
   // no-cors script responses here made them fail with net::ERR_FAILED, which
-  // silently broke jsPDF/xlsx/Chart/QRCode (invoice + exports) for returning users.
+  // silently broke jsPDF/xlsx/Chart (invoice + exports) for returning users.
   if (url.origin === location.origin) {
     // Navigations + core app shell: network-first so a fresh deploy is picked up
     // immediately; cached copy is only a fallback when offline.
