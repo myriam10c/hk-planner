@@ -1,6 +1,6 @@
 
 // === Lazy CDN loader ===
-// Heavy libraries (Chart.js ~200KB, jsPDF ~350KB, xlsx ~900KB, qrcode ~6KB)
+// Heavy libraries (Chart.js ~200KB, jsPDF ~350KB, xlsx ~900KB)
 // are loaded on demand instead of upfront. Cleaner mode never needs them, so
 // the initial page weight drops by ~1.5MB for the cleaner journey.
 const __CDN = Object.freeze({
@@ -10,8 +10,6 @@ const __CDN = Object.freeze({
             sri: 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk' },
   xlsx:   { src: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
             sri: 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw' },
-  qrcode: { src: 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
-            sri: 'sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU' },
 });
 const __loadedScripts = new Map(); // src -> Promise
 function loadScript(lib){
@@ -32,7 +30,6 @@ function loadScript(lib){
 const ensureChart  = () => loadScript(__CDN.chart);
 const ensurePdf    = () => loadScript(__CDN.pdf);
 const ensureXlsx   = () => loadScript(__CDN.xlsx);
-const ensureQRCode = () => loadScript(__CDN.qrcode);
 
 // === Event delegation router for declarative click handlers ===
 // Replaces inline click handlers with elements declaring:
@@ -135,12 +132,6 @@ function __toggleMtExpandAndFocusComment(id){ toggleMtExpand(id); setTimeout(fun
 // === Phase 3.b wrappers (final 14 inline onclicks) ===
 function __mtCardClick(id, e){ if(typeof mtSelectMode!=='undefined' && mtSelectMode) toggleMtSelected(id, e); else toggleMtExpand(id); }
 function __sendDailyToAllCleaners(){ cleaners.forEach(function(c){ sendDailyWhatsApp(c); }); }
-function __toggleInventoryQR(id, name, qty){
-  var el=document.getElementById('qr_inv_'+id);
-  if(!el) return;
-  if(el.style.display==='none'){ el.style.display='block'; generateQR('qr_inv_'+id, 'INVENTORY|'+id+'|'+name+'|qty:'+qty); }
-  else { el.style.display='none'; }
-}
 function __sendWhatsAppReminder(phone, listing, guest){ sendWhatsApp(phone, 'Reminder: '+listing+' - '+guest); }
 function __togglePlannerBulkAllFromKeys(keysJson){ try{ togglePlannerBulkAll(JSON.parse(keysJson)); } catch(e){ console.error('togglePlannerBulkAll parse', e); } }
 function __exportPlannerVisibleCSV(){ exportPlannerCSV(window.__plannerVisible || []); }
@@ -152,13 +143,6 @@ function __saveCleanerFromForm(){
     document.getElementById('newColor').value,
     document.getElementById('newPin').value,
     document.getElementById('newRole').value);
-}
-function __saveInventoryItemFromForm(){
-  saveInventoryItem(null,
-    document.getElementById('invName').value,
-    document.getElementById('invQty').value,
-    document.getElementById('invMin').value,
-    document.getElementById('invUnit').value);
 }
 function __resetSearchFilters(){ search=''; filterCleaner=0; setSelectedDate('all'); }
 function __closeSearchAndRender(){ search=''; searchOpen=false; render(); }
@@ -1018,7 +1002,7 @@ let notifPermission=typeof Notification!=='undefined'?Notification.permission:'d
 const T={
 en:{
   planner:'Planner',myTasks:'My Tasks',dashboard:'Dashboard',recurring:'Recurring',settings:'Settings',
-  history:'History',calendar:'Calendar',stats:'My Stats',inventory:'Inventory',
+  history:'History',calendar:'Calendar',stats:'My Stats',
   total:'Total',done:'Done',left:'Left',assigned:'Assigned',progress:'Progress',
   search:'Search guest or property...',autoAssign:'Auto-assign',smartAssign:'Smart Assign',
   allDays:'All',loading:'Loading...',noResults:'No results',updated:'Updated',
@@ -1037,7 +1021,6 @@ en:{
   overview:'Overview',realFees:'Real cleaning fees from Hostaway',
   pricing:'Pricing per Property',templates:'Checklist Templates',
   recentActivity:'Recent Activity',noActivity:'No activity yet',
-  stockItems:'Stock Items',lowAlerts:'Low Stock Alerts',
   enableNotif:'Enable notifications to get cleaning alerts',enable:'Enable',
   before:'Before',after:'After',comparison:'Photo Comparison',
   avgTime:'avg',mins:'min',
@@ -1049,7 +1032,6 @@ en:{
   unassigned:'Unassigned',assignTo:'Assign...',
   timerStart:'Start',timerStop:'Stop',
   photoRequired:'Required',photoAttached:'Photo attached ✓',attachPhoto:'Attach Photo',
-  qrCode:'QR Code',scanToTrack:'Scan to track inventory',
   guestReview:'Guest Review',noReview:'No review yet',
   customChecklist:'Custom Checklist',addItem:'Add item',
   myPerformance:'My Performance',cleaningsTotal:'Total Cleanings',avgTimeLabel:'Avg Time',qualityScore:'Quality Score',
@@ -2308,14 +2290,6 @@ function uploadAfterPhoto(rkey){
 }
 
 // Per-property custom checklist
-// QR code for inventory (lazy-loads qrcodejs CDN on first call)
-async function generateQR(elementId,text){
-  try { await ensureQRCode(); } catch(e){ console.error('generateQR: lib load failed', e); return; }
-  setTimeout(()=>{
-    const el=document.getElementById(elementId);
-    if(el&&typeof QRCode!=='undefined'){el.innerHTML='';new QRCode(el,{text,width:80,height:80});}
-  },100);
-}
 
 // Guest reviews (from Hostaway or manual)
 async function loadGuestReviews(listingId){
@@ -3021,7 +2995,6 @@ function renderMoreMenu(){
     {id:'ratings',icon:icon('star',22),label:'Ratings',color:'#ca8a04'},
     {id:'reviews',icon:icon('msgSquare',22),label:'Reviews',color:'#4f46e5'},
     {id:'settings',icon:icon('settings',22),label:'Settings',color:'#475569'},
-    {id:'inventory',icon:icon('package',22),label:'Inventory',color:'#2563eb'},
     {id:'properties',icon:icon('home',22),label:'Properties',color:'#7c3aed'},
     {id:'recurring',icon:icon('repeat',22),label:'Recurring',color:'#d97706'},
     {id:'history',icon:icon('history',22),label:'History',color:'#059669'},
@@ -3136,7 +3109,6 @@ function render(){
   if(currentTab==='dashboard')return renderDashboard();
   if(currentTab==='settings')return renderSettings();
   if(currentTab==='history')return renderHistory();
-  if(currentTab==='inventory')return renderInventory();
   if(currentTab==='recurring')return renderRecurring();
   if(currentTab==='calendar')return renderCalendar();
   if(currentTab==='stats')return renderCleanerStats();
@@ -4604,21 +4576,6 @@ function renderHistory(){
   document.getElementById('app').innerHTML=h;
 }
 
-// ============ INVENTORY (#13) ============
-let inventoryItems=null,inventoryAlerts=null;
-async function loadInventory(){
-  try{
-    const[itemsRes,alertsRes]=await Promise.all([api('getInventory'),api('getAlerts')]);
-    inventoryItems=itemsRes.items||[];inventoryAlerts=alertsRes.alerts||[];
-  }catch(err){
-    inventoryItems=[];inventoryAlerts=[];toast('Inventory failed to load','error');
-  }
-  render();
-}
-async function saveInventoryItem(id,name,qty,minQty,unit,listingId){
-  await api('saveInventoryItem',{body:{id:id||undefined,listing_id:listingId||null,item_name:name,current_qty:Number(qty),min_qty:Number(minQty),unit}});
-  inventoryItems=null;loadInventory();toast('Saved ✓','success');
-}
 // Property heatmap
 async function loadPropertyHeatmap(){
   const el=document.getElementById('heatmapContent');
@@ -4650,50 +4607,6 @@ async function loadPropertyHeatmap(){
     '</div>';
   }catch(e){ el.innerHTML='<div class="empty">Error: '+e.message+'</div>'; }
 }
-function renderInventory(){
-  let h='<div class="header"><div class="header-top"><h1>📦 Inventory</h1><div class="header-actions"></div></div></div>';
-  h+='<div class="container">';
-  if(!inventoryItems){h+='<div class="loading"><div class="spinner"></div></div></div>'+renderBottomNav();document.getElementById('app').innerHTML=h;loadInventory();return;}
-
-  // Alerts
-  if(inventoryAlerts&&inventoryAlerts.length>0){
-    h+='<div class="settings-panel" style="border-left:3px solid var(--orange)"><h3>⚠️ Low Stock Alerts ('+inventoryAlerts.length+')</h3>';
-    inventoryAlerts.forEach(a=>{
-      h+='<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">'+
-        '<strong>'+(a.inventory_items?esc(a.inventory_items.item_name):'Item #'+a.inventory_item_id)+'</strong>'+
-        (a.note?' — '+esc(a.note):'')+
-        '<div style="font-size:10px;color:var(--text3)">Reported by '+esc(a.reported_by||'Unknown')+' · '+new Date(a.created_at).toLocaleDateString()+'</div></div>';
-    });
-    h+='</div>';
-  }
-
-  // Items
-  h+='<div class="settings-panel"><h3>📋 Stock Items ('+inventoryItems.length+')</h3>';
-  if(inventoryItems.length===0){
-    h+='<div class="empty-hero" style="padding:30px 20px"><div class="empty-hero-icon">'+icon('package',56)+'</div><div class="empty-hero-title">Empty inventory</div><div class="empty-hero-sub">Add your first item below to start tracking stock.</div></div>';
-  } else if(!inventoryAlerts || inventoryAlerts.length===0){
-    h+='<div class="empty-hero" style="padding:20px 20px 10px"><div class="empty-hero-icon">'+icon('checkCircle',56)+'</div><div class="empty-hero-title">All stocked up</div><div class="empty-hero-sub">No low-stock alerts for now.</div></div>';
-  }
-  inventoryItems.forEach(item=>{
-    const low=item.current_qty<=item.min_qty;
-    h+='<div class="pricing-row" style="'+(low?'color:var(--red)':'')+';flex-wrap:wrap"><div class="pr-name">'+(low?'⚠️ ':'')+esc(item.item_name)+'</div>'+
-      '<div style="font-size:11px">'+item.current_qty+'/'+item.min_qty+' '+esc(item.unit||'')+'</div>'+
-      '<div id="qr_inv_'+item.id+'" class="qr-container" style="display:none"></div>'+
-      '<button style="font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer;color:var(--text)" data-action="__toggleInventoryQR" data-arg0="'+item.id+'" data-arg1="'+esc(item.item_name)+'" data-arg2="'+item.current_qty+'">QR</button></div>';
-  });
-  // Add item form
-  h+='<div class="add-form" style="margin-top:10px">'+
-    '<input id="invName" placeholder="Item name"/>'+
-    '<input id="invQty" type="number" placeholder="Qty" style="width:60px" value="10"/>'+
-    '<input id="invMin" type="number" placeholder="Min" style="width:60px" value="2"/>'+
-    '<input id="invUnit" placeholder="Unit" style="width:60px" value="pcs"/>'+
-    '<button data-action="__saveInventoryItemFromForm">Add</button></div>';
-  h+='</div>';
-
-  h+='</div>'+renderBottomNav();
-  document.getElementById('app').innerHTML=h;
-}
-
 // ============ RECURRING TASKS (#17) ============
 function renderRecurring(){
   let h='<div class="header"><div class="header-top"><h1>🔄 Recurring Tasks</h1><div class="header-actions"></div></div></div>';
