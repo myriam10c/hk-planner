@@ -3272,7 +3272,12 @@ async function submitLaundrySheet(){
   closeLaundrySheet();
   // markDone is a toggle. Handing an already-done cleaning back to it would
   // un-mark it, which is exactly what the Laundry correction button must not do.
-  if(!wasDone)markDone(key,{skipLaundry:true});
+  if(!wasDone){
+    // markDone bails out silently while another done-save is in flight, which
+    // would leave a saved count on a cleaning the cleaner believes she finished.
+    await markDone(key,{skipLaundry:true});
+    if(!done[key])toast('Count saved. Tap Done again to finish this cleaning.','error');
+  }
   else toast('Laundry count saved','success');
 }
 
@@ -3286,7 +3291,7 @@ let laundryMoveKind=null;  // open form, or null
 
 function laundryMonthRange(){
   const now=new Date();
-  const d=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+laundryMonthOffset,1));
+  const d=new Date(Date.UTC(now.getFullYear(),now.getMonth()+laundryMonthOffset,1));
   const start=d.toISOString().slice(0,10);
   const endD=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0));
   return{start,end:endD.toISOString().slice(0,10),
@@ -3374,7 +3379,7 @@ function renderLaundryMoveForm(){
   const pre=kind==='out'?laundryPrefill(bal.store):null;
   // An adjustment can be negative and inputmode="numeric" gives iOS no minus key.
   const inputmode=isAdjust?'text':'numeric';
-  const today=new Date().toISOString().slice(0,10);
+  const today=todayLocal();
   el.innerHTML='<div class="modal-overlay" data-action="__closeLaundryMoveBackdrop" data-pass-event="1">'+
     '<div class="modal-box laundry-box">'+
     '<div class="laundry-title">'+title+'</div>'+
@@ -3449,14 +3454,21 @@ async function submitLaundryMove(){
   try{
     await apiWrite('addLaundryMovement',{body:Object.assign({
       kind:realKind,
-      moved_on:dateEl?dateEl.value:new Date().toISOString().slice(0,10),
+      moved_on:dateEl?dateEl.value:todayLocal(),
       note:noteEl?noteEl.value:'',
       author:cleanerMode?cleanerMode.name:'Manager',
     },values)});
   }catch(e){
-    laundryMoveSubmitting=false;
-    if(btn){btn.disabled=false;btn.textContent='Save';}
-    if(errEl)errEl.textContent=(e&&e.message)||'Could not save.';
+    const msg=(e&&e.message)||'Could not save.';
+    // A dropped connection leaves the write in an unknown state: the edge function
+    // may well have committed it. Re-enabling Save here invites the retry that
+    // duplicates the movement, and the ledger has no reconciliation step.
+    const timedOut=/timed out|Network error/.test(msg);
+    laundryMoveSubmitting=timedOut;
+    if(btn&&!timedOut){btn.disabled=false;btn.textContent='Save';}
+    if(errEl)errEl.textContent=timedOut
+      ? 'The connection dropped. The movement may already be saved: close this, refresh, and check Recent movements before recording it again.'
+      : msg;
     return;
   }
   laundryMoveSubmitting=false;
@@ -3491,7 +3503,9 @@ function renderLaundry(){
     return;
   }
   const bal=(laundryData&&laundryData.balances)||{};
-  const noMovementsEver=(laundryMoves||[]).length===0;
+  // Only an adjustment seeds a balance, so a pickup must not silence the banner:
+  // without seeding, dirty_at_store under-reports forever and nothing says so.
+  const noMovementsEver=!(laundryMoves||[]).some(m=>String(m.kind).indexOf('adjust')===0);
   if(noMovementsEver){
     h+='<div class="laundry-onboard">'+
       '<strong>Start with what you already have.</strong> '+
@@ -3519,7 +3533,7 @@ function renderLaundry(){
       '<th>Date</th><th>Type</th>'+LAUNDRY_ITEMS.map(i=>'<th>'+i.label+'</th>').join('')+
       '<th>Total</th><th>By</th><th>Note</th></tr></thead><tbody>';
     laundryMoves.forEach(m=>{
-      const label={out:'Pickup',in:'Return',adjust_store:'Adjust store',adjust_laundry:'Adjust laundry'}[m.kind]||m.kind;
+      const label={out:'Pickup',in:'Return',adjust_store:'Adjust store',adjust_laundry:'Adjust laundry'}[m.kind];
       h+='<tr><td>'+esc(m.moved_on||'')+'</td><td>'+label+'</td>'+
         LAUNDRY_ITEMS.map(i=>'<td>'+(Number(m[i.key])||0)+'</td>').join('')+
         '<td><strong>'+laundryTotal(m)+'</strong></td>'+

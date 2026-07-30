@@ -549,21 +549,25 @@ async function stubLaundryApi(page: any, counts: any[]) {
   }, counts);
 }
 
+// laundryBucket drops any day outside the month the tab is showing, so stubbed
+// counts must be anchored to whatever month the app is on, never to a literal.
+async function currentLaundryMonth(page: any): Promise<string> {
+  const r = await page.evaluate(() => (window as any).laundryMonthRange());
+  return r.start.slice(0, 7);
+}
+
 test('renderLaundryTable day view: one row per day with correct per-item counts', async ({ page }) => {
+  const month = await currentLaundryMonth(page);
   const counts = [
-    { counted_on: '2026-07-10', pillowcases: 2, bed_sheets: 1, duvet_covers: 0, small_towels: 3, large_towels: 0, bath_mats: 1 },
-    { counted_on: '2026-07-10', pillowcases: 1, bed_sheets: 2, duvet_covers: 0, small_towels: 0, large_towels: 1, bath_mats: 0 },
-    { counted_on: '2026-07-15', pillowcases: 4, bed_sheets: 0, duvet_covers: 1, small_towels: 0, large_towels: 2, bath_mats: 0 },
+    { counted_on: `${month}-10`, pillowcases: 2, bed_sheets: 1, duvet_covers: 0, small_towels: 3, large_towels: 0, bath_mats: 1 },
+    { counted_on: `${month}-10`, pillowcases: 1, bed_sheets: 2, duvet_covers: 0, small_towels: 0, large_towels: 1, bath_mats: 0 },
+    { counted_on: `${month}-15`, pillowcases: 4, bed_sheets: 0, duvet_covers: 1, small_towels: 0, large_towels: 2, bath_mats: 0 },
   ];
   await stubLaundryApi(page, counts);
 
-  // Reset to current month and day granularity, then switch to laundry tab.
+  // Day granularity, then switch to the laundry tab so loadLaundry runs fresh.
   await page.evaluate(() => {
     const w = window as any;
-    // Force the month offset to 0 (current month is July 2026 in this session).
-    // setLaundryGranularity is on window; laundryMonthOffset cannot be set directly,
-    // but changeLaundryMonth can be driven. We reset by switching to the laundry
-    // tab so loadLaundry is called fresh; then we switch granularity if needed.
     w.setLaundryGranularity('day');
     w.setTab('laundry');
   });
@@ -593,23 +597,24 @@ test('renderLaundryTable day view: one row per day with correct per-item counts'
   });
 
   expect(result.rows).toBe(2);
-  // July 10: two cleanings merged
-  expect(result.row0label).toBe('2026-07-10');
+  // The 10th: two cleanings merged
+  expect(result.row0label).toBe(`${month}-10`);
   expect(result.row0pills).toBe(3);   // 2 + 1
   expect(result.row0beds).toBe(3);    // 1 + 2
   expect(result.row0small).toBe(3);   // 3 + 0
   expect(result.row0large).toBe(1);   // 0 + 1
   expect(result.row0cleanings).toBe(2);
-  // July 15: one cleaning
-  expect(result.row1label).toBe('2026-07-15');
+  // The 15th: one cleaning
+  expect(result.row1label).toBe(`${month}-15`);
   expect(result.row1pills).toBe(4);
   expect(result.row1cleanings).toBe(1);
 });
 
 test('renderLaundryTable footer totals equal column sums', async ({ page }) => {
+  const month = await currentLaundryMonth(page);
   const counts = [
-    { counted_on: '2026-07-05', pillowcases: 3, bed_sheets: 1, duvet_covers: 2, small_towels: 0, large_towels: 1, bath_mats: 1 },
-    { counted_on: '2026-07-12', pillowcases: 1, bed_sheets: 2, duvet_covers: 0, small_towels: 4, large_towels: 0, bath_mats: 2 },
+    { counted_on: `${month}-05`, pillowcases: 3, bed_sheets: 1, duvet_covers: 2, small_towels: 0, large_towels: 1, bath_mats: 1 },
+    { counted_on: `${month}-12`, pillowcases: 1, bed_sheets: 2, duvet_covers: 0, small_towels: 4, large_towels: 0, bath_mats: 2 },
   ];
   await stubLaundryApi(page, counts);
 
@@ -668,4 +673,115 @@ test('renderLaundryTable shows empty message and no table when no counts', async
 
   expect(result.hasTable).toBe(false);
   expect(result.hasEmptyMsg).toBe(true);
+});
+
+// ============ seeding banner ============
+//
+// Only an adjustment seeds a balance. Pickup is the first and the primary CTA,
+// so a banner that any movement silences leaves dirty_at_store short forever,
+// and the ledger has no reconciliation step that would ever surface it.
+
+const ONBOARD_TEXT = 'Start with what you already have.';
+
+async function stubLaundryMovements(page: any, movements: any[]) {
+  await page.evaluate((mv: any[]) => {
+    const w = window as any;
+    w.api = async (action: string) => {
+      if (action === 'getLaundrySummary') return { counts: [], balances: { store: null, laundry: null } };
+      if (action === 'getLaundryMovements') return { movements: mv };
+      return {};
+    };
+  }, movements);
+}
+
+test('the seeding banner survives a pickup and clears only once a balance is adjusted', async ({ page }) => {
+  const pickup = {
+    id: 1, moved_on: '2026-07-10', kind: 'out', author: 'Manager', note: '',
+    pillowcases: 12, bed_sheets: 6, duvet_covers: 0, small_towels: 0, large_towels: 0, bath_mats: 0,
+  };
+  await stubLaundryMovements(page, [pickup]);
+  await page.evaluate(() => (window as any).setTab('laundry'));
+  await page.waitForSelector('.month-selector', { timeout: 8000 });
+
+  const shownAfterPickup = await page.evaluate((t: string) => {
+    const app = document.getElementById('app');
+    return !!(app && (app.textContent || '').includes(t));
+  }, ONBOARD_TEXT);
+  expect(shownAfterPickup).toBe(true);
+
+  const adjust = Object.assign({}, pickup, { id: 2, kind: 'adjust_store', moved_on: '2026-07-11' });
+  await stubLaundryMovements(page, [adjust, pickup]);
+  await page.evaluate(() => (window as any).loadLaundry());
+  await page.waitForFunction((t: string) => {
+    const app = document.getElementById('app');
+    return !!app && !(app.textContent || '').includes(t);
+  }, ONBOARD_TEXT, { timeout: 8000 });
+});
+
+// ============ blocked mark-done after a saved count ============
+//
+// markDone bails out while another done-save is in flight. Silence there ends
+// the flow with the count saved and the cleaning still open, and the sheet
+// closing reads as success.
+
+test('a count saved while another done-save is in flight tells the cleaner', async ({ page }) => {
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__toasts = [];
+    w.toast = (msg: string) => { w.__toasts.push(msg); };
+    w.render = () => {};
+    // setDone never settles, so savingDone stays true once the undo timer fires.
+    w.api = async (action: string) => (action === 'setDone' ? new Promise(() => {}) : {});
+    w.apiWrite = async () => ({ status: 'success' });
+    return w.markDone('2026-07-30_Gate Race A', { skipLaundry: true });
+  });
+
+  // The undo window is 5s. Its setDone is what pins savingDone true.
+  await page.waitForTimeout(5400);
+
+  const toasts = await page.evaluate(async () => {
+    const w = window as any;
+    await w.openLaundrySheet('2026-07-30_Gate Race B');
+    w.LAUNDRY_ITEMS.forEach((it: any) => {
+      const inp = document.getElementById('lq_' + it.key) as HTMLInputElement | null;
+      if (inp) inp.value = '2';
+    });
+    w.syncLaundryConfirm();
+    await w.submitLaundrySheet();
+    return w.__toasts as string[];
+  });
+
+  expect(toasts.some((t: string) => /Tap Done again/i.test(t))).toBe(true);
+});
+
+// ============ month range follows local time ============
+//
+// Dubai is UTC+4, so between 00:00 and 03:59 local the UTC date is still
+// yesterday. On the 1st of a month that opens the tab on the previous month.
+
+test.describe('local-time month boundary', () => {
+  test.use({ timezoneId: 'Asia/Dubai' });
+
+  test('laundryMonthRange returns the month local time is in, not the UTC one', async ({ page }) => {
+    // 2026-08-01 01:00 in Dubai is still 2026-07-31 in UTC.
+    await page.clock.setFixedTime(new Date('2026-07-31T21:00:00Z'));
+
+    const r = await page.evaluate(() => {
+      const w = window as any;
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return {
+        range: w.laundryMonthRange(),
+        localMonth: now.getFullYear() + '-' + pad(now.getMonth() + 1),
+        utcMonth: now.getUTCFullYear() + '-' + pad(now.getUTCMonth() + 1),
+      };
+    });
+
+    // Guard the fixture: the two clocks must actually disagree, or this proves nothing.
+    expect(r.localMonth).toBe('2026-08');
+    expect(r.utcMonth).toBe('2026-07');
+
+    expect(r.range.start).toBe('2026-08-01');
+    expect(r.range.end).toBe('2026-08-31');
+  });
 });
