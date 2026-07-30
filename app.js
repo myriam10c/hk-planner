@@ -3040,6 +3040,98 @@ function renderNotifBanner(){
 }
 function dismissNotifBanner(){localStorage.setItem('notifBannerDismissed','1');render();}
 
+// ============ LAUNDRY: constants + pure helpers ============
+// Fixed list. Adding an item means a migration plus a proxy change, by design.
+const LAUNDRY_ITEMS=[
+  {key:'pillowcases',label:'Pillowcases'},
+  {key:'bed_sheets',label:'Bed sheets'},
+  {key:'duvet_covers',label:'Duvet covers'},
+  {key:'small_towels',label:'Small towels'},
+  {key:'large_towels',label:'Large towels'},
+  {key:'bath_mats',label:'Bath mats'},
+];
+// const is lexical, so it never lands on window on its own. Tests need it.
+window.LAUNDRY_ITEMS=LAUNDRY_ITEMS;
+
+function laundryZero(){const o={};LAUNDRY_ITEMS.forEach(i=>{o[i.key]=0;});return o;}
+
+function laundryTotal(row){return LAUNDRY_ITEMS.reduce((s,i)=>s+(Number(row&&row[i.key])||0),0);}
+
+function laundrySum(rows){
+  const o=laundryZero();
+  (rows||[]).forEach(r=>{LAUNDRY_ITEMS.forEach(i=>{o[i.key]+=Number(r&&r[i.key])||0;});});
+  return o;
+}
+
+// Empty is checked before Number(), because Number('') is 0 and that would turn
+// a forgotten field into a declared zero.
+function laundryParseCounts(values){
+  const out=laundryZero();
+  for(const it of LAUNDRY_ITEMS){
+    const raw=values?values[it.key]:undefined;
+    if(raw===''||raw===null||raw===undefined)return{ok:false,field:it.key,reason:'empty'};
+    const n=Number(raw);
+    if(!Number.isInteger(n))return{ok:false,field:it.key,reason:'not_integer'};
+    if(n<0)return{ok:false,field:it.key,reason:'negative'};
+    if(n>999)return{ok:false,field:it.key,reason:'too_large'};
+    out[it.key]=n;
+  }
+  return{ok:true,values:out};
+}
+
+// UTC throughout: these are calendar dates, never instants. Using local time
+// would shift a day for anyone whose device is not on Dubai time.
+function laundryAddDays(dateStr,n){
+  const d=new Date(dateStr+'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate()+n);
+  return d.toISOString().slice(0,10);
+}
+
+function laundryMonday(dateStr){
+  const d=new Date(dateStr+'T00:00:00Z');
+  const dow=(d.getUTCDay()+6)%7; // 0 = Monday
+  d.setUTCDate(d.getUTCDate()-dow);
+  return d.toISOString().slice(0,10);
+}
+
+// Week rows stay clipped to [monthStart, monthEnd] so that browsing month to
+// month never counts the same cleaning twice.
+function laundryBucket(counts,granularity,monthStart,monthEnd){
+  const groups=new Map();
+  (counts||[]).forEach(c=>{
+    const day=c&&c.counted_on;
+    if(!day||day<monthStart||day>monthEnd)return;
+    let gk,gStart,gEnd;
+    if(granularity==='week'){
+      gk=laundryMonday(day);
+      const gWeekEnd=laundryAddDays(gk,6);
+      gStart=gk<monthStart?monthStart:gk;
+      gEnd=gWeekEnd>monthEnd?monthEnd:gWeekEnd;
+    }else{
+      gk=day;gStart=day;gEnd=day;
+    }
+    if(!groups.has(gk))groups.set(gk,{key:gk,start:gStart,end:gEnd,cleanings:0,items:laundryZero()});
+    const g=groups.get(gk);
+    g.cleanings++;
+    LAUNDRY_ITEMS.forEach(i=>{g.items[i.key]+=Number(c[i.key])||0;});
+  });
+  return Array.from(groups.values())
+    .sort((a,b)=>a.key<b.key?-1:(a.key>b.key?1:0))
+    .map(g=>Object.assign({},g.items,{
+      key:g.key,start:g.start,end:g.end,
+      cleanings:g.cleanings,total:laundryTotal(g.items),
+    }));
+}
+
+function laundryPrefill(storeBalance){
+  const o={};
+  LAUNDRY_ITEMS.forEach(i=>{
+    const n=Number(storeBalance&&storeBalance[i.key])||0;
+    o[i.key]=n>0?n:0;
+  });
+  return o;
+}
+
 // ============ RENDER ============
 function render(){
   // #6 PIN screen
