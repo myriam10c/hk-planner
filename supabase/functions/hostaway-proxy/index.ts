@@ -265,6 +265,26 @@ async function addLog(sb: any, key: string, action: string, actor?: string | nul
   await sb.from("cleaning_log").insert({ reservation_key: key, action, actor: actor || null, details: details || {} });
 }
 
+// ========== Linge : champs quantités ==========
+const LAUNDRY_FIELDS = [
+  "pillowcases", "bed_sheets", "duvet_covers",
+  "small_towels", "large_towels", "bath_mats",
+] as const;
+
+// Retourne {values} ou {error}. allowNegative est vrai uniquement pour les
+// ajustements d'inventaire, où une correction peut ramener un solde vers le bas.
+function readLaundryQty(body: Record<string, any>, allowNegative: boolean) {
+  const values: Record<string, number> = {};
+  for (const f of LAUNDRY_FIELDS) {
+    const n = Number(body[f]);
+    if (!Number.isInteger(n)) return { error: `${f} must be an integer` };
+    if (!allowNegative && n < 0) return { error: `${f} must be >= 0` };
+    if (Math.abs(n) > 999) return { error: `${f} is out of range` };
+    values[f] = n;
+  }
+  return { values };
+}
+
 // ========== Phase 1 : Cleaner auth helpers ==========
 function generateSessionToken(): string {
   const arr = new Uint8Array(32);
@@ -564,6 +584,12 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["submitMacCommand", "POST"],
   ["getMacCommands", "GET"],
   ["updateMacCommand", "POST"],
+  // ===== Laundry =====
+  ["saveLaundryCount", "POST"],
+  ["getLaundryCount", "GET"],
+  ["getLaundrySummary", "GET"],
+  ["getLaundryMovements", "GET"],
+  ["addLaundryMovement", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -750,6 +776,97 @@ Deno.serve(async (req: Request) => {
       }
       await addLog(sb, key, postpone ? "postponed" : "unpostponed", actor, postpone ? { new_date, original_date } : null);
       return jsonResp({ status: "success", key, postpone });
+    }
+
+    // ==================== LAUNDRY ====================
+    // Comptage du linge sale déclaré en fin de ménage. Ouvert aux cleaners,
+    // même règle que addNote : c'est un fait du ménage, pas un privilège.
+    if (action === "saveLaundryCount" && req.method === "POST") {
+      const body = await req.json();
+      const { reservation_key, author } = body;
+      if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
+      const q = readLaundryQty(body, false);
+      if (q.error) return jsonResp({ error: q.error }, 400);
+      // counted_on vient du préfixe date de la clé, pas de l'heure de saisie :
+      // un ménage du 12 validé à 1h du matin le 13 reste imputé au 12.
+      const m = String(reservation_key).match(/^(\d{4}-\d{2}-\d{2})_/);
+      const counted_on = m ? m[1] : new Date().toISOString().slice(0, 10);
+      const { error } = await sb.from("laundry_counts").upsert({
+        reservation_key,
+        ...q.values,
+        counted_on,
+        author: author || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "reservation_key" });
+      if (error) throw error;
+      await addLog(sb, reservation_key, "laundry_counted", author, q.values);
+      return jsonResp({ status: "success" });
+    }
+
+    if (action === "getLaundryCount" && req.method === "GET") {
+      const key = url.searchParams.get("key");
+      if (!key) return jsonResp({ error: "key required" }, 400);
+      const { data, error } = await sb.from("laundry_counts")
+        .select("*").eq("reservation_key", key).maybeSingle();
+      if (error) throw error;
+      return jsonResp({ count: data || null });
+    }
+
+    // Les comptages du mois descendent bruts (le client agrège), mais les
+    // soldes passent par la vue : ils somment tout l'historique, ce qui grossit
+    // sans limite et n'a rien à faire dans le navigateur.
+    if (action === "getLaundrySummary" && req.method === "GET") {
+      const start = url.searchParams.get("start");
+      const end = url.searchParams.get("end");
+      if (!start || !end) return jsonResp({ error: "start and end required" }, 400);
+      const { data: counts, error: e1 } = await sb.from("laundry_counts")
+        .select(["reservation_key", "counted_on", ...LAUNDRY_FIELDS].join(","))
+        .gte("counted_on", start).lte("counted_on", end);
+      if (e1) throw e1;
+      const { data: bal, error: e2 } = await sb.from("laundry_balances").select("*");
+      if (e2) throw e2;
+      const byBucket: Record<string, any> = {};
+      for (const row of bal || []) byBucket[row.bucket] = row;
+      return jsonResp({
+        counts: counts || [],
+        balances: { store: byBucket.store || null, laundry: byBucket.laundry || null },
+      });
+    }
+
+    if (action === "getLaundryMovements" && req.method === "GET") {
+      const raw = Number(url.searchParams.get("limit"));
+      const limit = Number.isInteger(raw) && raw > 0 ? Math.min(raw, 200) : 50;
+      const { data, error } = await sb.from("laundry_movements")
+        .select("*")
+        .order("moved_on", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return jsonResp({ movements: data || [] });
+    }
+
+    // Manager-only, même règle que setCancelled / setPostponed : ce chiffre est
+    // la référence opposée à la blanchisserie, il ne s'écrit pas depuis un compte cleaner.
+    if (action === "addLaundryMovement" && req.method === "POST") {
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
+      const body = await req.json();
+      const { kind, moved_on, note, author } = body;
+      if (!["out", "in", "adjust_store", "adjust_laundry"].includes(kind)) {
+        return jsonResp({ error: "invalid kind" }, 400);
+      }
+      if (!moved_on || !/^\d{4}-\d{2}-\d{2}$/.test(String(moved_on))) {
+        return jsonResp({ error: "moved_on required (YYYY-MM-DD)" }, 400);
+      }
+      const q = readLaundryQty(body, String(kind).startsWith("adjust_"));
+      if (q.error) return jsonResp({ error: q.error }, 400);
+      const { data, error } = await sb.from("laundry_movements").insert({
+        kind, ...q.values, moved_on,
+        note: note || null,
+        author: author || "Manager",
+      }).select().single();
+      if (error) throw error;
+      return jsonResp({ status: "success", movement: data });
     }
 
     // ==================== CLEANERS ====================
