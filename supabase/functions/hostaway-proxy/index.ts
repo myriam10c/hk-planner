@@ -792,7 +792,7 @@ Deno.serve(async (req: Request) => {
       if (q.error) return jsonResp({ error: q.error }, 400);
       // counted_on vient du préfixe date de la clé, pas de l'heure de saisie :
       // un ménage du 12 validé à 1h du matin le 13 reste imputé au 12.
-      const m = String(reservation_key).match(/^(\d{4}-\d{2}-\d{2})_/);
+      const m = String(reservation_key).match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
       const counted_on = m ? m[1] : new Date().toISOString().slice(0, 10);
       const { error } = await sb.from("laundry_counts").upsert({
         reservation_key,
@@ -832,10 +832,11 @@ Deno.serve(async (req: Request) => {
       if (spanDays < 0 || spanDays > 31) {
         return jsonResp({ error: "window must be between 0 and 31 days" }, 400);
       }
-      const { data: counts, error: e1 } = await sb.from("laundry_counts")
-        .select(["reservation_key", "counted_on", ...LAUNDRY_FIELDS].join(","))
-        .gte("counted_on", start).lte("counted_on", end);
-      if (e1) throw e1;
+      const counts = await fetchAllRows<any>((from, to) =>
+        sb.from("laundry_counts")
+          .select(["reservation_key", "counted_on", ...LAUNDRY_FIELDS].join(","))
+          .gte("counted_on", start).lte("counted_on", end)
+          .order("counted_on").order("reservation_key").range(from, to));
       const { data: bal, error: e2 } = await sb.from("laundry_balances").select("*");
       if (e2) throw e2;
       const byBucket: Record<string, any> = {};
