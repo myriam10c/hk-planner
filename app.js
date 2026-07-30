@@ -3326,9 +3326,11 @@ function laundryBalanceCard(title,bal,tone){
 // Seam for Task 6: fills in the totals table. Returns empty string until Task 6 adds it.
 function renderLaundryTable(r){return '';}
 
-let laundryMoveSubmitting=false; // C1: re-entrancy guard
+let laundryMoveSubmitting=false;
 
-// C2+I3: form lives in its own body-level container so render() never wipes it.
+// The form gets its own body-level container for two reasons: a background
+// render() rebuilds #app and would wipe what the manager has typed, and inside
+// .container the modal is trapped in a stacking context the header sits above.
 function renderLaundryMoveForm(){
   let el=document.getElementById('laundryMoveForm');
   if(!el){el=document.createElement('div');el.id='laundryMoveForm';document.body.appendChild(el);}
@@ -3339,7 +3341,7 @@ function renderLaundryMoveForm(){
   const bal=(laundryData&&laundryData.balances)||{};
   // A pickup opens on the current store balance, so the common case is one tap.
   const pre=kind==='out'?laundryPrefill(bal.store):null;
-  // I5: adjust allows negatives; pickup and return floor at zero.
+  // An adjustment can be negative and inputmode="numeric" gives iOS no minus key.
   const inputmode=isAdjust?'text':'numeric';
   const today=new Date().toISOString().slice(0,10);
   el.innerHTML='<div class="modal-overlay" data-action="__closeLaundryMoveBackdrop" data-pass-event="1">'+
@@ -3365,8 +3367,9 @@ function renderLaundryMoveForm(){
       '<button class="btn-secondary" data-action="closeLaundryMoveForm">Cancel</button>'+
       '<button class="btn-success" id="lmSave" data-action="submitLaundryMove">Save</button>'+
     '</div></div></div>';
-  // I4: select on focus so a typed digit replaces the prefilled value.
-  // iOS Safari collapses the selection right after focus, so defer a tick.
+  // Select on focus so a typed digit replaces the prefilled value instead of
+  // appending to it. iOS Safari collapses the selection right after focus,
+  // hence the deferred tick.
   el.querySelectorAll('.laundry-input').forEach(inp=>{
     inp.addEventListener('focus',()=>setTimeout(()=>inp.select(),0));
   });
@@ -3376,19 +3379,19 @@ function openLaundryMoveForm(kind){laundryMoveKind=kind;renderLaundryMoveForm();
 function closeLaundryMoveForm(){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}
 function __closeLaundryMoveBackdrop(e){ if(e.target.classList.contains('modal-overlay'))closeLaundryMoveForm(); }
 
-// I5: for adjust kinds, stepper allows negatives down to -999.
 function laundryMoveStep(inputId,delta){
   const inp=document.getElementById(inputId);
   if(!inp)return;
   const cur=inp.value.trim()===''?0:Number(inp.value);
   const next=(Number.isFinite(cur)?Math.round(cur):0)+Number(delta);
-  // Check if the current form is an adjust form.
+  // Only an adjustment may go negative, and only it renders the bucket selector.
   const isAdjustForm=!!document.getElementById('lmBucket');
   inp.value=String(next<-999?-999:(next>999?999:((!isAdjustForm&&next<0)?0:next)));
 }
 
 async function submitLaundryMove(){
-  // C1: re-entrancy guard prevents double-write on double-tap.
+  // A double-tap would write the movement twice, and the ledger has no
+  // reconciliation step: the duplicate would skew the balance forever.
   if(laundryMoveSubmitting)return;
   const kind=laundryMoveKind;
   if(!kind)return;
@@ -3409,7 +3412,6 @@ async function submitLaundryMove(){
   if(bad){if(errEl)errEl.textContent='Check the '+bad.replace(/_/g,' ')+' field.';return;}
   const dateEl=document.getElementById('lmDate');
   const noteEl=document.getElementById('lmNote');
-  // C1: disable button and set flag before awaiting.
   laundryMoveSubmitting=true;
   const btn=document.getElementById('lmSave');
   if(btn){btn.disabled=true;btn.textContent='Saving...';}
@@ -3447,7 +3449,7 @@ function renderLaundry(){
     document.getElementById('app').innerHTML=h;
     return;
   }
-  // I7: surface load errors so the manager knows data is stale.
+  // Balances shown as zero after a failed fetch would read as a real inventory.
   if(laundryData&&laundryData.error){
     h+='<div class="laundry-onboard" style="background:#fee2e2;color:#7f1d1d;border-color:#fecaca">'+
       '<strong>Could not load data.</strong> '+
@@ -3458,8 +3460,6 @@ function renderLaundry(){
     return;
   }
   const bal=(laundryData&&laundryData.balances)||{};
-  // I7: onboarding banner must not appear when data failed to load (guard above handles that).
-  // Only show when data loaded successfully and no movements exist.
   const noMovementsEver=(laundryMoves||[]).length===0;
   if(noMovementsEver){
     h+='<div class="laundry-onboard">'+
@@ -3498,8 +3498,6 @@ function renderLaundry(){
   }
   h+='</div>'+renderBottomNav();
   document.getElementById('app').innerHTML=h;
-  // C2: form lives in its own body-level container and is not rebuilt here,
-  // so typed input survives a background render().
 }
 
 // ============ RENDER ============

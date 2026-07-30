@@ -477,17 +477,10 @@ test('Escape key clears laundryMoveKind so a re-render shows no form', async ({ 
   expect(result.openAfter).toBe(false);
 });
 
-// I8: The cleaner-bounce guard relies on cleanerMode, a module let that cannot
-// be set from tests. After a genuine attempt, the correct approach is to delete
-// the fake test rather than leave it giving false coverage.
-// The guard is exercised by the render() dispatch in app.js line ~3465 and is
-// readable in code review; a test that only checks function existence does not
-// add safety. Deleted as per review finding I8.
-
-// ============ C1: double-submit protection ============
+// ============ double-submit protection ============
 // A second call to submitLaundryMove while the first is in flight must not
 // write a second movement. Verified by patching apiWrite to count invocations.
-test('C1: submitLaundryMove is re-entrant-safe, second call while first is in flight writes only once', async ({ page }) => {
+test('submitLaundryMove is re-entrant-safe, second call while first is in flight writes only once', async ({ page }) => {
   const writeCount = await page.evaluate(async () => {
     const w = window as any;
     let count = 0;
@@ -514,10 +507,10 @@ test('C1: submitLaundryMove is re-entrant-safe, second call while first is in fl
   expect(writeCount).toBe(1);
 });
 
-// ============ C2: background render does not destroy typed input ============
-// The form now lives in #laundryMoveForm (body-level), not inside #app.
+// ============ background render does not destroy typed input ============
+// The form lives in #laundryMoveForm (body-level), not inside #app.
 // A full render() call must therefore leave typed values intact.
-test('C2: a full render() while the movement form is open does not destroy typed input', async ({ page }) => {
+test('a full render() while the movement form is open does not destroy typed input', async ({ page }) => {
   const valueAfterRender = await page.evaluate(async () => {
     const w = window as any;
     // Stub network so render/loadLaundry do not throw.
