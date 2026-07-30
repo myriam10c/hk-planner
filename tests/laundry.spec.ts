@@ -579,7 +579,7 @@ test('renderLaundryTable day view: one row per day with correct per-item counts'
     const cells1 = bodyRows[1] ? Array.from(bodyRows[1].querySelectorAll('td')).map((td: any) => td.textContent.trim()) : [];
     return {
       rows: bodyRows.length,
-      // cells0[0] = date, cells0[1] = pillowcases, ..., cells0[7] = cleanings
+      // cells: 0 = date, 1..6 = the six items, 7 = total, 8 = cleanings
       row0label: cells0[0],
       row0pills: Number(cells0[1]),
       row0beds: Number(cells0[2]),
