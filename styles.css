@@ -3202,3 +3202,23 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 .rv-trans-lbl{display:inline-block;font-size:10px;font-weight:700;color:#fff;background:#7a8699;border-radius:4px;padding:1px 5px;margin-right:6px;vertical-align:1px}
 .rv-angle{font-size:13px;font-weight:600;color:#1f2733;margin:4px 0 6px}
 @media(max-width:600px){.rv-stats{grid-template-columns:repeat(2,1fr)}}
+
+/* ============ LAUNDRY SHEET ============ */
+.laundry-box { max-width: 420px; width: 100%; }
+.laundry-title { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+.laundry-sub { font-size: 13px; opacity: 0.65; margin-bottom: 14px; }
+.laundry-rows { display: flex; flex-direction: column; gap: 10px; }
+.laundry-row { display: grid; grid-template-columns: 1fr auto 64px auto; align-items: center; gap: 8px; }
+.laundry-label { font-size: 14px; }
+.laundry-step {
+  width: 38px; height: 38px; border-radius: 10px; font-size: 20px; line-height: 1;
+  border: 1px solid var(--border, #d4d4d8); background: var(--card, #fff); cursor: pointer;
+}
+.laundry-step:active { transform: scale(0.94); }
+.laundry-input {
+  width: 64px; height: 38px; text-align: center; font-size: 17px; font-weight: 600;
+  border-radius: 10px; border: 1px solid var(--border, #d4d4d8); background: var(--card, #fff);
+}
+.laundry-error { min-height: 18px; font-size: 13px; color: #dc2626; margin-top: 8px; }
+.laundry-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
+.laundry-actions button { flex: 1; padding: 12px; font-size: 15px; }

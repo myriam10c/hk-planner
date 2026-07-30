@@ -488,7 +488,7 @@ async function bulkAssignSelected(cid){
 async function bulkMarkDoneSelected(){
   const keys = Array.from(plannerBulkSelected);
   if(keys.length === 0){ toast('Nothing selected'); return; }
-  for(const k of keys){ if(!done[k]) await markDone(k); }
+  for(const k of keys){ if(!done[k]) await markDone(k,{skipLaundry:true}); }
   plannerBulkSelected.clear(); render();
   toast(keys.length+' marked done ✓','success');
 }
@@ -1510,9 +1510,13 @@ async function flushPendingDone(){
   catch(err){delete done[pk];toast('Could not save — reverted','error');render();}
   savingDone=false;
 }
-async function markDone(key){
+async function markDone(key,opts){
   if(savingDone)return;
   const nw=!done[key];
+  // Marking done always goes through the laundry sheet. The sheet calls back
+  // with skipLaundry once the count is saved. Bulk mark-done opts out on
+  // purpose: it is a manager catch-up tool, and 20 sheets in a row is unusable.
+  if(nw&&!(opts&&opts.skipLaundry)){openLaundrySheet(key);return;}
   // If marking done → show undo toast with 5s window
   if(nw){
     done[key]=true;render();
@@ -3133,6 +3137,124 @@ function laundryPrefill(storeBalance){
   return o;
 }
 
+// ============ LAUNDRY: cleaner sheet ============
+let laundryCountCache={};
+let laundrySheetKey=null;
+
+async function openLaundrySheet(key){
+  laundrySheetKey=key;
+  renderLaundrySheet();
+  // Prefill from an earlier submission so a correction never starts from blank.
+  if(laundryCountCache[key]===undefined){
+    try{
+      const r=await api('getLaundryCount',{params:{key}});
+      laundryCountCache[key]=(r&&r.count)||null;
+    }catch(e){laundryCountCache[key]=null;}
+    if(laundrySheetKey===key)renderLaundrySheet();
+  }
+}
+
+function closeLaundrySheet(){laundrySheetKey=null;renderLaundrySheet();}
+
+// The delegated click handler walks up to the nearest [data-action], so a click
+// on an input inside the box resolves to the overlay. Guard on the actual click
+// target, exactly like __closeExtraModalBackdrop at app.js:123. Putting
+// data-stop-propagation on the box does nothing: that attribute is only read on
+// the element that carries data-action.
+function __closeLaundrySheetBackdrop(e){ if(e.target.classList.contains('modal-overlay'))closeLaundrySheet(); }
+
+function renderLaundrySheet(){
+  let el=document.getElementById('laundrySheet');
+  if(!el){el=document.createElement('div');el.id='laundrySheet';document.body.appendChild(el);}
+  if(!laundrySheetKey){el.innerHTML='';return;}
+  const key=laundrySheetKey;
+  const prev=laundryCountCache[key];
+  const res=(RESERVATIONS||[]).find(r=>keyFor(r)===key);
+  const where=res?(res.listing||res.guest||''):'';
+  el.innerHTML='<div class="modal-overlay" data-action="__closeLaundrySheetBackdrop" data-pass-event="1">'+
+    '<div class="modal-box laundry-box">'+
+      '<div class="laundry-title">Laundry collected</div>'+
+      (where?'<div class="laundry-sub">'+esc(where)+'</div>':'')+
+      '<div class="laundry-rows">'+
+      LAUNDRY_ITEMS.map(it=>{
+        const v=prev&&prev[it.key]!=null?String(prev[it.key]):'';
+        return '<div class="laundry-row">'+
+          '<label class="laundry-label" for="lq_'+it.key+'">'+it.label+'</label>'+
+          '<button type="button" class="laundry-step" data-action="laundryStep" data-arg0="lq_'+it.key+'" data-arg1="-1" aria-label="Less '+it.label+'">&minus;</button>'+
+          '<input class="laundry-input" id="lq_'+it.key+'" type="text" inputmode="numeric" pattern="[0-9]*" value="'+v+'" autocomplete="off">'+
+          '<button type="button" class="laundry-step" data-action="laundryStep" data-arg0="lq_'+it.key+'" data-arg1="1" aria-label="More '+it.label+'">+</button>'+
+        '</div>';
+      }).join('')+
+      '</div>'+
+      '<div class="laundry-error" id="laundryError"></div>'+
+      '<div class="laundry-actions">'+
+        '<button class="btn-secondary" data-action="closeLaundrySheet">Cancel</button>'+
+        '<button class="btn-success" id="laundryConfirm" data-action="submitLaundrySheet" disabled>Confirm &amp; mark done</button>'+
+      '</div>'+
+    '</div></div>';
+  el.querySelectorAll('.laundry-input').forEach(inp=>{
+    // Select on focus so a typed digit replaces the value instead of appending.
+    inp.addEventListener('focus',()=>inp.select());
+    inp.addEventListener('input',syncLaundryConfirm);
+  });
+  syncLaundryConfirm();
+}
+
+function readLaundrySheetValues(){
+  const out={};
+  LAUNDRY_ITEMS.forEach(it=>{
+    const inp=document.getElementById('lq_'+it.key);
+    out[it.key]=inp?inp.value.trim():'';
+  });
+  return out;
+}
+
+// The button stays dead until all six fields hold a value. An explicit zero is
+// a real answer, a blank field is not, and that distinction is the only thing
+// that makes these numbers worth anything against the laundry provider.
+function syncLaundryConfirm(){
+  const btn=document.getElementById('laundryConfirm');
+  if(!btn)return;
+  const parsed=laundryParseCounts(readLaundrySheetValues());
+  btn.disabled=!parsed.ok;
+}
+
+// Takes the full input id, not the item key, so the cleaner sheet (lq_ prefix)
+// and the manager movement form (lm_ prefix) can share one stepper without
+// their inputs ever colliding on a duplicate DOM id.
+function laundryStep(inputId,delta){
+  const inp=document.getElementById(inputId);
+  if(!inp)return;
+  const cur=inp.value.trim()===''?0:Number(inp.value);
+  const next=(Number.isInteger(cur)?cur:0)+Number(delta);
+  inp.value=String(next<0?0:(next>999?999:next));
+  syncLaundryConfirm();
+}
+
+async function submitLaundrySheet(){
+  const key=laundrySheetKey;
+  if(!key)return;
+  const parsed=laundryParseCounts(readLaundrySheetValues());
+  const errEl=document.getElementById('laundryError');
+  if(!parsed.ok){if(errEl)errEl.textContent='Check the '+parsed.field.replace(/_/g,' ')+' field.';return;}
+  const btn=document.getElementById('laundryConfirm');
+  if(btn){btn.disabled=true;btn.textContent='Saving...';}
+  try{
+    await apiWrite('saveLaundryCount',{body:Object.assign({
+      reservation_key:key,
+      author:cleanerMode?cleanerMode.name:'Manager',
+    },parsed.values)});
+  }catch(e){
+    if(errEl)errEl.textContent='Could not save the laundry count. Try again.';
+    if(btn){btn.disabled=false;btn.textContent='Confirm & mark done';}
+    return;
+  }
+  laundryCountCache[key]=Object.assign({reservation_key:key},parsed.values);
+  closeLaundrySheet();
+  // Only now does the existing done flow run, with its 5s undo toast.
+  markDone(key,{skipLaundry:true});
+}
+
 // ============ RENDER ============
 function render(){
   // #6 PIN screen
@@ -3591,6 +3713,7 @@ function renderCleaningDetailPane(r){
   h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px">';
   if(!isDone) h += '<button class="btn-success" data-action="markDone" data-arg0="'+esc(k)+'">'+icon('check',14)+' Mark done</button>';
   else h += '<button class="btn-secondary" data-action="markDone" data-arg0="'+esc(k)+'">'+icon('refresh',14)+' Undo</button>';
+  h += '<button class="btn-secondary" data-action="openLaundrySheet" data-arg0="'+esc(k)+'">'+icon('clipboard',14)+' Laundry</button>';
   if(!cleanerMode && typeof toggleCancel === 'function'){
     h += '<button class="btn-secondary" data-action="toggleCancel" data-arg0="'+esc(k)+'">'+icon('xCircle',14)+' '+(isCancelled?'Restore':'Cancel')+'</button>';
   }
