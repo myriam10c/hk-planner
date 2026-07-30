@@ -262,7 +262,12 @@ async function fetchAllPages(baseUrl: string, authHeaders: Record<string, string
 }
 
 async function addLog(sb: any, key: string, action: string, actor?: string | null, details?: any) {
-  await sb.from("cleaning_log").insert({ reservation_key: key, action, actor: actor || null, details: details || {} });
+  // Un log raté ne doit jamais casser l'action qu'il enregistre, mais l'erreur
+  // n'était pas seulement avalée : elle n'était même pas lue. C'est comme ça que
+  // la table est restée vide pendant des mois sans que rien ne le signale.
+  const { error } = await sb.from("cleaning_log")
+    .insert({ reservation_key: key, action, actor: actor || null, details: details || {} });
+  if (error) console.error("[addLog] insert failed:", action, key, error.message);
 }
 
 // ========== Linge : champs quantités ==========
