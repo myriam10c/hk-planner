@@ -152,6 +152,19 @@ test('laundryBucket clips week rows to the selected month', async ({ page }) => 
   expect(rows[1].pillowcases).toBe(7);
 });
 
+test('laundryParseCounts rejects whitespace-only value as empty', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const w = window as any;
+    return w.laundryParseCounts({
+      pillowcases: 1, bed_sheets: 1, duvet_covers: '  ',
+      small_towels: 1, large_towels: 1, bath_mats: 1,
+    });
+  });
+  // A whitespace-only string is not a declared count; it must be rejected as empty,
+  // not silently converted to 0 via Number('  ') === 0.
+  expect(r).toMatchObject({ ok: false, field: 'duvet_covers', reason: 'empty' });
+});
+
 test('laundryPrefill floors negative balances at zero', async ({ page }) => {
   const r = await page.evaluate(() => (window as any).laundryPrefill({
     pillowcases: 12, bed_sheets: -3, duvet_covers: 0,

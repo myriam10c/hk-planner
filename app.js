@@ -3063,13 +3063,14 @@ function laundrySum(rows){
   return o;
 }
 
-// Empty is checked before Number(), because Number('') is 0 and that would turn
-// a forgotten field into a declared zero.
+// Empty is checked before Number(), because Number('') and Number('  ') are both 0
+// and would silently turn a forgotten field into a declared zero.
+// A whitespace-only string is treated as empty for the same reason.
 function laundryParseCounts(values){
   const out=laundryZero();
   for(const it of LAUNDRY_ITEMS){
     const raw=values?values[it.key]:undefined;
-    if(raw===''||raw===null||raw===undefined)return{ok:false,field:it.key,reason:'empty'};
+    if(raw===null||raw===undefined||raw===''||(typeof raw==='string'&&raw.trim()===''))return{ok:false,field:it.key,reason:'empty'};
     const n=Number(raw);
     if(!Number.isInteger(n))return{ok:false,field:it.key,reason:'not_integer'};
     if(n<0)return{ok:false,field:it.key,reason:'negative'};
