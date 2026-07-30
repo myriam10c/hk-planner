@@ -3150,8 +3150,17 @@ async function openLaundrySheet(key){
       const r=await api('getLaundryCount',{params:{key}});
       laundryCountCache[key]=(r&&r.count)||null;
     }catch(e){laundryCountCache[key]=null;}
-    if(laundrySheetKey===key)renderLaundrySheet();
+    // api() waits up to 15s. On a weak phone connection the cleaner has often
+    // started typing by the time the prefill lands, and repainting would wipe
+    // what she entered and steal focus mid-keystroke. Only repaint a sheet that
+    // is still untouched, and only if it is still the same cleaning's sheet.
+    if(laundrySheetKey===key&&laundrySheetIsBlank())renderLaundrySheet();
   }
+}
+
+function laundrySheetIsBlank(){
+  const v=readLaundrySheetValues();
+  return LAUNDRY_ITEMS.every(it=>v[it.key]==='');
 }
 
 function closeLaundrySheet(){laundrySheetKey=null;renderLaundrySheet();}
@@ -3162,6 +3171,10 @@ function closeLaundrySheet(){laundrySheetKey=null;renderLaundrySheet();}
 // data-stop-propagation on the box does nothing: that attribute is only read on
 // the element that carries data-action.
 function __closeLaundrySheetBackdrop(e){ if(e.target.classList.contains('modal-overlay'))closeLaundrySheet(); }
+
+// Reopening the sheet on a finished cleaning only saves a correction, it does
+// not re-run the done flow, so the button must not promise otherwise.
+function laundryConfirmLabel(key){ return done[key]?'Save count':'Confirm & mark done'; }
 
 function renderLaundrySheet(){
   let el=document.getElementById('laundrySheet');
@@ -3189,12 +3202,14 @@ function renderLaundrySheet(){
       '<div class="laundry-error" id="laundryError"></div>'+
       '<div class="laundry-actions">'+
         '<button class="btn-secondary" data-action="closeLaundrySheet">Cancel</button>'+
-        '<button class="btn-success" id="laundryConfirm" data-action="submitLaundrySheet" disabled>Confirm &amp; mark done</button>'+
+        '<button class="btn-success" id="laundryConfirm" data-action="submitLaundrySheet" disabled>'+esc(laundryConfirmLabel(key))+'</button>'+
       '</div>'+
     '</div></div>';
   el.querySelectorAll('.laundry-input').forEach(inp=>{
     // Select on focus so a typed digit replaces the value instead of appending.
-    inp.addEventListener('focus',()=>inp.select());
+    // iOS Safari collapses the selection right after the focus handler returns,
+    // so defer it a tick. Without this the team types 7 over 4 and gets 47.
+    inp.addEventListener('focus',()=>setTimeout(()=>inp.select(),0));
     inp.addEventListener('input',syncLaundryConfirm);
   });
   syncLaundryConfirm();
@@ -3226,7 +3241,9 @@ function laundryStep(inputId,delta){
   const inp=document.getElementById(inputId);
   if(!inp)return;
   const cur=inp.value.trim()===''?0:Number(inp.value);
-  const next=(Number.isInteger(cur)?cur:0)+Number(delta);
+  // Round rather than reset: stepping off a stray "2.5" must not silently
+  // throw the cleaner's value away.
+  const next=(Number.isFinite(cur)?Math.round(cur):0)+Number(delta);
   inp.value=String(next<0?0:(next>999?999:next));
   syncLaundryConfirm();
 }
@@ -3246,13 +3263,16 @@ async function submitLaundrySheet(){
     },parsed.values)});
   }catch(e){
     if(errEl)errEl.textContent='Could not save the laundry count. Try again.';
-    if(btn){btn.disabled=false;btn.textContent='Confirm & mark done';}
+    if(btn){btn.disabled=false;btn.textContent=laundryConfirmLabel(key);}
     return;
   }
   laundryCountCache[key]=Object.assign({reservation_key:key},parsed.values);
+  const wasDone=!!done[key];
   closeLaundrySheet();
-  // Only now does the existing done flow run, with its 5s undo toast.
-  markDone(key,{skipLaundry:true});
+  // markDone is a toggle. Handing an already-done cleaning back to it would
+  // un-mark it, which is exactly what the Laundry correction button must not do.
+  if(!wasDone)markDone(key,{skipLaundry:true});
+  else toast('Laundry count saved','success');
 }
 
 // ============ RENDER ============
@@ -3713,7 +3733,7 @@ function renderCleaningDetailPane(r){
   h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px">';
   if(!isDone) h += '<button class="btn-success" data-action="markDone" data-arg0="'+esc(k)+'">'+icon('check',14)+' Mark done</button>';
   else h += '<button class="btn-secondary" data-action="markDone" data-arg0="'+esc(k)+'">'+icon('refresh',14)+' Undo</button>';
-  h += '<button class="btn-secondary" data-action="openLaundrySheet" data-arg0="'+esc(k)+'">'+icon('clipboard',14)+' Laundry</button>';
+  if(!cancelled[k]) h += '<button class="btn-secondary" data-action="openLaundrySheet" data-arg0="'+esc(k)+'">'+icon('clipboard',14)+' Laundry</button>';
   if(!cleanerMode && typeof toggleCancel === 'function'){
     h += '<button class="btn-secondary" data-action="toggleCancel" data-arg0="'+esc(k)+'">'+icon('xCircle',14)+' '+(isCancelled?'Restore':'Cancel')+'</button>';
   }
@@ -6864,6 +6884,9 @@ document.addEventListener('keydown', (e) => {
   if (typeof extraModalState !== 'undefined' && extraModalState.open) { e.preventDefault(); closeExtraModal(); return; }
   // More menu
   if (typeof moreOpen !== 'undefined' && moreOpen) { e.preventDefault(); closeMoreMenu(); return; }
+  // Laundry sheet: the generic branch below only blanks the DOM, which would
+  // leave laundrySheetKey set and let a late prefill repaint a dismissed sheet.
+  if (laundrySheetKey) { e.preventDefault(); closeLaundrySheet(); return; }
   // Any generic modal-overlay present in DOM
   const overlay = document.querySelector('.modal-overlay, .cmdk-overlay, .more-overlay');
   if (overlay) {

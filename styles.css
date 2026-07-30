@@ -3204,7 +3204,9 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 @media(max-width:600px){.rv-stats{grid-template-columns:repeat(2,1fr)}}
 
 /* ============ LAUNDRY SHEET ============ */
-.laundry-box { max-width: 420px; width: 100%; }
+/* .modal-box carries no padding of its own: the other modals get theirs from
+   .modal-header / .modal-body / .modal-footer, which this sheet does not use. */
+.laundry-box { max-width: 420px; width: 100%; padding: 20px; box-sizing: border-box; }
 .laundry-title { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
 .laundry-sub { font-size: 13px; opacity: 0.65; margin-bottom: 14px; }
 .laundry-rows { display: flex; flex-direction: column; gap: 10px; }
@@ -3221,4 +3223,9 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 }
 .laundry-error { min-height: 18px; font-size: 13px; color: #dc2626; margin-top: 8px; }
 .laundry-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
-.laundry-actions button { flex: 1; padding: 12px; font-size: 15px; }
+.laundry-actions button { padding: 12px; font-size: 15px; }
+.laundry-actions .btn-secondary { flex: 0 0 34%; }
+.laundry-actions .btn-success { flex: 1; white-space: nowrap; }
+/* The spec requires the confirm button to be visibly inactive until all six
+   fields hold a value, otherwise the team taps a dead button and waits. */
+.laundry-actions button[disabled] { opacity: 0.45; cursor: not-allowed; }
