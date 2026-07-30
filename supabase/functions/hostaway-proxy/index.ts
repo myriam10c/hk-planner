@@ -273,9 +273,12 @@ const LAUNDRY_FIELDS = [
 
 // Retourne {values} ou {error}. allowNegative est vrai uniquement pour les
 // ajustements d'inventaire, où une correction peut ramener un solde vers le bas.
+// null est rejeté comme un champ absent : une valeur que personne n'a saisie
+// ne doit jamais être écrite comme zéro dans la base.
 function readLaundryQty(body: Record<string, any>, allowNegative: boolean) {
   const values: Record<string, number> = {};
   for (const f of LAUNDRY_FIELDS) {
+    if (body[f] === null) return { error: `${f} must be an integer` };
     const n = Number(body[f]);
     if (!Number.isInteger(n)) return { error: `${f} must be an integer` };
     if (!allowNegative && n < 0) return { error: `${f} must be >= 0` };
@@ -819,6 +822,16 @@ Deno.serve(async (req: Request) => {
       const start = url.searchParams.get("start");
       const end = url.searchParams.get("end");
       if (!start || !end) return jsonResp({ error: "start and end required" }, 400);
+      // Validation format YYYY-MM-DD, même style que moved_on dans addLaundryMovement.
+      const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRe.test(start)) return jsonResp({ error: "start must be YYYY-MM-DD" }, 400);
+      if (!dateRe.test(end)) return jsonResp({ error: "end must be YYYY-MM-DD" }, 400);
+      // Fenêtre bornée à 31 jours : le navigateur ne demande jamais plus d'un mois.
+      const msPerDay = 86_400_000;
+      const spanDays = (new Date(end).getTime() - new Date(start).getTime()) / msPerDay;
+      if (spanDays < 0 || spanDays > 31) {
+        return jsonResp({ error: "window must be between 0 and 31 days" }, 400);
+      }
       const { data: counts, error: e1 } = await sb.from("laundry_counts")
         .select(["reservation_key", "counted_on", ...LAUNDRY_FIELDS].join(","))
         .gte("counted_on", start).lte("counted_on", end);
