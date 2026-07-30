@@ -3509,7 +3509,7 @@ function renderLaundry(){
     '<button class="btn-secondary" data-action="openLaundryMoveForm" data-arg0="adjust">Adjust</button>'+
     '</div>';
 
-  h+=renderLaundryTable(r);   // Task 6 fills this in
+  h+=renderLaundryTable(r);
 
   h+='<h3 class="laundry-h3">Recent movements</h3>';
   if(!laundryMoves||!laundryMoves.length){
