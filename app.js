@@ -2931,7 +2931,7 @@ function getFiltered(){
 
 function countByDate(d){return RESERVATIONS.filter(r=>r.co===d&&!cancelled[keyFor(r)]).length;}
 function countDoneForDate(d){return RESERVATIONS.filter(r=>r.co===d&&done[keyFor(r)]&&!cancelled[keyFor(r)]).length;}
-function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();}
+function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();if(t==='laundry'&&laundryData===null&&!laundryLoading)loadLaundry();}
 let moreOpen=false;
 function openMoreMenu(){ moreOpen=true; renderMoreMenu(); }
 function closeMoreMenu(){ moreOpen=false; renderMoreMenu(); }
@@ -2940,6 +2940,7 @@ function renderMoreMenu(){
   if(!el){ el=document.createElement('div'); el.id='moreMenu'; document.body.appendChild(el); }
   if(!moreOpen){ el.innerHTML=''; return; }
   const items=[
+    {id:'laundry',icon:icon('clipboard',22),label:'Laundry',color:'#0ea5e9'},
     {id:'subcontractors',icon:icon('dollar',22),label:'Subs',color:'#16a34a'},
     {id:'ratings',icon:icon('star',22),label:'Ratings',color:'#ca8a04'},
     {id:'reviews',icon:icon('msgSquare',22),label:'Reviews',color:'#4f46e5'},
@@ -3275,6 +3276,185 @@ async function submitLaundrySheet(){
   else toast('Laundry count saved','success');
 }
 
+// ============ LAUNDRY: manager tab ============
+let laundryData=null;      // {counts:[], balances:{store,laundry}}
+let laundryMoves=null;     // recent movements
+let laundryLoading=false;
+let laundryMonthOffset=0;  // 0 = current month
+let laundryGranularity='day';
+let laundryMoveKind=null;  // open form, or null
+
+function laundryMonthRange(){
+  const now=new Date();
+  const d=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+laundryMonthOffset,1));
+  const start=d.toISOString().slice(0,10);
+  const endD=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0));
+  return{start,end:endD.toISOString().slice(0,10),
+    label:MONTH_NAMES[d.getUTCMonth()]+' '+d.getUTCFullYear()};
+}
+
+async function loadLaundry(){
+  laundryLoading=true;render();
+  const {start,end}=laundryMonthRange();
+  try{
+    const [sum,mv]=await Promise.all([
+      api('getLaundrySummary',{params:{start,end}}),
+      api('getLaundryMovements',{params:{limit:30}}),
+    ]);
+    laundryData=sum||{counts:[],balances:{store:null,laundry:null}};
+    laundryMoves=(mv&&mv.movements)||[];
+  }catch(e){
+    laundryData={counts:[],balances:{store:null,laundry:null},error:true};
+    laundryMoves=[];
+  }
+  laundryLoading=false;render();
+}
+
+function changeLaundryMonth(dir){laundryMonthOffset+=dir;laundryData=null;loadLaundry();}
+function setLaundryGranularity(g){laundryGranularity=g;render();}
+
+function laundryBalanceCard(title,bal,tone){
+  const b=bal||laundryZero();
+  return '<div class="laundry-bal '+tone+'">'+
+    '<div class="laundry-bal-title">'+title+'</div>'+
+    '<div class="laundry-bal-total">'+laundryTotal(b)+'</div>'+
+    '<div class="laundry-bal-items">'+
+      LAUNDRY_ITEMS.map(i=>'<span><em>'+i.label+'</em><strong>'+(Number(b[i.key])||0)+'</strong></span>').join('')+
+    '</div></div>';
+}
+
+// Seam for Task 6: fills in the totals table. Returns empty string until Task 6 adds it.
+function renderLaundryTable(r){return '';}
+
+function renderLaundryMoveForm(){
+  if(!laundryMoveKind)return '';
+  const kind=laundryMoveKind;
+  const isAdjust=kind==='adjust';
+  const title={out:'Laundry pickup',in:'Laundry return',adjust:'Adjust balance'}[kind];
+  const bal=(laundryData&&laundryData.balances)||{};
+  // A pickup opens on the current store balance, so the common case is one tap.
+  const pre=kind==='out'?laundryPrefill(bal.store):null;
+  const today=new Date().toISOString().slice(0,10);
+  return '<div class="modal-overlay" data-action="__closeLaundryMoveBackdrop" data-pass-event="1">'+
+    '<div class="modal-box laundry-box">'+
+    '<div class="laundry-title">'+title+'</div>'+
+    (isAdjust?'<div class="laundry-row-full"><label>Which balance</label>'+
+      '<select id="lmBucket"><option value="adjust_store">Dirty at store</option>'+
+      '<option value="adjust_laundry">At laundry</option></select></div>':'')+
+    '<div class="laundry-row-full"><label for="lmDate">Date</label>'+
+      '<input id="lmDate" type="date" value="'+today+'"></div>'+
+    '<div class="laundry-rows">'+
+      LAUNDRY_ITEMS.map(it=>'<div class="laundry-row">'+
+        '<label class="laundry-label" for="lm_'+it.key+'">'+it.label+'</label>'+
+        '<button type="button" class="laundry-step" data-action="laundryStep" data-arg0="lm_'+it.key+'" data-arg1="-1">&minus;</button>'+
+        '<input class="laundry-input" id="lm_'+it.key+'" type="text" inputmode="numeric" value="'+(pre?pre[it.key]:'')+'" autocomplete="off">'+
+        '<button type="button" class="laundry-step" data-action="laundryStep" data-arg0="lm_'+it.key+'" data-arg1="1">+</button>'+
+      '</div>').join('')+
+    '</div>'+
+    '<div class="laundry-row-full"><label for="lmNote">Note</label>'+
+      '<input id="lmNote" type="text" placeholder="optional"></div>'+
+    '<div class="laundry-error" id="laundryError"></div>'+
+    '<div class="laundry-actions">'+
+      '<button class="btn-secondary" data-action="closeLaundryMoveForm">Cancel</button>'+
+      '<button class="btn-success" data-action="submitLaundryMove">Save</button>'+
+    '</div></div></div>';
+}
+
+function openLaundryMoveForm(kind){laundryMoveKind=kind;render();}
+function closeLaundryMoveForm(){laundryMoveKind=null;render();}
+function __closeLaundryMoveBackdrop(e){ if(e.target.classList.contains('modal-overlay'))closeLaundryMoveForm(); }
+
+async function submitLaundryMove(){
+  const kind=laundryMoveKind;
+  if(!kind)return;
+  const errEl=document.getElementById('laundryError');
+  const bucketEl=document.getElementById('lmBucket');
+  const realKind=kind==='adjust'?(bucketEl?bucketEl.value:'adjust_store'):kind;
+  const values={};
+  let bad=null;
+  LAUNDRY_ITEMS.forEach(it=>{
+    const el=document.getElementById('lm_'+it.key);
+    const raw=el?el.value.trim():'';
+    // Adjustments accept negatives, so this cannot reuse laundryParseCounts.
+    const n=raw===''?0:Number(raw);
+    if(!Number.isInteger(n)||Math.abs(n)>999){bad=bad||it.key;return;}
+    if(n<0&&realKind.indexOf('adjust')!==0){bad=bad||it.key;return;}
+    values[it.key]=n;
+  });
+  if(bad){if(errEl)errEl.textContent='Check the '+bad.replace(/_/g,' ')+' field.';return;}
+  const dateEl=document.getElementById('lmDate');
+  const noteEl=document.getElementById('lmNote');
+  try{
+    await apiWrite('addLaundryMovement',{body:Object.assign({
+      kind:realKind,
+      moved_on:dateEl?dateEl.value:new Date().toISOString().slice(0,10),
+      note:noteEl?noteEl.value:'',
+      author:cleanerMode?cleanerMode.name:'Manager',
+    },values)});
+  }catch(e){
+    if(errEl)errEl.textContent=(e&&e.message)||'Could not save.';
+    return;
+  }
+  laundryMoveKind=null;
+  laundryData=null;
+  loadLaundry();
+}
+
+function renderLaundry(){
+  const r=laundryMonthRange();
+  let h='<div class="header"><div class="header-top"><h1>Laundry</h1>'+
+    '<div style="flex:1"></div>'+
+    '<button class="icon-btn" data-action="loadLaundry" title="Refresh">'+icon('refresh',18)+'</button>'+
+    '</div></div>';
+  h+='<div class="container">';
+  if(laundryLoading&&laundryData===null){
+    h+='<div style="text-align:center;padding:40px;color:var(--text3)">Loading...</div>';
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h;
+    return;
+  }
+  const bal=(laundryData&&laundryData.balances)||{};
+  const noMovementsEver=(laundryMoves||[]).length===0;
+  if(noMovementsEver){
+    h+='<div class="laundry-onboard">'+
+      '<strong>Start with what you already have.</strong> '+
+      'Record the dirty linen sitting at the store right now, and what is still at the laundry, '+
+      'so both balances start from the truth. Use Adjust.'+
+      '</div>';
+  }
+  h+='<div class="laundry-bals">'+
+    laundryBalanceCard('Dirty at store',bal.store,'warn')+
+    laundryBalanceCard('At laundry',bal.laundry,'info')+
+    '</div>';
+  h+='<div class="laundry-cta">'+
+    '<button class="btn-success" data-action="openLaundryMoveForm" data-arg0="out">Pickup</button>'+
+    '<button class="btn-primary" data-action="openLaundryMoveForm" data-arg0="in">Return</button>'+
+    '<button class="btn-secondary" data-action="openLaundryMoveForm" data-arg0="adjust">Adjust</button>'+
+    '</div>';
+
+  h+=renderLaundryTable(r);   // Task 6 fills this in
+
+  h+='<h3 class="laundry-h3">Recent movements</h3>';
+  if(!laundryMoves||!laundryMoves.length){
+    h+='<div style="text-align:center;padding:24px;color:var(--text3);font-size:13px">No movement recorded yet.</div>';
+  }else{
+    h+='<div style="overflow-x:auto"><table class="laundry-table"><thead><tr>'+
+      '<th>Date</th><th>Type</th>'+LAUNDRY_ITEMS.map(i=>'<th>'+i.label+'</th>').join('')+
+      '<th>Total</th><th>By</th><th>Note</th></tr></thead><tbody>';
+    laundryMoves.forEach(m=>{
+      const label={out:'Pickup',in:'Return',adjust_store:'Adjust store',adjust_laundry:'Adjust laundry'}[m.kind]||m.kind;
+      h+='<tr><td>'+esc(m.moved_on||'')+'</td><td>'+label+'</td>'+
+        LAUNDRY_ITEMS.map(i=>'<td>'+(Number(m[i.key])||0)+'</td>').join('')+
+        '<td><strong>'+laundryTotal(m)+'</strong></td>'+
+        '<td>'+esc(m.author||'')+'</td><td>'+esc(m.note||'')+'</td></tr>';
+    });
+    h+='</tbody></table></div>';
+  }
+  h+=renderLaundryMoveForm();
+  h+='</div>'+renderBottomNav();
+  document.getElementById('app').innerHTML=h;
+}
+
 // ============ RENDER ============
 function render(){
   // #6 PIN screen
@@ -3282,6 +3462,7 @@ function render(){
   if(cleanerMode&&window.location.hash!=='#cleaner')window.location.hash='#cleaner';
   try { writeUrlState(); } catch(e) {}
   try { applyPlannerLayoutMode(); } catch(e) {}
+  if(currentTab==='laundry'){if(cleanerMode&&cleanerMode.role!=='manager'){currentTab='planner';}else return renderLaundry();}
   if(currentTab==='maintenance')return renderMaintenance();
   if(currentTab==='dashboard')return renderDashboard();
   if(currentTab==='settings')return renderSettings();
@@ -6887,6 +7068,8 @@ document.addEventListener('keydown', (e) => {
   // Laundry sheet: the generic branch below only blanks the DOM, which would
   // leave laundrySheetKey set and let a late prefill repaint a dismissed sheet.
   if (laundrySheetKey) { e.preventDefault(); closeLaundrySheet(); return; }
+  // Laundry movement form: same reason, laundryMoveKind must be cleared, not just the DOM.
+  if (laundryMoveKind) { e.preventDefault(); closeLaundryMoveForm(); return; }
   // Any generic modal-overlay present in DOM
   const overlay = document.querySelector('.modal-overlay, .cmdk-overlay, .more-overlay');
   if (overlay) {

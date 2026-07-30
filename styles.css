@@ -3229,3 +3229,32 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
 /* The spec requires the confirm button to be visibly inactive until all six
    fields hold a value, otherwise the team taps a dead button and waits. */
 .laundry-actions button[disabled] { opacity: 0.45; cursor: not-allowed; }
+
+/* ============ LAUNDRY TAB ============ */
+.laundry-onboard { padding: 12px 14px; border-radius: 12px; background: #fef9c3; color: #713f12; font-size: 14px; margin-bottom: 14px; }
+.laundry-bals { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.laundry-bal { padding: 14px; border-radius: 14px; border: 1px solid var(--border, #e4e4e7); }
+.laundry-bal.warn { background: #fff7ed; border-color: #fed7aa; }
+.laundry-bal.info { background: #eff6ff; border-color: #bfdbfe; }
+.laundry-bal-title { font-size: 13px; font-weight: 600; opacity: 0.7; }
+.laundry-bal-total { font-size: 30px; font-weight: 800; line-height: 1.1; margin: 2px 0 8px; }
+.laundry-bal-items { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.laundry-bal-items span { display: flex; justify-content: space-between; }
+.laundry-bal-items em { font-style: normal; opacity: 0.7; }
+.laundry-cta { display: flex; gap: 8px; margin-bottom: 18px; }
+.laundry-cta button { flex: 1; padding: 11px; }
+.laundry-h3 { margin: 22px 0 8px; font-size: 15px; }
+.laundry-row-full { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+.laundry-row-full label { font-size: 13px; opacity: 0.7; }
+.laundry-row-full input, .laundry-row-full select {
+  height: 40px; border-radius: 10px; padding: 0 10px;
+  border: 1px solid var(--border, #d4d4d8); background: var(--card, #fff);
+}
+.laundry-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.laundry-table th { text-align: left; padding: 8px 10px; font-weight: 600; border-bottom: 2px solid var(--border, #e4e4e7); white-space: nowrap; }
+.laundry-table td { padding: 8px 10px; border-bottom: 1px solid var(--border, #e4e4e7); white-space: nowrap; }
+.laundry-table tbody tr:hover { background: var(--bg-2, #f4f4f5); }
+@media (max-width: 640px) {
+  .laundry-bals { grid-template-columns: 1fr; }
+  .laundry-cta { flex-wrap: wrap; }
+}
