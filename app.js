@@ -3857,6 +3857,9 @@ function renderCardDetail(key,r){
       h+='<button style="width:100%;margin-bottom:10px;padding:9px;border-radius:10px;border:1px solid var(--border);background:rgba(0,0,0,0.03);color:var(--text);font-weight:700;font-size:13px;cursor:pointer" data-action="showPostponeConfirm" data-arg0="'+sk+'" data-stop-propagation="1">🕒 Postpone to tomorrow</button>';
     }
   }
+  // Cleaners live on this pane, not the desktop aside, so the laundry count has to
+  // be correctable from here too once Done has already been pressed.
+  if(!cancelled[key]) h+='<button style="width:100%;margin-bottom:10px;padding:9px;border-radius:10px;border:1px solid var(--border);background:rgba(0,0,0,0.03);color:var(--text);font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px" data-action="openLaundrySheet" data-arg0="'+sk+'" data-stop-propagation="1">'+icon('clipboard',13)+' Laundry</button>';
   // Quality score (#12)
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="detail-title">☑️ Checklist'+(tmpl?' ('+esc(tmpl.name)+')':'')+'  '+doneCnt+'/'+items.length+'</div>'+
     '<div class="score-badge '+scoreClass(score)+'">Quality: '+score+'%</div></div>';
