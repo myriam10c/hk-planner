@@ -3250,10 +3250,13 @@ button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
   height: 40px; border-radius: 10px; padding: 0 10px;
   border: 1px solid var(--border, #d4d4d8); background: var(--card, #fff);
 }
-.laundry-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.laundry-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 560px; }
 .laundry-table th { text-align: left; padding: 8px 10px; font-weight: 600; border-bottom: 2px solid var(--border, #e4e4e7); white-space: nowrap; }
 .laundry-table td { padding: 8px 10px; border-bottom: 1px solid var(--border, #e4e4e7); white-space: nowrap; }
-.laundry-table tbody tr:hover { background: var(--bg-2, #f4f4f5); }
+.laundry-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text3); font-weight: 700; }
+.laundry-table tbody tr:hover { background: var(--bg, var(--bg-2, #f4f4f5)); }
+.laundry-table tfoot td { border-top: 2px solid var(--border, #e4e4e7); border-bottom: none; padding-top: 10px; }
+.laundry-totals th:not(:first-child), .laundry-totals td:not(:first-child) { text-align: right; }
 @media (max-width: 640px) {
   .laundry-bals { grid-template-columns: 1fr; }
   .laundry-cta { flex-wrap: wrap; }

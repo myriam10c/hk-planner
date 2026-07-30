@@ -3323,8 +3323,39 @@ function laundryBalanceCard(title,bal,tone){
     '</div></div>';
 }
 
-// Seam for Task 6: fills in the totals table. Returns empty string until Task 6 adds it.
-function renderLaundryTable(r){return '';}
+function renderLaundryTable(range){
+  const counts=(laundryData&&laundryData.counts)||[];
+  const rows=laundryBucket(counts,laundryGranularity,range.start,range.end);
+  const totals=laundrySum(rows);
+  let h='<div class="month-selector">'+
+      '<button data-action="changeLaundryMonth" data-arg0="-1" aria-label="Previous month">&lsaquo;</button>'+
+      '<h3>'+esc(range.label)+'</h3>'+
+      '<button data-action="changeLaundryMonth" data-arg0="1" aria-label="Next month">&rsaquo;</button>'+
+    '</div>'+
+    '<div class="dash-tabs">'+
+      '<button class="dash-tab'+(laundryGranularity==='day'?' active':'')+'" data-action="setLaundryGranularity" data-arg0="day">Day</button>'+
+      '<button class="dash-tab'+(laundryGranularity==='week'?' active':'')+'" data-action="setLaundryGranularity" data-arg0="week">Week</button>'+
+    '</div>';
+  if(!rows.length){
+    return h+'<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">No laundry counted this month.</div>';
+  }
+  h+='<div style="overflow-x:auto"><table class="laundry-table laundry-totals"><thead><tr><th>'+
+    (laundryGranularity==='week'?'Week':'Day')+'</th>'+
+    LAUNDRY_ITEMS.map(i=>'<th>'+i.label+'</th>').join('')+
+    '<th>Total</th><th>Cleanings</th></tr></thead><tbody>';
+  rows.forEach(r=>{
+    const label=laundryGranularity==='week'?(r.start+' to '+r.end):r.key;
+    h+='<tr><td>'+esc(label)+'</td>'+
+      LAUNDRY_ITEMS.map(i=>'<td>'+r[i.key]+'</td>').join('')+
+      '<td><strong>'+r.total+'</strong></td><td>'+r.cleanings+'</td></tr>';
+  });
+  h+='</tbody><tfoot><tr><td><strong>Total</strong></td>'+
+    LAUNDRY_ITEMS.map(i=>'<td><strong>'+totals[i.key]+'</strong></td>').join('')+
+    '<td><strong>'+laundryTotal(totals)+'</strong></td>'+
+    '<td><strong>'+rows.reduce((s,r)=>s+r.cleanings,0)+'</strong></td>'+
+    '</tr></tfoot></table></div>';
+  return h;
+}
 
 let laundryMoveSubmitting=false;
 

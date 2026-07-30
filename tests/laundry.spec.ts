@@ -530,3 +530,142 @@ test('a full render() while the movement form is open does not destroy typed inp
   });
   expect(valueAfterRender).toBe('77');
 });
+
+// ============ renderLaundryTable: totals table ============
+//
+// laundryData and laundryGranularity are module-level `let`s, unreachable from
+// test code. We load them via the real load path: stub api() to return a known
+// payload, call setTab('laundry') to trigger loadLaundry(), wait for the DOM
+// to reflect the data, then assert on #app.
+
+async function stubLaundryApi(page: any, counts: any[]) {
+  await page.evaluate((c: any[]) => {
+    const w = window as any;
+    w.api = async (action: string) => {
+      if (action === 'getLaundrySummary') return { counts: c, balances: { store: null, laundry: null } };
+      if (action === 'getLaundryMovements') return { movements: [] };
+      return {};
+    };
+  }, counts);
+}
+
+test('renderLaundryTable day view: one row per day with correct per-item counts', async ({ page }) => {
+  const counts = [
+    { counted_on: '2026-07-10', pillowcases: 2, bed_sheets: 1, duvet_covers: 0, small_towels: 3, large_towels: 0, bath_mats: 1 },
+    { counted_on: '2026-07-10', pillowcases: 1, bed_sheets: 2, duvet_covers: 0, small_towels: 0, large_towels: 1, bath_mats: 0 },
+    { counted_on: '2026-07-15', pillowcases: 4, bed_sheets: 0, duvet_covers: 1, small_towels: 0, large_towels: 2, bath_mats: 0 },
+  ];
+  await stubLaundryApi(page, counts);
+
+  // Reset to current month and day granularity, then switch to laundry tab.
+  await page.evaluate(() => {
+    const w = window as any;
+    // Force the month offset to 0 (current month is July 2026 in this session).
+    // setLaundryGranularity is on window; laundryMonthOffset cannot be set directly,
+    // but changeLaundryMonth can be driven. We reset by switching to the laundry
+    // tab so loadLaundry is called fresh; then we switch granularity if needed.
+    w.setLaundryGranularity('day');
+    w.setTab('laundry');
+  });
+
+  // Wait for the totals table to appear (load is async).
+  await page.waitForSelector('.laundry-totals', { timeout: 8000 });
+
+  const result = await page.evaluate(() => {
+    const table = document.querySelector('.laundry-totals');
+    if (!table) return { rows: 0, row0pills: -1, row0cleanings: -1, row1pills: -1 };
+    const bodyRows = table.querySelectorAll('tbody tr');
+    const cells0 = bodyRows[0] ? Array.from(bodyRows[0].querySelectorAll('td')).map((td: any) => td.textContent.trim()) : [];
+    const cells1 = bodyRows[1] ? Array.from(bodyRows[1].querySelectorAll('td')).map((td: any) => td.textContent.trim()) : [];
+    return {
+      rows: bodyRows.length,
+      // cells0[0] = date, cells0[1] = pillowcases, ..., cells0[7] = cleanings
+      row0label: cells0[0],
+      row0pills: Number(cells0[1]),
+      row0beds: Number(cells0[2]),
+      row0small: Number(cells0[4]),
+      row0large: Number(cells0[5]),
+      row0cleanings: Number(cells0[8]),
+      row1label: cells1[0],
+      row1pills: Number(cells1[1]),
+      row1cleanings: Number(cells1[8]),
+    };
+  });
+
+  expect(result.rows).toBe(2);
+  // July 10: two cleanings merged
+  expect(result.row0label).toBe('2026-07-10');
+  expect(result.row0pills).toBe(3);   // 2 + 1
+  expect(result.row0beds).toBe(3);    // 1 + 2
+  expect(result.row0small).toBe(3);   // 3 + 0
+  expect(result.row0large).toBe(1);   // 0 + 1
+  expect(result.row0cleanings).toBe(2);
+  // July 15: one cleaning
+  expect(result.row1label).toBe('2026-07-15');
+  expect(result.row1pills).toBe(4);
+  expect(result.row1cleanings).toBe(1);
+});
+
+test('renderLaundryTable footer totals equal column sums', async ({ page }) => {
+  const counts = [
+    { counted_on: '2026-07-05', pillowcases: 3, bed_sheets: 1, duvet_covers: 2, small_towels: 0, large_towels: 1, bath_mats: 1 },
+    { counted_on: '2026-07-12', pillowcases: 1, bed_sheets: 2, duvet_covers: 0, small_towels: 4, large_towels: 0, bath_mats: 2 },
+  ];
+  await stubLaundryApi(page, counts);
+
+  await page.evaluate(() => {
+    (window as any).setLaundryGranularity('day');
+    (window as any).setTab('laundry');
+  });
+  await page.waitForSelector('.laundry-totals', { timeout: 8000 });
+
+  const result = await page.evaluate(() => {
+    const table = document.querySelector('.laundry-totals');
+    if (!table) return null;
+    const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
+    const footRow = table.querySelector('tfoot tr');
+    if (!footRow) return null;
+    // Sum each column (excluding col 0 = label) across body rows.
+    const colCount = bodyRows[0] ? bodyRows[0].querySelectorAll('td').length : 0;
+    const bodySums: number[] = [];
+    for (let c = 1; c < colCount; c++) {
+      let s = 0;
+      bodyRows.forEach(row => {
+        const td = row.querySelectorAll('td')[c];
+        s += Number(td ? (td as any).textContent.replace(/[^0-9-]/g, '') : 0);
+      });
+      bodySums.push(s);
+    }
+    const footCells = Array.from(footRow.querySelectorAll('td')).slice(1).map((td: any) => Number(td.textContent.replace(/[^0-9-]/g, '')));
+    return { bodySums, footCells };
+  });
+
+  expect(result).not.toBeNull();
+  // Every footer column must match the body column sum.
+  result!.footCells.forEach((fv: number, i: number) => {
+    expect(fv).toBe(result!.bodySums[i]);
+  });
+});
+
+test('renderLaundryTable shows empty message and no table when no counts', async ({ page }) => {
+  await stubLaundryApi(page, []);
+
+  await page.evaluate(() => {
+    (window as any).setLaundryGranularity('day');
+    (window as any).setTab('laundry');
+  });
+
+  // Wait for loading to finish: month-selector appears once laundryData is set.
+  await page.waitForSelector('.month-selector', { timeout: 8000 });
+
+  const result = await page.evaluate(() => {
+    const app = document.getElementById('app');
+    const hasTable = !!(app && app.querySelector('.laundry-totals'));
+    // The empty-state div contains the expected text.
+    const bodyText = app ? app.textContent : '';
+    return { hasTable, hasEmptyMsg: bodyText.includes('No laundry counted this month.') };
+  });
+
+  expect(result.hasTable).toBe(false);
+  expect(result.hasEmptyMsg).toBe(true);
+});
