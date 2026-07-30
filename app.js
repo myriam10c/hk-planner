@@ -2931,7 +2931,7 @@ function getFiltered(){
 
 function countByDate(d){return RESERVATIONS.filter(r=>r.co===d&&!cancelled[keyFor(r)]).length;}
 function countDoneForDate(d){return RESERVATIONS.filter(r=>r.co===d&&done[keyFor(r)]&&!cancelled[keyFor(r)]).length;}
-function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();if(t==='laundry'&&laundryData===null&&!laundryLoading)loadLaundry();}
+function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;if(t!=='laundry'&&laundryMoveKind){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();if(t==='laundry'&&laundryData===null&&!laundryLoading)loadLaundry();}
 let moreOpen=false;
 function openMoreMenu(){ moreOpen=true; renderMoreMenu(); }
 function closeMoreMenu(){ moreOpen=false; renderMoreMenu(); }
@@ -2940,7 +2940,7 @@ function renderMoreMenu(){
   if(!el){ el=document.createElement('div'); el.id='moreMenu'; document.body.appendChild(el); }
   if(!moreOpen){ el.innerHTML=''; return; }
   const items=[
-    {id:'laundry',icon:icon('clipboard',22),label:'Laundry',color:'#0ea5e9'},
+    {id:'laundry',icon:icon('wave',22),label:'Laundry',color:'#0ea5e9'},
     {id:'subcontractors',icon:icon('dollar',22),label:'Subs',color:'#16a34a'},
     {id:'ratings',icon:icon('star',22),label:'Ratings',color:'#ca8a04'},
     {id:'reviews',icon:icon('msgSquare',22),label:'Reviews',color:'#4f46e5'},
@@ -3326,16 +3326,23 @@ function laundryBalanceCard(title,bal,tone){
 // Seam for Task 6: fills in the totals table. Returns empty string until Task 6 adds it.
 function renderLaundryTable(r){return '';}
 
+let laundryMoveSubmitting=false; // C1: re-entrancy guard
+
+// C2+I3: form lives in its own body-level container so render() never wipes it.
 function renderLaundryMoveForm(){
-  if(!laundryMoveKind)return '';
+  let el=document.getElementById('laundryMoveForm');
+  if(!el){el=document.createElement('div');el.id='laundryMoveForm';document.body.appendChild(el);}
+  if(!laundryMoveKind){el.innerHTML='';return;}
   const kind=laundryMoveKind;
   const isAdjust=kind==='adjust';
   const title={out:'Laundry pickup',in:'Laundry return',adjust:'Adjust balance'}[kind];
   const bal=(laundryData&&laundryData.balances)||{};
   // A pickup opens on the current store balance, so the common case is one tap.
   const pre=kind==='out'?laundryPrefill(bal.store):null;
+  // I5: adjust allows negatives; pickup and return floor at zero.
+  const inputmode=isAdjust?'text':'numeric';
   const today=new Date().toISOString().slice(0,10);
-  return '<div class="modal-overlay" data-action="__closeLaundryMoveBackdrop" data-pass-event="1">'+
+  el.innerHTML='<div class="modal-overlay" data-action="__closeLaundryMoveBackdrop" data-pass-event="1">'+
     '<div class="modal-box laundry-box">'+
     '<div class="laundry-title">'+title+'</div>'+
     (isAdjust?'<div class="laundry-row-full"><label>Which balance</label>'+
@@ -3346,9 +3353,9 @@ function renderLaundryMoveForm(){
     '<div class="laundry-rows">'+
       LAUNDRY_ITEMS.map(it=>'<div class="laundry-row">'+
         '<label class="laundry-label" for="lm_'+it.key+'">'+it.label+'</label>'+
-        '<button type="button" class="laundry-step" data-action="laundryStep" data-arg0="lm_'+it.key+'" data-arg1="-1">&minus;</button>'+
-        '<input class="laundry-input" id="lm_'+it.key+'" type="text" inputmode="numeric" value="'+(pre?pre[it.key]:'')+'" autocomplete="off">'+
-        '<button type="button" class="laundry-step" data-action="laundryStep" data-arg0="lm_'+it.key+'" data-arg1="1">+</button>'+
+        '<button type="button" class="laundry-step" data-action="laundryMoveStep" data-arg0="lm_'+it.key+'" data-arg1="-1">&minus;</button>'+
+        '<input class="laundry-input" id="lm_'+it.key+'" type="text" inputmode="'+inputmode+'" value="'+(pre?pre[it.key]:'')+'" autocomplete="off">'+
+        '<button type="button" class="laundry-step" data-action="laundryMoveStep" data-arg0="lm_'+it.key+'" data-arg1="1">+</button>'+
       '</div>').join('')+
     '</div>'+
     '<div class="laundry-row-full"><label for="lmNote">Note</label>'+
@@ -3356,15 +3363,33 @@ function renderLaundryMoveForm(){
     '<div class="laundry-error" id="laundryError"></div>'+
     '<div class="laundry-actions">'+
       '<button class="btn-secondary" data-action="closeLaundryMoveForm">Cancel</button>'+
-      '<button class="btn-success" data-action="submitLaundryMove">Save</button>'+
+      '<button class="btn-success" id="lmSave" data-action="submitLaundryMove">Save</button>'+
     '</div></div></div>';
+  // I4: select on focus so a typed digit replaces the prefilled value.
+  // iOS Safari collapses the selection right after focus, so defer a tick.
+  el.querySelectorAll('.laundry-input').forEach(inp=>{
+    inp.addEventListener('focus',()=>setTimeout(()=>inp.select(),0));
+  });
 }
 
-function openLaundryMoveForm(kind){laundryMoveKind=kind;render();}
-function closeLaundryMoveForm(){laundryMoveKind=null;render();}
+function openLaundryMoveForm(kind){laundryMoveKind=kind;renderLaundryMoveForm();}
+function closeLaundryMoveForm(){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}
 function __closeLaundryMoveBackdrop(e){ if(e.target.classList.contains('modal-overlay'))closeLaundryMoveForm(); }
 
+// I5: for adjust kinds, stepper allows negatives down to -999.
+function laundryMoveStep(inputId,delta){
+  const inp=document.getElementById(inputId);
+  if(!inp)return;
+  const cur=inp.value.trim()===''?0:Number(inp.value);
+  const next=(Number.isFinite(cur)?Math.round(cur):0)+Number(delta);
+  // Check if the current form is an adjust form.
+  const isAdjustForm=!!document.getElementById('lmBucket');
+  inp.value=String(next<-999?-999:(next>999?999:((!isAdjustForm&&next<0)?0:next)));
+}
+
 async function submitLaundryMove(){
+  // C1: re-entrancy guard prevents double-write on double-tap.
+  if(laundryMoveSubmitting)return;
   const kind=laundryMoveKind;
   if(!kind)return;
   const errEl=document.getElementById('laundryError');
@@ -3384,6 +3409,10 @@ async function submitLaundryMove(){
   if(bad){if(errEl)errEl.textContent='Check the '+bad.replace(/_/g,' ')+' field.';return;}
   const dateEl=document.getElementById('lmDate');
   const noteEl=document.getElementById('lmNote');
+  // C1: disable button and set flag before awaiting.
+  laundryMoveSubmitting=true;
+  const btn=document.getElementById('lmSave');
+  if(btn){btn.disabled=true;btn.textContent='Saving...';}
   try{
     await apiWrite('addLaundryMovement',{body:Object.assign({
       kind:realKind,
@@ -3392,11 +3421,16 @@ async function submitLaundryMove(){
       author:cleanerMode?cleanerMode.name:'Manager',
     },values)});
   }catch(e){
+    laundryMoveSubmitting=false;
+    if(btn){btn.disabled=false;btn.textContent='Save';}
     if(errEl)errEl.textContent=(e&&e.message)||'Could not save.';
     return;
   }
+  laundryMoveSubmitting=false;
   laundryMoveKind=null;
   laundryData=null;
+  renderLaundryMoveForm();
+  toast('Movement saved','success');
   loadLaundry();
 }
 
@@ -3407,13 +3441,25 @@ function renderLaundry(){
     '<button class="icon-btn" data-action="loadLaundry" title="Refresh">'+icon('refresh',18)+'</button>'+
     '</div></div>';
   h+='<div class="container">';
-  if(laundryLoading&&laundryData===null){
+  if((laundryLoading||laundryMoves===null)&&laundryData===null){
     h+='<div style="text-align:center;padding:40px;color:var(--text3)">Loading...</div>';
     h+='</div>'+renderBottomNav();
     document.getElementById('app').innerHTML=h;
     return;
   }
+  // I7: surface load errors so the manager knows data is stale.
+  if(laundryData&&laundryData.error){
+    h+='<div class="laundry-onboard" style="background:#fee2e2;color:#7f1d1d;border-color:#fecaca">'+
+      '<strong>Could not load data.</strong> '+
+      'Check your connection and tap Refresh.'+
+      '</div>';
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h;
+    return;
+  }
   const bal=(laundryData&&laundryData.balances)||{};
+  // I7: onboarding banner must not appear when data failed to load (guard above handles that).
+  // Only show when data loaded successfully and no movements exist.
   const noMovementsEver=(laundryMoves||[]).length===0;
   if(noMovementsEver){
     h+='<div class="laundry-onboard">'+
@@ -3450,9 +3496,10 @@ function renderLaundry(){
     });
     h+='</tbody></table></div>';
   }
-  h+=renderLaundryMoveForm();
   h+='</div>'+renderBottomNav();
   document.getElementById('app').innerHTML=h;
+  // C2: form lives in its own body-level container and is not rebuilt here,
+  // so typed input survives a background render().
 }
 
 // ============ RENDER ============
@@ -3462,7 +3509,7 @@ function render(){
   if(cleanerMode&&window.location.hash!=='#cleaner')window.location.hash='#cleaner';
   try { writeUrlState(); } catch(e) {}
   try { applyPlannerLayoutMode(); } catch(e) {}
-  if(currentTab==='laundry'){if(cleanerMode&&cleanerMode.role!=='manager'){currentTab='planner';}else return renderLaundry();}
+  if(currentTab==='laundry'){if(cleanerMode&&cleanerMode.role!=='manager'){currentTab='planner';}else{if(laundryData===null&&!laundryLoading)loadLaundry();return renderLaundry();}}
   if(currentTab==='maintenance')return renderMaintenance();
   if(currentTab==='dashboard')return renderDashboard();
   if(currentTab==='settings')return renderSettings();
