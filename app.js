@@ -980,8 +980,6 @@ document.addEventListener('dragend', onDragEnd);
 
 let autoSendCleaners=true;
 let dashKPIs=null,dashKPIsLoading=false;
-// Hermes Activity tab (auto-agent observability)
-let hermesData=null,hermesLoading=false,hermesFilter={handler:'',status:'',days:7};
 // Subcontractors tab (Elite Cleaning accounting)
 let subData=null,subLoading=false,subMonth=null,subAvailableMonths=null;
 // Cleaner Ratings tab (notes propreté)
@@ -2075,23 +2073,6 @@ async function loadDashKPIs(){
   dashKPIsLoading=false;render();
 }
 
-// ============== HERMES ACTIVITY ==============
-async function loadHermesActivity(){
-  hermesLoading=true;render();
-  try{
-    const params={days:hermesFilter.days};
-    if(hermesFilter.handler) params.handler=hermesFilter.handler;
-    if(hermesFilter.status) params.status=hermesFilter.status;
-    const res=await api('getHermesActivity',{params});
-    hermesData=res.actions||[];
-  }catch(e){hermesData=[];console.error('loadHermesActivity',e);}
-  hermesLoading=false;render();
-}
-function setHermesFilter(key,val){
-  hermesFilter[key]=val;loadHermesActivity();
-}
-function refreshHermes(){loadHermesActivity();}
-
 // ============== SUBCONTRACTORS (Elite accounting) ==============
 async function loadSubcontractorMonths(){
   try{
@@ -2940,7 +2921,6 @@ function renderMoreMenu(){
   if(!el){ el=document.createElement('div'); el.id='moreMenu'; document.body.appendChild(el); }
   if(!moreOpen){ el.innerHTML=''; return; }
   const items=[
-    {id:'laundry',icon:icon('wave',22),label:'Laundry',color:'#0ea5e9'},
     {id:'subcontractors',icon:icon('dollar',22),label:'Subs',color:'#16a34a'},
     {id:'ratings',icon:icon('star',22),label:'Ratings',color:'#ca8a04'},
     {id:'reviews',icon:icon('msgSquare',22),label:'Reviews',color:'#4f46e5'},
@@ -3559,7 +3539,6 @@ function render(){
   if(currentTab==='history')return renderHistory();
   if(currentTab==='calendar')return renderCalendar();
   if(currentTab==='stats')return renderCleanerStats();
-  if(currentTab==='hermes'){if(hermesData===null && !hermesLoading)loadHermesActivity();return renderHermes();}
   if(currentTab==='subcontractors'){
     if(subAvailableMonths===null)loadSubcontractorMonths();
     if(subData===null && !subLoading && subMonth)loadSubcontractorMonth();
@@ -3584,7 +3563,7 @@ function renderBottomNav(){
       {id:'planner',icon:icon('clipboard',22),label:t('planner')},
       {id:'dashboard',icon:icon('chart',22),label:t('dashboard')},
       {id:'maintenance',icon:icon('wrench',22),label:'Maint.'},
-      {id:'hermes',icon:icon('zap',22),label:'Hermes'},
+      {id:'laundry',icon:icon('wave',22),label:'Laundry'},
       {id:'__more',icon:icon('more',22),label:'More'},
     ];
   }else if(cleanerMode.role==='maintenance'){
@@ -5427,158 +5406,6 @@ function renderSubcontractors(){
       '</tr>';
   });
   h+='</tbody></table></div></div>';
-
-  h+='</div>'+renderBottomNav();
-  document.getElementById('app').innerHTML=h;
-}
-
-// ============== HERMES TAB ==============
-
-function renderHermes(){
-  // Header
-  let h='<div class="header"><div class="header-top"><h1>⚡ Hermes Activity</h1>'+
-    '<div style="flex:1"></div>'+
-    '<button class="icon-btn" data-action="refreshHermes" title="Refresh">'+icon('refresh',18)+'</button>'+
-    '</div></div>';
-  h+='<div class="container">';
-
-  // Filters bar
-  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding:10px;background:rgba(0,0,0,0.02);border-radius:12px">';
-  // Days picker
-  h+='<div style="display:flex;gap:4px;align-items:center"><span style="font-size:12px;color:var(--text3);font-weight:700">Range:</span>';
-  [1,3,7].forEach(d=>{
-    h+='<button class="dash-tab'+(hermesFilter.days===d?' active':'')+'" data-action="setHermesFilter" data-arg0="days" data-arg1="'+d+'" style="padding:4px 10px;font-size:12px">'+d+'d</button>';
-  });
-  h+='</div>';
-  // Status picker
-  h+='<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;min-width:0">'+'<span style="font-size:12px;color:var(--text3);font-weight:700">Status:</span>';
-  [['','All'],['auto_done','Auto'],['proposed','Proposed'],['approved','Approved'],['rejected','Rejected'],['alerted','Alerted'],['failed','Failed']].forEach(([v,lbl])=>{
-    h+='<button class="dash-tab'+(hermesFilter.status===v?' active':'')+'" data-action="setHermesFilter" data-arg0="status" data-arg1="'+v+'" style="padding:4px 10px;font-size:12px">'+lbl+'</button>';
-  });
-  h+='</div></div>';
-
-  if(hermesLoading){
-    h+='<div style="text-align:center;padding:40px;color:var(--text3)">Loading…</div>';
-    h+='</div>'+renderBottomNav();
-    document.getElementById('app').innerHTML=h;
-    return;
-  }
-
-  const acts=hermesData||[];
-  if(acts.length===0){
-    h+='<div class="empty-state" style="text-align:center;padding:60px 20px;color:var(--text3)">'+
-      '<div style="font-size:48px;margin-bottom:12px">🤖</div>'+
-      '<div style="font-size:16px;font-weight:600;margin-bottom:6px">No Hermes activity yet</div>'+
-      '<div style="font-size:13px">VPS sync may be delayed. Cache retains 7 days.</div></div>';
-    h+='</div>'+renderBottomNav();
-    document.getElementById('app').innerHTML=h;
-    return;
-  }
-
-  // ===== KPI BAR =====
-  const now=Date.now();
-  const today0=new Date();today0.setHours(0,0,0,0);
-  const todayTs=today0.getTime();
-  const week0=new Date(now-7*86400000);
-  const todayActs=acts.filter(a=>new Date(a.ts).getTime()>=todayTs);
-  const weekActs=acts.filter(a=>new Date(a.ts).getTime()>=week0.getTime());
-  const todayCost=todayActs.reduce((s,a)=>s+Number(a.cost_usd_est||0),0);
-  const weekCost=weekActs.reduce((s,a)=>s+Number(a.cost_usd_est||0),0);
-  const statusCounts={};
-  weekActs.forEach(a=>{const s=a.status||'?';statusCounts[s]=(statusCounts[s]||0)+1;});
-  const errorCount=(statusCounts.failed||0)+(statusCounts.alerted||0);
-  const approvedCount=statusCounts.approved||0;
-  const rejectedCount=statusCounts.rejected||0;
-  const approvalRate=(approvedCount+rejectedCount)>0?Math.round(approvedCount/(approvedCount+rejectedCount)*100):null;
-
-  h+='<div class="dash-card" style="border:1px solid rgba(233,69,96,0.15);overflow:hidden;position:relative;margin-bottom:14px">';
-  h+='<div style="position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent-gradient)"></div>';
-  h+='<h3 style="margin-bottom:14px;margin-top:4px">⚡ Key Metrics</h3>';
-  h+='<div class="dash-stat-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px">';
-  h+='<div class="dash-stat" style="min-width:0;border-left:3px solid var(--primary)"><div class="ds-num" style="color:var(--primary)">'+todayActs.length+'</div><div class="ds-label">Actions today</div></div>';
-  h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--primary)"><div class="ds-num">'+weekActs.length+'</div><div class="ds-label">Actions 7d</div></div>';
-  h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--green)"><div class="ds-num" style="color:var(--green)">$'+todayCost.toFixed(2)+'</div><div class="ds-label">LLM cost today</div></div>';
-  h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--green)"><div class="ds-num">$'+weekCost.toFixed(2)+'</div><div class="ds-label">LLM cost 7d</div></div>';
-  h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid '+(errorCount>0?'var(--orange)':'var(--green)')+'"><div class="ds-num" style="color:'+(errorCount>0?'var(--orange)':'var(--green)')+'">'+errorCount+'</div><div class="ds-label">Errors / alerts 7d</div></div>';
-  if(approvalRate!==null){
-    h+='<div class="dash-stat" style="min-width:80px;border-left:3px solid var(--primary)"><div class="ds-num">'+approvalRate+'%</div><div class="ds-label">Approval rate</div></div>';
-  }
-  h+='</div></div>';
-
-  // ===== DAILY COST CHART =====
-  // Compute daily cost over the filter window
-  const days=hermesFilter.days;
-  const byDay={};
-  for(let i=days-1;i>=0;i--){
-    const d=new Date(now-i*86400000);
-    const k=localYMD(d);
-    byDay[k]={cost:0,count:0};
-  }
-  acts.forEach(a=>{
-    const k=a.ts?localYMD(new Date(a.ts)):'';
-    if(byDay[k]){byDay[k].cost+=Number(a.cost_usd_est||0);byDay[k].count+=1;}
-  });
-  const dayKeys=Object.keys(byDay).sort();
-  const maxCost=Math.max(...dayKeys.map(k=>byDay[k].cost),0.01);
-  h+='<div class="dash-card" style="margin-bottom:14px"><h3 style="margin-bottom:14px">💰 Daily LLM cost (last '+days+' days)</h3>';
-  h+='<div style="display:flex;align-items:end;gap:6px;height:80px;padding:0 4px">';
-  dayKeys.forEach(k=>{
-    const v=byDay[k];
-    const pct=Math.max(4,v.cost/maxCost*100);
-    const dl=new Date(k+'T00:00:00').toLocaleDateString('en',{weekday:'short',day:'numeric'});
-    h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center" title="'+k+': $'+v.cost.toFixed(3)+' ('+v.count+' actions)">';
-    h+='<div style="font-size:9px;color:var(--text3);margin-bottom:2px">$'+v.cost.toFixed(2)+'</div>';
-    h+='<div style="width:100%;height:'+pct+'%;background:var(--accent-gradient);border-radius:6px 6px 0 0;min-height:4px"></div>';
-    h+='<div style="font-size:9px;color:var(--text3);margin-top:4px;font-weight:700">'+dl+'</div>';
-    h+='</div>';
-  });
-  h+='</div></div>';
-
-  // ===== STATS PER HANDLER =====
-  const byHandler={};
-  weekActs.forEach(a=>{
-    const hh=a.handler||'unknown';
-    if(!byHandler[hh])byHandler[hh]={count:0,cost:0,errors:0,statuses:{}};
-    byHandler[hh].count+=1;
-    byHandler[hh].cost+=Number(a.cost_usd_est||0);
-    const s=a.status||'?';
-    byHandler[hh].statuses[s]=(byHandler[hh].statuses[s]||0)+1;
-    if(s==='failed'||s==='alerted')byHandler[hh].errors+=1;
-  });
-  const handlerList=Object.entries(byHandler).sort((a,b)=>b[1].count-a[1].count);
-  h+='<div class="dash-card" style="margin-bottom:14px"><h3 style="margin-bottom:14px">🎯 Stats per handler (7d)</h3>';
-  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">';
-  h+='<thead><tr style="border-bottom:2px solid rgba(0,0,0,0.08)"><th style="text-align:left;padding:8px 6px">Handler</th><th style="text-align:right;padding:8px 6px">Count</th><th style="text-align:right;padding:8px 6px">LLM cost</th><th style="text-align:right;padding:8px 6px">Errors</th><th style="text-align:left;padding:8px 6px">Status breakdown</th></tr></thead><tbody>';
-  handlerList.forEach(([hh,s])=>{
-    const breakdown=Object.entries(s.statuses).map(([k,v])=>k+':'+v).join(', ');
-    h+='<tr style="border-bottom:1px solid rgba(0,0,0,0.04)">'+
-      '<td style="padding:8px 6px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(hh)+'</td>'+
-      '<td style="padding:8px 6px;text-align:right;font-weight:600">'+s.count+'</td>'+
-      '<td style="padding:8px 6px;text-align:right">$'+s.cost.toFixed(3)+'</td>'+
-      '<td style="padding:8px 6px;text-align:right;color:'+(s.errors>0?'var(--orange)':'var(--text3)')+'">'+s.errors+'</td>'+
-      '<td style="padding:8px 6px;font-size:11px;color:var(--text3)">'+esc(breakdown)+'</td>'+
-      '</tr>';
-  });
-  h+='</tbody></table></div></div>';
-
-  // ===== TIMELINE =====
-  h+='<div class="dash-card"><h3 style="margin-bottom:14px">📋 Timeline ('+acts.length+' actions)</h3>';
-  acts.slice(0,100).forEach(a=>{
-    const lvlColor=a.level==='red'?'var(--orange)':(a.level==='yellow'?'#d97706':'var(--green)');
-    const lvlIcon=a.level==='red'?'🔴':(a.level==='yellow'?'🟡':'🟢');
-    const ts=new Date(a.ts);
-    const tsStr=ts.toLocaleString('en',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-    const costStr=a.cost_usd_est?' · $'+Number(a.cost_usd_est).toFixed(4):'';
-    const modelStr=a.llm_model?' · '+a.llm_model.split('/').pop():'';
-    h+='<div style="padding:10px 12px;border-left:3px solid '+lvlColor+';background:rgba(0,0,0,0.02);border-radius:8px;margin-bottom:6px">';
-    h+='<div style="display:flex;justify-content:space-between;align-items:start;gap:8px;flex-wrap:wrap">';
-    h+='<div style="flex:1;min-width:200px"><div style="font-size:13px;font-weight:600;margin-bottom:2px">'+lvlIcon+' '+esc(a.handler||'?')+' <span style="font-weight:400;color:var(--text3);font-size:11px">· '+esc(a.status||'?')+'</span></div>';
-    h+='<div style="font-size:12px;color:var(--text2);line-height:1.4">'+esc(a.summary||'')+'</div></div>';
-    h+='<div style="font-size:11px;color:var(--text3);text-align:right;white-space:nowrap">'+tsStr+costStr+modelStr+'</div>';
-    h+='</div></div>';
-  });
-  if(acts.length>100) h+='<div style="text-align:center;color:var(--text3);font-size:12px;padding:10px">… '+(acts.length-100)+' more actions (filter to narrow)</div>';
-  h+='</div>';
 
   h+='</div>'+renderBottomNav();
   document.getElementById('app').innerHTML=h;
