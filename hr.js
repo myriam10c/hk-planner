@@ -443,6 +443,76 @@ async function hrCancelRequest(id){
 }
 
 function renderHRMine(){
-  return '<div class="header"><div class="header-top"><h1>&#x1F334; My leave</h1></div></div>' +
-    '<div class="container"><div class="hr-empty">Employee view coming next.</div></div>';
+  const emp = hrData.employee;
+  const reqs = hrData.requests || [];
+  let h = '<div class="header"><div class="header-top"><h1>🌴 My leave</h1>' +
+    '<div class="header-actions"><button data-action="hrRefresh" title="Refresh" aria-label="Refresh">' + icon('refresh', 18) + '</button></div></div></div>';
+  h += '<div class="container">';
+
+  // Dossier non encore créé par le manager : message clair sans erreur JS.
+  if (!emp) {
+    h += '<div class="hr-empty">Your HR record is not set up yet. Ask your manager to create it before requesting leave.</div></div>';
+    return h;
+  }
+
+  // Soldes acquis a ce jour (ou a la date de fin si l'employé a quitté).
+  const approved = reqs.filter(r => r.status === 'approved');
+  const usedAnnual = approved.filter(r => r.leave_type === 'annual').reduce((s, r) => s + Number(r.days || 0), 0);
+  const usedSick = approved.filter(r => r.leave_type === 'sick').reduce((s, r) => s + Number(r.days || 0), 0);
+  const asOf = emp.end_date && emp.end_date < hrToday() ? emp.end_date : hrToday();
+  const accrued = accruedAnnualDays(emp.hire_date, asOf, emp.opening_annual_days, emp.opening_date);
+  const sick = sickTiers(usedSick);
+
+  h += '<div class="hr-section"><div class="hr-card">' +
+    '<div class="hr-stat"><span>Annual days available</span><b>' + (Math.round((accrued - usedAnnual) * 100) / 100) + '</b></div>' +
+    '<div class="hr-stat"><span>Annual days earned so far</span><b>' + accrued + '</b></div>' +
+    '<div class="hr-stat"><span>Annual days taken</span><b>' + usedAnnual + '</b></div>' +
+    '<div class="hr-stat"><span>Sick days left this year</span><b>' + sick.remaining + '</b></div>' +
+    '</div></div>';
+
+  // Formulaire de demande de congé.
+  h += '<div class="hr-section"><h3>Request leave</h3><div class="hr-card"><div class="hr-form">' +
+    '<label>Type</label><select id="hrMineType">' +
+    HR_LEAVE_TYPES.map(t => '<option value="' + t.key + '">' + esc(t.label) + '</option>').join('') + '</select>' +
+    '<label>From</label><input type="date" id="hrMineStart" min="' + esc(hrToday()) + '"/>' +
+    '<label>To</label><input type="date" id="hrMineEnd" min="' + esc(hrToday()) + '"/>' +
+    '<label>Reason (optional)</label><input id="hrMineReason" placeholder="Family trip"/>' +
+    '</div><div class="hr-actions"><button class="hr-btn-ok" data-action="hrSubmitMine">Send request</button></div>' +
+    '<div class="hr-meta" style="margin-top:8px">Days are counted on the calendar, weekends included.</div>' +
+    '</div></div>';
+
+  // Historique des demandes de l'employé. Cancel possible si pending.
+  h += '<div class="hr-section"><h3>My requests</h3>';
+  h += reqs.length
+    ? reqs.map(r => hrRequestCard(r, false) +
+        (r.status === 'pending'
+          ? '<div class="hr-actions" style="margin-top:-4px;margin-bottom:8px"><button class="hr-btn-alt" data-action="hrCancelRequest" data-arg0="' + r.id + '">Cancel</button></div>'
+          : '')).join('')
+    : '<div class="hr-empty">No request yet.</div>';
+  h += '</div></div>';
+  return h;
+}
+
+// Soumet une demande de congé pour soi-même via le formulaire employé.
+async function hrSubmitMine(){
+  if (hrSubmitting) return;
+  const start = hrVal('hrMineStart'), end = hrVal('hrMineEnd');
+  if (!start || !end) { toast('Pick both dates', 'error'); return; }
+  const d = leaveDays(start, end);
+  if (!d) { toast('End date must be on or after start date', 'error'); return; }
+  if (!confirm('Request ' + d + ' day' + (d > 1 ? 's' : '') + ' off, from ' + start + ' to ' + end + '?')) return;
+  hrSubmitting = true;
+  try {
+    await apiWrite('hrSubmitLeave', { body: {
+      leave_type: hrVal('hrMineType') || 'annual',
+      start_date: start, end_date: end, reason: hrVal('hrMineReason') || null,
+    }});
+    toast('Request sent to your manager', 'success');
+    hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed to send', 'error');
+  } finally {
+    hrSubmitting = false;
+  }
 }
