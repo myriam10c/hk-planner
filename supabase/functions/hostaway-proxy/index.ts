@@ -1162,6 +1162,27 @@ Deno.serve(async (req: Request) => {
 
       const op = mode || (list !== null ? "set" : (single ? "add" : "clear"));
 
+      // Blocage strict : on n'assigne pas un menage a quelqu'un dont le conge
+      // est approuve ce jour-la. La date se lit dans la reservation_key
+      // (YYYY-MM-DD_guest, ou extra_YYYY-MM-DD_... pour les menages hors Hostaway).
+      const dm = String(reservation_key).match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
+      const cleaningDate = dm ? dm[1] : null;
+      const candidates: number[] = op === "set"
+        ? (Array.isArray(list) ? list.map(Number) : (single ? [Number(single)] : []))
+        : (op === "add" && single ? [Number(single)] : []);
+      if (cleaningDate && candidates.length) {
+        const { data: onLeave } = await sb.from("leave_requests")
+          .select("cleaner_id").eq("status", "approved")
+          .in("cleaner_id", candidates)
+          .lte("start_date", cleaningDate).gte("end_date", cleaningDate);
+        if (onLeave && onLeave.length) {
+          const ids = [...new Set(onLeave.map((r: any) => r.cleaner_id))];
+          const { data: names } = await sb.from("cleaners").select("name").in("id", ids);
+          const who = (names || []).map((n: any) => n.name).join(", ") || "This person";
+          return jsonResp({ error: `${who} is on approved leave on ${cleaningDate}` }, 409);
+        }
+      }
+
       if (op === "set") {
         // Replace all rows for this key.
         const { error: dErr } = await sb.from("cleaning_assignments").delete().eq("reservation_key", reservation_key);
@@ -1208,6 +1229,14 @@ Deno.serve(async (req: Request) => {
       const { data: cleanerData } = await sb.from("cleaners").select("id, name").eq("is_active", true).eq("role", "cleaner").order("name");
       const cls = cleanerData || [];
       if (cls.length === 0) return jsonResp({ error: "No cleaners available" }, 400);
+      // Les personnes en conge approuve sur la journee traitee sortent du pool.
+      // On charge une fois tous les conges approuves qui touchent la fenetre,
+      // puis on filtre par date de menage.
+      const { data: leaveRows } = await sb.from("leave_requests")
+        .select("cleaner_id, start_date, end_date").eq("status", "approved");
+      const isOnLeave = (cid: number, day: string | null) =>
+        !!day && (leaveRows || []).some((l: any) =>
+          l.cleaner_id === cid && l.start_date <= day && l.end_date >= day);
       const { data: existingAssign } = await sb.from("cleaning_assignments").select("reservation_key, cleaner_id");
       // Multi-assign: existingMap[key] is now a Set<cleaner_id>. "Already assigned" =
       // at least one cleaner attached to that key.
@@ -1222,8 +1251,12 @@ Deno.serve(async (req: Request) => {
       let assigned = 0;
       for (const r of reservations) {
         if (existingMap[r.key] && existingMap[r.key].size > 0) continue;
-        let minLoad = Infinity, minId = cls[0].id;
-        for (const c of cls) { if (load[c.id] < minLoad) { minLoad = load[c.id]; minId = c.id; } }
+        const dm = String(r.key).match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
+        const day = dm ? dm[1] : null;
+        const pool = cls.filter((c: any) => !isOnLeave(c.id, day));
+        if (!pool.length) continue; // personne de disponible ce jour-la
+        let minLoad = Infinity, minId = pool[0].id;
+        for (const c of pool) { if (load[c.id] < minLoad) { minLoad = load[c.id]; minId = c.id; } }
         const { error } = await sb.from("cleaning_assignments")
           .upsert({ reservation_key: r.key, cleaner_id: minId, assigned_at: new Date().toISOString() },
                   { onConflict: "reservation_key,cleaner_id" });
@@ -1948,7 +1981,7 @@ Deno.serve(async (req: Request) => {
       // Tables qui grossissent à chaque ménage (menage_done, cleaning_assignments,
       // cleaning_timer, cleaning_cancelled) : paginer pour éviter la troncature
       // silencieuse PostgREST à 1000 rows.
-      const [doneRows, assignRows, timerRows, cancelledRows, postponedRows, cleanerRes, templateRes, listingRes, ticketRes, vendorRes, equipRes, prevRes, extraRes] = await Promise.all([
+      const [doneRows, assignRows, timerRows, cancelledRows, postponedRows, cleanerRes, templateRes, listingRes, ticketRes, vendorRes, equipRes, prevRes, extraRes, leaveRes] = await Promise.all([
         fetchAllRows<any>((from, to) => sb.from("menage_done").select("reservation_key, done").order("reservation_key").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type").order("reservation_key").order("cleaner_id").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_timer").select("*").order("reservation_key").range(from, to)),
@@ -1965,6 +1998,13 @@ Deno.serve(async (req: Request) => {
         sb.from("equipment").select("*").order("listing_id, name"),
         sb.from("preventive_maintenance").select("*").eq("is_active", true).order("next_due_at"),
         sb.from("extra_cleanings").select("*").gte("cleaning_date", new Date(Date.now() - 30*86400000).toISOString().split('T')[0]).lte("cleaning_date", new Date(Date.now() + 60*86400000).toISOString().split('T')[0]).order("cleaning_date"),
+        // Conges approuves (J-7 a J+90) : trois colonnes uniquement, le type de conge
+        // ne doit jamais atteindre le client cleaner (donnee medicale sensible).
+        sb.from("leave_requests")
+          .select("cleaner_id, start_date, end_date")
+          .eq("status", "approved")
+          .gte("end_date", new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0])
+          .lte("start_date", new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0]),
       ]);
       const cancelledMap: Record<string, any> = {};
       cancelledRows.forEach((r: any) => { cancelledMap[r.reservation_key] = { reason: r.reason, cancelled_by: r.cancelled_by, cancelled_at: r.cancelled_at }; });
@@ -1994,6 +2034,7 @@ Deno.serve(async (req: Request) => {
         cancelled: cancelledMap,
         postponed: postponedMap,
         extraCleanings: extraRes.data || [],
+        leaves: leaveRes.data || [],
       });
     }
 
