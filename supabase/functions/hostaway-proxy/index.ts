@@ -675,6 +675,8 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["hrSubmitLeave", "POST"],
   ["hrDecideLeave", "POST"],
   ["hrCancelLeave", "POST"],
+  ["hrSaveEmployee", "POST"],
+  ["hrDeleteEmployee", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -2152,6 +2154,72 @@ Deno.serve(async (req: Request) => {
           `\u{1F6AB} <b>Leave cancelled</b>\n${HR_LEAVE_LABELS[lr.leave_type] || "Leave"}: ${lr.start_date} to ${lr.end_date}\nBy ${g.me!.name}`);
       }
       return jsonResp({ status: "success", request: data });
+    }
+
+    // ========== RH : dossier employe ==========
+    if (action === "hrSaveEmployee" && req.method === "POST") {
+      const g = await hrAuth(sb, req, "manager");
+      if (g.err) return g.err;
+      const body = await req.json();
+      const cleanerId = Number(body.cleaner_id);
+      if (!cleanerId) return jsonResp({ error: "cleaner_id required" }, 400);
+
+      const isDate = (v: any) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+      if (!isDate(body.hire_date)) return jsonResp({ error: "hire_date must be YYYY-MM-DD" }, 400);
+      if (body.end_date && !isDate(body.end_date)) return jsonResp({ error: "end_date must be YYYY-MM-DD" }, 400);
+      const openingDate = isDate(body.opening_date) ? body.opening_date : body.hire_date;
+      if (openingDate < body.hire_date) return jsonResp({ error: "opening_date cannot precede hire_date" }, 400);
+      if (body.end_date && body.end_date < body.hire_date) return jsonResp({ error: "end_date cannot precede hire_date" }, 400);
+
+      const { data: c } = await sb.from("cleaners").select("id, role").eq("id", cleanerId).maybeSingle();
+      if (!c) return jsonResp({ error: "unknown cleaner" }, 404);
+      // Les sous-traitants (Elite) ne sont pas des salaries : pas de dossier RH.
+      if (c.role === "subcontractor") return jsonResp({ error: "subcontractors have no HR record" }, 400);
+
+      const row: Record<string, any> = {
+        cleaner_id: cleanerId,
+        hire_date: body.hire_date,
+        end_date: body.end_date || null,
+        job_title: body.job_title ? String(body.job_title).slice(0, 120) : null,
+        nationality: body.nationality ? String(body.nationality).slice(0, 80) : null,
+        opening_annual_days: Number(body.opening_annual_days) || 0,
+        opening_date: openingDate,
+        notes: body.notes ? String(body.notes).slice(0, 2000) : null,
+        updated_at: new Date().toISOString(),
+      };
+      // Les montants ne sont modifiables que par le CEO. Un manager qui poste
+      // ces champs les voit simplement ignores : le reste de son edition passe.
+      if (g.isOwner) {
+        const money = (v: any) => (v === "" || v === null || v === undefined ? null : Number(v));
+        ["basic_salary", "housing_allowance", "transport_allowance", "other_allowance"].forEach((k) => {
+          if (k in body) {
+            const n = money(body[k]);
+            if (n !== null && (!Number.isFinite(n) || n < 0)) return;
+            row[k] = n;
+          }
+        });
+      }
+
+      const { data, error } = await sb.from("employees")
+        .upsert(row, { onConflict: "cleaner_id" })
+        .select(HR_EMPLOYEE_PUBLIC_COLS).single();
+      if (error) return jsonResp({ error: error.message }, 500);
+      return jsonResp({ status: "success", employee: data });
+    }
+
+    if (action === "hrDeleteEmployee" && req.method === "POST") {
+      // Suppression reservee au CEO : le dossier porte la remuneration et
+      // l'historique d'anciennete, sa perte n'est pas rattrapable.
+      const g = await hrAuth(sb, req, "owner");
+      if (g.err) return g.err;
+      const cleanerId = Number((await req.json()).cleaner_id);
+      if (!cleanerId) return jsonResp({ error: "cleaner_id required" }, 400);
+      const { count } = await sb.from("leave_requests")
+        .select("id", { count: "exact", head: true }).eq("cleaner_id", cleanerId);
+      if ((count || 0) > 0) return jsonResp({ error: `${count} leave request(s) exist, delete them first` }, 409);
+      const { error } = await sb.from("employees").delete().eq("cleaner_id", cleanerId);
+      if (error) return jsonResp({ error: error.message }, 500);
+      return jsonResp({ status: "success" });
     }
 
     // ========== PROPERTY HEATMAP ==========
