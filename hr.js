@@ -113,3 +113,82 @@ function daysUntil(dateStr, todayStr){
 
 window.HR_LEAVE_TYPES = HR_LEAVE_TYPES;
 window.HR_DOC_TYPES = HR_DOC_TYPES;
+
+// ===========================================================================
+// Etat du module RH. Volontairement séparé des helpers purs ci-dessus, qui
+// restent testables sans DOM ni réseau.
+// ===========================================================================
+
+let hrData = null;        // payload de hrOverview ou hrMyLeave
+let hrLoading = false;
+let hrError = null;
+let hrSelected = null;    // cleaner_id du dossier ouvert (vue manager)
+let hrSubmitting = false;
+
+function hrIsManager(){
+  return !cleanerMode || cleanerMode.role === 'manager';
+}
+
+function hrToday(){
+  return (hrData && hrData.today) || new Date().toISOString().slice(0, 10);
+}
+
+function hrCleanerName(id){
+  const c = (typeof cleaners !== 'undefined' ? cleaners : []).find(x => x.id === Number(id));
+  return c ? c.name : ('#' + id);
+}
+
+function hrTypeLabel(key){
+  const t = HR_LEAVE_TYPES.find(x => x.key === key);
+  return t ? t.label : key;
+}
+
+async function loadHR(){
+  if (hrLoading) return;
+  hrLoading = true; hrError = null;
+  try {
+    const r = await api(hrIsManager() ? 'hrOverview' : 'hrMyLeave');
+    if (r && r.error) throw new Error(r.error);
+    hrData = r;
+  } catch (e) {
+    hrError = (e && e.message) || 'Failed to load HR data';
+    hrData = null;
+  } finally {
+    hrLoading = false;
+    render();
+  }
+}
+
+function hrRefresh(){
+  hrData = null; hrError = null;
+  loadHR();
+  render();
+}
+
+function renderHR(){
+  if (hrLoading || (hrData === null && !hrError)) {
+    document.getElementById('app').innerHTML =
+      '<div class="header"><div class="header-top"><h1>&#x1F464; HR</h1></div></div>' +
+      '<div class="container"><div class="loading"><div class="spinner"></div></div></div>' + renderBottomNav();
+    return;
+  }
+  if (hrError) {
+    document.getElementById('app').innerHTML =
+      '<div class="header"><div class="header-top"><h1>&#x1F464; HR</h1></div></div>' +
+      '<div class="container"><div class="hr-empty">' + esc(hrError) +
+      ' <button class="btn-secondary" data-action="hrRefresh">Retry</button></div></div>' + renderBottomNav();
+    return;
+  }
+  document.getElementById('app').innerHTML =
+    (hrIsManager() ? renderHRManager() : renderHRMine()) + renderBottomNav();
+}
+
+function renderHRManager(){
+  return '<div class="header"><div class="header-top"><h1>&#x1F464; HR</h1></div></div>' +
+    '<div class="container"><div class="hr-empty">Manager view coming next.</div></div>';
+}
+
+function renderHRMine(){
+  return '<div class="header"><div class="header-top"><h1>&#x1F334; My leave</h1></div></div>' +
+    '<div class="container"><div class="hr-empty">Employee view coming next.</div></div>';
+}

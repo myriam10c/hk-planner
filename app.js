@@ -2912,7 +2912,7 @@ function getFiltered(){
 
 function countByDate(d){return RESERVATIONS.filter(r=>r.co===d&&!cancelled[keyFor(r)]).length;}
 function countDoneForDate(d){return RESERVATIONS.filter(r=>r.co===d&&done[keyFor(r)]&&!cancelled[keyFor(r)]).length;}
-function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;if(t!=='laundry'&&laundryMoveKind){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();if(t==='laundry'&&laundryData===null&&!laundryLoading)loadLaundry();}
+function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;if(t!=='laundry'&&laundryMoveKind){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();if(t==='laundry'&&laundryData===null&&!laundryLoading)loadLaundry();if(t==='hr'&&typeof loadHR==='function'&&hrData===null&&!hrLoading&&!hrError)loadHR();}
 let moreOpen=false;
 function openMoreMenu(){ moreOpen=true; renderMoreMenu(); }
 function closeMoreMenu(){ moreOpen=false; renderMoreMenu(); }
@@ -2924,6 +2924,7 @@ function renderMoreMenu(){
     {id:'subcontractors',icon:icon('dollar',22),label:'Subs',color:'#16a34a'},
     {id:'ratings',icon:icon('star',22),label:'Ratings',color:'#ca8a04'},
     {id:'reviews',icon:icon('msgSquare',22),label:'Reviews',color:'#4f46e5'},
+    {id:'hr',icon:icon('user',22),label:'HR',color:'#0d9488'},
     {id:'settings',icon:icon('settings',22),label:'Settings',color:'#475569'},
     {id:'history',icon:icon('history',22),label:'History',color:'#059669'},
     {id:'calendar',icon:icon('calendar',22),label:'Calendar',color:'#0891b2'},
@@ -3533,6 +3534,10 @@ function render(){
   try { writeUrlState(); } catch(e) {}
   try { applyPlannerLayoutMode(); } catch(e) {}
   if(currentTab==='laundry'){if(cleanerMode&&cleanerMode.role!=='manager'){currentTab='planner';}else{if(laundryData===null&&!laundryLoading)loadLaundry();return renderLaundry();}}
+  if(currentTab==='hr'){
+    if(typeof renderHR!=='function'){currentTab='planner';}
+    else{if(hrData===null&&!hrLoading&&!hrError)loadHR();return renderHR();}
+  }
   if(currentTab==='maintenance')return renderMaintenance();
   if(currentTab==='dashboard')return renderDashboard();
   if(currentTab==='settings')return renderSettings();
@@ -3568,10 +3573,10 @@ function renderBottomNav(){
     ];
   }else if(cleanerMode.role==='maintenance'){
     // Maintenance view
-    tabs=[{id:'maintenance',icon:icon('wrench',22),label:'Maintenance'},{id:'history',icon:icon('history',22),label:t('history')}];
+    tabs=[{id:'maintenance',icon:icon('wrench',22),label:'Maintenance'},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'history',icon:icon('history',22),label:t('history')}];
   }else{
     // Cleaner view (default)
-    tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')}];
+    tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')}];
   }
   const mainIds=tabs.map(tb=>tb.id);
   return '<nav class="bottom-nav">'+tabs.map(tab=>
