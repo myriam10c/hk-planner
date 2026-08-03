@@ -2498,6 +2498,22 @@ Deno.serve(async (req: Request) => {
       const { listing_id, cleaning_date, label, guest_name, price_billed, cleaner_price, notes, assigned_cleaner_id, created_by } = body;
       if (!listing_id || !cleaning_date) return jsonResp({ error: "listing_id and cleaning_date required" }, 400);
 
+      // Blocage strict AVANT tout write : verifier que le cleaner n'est pas en conge approuve
+      // a la date du menage. Le check utilise uniquement des donnees du body, aucune ecriture
+      // n'a encore eu lieu, donc un 409 ici ne laisse aucun orphelin dans extra_cleanings.
+      if (assigned_cleaner_id) {
+        const { data: ecLeave, error: ecLeaveErr } = await sb.from("leave_requests")
+          .select("cleaner_id").eq("status", "approved")
+          .eq("cleaner_id", assigned_cleaner_id)
+          .lte("start_date", cleaning_date).gte("end_date", cleaning_date);
+        if (ecLeaveErr) return jsonResp({ error: "Failed to verify leave status" }, 500);
+        if (ecLeave && ecLeave.length) {
+          const { data: ecNames } = await sb.from("cleaners").select("name").eq("id", assigned_cleaner_id);
+          const who = (ecNames && ecNames[0]) ? ecNames[0].name : "This person";
+          return jsonResp({ error: `${who} is on approved leave on ${cleaning_date}` }, 409);
+        }
+      }
+
       // Generate unique reservation_key
       const rand = Math.random().toString(36).substring(2, 10);
       const reservation_key = `extra_${cleaning_date}_${rand}`;
@@ -2515,18 +2531,6 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
 
       if (assigned_cleaner_id) {
-        // Blocage strict : verifier que le cleaner n'est pas en conge approuve
-        // a la date du menage (cleaning_date vient directement du body).
-        const { data: ecLeave, error: ecLeaveErr } = await sb.from("leave_requests")
-          .select("cleaner_id").eq("status", "approved")
-          .eq("cleaner_id", assigned_cleaner_id)
-          .lte("start_date", cleaning_date).gte("end_date", cleaning_date);
-        if (ecLeaveErr) return jsonResp({ error: "Failed to verify leave status" }, 500);
-        if (ecLeave && ecLeave.length) {
-          const { data: ecNames } = await sb.from("cleaners").select("name").eq("id", assigned_cleaner_id);
-          const who = (ecNames && ecNames[0]) ? ecNames[0].name : "This person";
-          return jsonResp({ error: `${who} is on approved leave on ${cleaning_date}` }, 409);
-        }
         // Unique constraint = (reservation_key, cleaner_id) depuis la migration
         // multi_cleaner_per_cleaning — un onConflict "reservation_key" seul fait
         // echouer l'upsert (42P10) et perdait l'assignation en silence.
