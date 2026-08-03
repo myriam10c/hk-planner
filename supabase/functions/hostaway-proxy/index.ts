@@ -27,6 +27,7 @@ const SERVER_ONLY_ACTIONS = new Set([
   "submitMacCommand",
   "getMacCommands",
   "getHermesCommands",
+  "hrCheckExpiries",
 ]);
 const TOKEN_URL = "https://api.hostaway.com/v1/accessTokens";
 const API_BASE = "https://api.hostaway.com/v1";
@@ -385,6 +386,43 @@ async function hrNotifyCleaner(sb: any, cleanerId: number, text: string) {
   }
 }
 
+// Alertes d'expiration de documents. Un document déclenche au plus une alerte
+// par palier (60 / 30 / 7 / 0 jours) : la clé app_config `hr_doc_alert_<id>_<palier>`
+// sert de verrou, sinon chaque ouverture de l'onglet RH renverrait la même notif.
+const HR_EXPIRY_THRESHOLDS = [60, 30, 7, 0];
+
+async function hrRunExpiryAlerts(sb: any): Promise<number> {
+  const today = HR_TODAY();
+  const horizon = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
+  const { data: docs } = await sb.from("employee_documents")
+    .select("id, cleaner_id, doc_type, expiry_date")
+    .not("expiry_date", "is", null).lte("expiry_date", horizon);
+  if (!docs || !docs.length) return 0;
+
+  const { data: cRows } = await sb.from("cleaners").select("id, name");
+  const nameOf = (id: number) => {
+    const c = (cRows || []).find((x: any) => x.id === id);
+    return (c && c.name) || ("#" + id);
+  };
+
+  let sent = 0;
+  for (const d of docs) {
+    const left = Math.round((Date.parse(d.expiry_date + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 86400000);
+    // Palier franchi le plus proche : 45 jours restants déclenche le palier 60.
+    const threshold = HR_EXPIRY_THRESHOLDS.find((t) => left <= t);
+    if (threshold === undefined) continue;
+    const key = `hr_doc_alert_${d.id}_${threshold}`;
+    const { data: seen } = await sb.from("app_config").select("key").eq("key", key).maybeSingle();
+    if (seen) continue;
+    await hrNotifyManagers(sb,
+      `📄 <b>Document expiring</b>\n${nameOf(d.cleaner_id)} - ${d.doc_type}\n` +
+      (left < 0 ? `Expired ${Math.abs(left)} day(s) ago (${d.expiry_date})` : `Expires in ${left} day(s) (${d.expiry_date})`));
+    await sb.from("app_config").upsert({ key, value: today, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    sent++;
+  }
+  return sent;
+}
+
 // ========== Telegram notifications (team_tasks) ==========
 // Side-effect : si fail, ne pas faire échouer la requête principale.
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -679,6 +717,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["hrDeleteEmployee", "POST"],
   ["hrSaveDocument", "POST"],
   ["hrDeleteDocument", "POST"],
+  ["hrCheckExpiries", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -2079,6 +2118,9 @@ Deno.serve(async (req: Request) => {
       // Documents expirant dans moins de 60 jours ou déjà expirés.
       const horizon60 = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
       const expiring = (docRes.data || []).filter((d: any) => d.expiry_date && d.expiry_date <= horizon60);
+      // Fire and forget : un envoi Telegram lent ne doit pas retarder l'écran.
+      const alertsPromise = hrRunExpiryAlerts(sb).catch((e) => console.warn("[hr] expiry alerts failed", e));
+      try { (globalThis as any).EdgeRuntime?.waitUntil?.(alertsPromise); } catch (_e) { /* best effort */ }
       return jsonResp({
         status: "success",
         employees: empRes.data || [],
@@ -2346,6 +2388,13 @@ Deno.serve(async (req: Request) => {
       const { error } = await sb.from("employee_documents").delete().eq("id", id);
       if (error) return jsonResp({ error: error.message }, 500);
       return jsonResp({ status: "success" });
+    }
+
+    if (action === "hrCheckExpiries" && req.method === "POST") {
+      // Route serveur : un cron VPS peut la déclencher tous les jours sans
+      // qu'un manager ait besoin d'ouvrir l'app.
+      const sent = await hrRunExpiryAlerts(sb);
+      return jsonResp({ status: "success", sent });
     }
 
     // ========== PROPERTY HEATMAP ==========
