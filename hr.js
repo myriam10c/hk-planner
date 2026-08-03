@@ -149,6 +149,13 @@ let hrSubmitting = false;
 let hrComp = null;        // payload hrGetCompensation du dossier ouvert
 let hrCompLoading = false;
 let hrCompError = null;   // message d'erreur du dernier fetch hrGetCompensation ; null = pas d'erreur
+// Proprietaire de l'etat de remuneration ci-dessus : hrComp / hrCompLoading /
+// hrCompError ne valent QUE pour ce cleaner_id. Sans ce marqueur, une reponse
+// arrivee apres un changement de dossier peuplait le panneau d'un autre salarie.
+let hrCompCleanerId = null;
+// Numero de la derniere requete hrGetCompensation emise. Toute reponse portant
+// un numero perime est jetee : elle ne peut plus ecrire dans l'etat du module.
+let hrCompReqId = 0;
 
 function hrIsManager(){
   return !cleanerMode || cleanerMode.role === 'manager';
@@ -196,24 +203,62 @@ function hrRefresh(){
   render();
 }
 
+// Remet a zero tout l'etat de rémunération et périme les réponses en vol.
+// Incrémenter hrCompReqId suffit : la réponse d'une requête déja partie sera
+// jetée a son retour, donc elle ne peut plus peupler le panneau d'un autre dossier.
+function hrResetComp(){
+  hrComp = null;
+  hrCompError = null;
+  hrCompLoading = false;
+  hrCompCleanerId = null;
+  hrCompReqId++;
+}
+
+// Renvoie hrComp UNIQUEMENT s'il appartient bien au dossier demandé, sinon null.
+// Double contrôle : le marqueur de propriété du module ET le cleaner_id renvoyé
+// par le serveur dans la réponse.
+function hrCompDataFor(cleanerId){
+  const cid = Number(cleanerId);
+  if (hrCompCleanerId !== cid || !hrComp) return null;
+  if (hrComp.cleaner_id != null && Number(hrComp.cleaner_id) !== cid) return null;
+  return hrComp;
+}
+
 // Charge les données de rémunération du dossier ouvert, uniquement si l'appelant
 // est owner (le drapeau hrData.isOwner est vérifié avant l'appel dans renderHRDetail).
 // Pattern trois-états identique à loadHR / hrRefresh : hrCompError bloque toute
 // nouvelle tentative automatique ; seul un appel explicite (ex. retry) remet hrCompError
 // à null avant le fetch, ce qui stoppe la boucle infinie en cas d'erreur réseau ou 4xx.
+// Anti-contamination : la requête s'approprie l'état (hrCompCleanerId) avant l'await et
+// porte un numéro ; une réponse dont le numéro n'est plus le dernier n'écrit rien.
 async function hrLoadComp(cleanerId){
-  if (hrCompLoading) return;
-  hrCompLoading = true; hrCompError = null;
+  const cid = Number(cleanerId);
+  // Déja en vol POUR CE DOSSIER : ne pas doubler la requête. Un fetch en cours
+  // pour un AUTRE dossier ne doit en revanche jamais bloquer celui-ci.
+  if (hrCompLoading && hrCompCleanerId === cid) return;
+  const reqId = ++hrCompReqId;
+  hrCompCleanerId = cid; hrCompLoading = true; hrCompError = null; hrComp = null;
   try {
-    const r = await api('hrGetCompensation', { params: { cleaner_id: Number(cleanerId) } });
+    const r = await api('hrGetCompensation', { params: { cleaner_id: cid } });
+    if (reqId !== hrCompReqId) return; // réponse périmée : un autre dossier a pris la main
     if (r && r.error) { hrCompError = r.error; hrComp = null; }
+    else if (!r || !r.compensation) { hrCompError = 'Failed to load compensation'; hrComp = null; }
+    else if (r.compensation.cleaner_id != null && Number(r.compensation.cleaner_id) !== cid) {
+      // Ceinture et bretelles : le serveur a répondu pour quelqu'un d'autre.
+      hrCompError = 'Compensation data did not match the selected employee'; hrComp = null;
+    }
     else { hrComp = r.compensation; }
   } catch (e) {
+    if (reqId !== hrCompReqId) return;
     hrCompError = (e && e.message) || 'Failed to load compensation';
     hrComp = null;
   } finally {
-    hrCompLoading = false;
-    render();
+    // Une réponse périmée ne touche ni au drapeau de chargement (il appartient a
+    // la requête courante) ni au rendu.
+    if (reqId === hrCompReqId) {
+      hrCompLoading = false;
+      render();
+    }
   }
 }
 
@@ -364,11 +409,12 @@ async function hrDecide(id, decision){
 }
 
 // Ouvre le dossier d'un employé (vue détail, remplacée en Task 9).
-// hrComp est réinitialisé pour éviter d'afficher brièvement les données
-// de rémunération de l'employé précédent en attendant la réponse réseau.
-function hrOpen(cleanerId){ hrSelected = Number(cleanerId); hrComp = null; hrCompError = null; render(); }
-// Ferme le dossier et revient a la liste.
-function hrCloseDetail(){ hrSelected = null; render(); }
+// L'état de rémunération est remis a zéro ET les réponses en vol sont périmées,
+// pour qu'aucune donnée de l'employé précédent ne puisse atterrir dans ce panneau.
+function hrOpen(cleanerId){ hrSelected = Number(cleanerId); hrResetComp(); render(); }
+// Ferme le dossier et revient a la liste. Même remise a zéro : sans elle, un aller
+// -retour liste/dossier laissait un hrComp orphelin en mémoire.
+function hrCloseDetail(){ hrSelected = null; hrResetComp(); render(); }
 
 // Panneau de détail employé : soldes, formulaire d'édition du dossier, saisie
 // de congé par le manager, et historique des congés en cours/à venir.
@@ -461,18 +507,22 @@ function renderHRDetail(cleanerId){
     // Bloc rémunération : visible uniquement si l'utilisateur courant est owner.
     // Le fetch n'est déclenché que si hrData.isOwner est vrai ; un manager non-owner
     // ne voit jamais ce bloc et n'envoie aucune requête hrGetCompensation.
-    // Garde trois-états (identique à loadHR) : hrComp === null && !hrCompLoading && !hrCompError.
     // hrCompError stoppe toute nouvelle tentative automatique et affiche un message explicite.
     if (hrData.isOwner) {
-      if (hrComp === null && !hrCompLoading && !hrCompError) hrLoadComp(cid);
-      const c = hrComp || {};
-      const endForGratuity = emp.end_date || hrToday();
-      const grat = gratuityEstimate(emp.hire_date, endForGratuity, c.basic_salary, c.unpaid_days || 0);
+      // Garde a quatre termes. Le premier terme relance un fetch si l'état en mémoire
+      // appartient a un AUTRE dossier (retour arrière puis ouverture d'un autre salarié
+      // pendant qu'une réponse est en vol) ; les trois autres sont la garde anti-boucle.
+      if (hrCompCleanerId !== cid || (hrComp === null && !hrCompLoading && !hrCompError)) hrLoadComp(cid);
+      // Rendu strictement limité aux données du dossier ouvert : hrCompDataFor renvoie
+      // null si l'état appartient a quelqu'un d'autre, donc jamais de salaire croisé.
+      const compData = hrCompDataFor(cid);
+      const c = compData || {};
+      const compError = (hrCompCleanerId === cid) ? hrCompError : null;
       h += '<div class="hr-section"><h3>Compensation (CEO only)</h3><div class="hr-card">';
-      if (hrCompError) {
+      if (compError) {
         // Erreur de chargement : afficher le message et bloquer le formulaire pour
         // éviter d'écraser des valeurs inconnues avec des nulls.
-        h += '<div class="hr-empty">Could not load compensation data: ' + esc(hrCompError) + '</div>';
+        h += '<div class="hr-empty">Could not load compensation data: ' + esc(compError) + '</div>';
       } else {
         h += '<div class="hr-form">' +
           '<label>Basic salary (AED / month)</label><input type="number" step="1" id="hrBasic" value="' + (c.basic_salary != null ? c.basic_salary : '') + '"/>' +
@@ -484,14 +534,22 @@ function renderHRDetail(cleanerId){
           '<div class="hr-stat"><span>Basic share</span><b>' + (c.total ? Math.round((Number(c.basic_salary || 0) / c.total) * 100) : 0) + '%</b></div>';
       }
       h += '</div>';
-      h += '<div class="hr-card">' +
-        '<div class="hr-name" style="margin-bottom:6px">End of service estimate</div>' +
-        '<div class="hr-stat"><span>Service years' + (emp.end_date ? '' : ' if leaving today') + '</span><b>' + grat.years + '</b></div>' +
-        '<div class="hr-stat"><span>Gratuity days</span><b>' + grat.days + '</b></div>' +
-        '<div class="hr-stat"><span>Unpaid leave deducted</span><b>' + (c.unpaid_days || 0) + ' days</b></div>' +
-        '<div class="hr-stat"><span>Estimated gratuity</span><b>' + grat.amount + ' AED</b></div>' +
-        '<div class="hr-meta" style="margin-top:8px">Indicative only, based on basic salary. Confirm with the PRO before any settlement.</div>' +
-        '</div></div>';
+      // L'estimation de fin de service n'est rendue que sur des données réellement
+      // chargées pour CE dossier. Sous un message d'erreur ou pendant le chargement,
+      // "Estimated gratuity 0 AED" se lirait comme un vrai montant.
+      if (compData) {
+        const endForGratuity = emp.end_date || hrToday();
+        const grat = gratuityEstimate(emp.hire_date, endForGratuity, c.basic_salary, c.unpaid_days || 0);
+        h += '<div class="hr-card">' +
+          '<div class="hr-name" style="margin-bottom:6px">End of service estimate</div>' +
+          '<div class="hr-stat"><span>Service years' + (emp.end_date ? '' : ' if leaving today') + '</span><b>' + grat.years + '</b></div>' +
+          '<div class="hr-stat"><span>Gratuity days</span><b>' + grat.days + '</b></div>' +
+          '<div class="hr-stat"><span>Unpaid leave deducted</span><b>' + (c.unpaid_days || 0) + ' days</b></div>' +
+          '<div class="hr-stat"><span>Estimated gratuity</span><b>' + grat.amount + ' AED</b></div>' +
+          '<div class="hr-meta" style="margin-top:8px">Indicative only, based on basic salary. Confirm with the PRO before any settlement.</div>' +
+          '</div>';
+      }
+      h += '</div>';
     }
   }
 
@@ -505,10 +563,18 @@ function renderHRDetail(cleanerId){
 // fonction directement, sans tenir compte de l'état visuel du bouton.
 async function hrSaveComp(cleanerId){
   if (hrSubmitting) return;
-  // Sécurité anti-race : si les données n'ont pas encore été chargées, on ne peut pas
-  // distinguer "champ vide car l'employé n'a pas de salaire" de "champ vide car le fetch
-  // n'est pas terminé". Envoyer des nulls détruirait les valeurs stockées silencieusement.
-  if (hrCompLoading || (hrComp === null && !hrCompError)) { toast('Compensation data not loaded yet, please wait', 'error'); return; }
+  const cid = Number(cleanerId);
+  // Anti-contamination : l'état de rémunération en mémoire doit appartenir a CE dossier.
+  // Sinon on écrirait les montants d'un autre salarié (champs rendus depuis son payload)
+  // sur ce dossier-ci, avec un toast de succès.
+  if (hrCompCleanerId !== cid) {
+    toast('Compensation data does not match this employee, reopen the record', 'error');
+    return;
+  }
+  // Sécurité anti-race : sans données chargées pour ce dossier, on ne peut pas distinguer
+  // "champ vide car l'employé n'a pas de salaire" de "champ vide car le fetch n'est pas
+  // terminé". Envoyer des nulls détruirait les valeurs stockées silencieusement.
+  if (hrCompLoading || !hrCompDataFor(cid)) { toast('Compensation data not loaded yet, please wait', 'error'); return; }
   const emp = (hrData.employees || []).find(e => e.cleaner_id === Number(cleanerId));
   if (!emp) { toast('Create the employee record first', 'error'); return; }
   const num = (id) => { const v = hrVal(id); return v === '' ? null : Number(v); };
