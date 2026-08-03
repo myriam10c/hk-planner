@@ -165,6 +165,12 @@ function hrTypeLabel(key){
   return t ? t.label : key;
 }
 
+// Libellé lisible pour un type de document (analogue à hrTypeLabel pour les congés).
+function hrDocLabel(key){
+  const d = HR_DOC_TYPES.find(x => x.key === key);
+  return d ? d.label : key;
+}
+
 async function loadHR(){
   if (hrLoading) return;
   hrLoading = true; hrError = null;
@@ -259,6 +265,23 @@ function renderHRManager(){
     ? pending.map(r => hrRequestCard(r, true)).join('')
     : '<div class="hr-empty">Nothing waiting for a decision.</div>';
   h += '</div>';
+
+  // Bandeau d'alerte pour les documents expirant dans les 60 prochains jours.
+  const expiring = hrData.expiring || [];
+  if (expiring.length) {
+    h += '<div class="hr-section"><h3>Documents expiring</h3>';
+    expiring.forEach(d => {
+      const left = daysUntil(d.expiry_date, today);
+      h += '<div class="hr-card" data-action="hrOpen" data-arg0="' + d.cleaner_id + '" style="cursor:pointer">' +
+        '<div class="hr-row"><div class="hr-grow">' +
+        '<div class="hr-name">' + esc(hrCleanerName(d.cleaner_id)) + '</div>' +
+        '<div class="hr-meta">' + esc(hrDocLabel(d.doc_type)) + ' · expires ' + esc(d.expiry_date) + '</div></div>' +
+        '<span class="hr-badge ' + (left < 0 ? 'rejected' : 'pending') + '">' +
+        (left < 0 ? 'expired ' + Math.abs(left) + 'd ago' : left + 'd left') + '</span>' +
+        '</div></div>';
+    });
+    h += '</div>';
+  }
 
   const onLeaveNow = upcoming.filter(l => rangesOverlap(l.start_date, l.end_date, today, today));
   if (onLeaveNow.length) {
@@ -381,6 +404,33 @@ function renderHRDetail(cleanerId){
             : '')).join('')
       : '<div class="hr-empty">Nothing planned.</div>';
     h += '</div>';
+
+    // Section documents : liste + formulaire d'ajout.
+    const docs = (hrData.documents || []).filter(d => d.cleaner_id === cid);
+    h += '<div class="hr-section"><h3>Documents</h3>';
+    docs.forEach(d => {
+      const left = daysUntil(d.expiry_date, hrToday());
+      h += '<div class="hr-card"><div class="hr-row"><div class="hr-grow">' +
+        '<div class="hr-name">' + esc(hrDocLabel(d.doc_type)) + '</div>' +
+        '<div class="hr-meta">' + (d.doc_number ? esc(d.doc_number) + ' · ' : '') +
+        (d.expiry_date ? 'expires ' + esc(d.expiry_date) : 'no expiry') +
+        (d.note ? ' · ' + esc(d.note) : '') + '</div></div>' +
+        (left !== null ? '<span class="hr-badge ' + (left < 0 ? 'rejected' : left <= 60 ? 'pending' : 'approved') + '">' +
+          (left < 0 ? 'expired' : left + 'd') + '</span>' : '') +
+        '<button class="hr-btn-alt" style="padding:6px 10px;border:none;border-radius:8px;cursor:pointer" data-action="hrDeleteDocument" data-arg0="' + d.id + '" title="Delete" aria-label="Delete document">' + icon('trash', 14) + '</button>' +
+        '</div></div>';
+    });
+    if (!docs.length) h += '<div class="hr-empty">No document on file.</div>';
+    h += '<div class="hr-card"><div class="hr-form">' +
+      '<label>Type</label><select id="hrDocType">' +
+      HR_DOC_TYPES.map(t => '<option value="' + t.key + '">' + esc(t.label) + '</option>').join('') + '</select>' +
+      '<label>Number</label><input id="hrDocNumber" placeholder="Optional"/>' +
+      '<label>Issued</label><input type="date" id="hrDocIssue"/>' +
+      '<label>Expires</label><input type="date" id="hrDocExpiry"/>' +
+      '<label>Note</label><input id="hrDocNote" placeholder="Optional"/>' +
+      '</div><div class="hr-actions">' +
+      '<button class="hr-btn-ok" data-action="hrSaveDocument" data-arg0="' + cid + '">Add document</button>' +
+      '</div></div></div>';
   }
 
   return h;
@@ -513,6 +563,44 @@ function renderHRMine(){
     : '<div class="hr-empty">No request yet.</div>';
   h += '</div></div>';
   return h;
+}
+
+// Sauvegarde (création) d'un document employé via le formulaire Documents.
+// Utilise apiWrite pour que tout échec (réseau ou serveur) lève une exception.
+async function hrSaveDocument(cleanerId){
+  if (hrSubmitting) return;
+  const type = hrVal('hrDocType');
+  if (!type) { toast('Pick a document type', 'error'); return; }
+  hrSubmitting = true;
+  try {
+    await apiWrite('hrSaveDocument', { body: {
+      cleaner_id: Number(cleanerId), doc_type: type,
+      doc_number: hrVal('hrDocNumber') || null,
+      issue_date: hrVal('hrDocIssue') || null,
+      expiry_date: hrVal('hrDocExpiry') || null,
+      note: hrVal('hrDocNote') || null,
+    }});
+    toast('Document saved', 'success');
+    hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed to save', 'error');
+  } finally {
+    hrSubmitting = false;
+  }
+}
+
+// Supprime un document employé après confirmation.
+async function hrDeleteDocument(id){
+  if (!confirm('Delete this document?')) return;
+  try {
+    await apiWrite('hrDeleteDocument', { body: { id: Number(id) } });
+    toast('Document deleted', 'info');
+    hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed to delete', 'error');
+  }
 }
 
 // Soumet une demande de congé pour soi-même via le formulaire employé.
