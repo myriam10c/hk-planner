@@ -1171,10 +1171,12 @@ Deno.serve(async (req: Request) => {
         ? (Array.isArray(list) ? list.map(Number) : (single ? [Number(single)] : []))
         : (op === "add" && single ? [Number(single)] : []);
       if (cleaningDate && candidates.length) {
-        const { data: onLeave } = await sb.from("leave_requests")
+        // Echec ferme : si la lecture echoue, on bloque plutot que d'autoriser en silence.
+        const { data: onLeave, error: leaveErr } = await sb.from("leave_requests")
           .select("cleaner_id").eq("status", "approved")
           .in("cleaner_id", candidates)
           .lte("start_date", cleaningDate).gte("end_date", cleaningDate);
+        if (leaveErr) return jsonResp({ error: "Failed to verify leave status" }, 500);
         if (onLeave && onLeave.length) {
           const ids = [...new Set(onLeave.map((r: any) => r.cleaner_id))];
           const { data: names } = await sb.from("cleaners").select("name").in("id", ids);
@@ -1856,9 +1858,22 @@ Deno.serve(async (req: Request) => {
         const load: Record<number, number> = {};
         cls.forEach((c: any) => { load[c.id] = 0; });
         Object.values(existingMap).forEach((arr) => arr.forEach((cid) => { if (load[cid] !== undefined) load[cid]++; }));
+        // Chargement unique des conges approuves avant la boucle (meme approche qu'autoAssign).
+        // En cas d'erreur lecture, on echoue en mode ouvert (le batch ne doit pas mourir
+        // pour un conge non verifie) : isOnLeaveAuto retourne false pour tous.
+        const { data: apLeaveRows } = await sb.from("leave_requests")
+          .select("cleaner_id, start_date, end_date").eq("status", "approved");
+        const isOnLeaveAuto = (cid: number, day: string | null) =>
+          !!day && (apLeaveRows || []).some((l: any) =>
+            l.cleaner_id === cid && l.start_date <= day && l.end_date >= day);
         for (const r of unassigned) {
-          let minLoad = Infinity, minId = cls[0].id;
-          for (const c of cls) { if (load[c.id] < minLoad) { minLoad = load[c.id]; minId = c.id; } }
+          // Extraire la date de la cle pour filtrer le pool par conge.
+          const dm2 = String(r.key).match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
+          const day2 = dm2 ? dm2[1] : null;
+          const pool = cls.filter((c: any) => !isOnLeaveAuto(c.id, day2));
+          if (!pool.length) continue; // aucun cleaner disponible ce jour-la, on saute
+          let minLoad = Infinity, minId = pool[0].id;
+          for (const c of pool) { if (load[c.id] < minLoad) { minLoad = load[c.id]; minId = c.id; } }
           const { error } = await sb.from("cleaning_assignments")
             .upsert({ reservation_key: r.key, cleaner_id: minId, assigned_at: new Date().toISOString() },
                     { onConflict: "reservation_key,cleaner_id" });
@@ -2500,9 +2515,21 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
 
       if (assigned_cleaner_id) {
+        // Blocage strict : verifier que le cleaner n'est pas en conge approuve
+        // a la date du menage (cleaning_date vient directement du body).
+        const { data: ecLeave, error: ecLeaveErr } = await sb.from("leave_requests")
+          .select("cleaner_id").eq("status", "approved")
+          .eq("cleaner_id", assigned_cleaner_id)
+          .lte("start_date", cleaning_date).gte("end_date", cleaning_date);
+        if (ecLeaveErr) return jsonResp({ error: "Failed to verify leave status" }, 500);
+        if (ecLeave && ecLeave.length) {
+          const { data: ecNames } = await sb.from("cleaners").select("name").eq("id", assigned_cleaner_id);
+          const who = (ecNames && ecNames[0]) ? ecNames[0].name : "This person";
+          return jsonResp({ error: `${who} is on approved leave on ${cleaning_date}` }, 409);
+        }
         // Unique constraint = (reservation_key, cleaner_id) depuis la migration
         // multi_cleaner_per_cleaning — un onConflict "reservation_key" seul fait
-        // échouer l'upsert (42P10) et perdait l'assignation en silence.
+        // echouer l'upsert (42P10) et perdait l'assignation en silence.
         const { error: assignErr } = await sb.from("cleaning_assignments").upsert({
           reservation_key, cleaner_id: assigned_cleaner_id, assigned_at: new Date().toISOString(),
         }, { onConflict: "reservation_key,cleaner_id" });
