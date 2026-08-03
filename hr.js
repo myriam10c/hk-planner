@@ -146,6 +146,8 @@ let hrLoading = false;
 let hrError = null;
 let hrSelected = null;    // cleaner_id du dossier ouvert (vue manager)
 let hrSubmitting = false;
+let hrComp = null;        // payload hrGetCompensation du dossier ouvert
+let hrCompLoading = false;
 
 function hrIsManager(){
   return !cleanerMode || cleanerMode.role === 'manager';
@@ -191,6 +193,23 @@ function hrRefresh(){
   hrData = null; hrError = null;
   loadHR();
   render();
+}
+
+// Charge les données de rémunération du dossier ouvert, uniquement si l'appelant
+// est owner (le drapeau hrData.isOwner est vérifié avant l'appel dans renderHRDetail).
+// En cas d'erreur ou de refus serveur, hrComp reste null et aucun nombre n'est affiché.
+async function hrLoadComp(cleanerId){
+  if (hrCompLoading) return;
+  hrCompLoading = true;
+  try {
+    const r = await api('hrGetCompensation', { params: { cleaner_id: Number(cleanerId) } });
+    hrComp = (r && r.error) ? null : r.compensation;
+  } catch (e) {
+    hrComp = null;
+  } finally {
+    hrCompLoading = false;
+    render();
+  }
 }
 
 function renderHR(){
@@ -340,7 +359,9 @@ async function hrDecide(id, decision){
 }
 
 // Ouvre le dossier d'un employé (vue détail, remplacée en Task 9).
-function hrOpen(cleanerId){ hrSelected = Number(cleanerId); render(); }
+// hrComp est réinitialisé pour éviter d'afficher brièvement les données
+// de rémunération de l'employé précédent en attendant la réponse réseau.
+function hrOpen(cleanerId){ hrSelected = Number(cleanerId); hrComp = null; render(); }
 // Ferme le dossier et revient a la liste.
 function hrCloseDetail(){ hrSelected = null; render(); }
 
@@ -431,9 +452,71 @@ function renderHRDetail(cleanerId){
       '</div><div class="hr-actions">' +
       '<button class="hr-btn-ok" data-action="hrSaveDocument" data-arg0="' + cid + '">Add document</button>' +
       '</div></div></div>';
+
+    // Bloc rémunération : visible uniquement si l'utilisateur courant est owner.
+    // Le fetch n'est déclenché que si hrData.isOwner est vrai ; un manager non-owner
+    // ne voit jamais ce bloc et n'envoie aucune requête hrGetCompensation.
+    if (hrData.isOwner) {
+      if (hrComp === null && !hrCompLoading) hrLoadComp(cid);
+      const c = hrComp || {};
+      const endForGratuity = emp.end_date || hrToday();
+      const grat = gratuityEstimate(emp.hire_date, endForGratuity, c.basic_salary, c.unpaid_days || 0);
+      h += '<div class="hr-section"><h3>Compensation (CEO only)</h3><div class="hr-card">' +
+        '<div class="hr-form">' +
+        '<label>Basic salary (AED / month)</label><input type="number" step="1" id="hrBasic" value="' + (c.basic_salary != null ? c.basic_salary : '') + '"/>' +
+        '<label>Housing allowance</label><input type="number" step="1" id="hrHousing" value="' + (c.housing_allowance != null ? c.housing_allowance : '') + '"/>' +
+        '<label>Transport allowance</label><input type="number" step="1" id="hrTransport" value="' + (c.transport_allowance != null ? c.transport_allowance : '') + '"/>' +
+        '<label>Other allowance</label><input type="number" step="1" id="hrOther" value="' + (c.other_allowance != null ? c.other_allowance : '') + '"/>' +
+        '</div><div class="hr-actions"><button class="hr-btn-ok" data-action="hrSaveComp" data-arg0="' + cid + '">Save compensation</button></div>' +
+        '<div class="hr-stat" style="margin-top:10px"><span>Total package</span><b>' + (c.total || 0) + ' AED</b></div>' +
+        '<div class="hr-stat"><span>Basic share</span><b>' + (c.total ? Math.round((Number(c.basic_salary || 0) / c.total) * 100) : 0) + '%</b></div>' +
+        '</div>';
+      h += '<div class="hr-card">' +
+        '<div class="hr-name" style="margin-bottom:6px">End of service estimate</div>' +
+        '<div class="hr-stat"><span>Service years' + (emp.end_date ? '' : ' if leaving today') + '</span><b>' + grat.years + '</b></div>' +
+        '<div class="hr-stat"><span>Gratuity days</span><b>' + grat.days + '</b></div>' +
+        '<div class="hr-stat"><span>Unpaid leave deducted</span><b>' + (c.unpaid_days || 0) + ' days</b></div>' +
+        '<div class="hr-stat"><span>Estimated gratuity</span><b>' + grat.amount + ' AED</b></div>' +
+        '<div class="hr-meta" style="margin-top:8px">Indicative only, based on basic salary. Confirm with the PRO before any settlement.</div>' +
+        '</div></div>';
+    }
   }
 
   return h;
+}
+
+// Sauvegarde les données de rémunération via hrSaveEmployee (upsert complet).
+// Les champs non sensibles sont repris depuis emp pour ne pas écraser les valeurs existantes.
+// Utilise apiWrite pour que tout refus serveur (403 si non-owner) lève une exception.
+async function hrSaveComp(cleanerId){
+  if (hrSubmitting) return;
+  const emp = (hrData.employees || []).find(e => e.cleaner_id === Number(cleanerId));
+  if (!emp) { toast('Create the employee record first', 'error'); return; }
+  const num = (id) => { const v = hrVal(id); return v === '' ? null : Number(v); };
+  hrSubmitting = true;
+  try {
+    await apiWrite('hrSaveEmployee', { body: {
+      cleaner_id: Number(cleanerId),
+      hire_date: emp.hire_date,
+      end_date: emp.end_date || null,
+      job_title: emp.job_title || null,
+      nationality: emp.nationality || null,
+      opening_annual_days: emp.opening_annual_days || 0,
+      opening_date: emp.opening_date,
+      notes: emp.notes || null,
+      basic_salary: num('hrBasic'),
+      housing_allowance: num('hrHousing'),
+      transport_allowance: num('hrTransport'),
+      other_allowance: num('hrOther'),
+    }});
+    toast('Compensation saved', 'success');
+    hrComp = null;
+    await hrLoadComp(cleanerId);
+  } catch (e) {
+    toast((e && e.message) || 'Failed to save', 'error');
+  } finally {
+    hrSubmitting = false;
+  }
 }
 
 // Lit la valeur d'un champ formulaire par son id.
