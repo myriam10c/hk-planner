@@ -2310,10 +2310,31 @@ Deno.serve(async (req: Request) => {
         note: body.note ? String(body.note).slice(0, 500) : null,
         updated_at: new Date().toISOString(),
       };
-      if (body.id) row.id = Number(body.id);
-      const { data, error } = await sb.from("employee_documents").upsert(row).select().single();
-      if (error) return jsonResp({ error: error.message }, 500);
-      return jsonResp({ status: "success", document: data });
+      if (body.id) {
+        // Mise a jour d'un document existant.
+        // On n'insere pas id dans le payload : la colonne est GENERATED ALWAYS AS IDENTITY,
+        // Postgres refuse l'ecriture directe dessus sans OVERRIDING SYSTEM VALUE.
+        const docId = Number(body.id);
+        const { data, error } = await sb
+          .from("employee_documents")
+          .update(row)
+          .eq("id", docId)
+          .select()
+          .single();
+        // PGRST116 = "The result contains 0 rows" : .single() sur un UPDATE sans correspondance.
+        if (error && error.code === "PGRST116") return jsonResp({ error: "document not found" }, 404);
+        if (error) return jsonResp({ error: error.message }, 500);
+        return jsonResp({ status: "success", document: data });
+      } else {
+        // Creation d'un nouveau document ; id genere par Postgres.
+        const { data, error } = await sb
+          .from("employee_documents")
+          .insert(row)
+          .select()
+          .single();
+        if (error) return jsonResp({ error: error.message }, 500);
+        return jsonResp({ status: "success", document: data });
+      }
     }
 
     if (action === "hrDeleteDocument" && req.method === "POST") {
