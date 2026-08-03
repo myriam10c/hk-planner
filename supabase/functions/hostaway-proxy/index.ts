@@ -314,6 +314,43 @@ async function validateCleanerToken(sb: any, token: string | null): Promise<{ cl
   return data[0];
 }
 
+// Gate d'auth du module RH, a trois niveaux :
+//   staff   : n'importe quel membre authentifié (agit sur son propre dossier)
+//   manager : role === 'manager'
+//   owner   : role === 'manager' ET cleaners.is_owner (Hillal uniquement)
+// Retourne { me, isOwner, err }. Si err n'est pas null, le handler doit le
+// retourner immédiatement sans rien faire d'autre.
+async function hrAuth(sb: any, req: Request, level: "staff" | "manager" | "owner") {
+  const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+  if (!me) return { me: null, isOwner: false, err: jsonResp({ error: "auth required" }, 401) };
+  const { data } = await sb.from("cleaners").select("is_owner").eq("id", me.cleaner_id).maybeSingle();
+  const isOwner = !!(data && data.is_owner);
+  if (level !== "staff" && me.role !== "manager") {
+    return { me: null, isOwner, err: jsonResp({ error: "manager auth required" }, 403) };
+  }
+  if (level === "owner" && !isOwner) {
+    return { me: null, isOwner, err: jsonResp({ error: "owner auth required" }, 403) };
+  }
+  return { me, isOwner, err: null };
+}
+
+// Jours calendaires bornes incluses. Miroir serveur de leaveDays() de hr.js :
+// la valeur envoyée par le client n'est jamais utilisée.
+function hrLeaveDays(start: string, end: string): number {
+  const a = Date.parse(String(start) + "T00:00:00Z");
+  const b = Date.parse(String(end) + "T00:00:00Z");
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0;
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+const HR_TODAY = () => new Date().toISOString().slice(0, 10);
+
+// Colonnes non sensibles d'employees. Utilisée par toutes les routes SAUF
+// hrGetCompensation. Ne jamais remplacer par un select("*") : les colonnes de
+// salaire sortiraient vers les managers non-owner.
+const HR_EMPLOYEE_PUBLIC_COLS =
+  "id, cleaner_id, hire_date, end_date, job_title, nationality, opening_annual_days, opening_date, notes, created_at, updated_at";
+
 // ========== Telegram notifications (team_tasks) ==========
 // Side-effect : si fail, ne pas faire échouer la requête principale.
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -598,6 +635,9 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["getLaundrySummary", "GET"],
   ["getLaundryMovements", "GET"],
   ["addLaundryMovement", "POST"],
+  // ===== RH (congés, dossier employé, documents) =====
+  ["hrOverview", "GET"],
+  ["hrMyLeave", "GET"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -1915,6 +1955,52 @@ Deno.serve(async (req: Request) => {
         cancelled: cancelledMap,
         postponed: postponedMap,
         extraCleanings: extraRes.data || [],
+      });
+    }
+
+    // ========== RH : LECTURE ==========
+    if (action === "hrOverview") {
+      const g = await hrAuth(sb, req, "manager");
+      if (g.err) return g.err;
+      const today = HR_TODAY();
+      const horizon = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
+      const [empRes, pendingRes, upcomingRes, takenRes] = await Promise.all([
+        sb.from("employees").select(HR_EMPLOYEE_PUBLIC_COLS).order("hire_date"),
+        sb.from("leave_requests").select("*").eq("status", "pending").order("start_date"),
+        sb.from("leave_requests").select("*").eq("status", "approved").gte("end_date", today).lte("start_date", horizon).order("start_date"),
+        sb.from("leave_requests").select("cleaner_id, leave_type, days, start_date, end_date").eq("status", "approved"),
+      ]);
+      // Cumul des jours approuvés par employé et par type, pour que le client
+      // puisse afficher un solde sans refaire un aller-retour par personne.
+      const taken: Record<string, Record<string, number>> = {};
+      (takenRes.data || []).forEach((r: any) => {
+        const k = String(r.cleaner_id);
+        if (!taken[k]) taken[k] = {};
+        taken[k][r.leave_type] = (taken[k][r.leave_type] || 0) + Number(r.days || 0);
+      });
+      return jsonResp({
+        status: "success",
+        employees: empRes.data || [],
+        pending: pendingRes.data || [],
+        upcoming: upcomingRes.data || [],
+        taken,
+        today,
+        isOwner: g.isOwner,
+      });
+    }
+
+    if (action === "hrMyLeave") {
+      const g = await hrAuth(sb, req, "staff");
+      if (g.err) return g.err;
+      const [empRes, reqRes] = await Promise.all([
+        sb.from("employees").select(HR_EMPLOYEE_PUBLIC_COLS).eq("cleaner_id", g.me!.cleaner_id).maybeSingle(),
+        sb.from("leave_requests").select("*").eq("cleaner_id", g.me!.cleaner_id).order("start_date", { ascending: false }).limit(100),
+      ]);
+      return jsonResp({
+        status: "success",
+        employee: empRes.data || null,
+        requests: reqRes.data || [],
+        today: HR_TODAY(),
       });
     }
 
