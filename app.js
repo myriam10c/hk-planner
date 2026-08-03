@@ -6768,7 +6768,10 @@ window.addEventListener('popstate', () => {
 });
 initSwipe();
 fetchAll();
-setInterval(fetchAll,5*60*1000);
+// Rafraichissement auto : jamais pendant que l'onglet RH est ouvert. fetchAll finit par
+// render(), qui remplace #app.innerHTML et viderait les formulaires RH (dossier salarie,
+// document, remuneration) en pleine saisie. Comportement inchange sur les autres onglets.
+setInterval(()=>{if(currentTab!=='hr')fetchAll();},5*60*1000);
 // Refresh timer display every minute
 setInterval(()=>{if(currentTab==='planner')render();},60000);
 // Check upcoming checkouts every 30 min
