@@ -351,6 +351,30 @@ const HR_TODAY = () => new Date().toISOString().slice(0, 10);
 const HR_EMPLOYEE_PUBLIC_COLS =
   "id, cleaner_id, hire_date, end_date, job_title, nationality, opening_annual_days, opening_date, notes, created_at, updated_at";
 
+// Labels lisibles par type de congé. Ajoutez ici tout nouveau type avant
+// de l'autoriser dans hrSubmitLeave.
+const HR_LEAVE_LABELS: Record<string, string> = {
+  annual: "Annual leave", sick: "Sick leave", unpaid: "Unpaid leave",
+  maternity: "Maternity leave", parental: "Parental leave",
+  bereavement: "Bereavement leave", hajj: "Hajj leave", other: "Leave",
+};
+
+// Notifie tous les managers actifs ayant un chat Telegram. Les echecs sont
+// avales par sendTelegram : une notif ratee ne doit pas faire echouer la
+// demande de conge.
+async function hrNotifyManagers(sb: any, text: string) {
+  const { data } = await sb.from("cleaners")
+    .select("telegram_chat_id").eq("role", "manager").eq("is_active", true)
+    .not("telegram_chat_id", "is", null);
+  await Promise.all((data || []).map((c: any) => sendTelegram(c.telegram_chat_id, text)));
+}
+
+// Notifie un salarie specifique par son cleaner_id (best-effort).
+async function hrNotifyCleaner(sb: any, cleanerId: number, text: string) {
+  const { data } = await sb.from("cleaners").select("telegram_chat_id").eq("id", cleanerId).maybeSingle();
+  if (data && data.telegram_chat_id) await sendTelegram(data.telegram_chat_id, text);
+}
+
 // ========== Telegram notifications (team_tasks) ==========
 // Side-effect : si fail, ne pas faire échouer la requête principale.
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -638,6 +662,9 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   // ===== RH (congés, dossier employé, documents) =====
   ["hrOverview", "GET"],
   ["hrMyLeave", "GET"],
+  ["hrSubmitLeave", "POST"],
+  ["hrDecideLeave", "POST"],
+  ["hrCancelLeave", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -2002,6 +2029,119 @@ Deno.serve(async (req: Request) => {
         requests: reqRes.data || [],
         today: HR_TODAY(),
       });
+    }
+
+    if (action === "hrSubmitLeave" && req.method === "POST") {
+      const g = await hrAuth(sb, req, "staff");
+      if (g.err) return g.err;
+      const body = await req.json();
+      const target = Number(body.cleaner_id) || g.me!.cleaner_id;
+      // Deposer une demande pour quelqu'un d'autre est une action de manager.
+      if (target !== g.me!.cleaner_id && g.me!.role !== "manager") {
+        return jsonResp({ error: "manager auth required" }, 403);
+      }
+      const leaveType = String(body.leave_type || "");
+      if (!HR_LEAVE_LABELS[leaveType]) return jsonResp({ error: "invalid leave_type" }, 400);
+      const start = String(body.start_date || "");
+      const end = String(body.end_date || "");
+      // days est TOUJOURS recalcule ici : la valeur envoyee par le client est ignoree.
+      const days = hrLeaveDays(start, end);
+      if (!days) return jsonResp({ error: "invalid date range" }, 400);
+      if (days > 365) return jsonResp({ error: "range too long" }, 400);
+
+      const { data: emp } = await sb.from("employees").select("id").eq("cleaner_id", target).maybeSingle();
+      if (!emp) return jsonResp({ error: "no employee record for this person" }, 400);
+
+      const { data: clash } = await sb.from("leave_requests")
+        .select("id, start_date, end_date, status")
+        .eq("cleaner_id", target).in("status", ["pending", "approved"])
+        .lte("start_date", end).gte("end_date", start).limit(1);
+      if (clash && clash.length) {
+        return jsonResp({ error: `Overlaps an existing ${clash[0].status} request (${clash[0].start_date} to ${clash[0].end_date})` }, 409);
+      }
+
+      const { data, error } = await sb.from("leave_requests").insert({
+        cleaner_id: target, leave_type: leaveType, start_date: start, end_date: end,
+        days, status: "pending", reason: body.reason ? String(body.reason).slice(0, 500) : null,
+        requested_by: g.me!.name,
+      }).select().single();
+      if (error) return jsonResp({ error: error.message }, 500);
+
+      const { data: who } = await sb.from("cleaners").select("name").eq("id", target).maybeSingle();
+      await hrNotifyManagers(sb,
+        `\u{1F334} <b>Leave request</b>\n${(who && who.name) || "Someone"} - ${HR_LEAVE_LABELS[leaveType]}\n${start} to ${end} (${days} day${days > 1 ? "s" : ""})` +
+        (body.reason ? `\nReason: ${String(body.reason).slice(0, 200)}` : ""));
+      return jsonResp({ status: "success", request: data });
+    }
+
+    if (action === "hrDecideLeave" && req.method === "POST") {
+      const g = await hrAuth(sb, req, "manager");
+      if (g.err) return g.err;
+      const body = await req.json();
+      const id = Number(body.id);
+      const decision = String(body.decision || "");
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      if (decision !== "approved" && decision !== "rejected") return jsonResp({ error: "invalid decision" }, 400);
+
+      const { data: lr } = await sb.from("leave_requests").select("*").eq("id", id).maybeSingle();
+      if (!lr) return jsonResp({ error: "request not found" }, 404);
+      if (lr.status !== "pending") return jsonResp({ error: `request already ${lr.status}` }, 409);
+      // Un manager ne valide pas sa propre demande. Seul le CEO (isOwner) le peut.
+      if (lr.cleaner_id === g.me!.cleaner_id && !g.isOwner) {
+        return jsonResp({ error: "you cannot decide your own request" }, 403);
+      }
+
+      if (decision === "approved") {
+        const { data: clash } = await sb.from("leave_requests")
+          .select("id, start_date, end_date").eq("cleaner_id", lr.cleaner_id).eq("status", "approved")
+          .lte("start_date", lr.end_date).gte("end_date", lr.start_date).limit(1);
+        if (clash && clash.length) {
+          return jsonResp({ error: `Overlaps an approved leave (${clash[0].start_date} to ${clash[0].end_date})` }, 409);
+        }
+      }
+
+      const { data, error } = await sb.from("leave_requests").update({
+        status: decision, decided_by: g.me!.name, decided_at: new Date().toISOString(),
+        decision_note: body.note ? String(body.note).slice(0, 500) : null,
+        updated_at: new Date().toISOString(),
+      }).eq("id", id).eq("status", "pending").select().single();
+      if (error) return jsonResp({ error: error.message }, 500);
+      if (!data) return jsonResp({ error: "request already decided" }, 409);
+
+      await hrNotifyCleaner(sb, lr.cleaner_id,
+        `${decision === "approved" ? "✅" : "❌"} <b>Leave ${decision}</b>\n${HR_LEAVE_LABELS[lr.leave_type] || "Leave"}: ${lr.start_date} to ${lr.end_date} (${lr.days} day${Number(lr.days) > 1 ? "s" : ""})\nBy ${g.me!.name}` +
+        (body.note ? `\nNote: ${String(body.note).slice(0, 200)}` : ""));
+      return jsonResp({ status: "success", request: data });
+    }
+
+    if (action === "hrCancelLeave" && req.method === "POST") {
+      const g = await hrAuth(sb, req, "staff");
+      if (g.err) return g.err;
+      const id = Number((await req.json()).id);
+      if (!id) return jsonResp({ error: "id required" }, 400);
+
+      const { data: lr } = await sb.from("leave_requests").select("*").eq("id", id).maybeSingle();
+      if (!lr) return jsonResp({ error: "request not found" }, 404);
+      const isMine = lr.cleaner_id === g.me!.cleaner_id;
+      const isManager = g.me!.role === "manager";
+      if (!isMine && !isManager) return jsonResp({ error: "not your request" }, 403);
+      // Un salarie n'annule que ses demandes encore en attente. Un manager peut
+      // aussi annuler un conge deja approuve : c'est la soupape qui debloque
+      // une assignation refusee par le blocage strict.
+      if (!isManager && lr.status !== "pending") return jsonResp({ error: "only pending requests can be cancelled" }, 409);
+      if (lr.status === "cancelled" || lr.status === "rejected") return jsonResp({ error: `already ${lr.status}` }, 409);
+
+      const { data, error } = await sb.from("leave_requests").update({
+        status: "cancelled", decided_by: g.me!.name, decided_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", id).select().single();
+      if (error) return jsonResp({ error: error.message }, 500);
+
+      if (!isMine) {
+        await hrNotifyCleaner(sb, lr.cleaner_id,
+          `\u{1F6AB} <b>Leave cancelled</b>\n${HR_LEAVE_LABELS[lr.leave_type] || "Leave"}: ${lr.start_date} to ${lr.end_date}\nBy ${g.me!.name}`);
+      }
+      return jsonResp({ status: "success", request: data });
     }
 
     // ========== PROPERTY HEATMAP ==========
