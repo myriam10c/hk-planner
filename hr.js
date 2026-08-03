@@ -299,10 +299,147 @@ function hrOpen(cleanerId){ hrSelected = Number(cleanerId); render(); }
 // Ferme le dossier et revient a la liste.
 function hrCloseDetail(){ hrSelected = null; render(); }
 
-// Stub de détail remplacé en Task 9.
+// Panneau de détail employé : soldes, formulaire d'édition du dossier, saisie
+// de congé par le manager, et historique des congés en cours/à venir.
 function renderHRDetail(cleanerId){
-  return '<div class="hr-card">Detail for ' + esc(hrCleanerName(cleanerId)) +
-    ' <button class="hr-btn-alt" data-action="hrCloseDetail">Back</button></div>';
+  const cid = Number(cleanerId);
+  const emp = (hrData.employees || []).find(e => e.cleaner_id === cid) || null;
+  const taken = ((hrData && hrData.taken) || {})[String(cid)] || {};
+  const history = ((hrData.pending || []).concat(hrData.upcoming || []))
+    .filter(r => r.cleaner_id === cid)
+    .sort((a, b) => (a.start_date < b.start_date ? 1 : -1));
+
+  let h = '<div class="hr-row" style="margin-bottom:12px">' +
+    '<button class="hr-btn-alt" style="padding:8px 12px;border:none;border-radius:8px;font-weight:700;cursor:pointer" data-action="hrCloseDetail">' + icon('chevronLeft', 14) + ' Back</button>' +
+    '<div class="hr-grow"><div class="hr-name">' + esc(hrCleanerName(cid)) + '</div></div></div>';
+
+  if (emp) {
+    const bal = hrAnnualBalance(emp);
+    const sick = sickTiers(Number(taken.sick || 0));
+    h += '<div class="hr-section"><h3>Balances</h3><div class="hr-card">' +
+      '<div class="hr-stat"><span>Annual accrued</span><b>' + bal.accrued + '</b></div>' +
+      '<div class="hr-stat"><span>Annual taken</span><b>' + bal.used + '</b></div>' +
+      '<div class="hr-stat"><span>Annual left</span><b>' + bal.left + '</b></div>' +
+      '<div class="hr-stat"><span>Sick used (full / half / unpaid)</span><b>' + sick.full + ' / ' + sick.half + ' / ' + sick.unpaid + '</b></div>' +
+      '<div class="hr-stat"><span>Sick left this service year</span><b>' + sick.remaining + '</b></div>' +
+      '<div class="hr-stat"><span>Unpaid days taken</span><b>' + (Number(taken.unpaid || 0)) + '</b></div>' +
+      '</div></div>';
+  }
+
+  h += '<div class="hr-section"><h3>' + (emp ? 'Employee record' : 'Create employee record') + '</h3><div class="hr-card"><div class="hr-form">' +
+    '<input type="hidden" id="hrEmpCleanerId" value="' + cid + '"/>' +
+    '<label>Hire date</label><input type="date" id="hrHireDate" value="' + esc((emp && emp.hire_date) || '') + '"/>' +
+    '<label>Job title</label><input id="hrJobTitle" value="' + esc((emp && emp.job_title) || '') + '" placeholder="Housekeeper"/>' +
+    '<label>Nationality</label><input id="hrNationality" value="' + esc((emp && emp.nationality) || '') + '" placeholder="Philippines"/>' +
+    '<label>Opening annual balance (days)</label><input type="number" step="0.5" id="hrOpeningDays" value="' + ((emp && emp.opening_annual_days) || 0) + '"/>' +
+    '<label>Opening balance date</label><input type="date" id="hrOpeningDate" value="' + esc((emp && emp.opening_date) || '') + '"/>' +
+    '<label>End of service date (leave empty if active)</label><input type="date" id="hrEndDate" value="' + esc((emp && emp.end_date) || '') + '"/>' +
+    '<label>Notes</label><textarea id="hrNotes" rows="2">' + esc((emp && emp.notes) || '') + '</textarea>' +
+    '</div><div class="hr-actions">' +
+    '<button class="hr-btn-ok" data-action="hrSaveEmployee">' + (emp ? 'Save' : 'Create') + '</button>' +
+    (emp && hrData.isOwner ? '<button class="hr-btn-no" data-action="hrDeleteEmployeeRecord" data-arg0="' + cid + '">Delete record</button>' : '') +
+    '</div></div></div>';
+
+  if (emp) {
+    h += '<div class="hr-section"><h3>Book leave for this person</h3><div class="hr-card"><div class="hr-form">' +
+      '<label>Type</label><select id="hrNewType">' +
+      HR_LEAVE_TYPES.map(t => '<option value="' + t.key + '">' + esc(t.label) + '</option>').join('') + '</select>' +
+      '<label>From</label><input type="date" id="hrNewStart"/>' +
+      '<label>To</label><input type="date" id="hrNewEnd"/>' +
+      '<label>Reason (optional)</label><input id="hrNewReason" placeholder="Family trip"/>' +
+      '</div><div class="hr-actions">' +
+      '<button class="hr-btn-ok" data-action="hrSubmitLeaveFor" data-arg0="' + cid + '">Submit request</button>' +
+      '</div></div></div>';
+
+    h += '<div class="hr-section"><h3>Current and upcoming leave</h3>';
+    h += history.length
+      ? history.map(r => hrRequestCard(r, false) +
+          (r.status === 'pending' || r.status === 'approved'
+            ? '<div class="hr-actions" style="margin-top:-4px;margin-bottom:8px"><button class="hr-btn-alt" data-action="hrCancelRequest" data-arg0="' + r.id + '">Cancel this leave</button></div>'
+            : '')).join('')
+      : '<div class="hr-empty">Nothing planned.</div>';
+    h += '</div>';
+  }
+
+  return h;
+}
+
+// Lit la valeur d'un champ formulaire par son id.
+function hrVal(id){ const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+
+// Sauvegarde (création ou mise à jour) du dossier employé via hrSaveEmployee.
+async function hrSaveEmployee(){
+  if (hrSubmitting) return;
+  const cid = Number(hrVal('hrEmpCleanerId'));
+  const hire = hrVal('hrHireDate');
+  if (!hire) { toast('Hire date is required', 'error'); return; }
+  hrSubmitting = true;
+  try {
+    await apiWrite('hrSaveEmployee', { body: {
+      cleaner_id: cid, hire_date: hire,
+      job_title: hrVal('hrJobTitle') || null,
+      nationality: hrVal('hrNationality') || null,
+      opening_annual_days: Number(hrVal('hrOpeningDays')) || 0,
+      opening_date: hrVal('hrOpeningDate') || hire,
+      end_date: hrVal('hrEndDate') || null,
+      notes: hrVal('hrNotes') || null,
+    }});
+    toast('Employee record saved', 'success');
+    hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed to save', 'error');
+  } finally {
+    hrSubmitting = false;
+  }
+}
+
+// Supprime le dossier employé (owner uniquement). Demande confirmation.
+async function hrDeleteEmployeeRecord(cleanerId){
+  if (!confirm('Delete the HR record of ' + hrCleanerName(cleanerId) + '? This cannot be undone.')) return;
+  try {
+    await apiWrite('hrDeleteEmployee', { body: { cleaner_id: Number(cleanerId) } });
+    toast('Record deleted', 'success');
+    hrSelected = null; hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed to delete', 'error');
+  }
+}
+
+// Soumet une demande de congé pour un autre membre de l'équipe (manager).
+async function hrSubmitLeaveFor(cleanerId){
+  if (hrSubmitting) return;
+  const start = hrVal('hrNewStart'), end = hrVal('hrNewEnd');
+  if (!start || !end) { toast('Pick both dates', 'error'); return; }
+  if (!leaveDays(start, end)) { toast('End date must be on or after start date', 'error'); return; }
+  hrSubmitting = true;
+  try {
+    await apiWrite('hrSubmitLeave', { body: {
+      cleaner_id: Number(cleanerId), leave_type: hrVal('hrNewType') || 'annual',
+      start_date: start, end_date: end, reason: hrVal('hrNewReason') || null,
+    }});
+    toast('Request submitted', 'success');
+    hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed to submit', 'error');
+  } finally {
+    hrSubmitting = false;
+  }
+}
+
+// Annule une demande de congé existante. Demande confirmation.
+async function hrCancelRequest(id){
+  if (!confirm('Cancel this leave?')) return;
+  try {
+    await apiWrite('hrCancelLeave', { body: { id: Number(id) } });
+    toast('Leave cancelled', 'info');
+    hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed to cancel', 'error');
+  }
 }
 
 function renderHRMine(){
