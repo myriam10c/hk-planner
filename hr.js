@@ -115,6 +115,28 @@ window.HR_LEAVE_TYPES = HR_LEAVE_TYPES;
 window.HR_DOC_TYPES = HR_DOC_TYPES;
 
 // ===========================================================================
+// Congés approuvés reçus via getAllData. Ne contiennent que cleaner_id,
+// start_date et end_date : le type de congé n'est jamais envoyé aux clients
+// non-manager, un arrêt maladie n'a pas a circuler.
+// ===========================================================================
+let hrApprovedLeaves = [];
+
+function hrSetApprovedLeaves(rows){
+  hrApprovedLeaves = Array.isArray(rows) ? rows : [];
+}
+
+function hrOnLeaveOn(cleanerId, day){
+  if (!day) return false;
+  const cid = Number(cleanerId);
+  return hrApprovedLeaves.some(l => Number(l.cleaner_id) === cid && l.start_date <= day && l.end_date >= day);
+}
+
+function hrDayOfKey(reservationKey){
+  const m = String(reservationKey || '').match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
+  return m ? m[1] : null;
+}
+
+// ===========================================================================
 // Etat du module RH. Volontairement séparé des helpers purs ci-dessus, qui
 // restent testables sans DOM ni réseau.
 // ===========================================================================

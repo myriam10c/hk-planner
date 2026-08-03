@@ -480,10 +480,26 @@ async function bulkAssignSelected(cid){
   if(!cid){ return; }
   const keys = Array.from(plannerBulkSelected);
   if(keys.length === 0){ toast('Nothing selected'); return; }
+  const cleanerId=Number(cid);
   toast('Assigning '+keys.length+'...');
-  for(const k of keys){ await assignCleaner(k, cid); }
+  // Applique optimistiquement puis écrit via apiWrite ; les refus serveur (409 congé…)
+  // sont comptés sans interrompre la boucle (Task 11).
+  let bulkOk=0;let bulkFail=0;const bulkFailMsgs=[];
+  for(const k of keys){
+    const prevBulk=assignments[k];
+    assignments[k]=[cleanerId];
+    try{
+      await apiWrite('assignCleaner',{body:{reservation_key:k,cleaner_id:cleanerId,mode:'set'}});
+      bulkOk++;
+    }catch(e){
+      if(prevBulk===undefined) delete assignments[k]; else assignments[k]=prevBulk;
+      bulkFail++;
+      bulkFailMsgs.push(e&&e.message?e.message:k);
+    }
+  }
   plannerBulkSelected.clear(); render();
-  toast(keys.length+' assigned ✓','success');
+  if(bulkFail>0) toast(bulkFail+' refused: '+bulkFailMsgs[0]+(bulkFail>1?' (+'+(bulkFail-1)+' more)':''),'error');
+  if(bulkOk>0) toast(bulkOk+' assigned ✓','success');
 }
 async function bulkMarkDoneSelected(){
   const keys = Array.from(plannerBulkSelected);
@@ -1230,6 +1246,8 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
     cancelled=allRes.cancelled||{};
     postponed=allRes.postponed||{};
     extraCleanings=allRes.extraCleanings||[];
+    // Alimente le module RH avec les congés approuvés du payload boot (Task 11).
+    if(typeof hrSetApprovedLeaves==='function') hrSetApprovedLeaves(allRes.leaves||[]);
     // Inject extras into RESERVATIONS as pseudo-reservations so the full workflow applies
     const extrasAsRes=(extraCleanings||[])
       .filter(e=>e.status!=='cancelled')
@@ -1795,13 +1813,20 @@ function showAssignPicker(rkey){
       '<div class="picker-dot" style="background:var(--text3)"></div>'+
       '<span class="picker-name" style="color:var(--red)">✕ Clear all</span></div>';
   }
+  // Calcul du jour cible pour vérifier les congés approuvés (Task 11).
+  const __day = (typeof hrDayOfKey==='function') ? hrDayOfKey(rkey) : null;
   cleaners.filter(c=>(c.role||'cleaner')==='cleaner').forEach(c=>{
     const cnt=RESERVATIONS.filter(r=>isAssignedTo(keyFor(r), c.id)).length;
     const isCurrent=currentIds.has(c.id);
-    ph+='<div class="assign-picker-item'+(isCurrent?' selected':'')+'" style="'+(isCurrent?'background:var(--primary-light);border-radius:8px':'')+'" data-action="toggleAssignee" data-arg0="'+esc(rkey)+'" data-arg1="'+c.id+'">'+
+    // Indique visuellement si la personne est en congé ce jour-la (Task 11).
+    const __away = (typeof hrOnLeaveOn==='function') && hrOnLeaveOn(c.id, __day);
+    let __style='';
+    if(isCurrent) __style='background:var(--primary-light);border-radius:8px';
+    if(__away) __style=(__style?__style+';':'')+'opacity:.55';
+    ph+='<div class="assign-picker-item'+(isCurrent?' selected':'')+'" style="'+__style+'" data-action="toggleAssignee" data-arg0="'+esc(rkey)+'" data-arg1="'+c.id+'">'+
       '<div class="picker-checkbox'+(isCurrent?' checked':'')+'">'+(isCurrent?'✓':'')+'</div>'+
       '<div class="picker-dot" style="background:'+c.color+'"></div>'+
-      '<span class="picker-name">'+esc(c.name)+'</span>'+
+      '<span class="picker-name">'+esc(c.name)+(__away?' <span class="hr-badge onleave">on leave</span>':'')+'</span>'+
       '<span class="picker-count">'+cnt+' task'+(cnt!==1?'s':'')+'</span></div>';
   });
   ph+='<button class="picker-done" data-action="__noop" data-close-closest=".assign-picker-overlay">Done</button>';
@@ -1831,7 +1856,7 @@ async function toggleAssignee(rkey, cid){
     const ov=document.querySelector('.assign-picker-overlay');
     if(ov){ ov.remove(); showAssignPicker(rkey); }
     render();
-    toast('Could not save — '+(e.message||'check connection'),'error');
+    toast((e&&e.message)||'Assignment failed','error');
   }
 }
 
@@ -1843,19 +1868,35 @@ async function setAssignees(rkey, ids){
     const cur=getAssigneeIds(rkey);
     if(cur.length>1 && !confirm('Remove all '+cur.length+' assignees from this cleaning?')) return;
   }
+  const prevSet=assignments[rkey];
   assignments[rkey]=list;
   render();
-  await api('assignCleaner',{body:{reservation_key:rkey, cleaner_ids:list, mode:'set'}});
-  toast(list.length ? list.length+' assigned ✓' : 'Unassigned','success');
+  try{
+    // apiWrite throws sur erreur serveur (409 congé, etc.) au lieu de renvoyer {error}.
+    await apiWrite('assignCleaner',{body:{reservation_key:rkey, cleaner_ids:list, mode:'set'}});
+    toast(list.length ? list.length+' assigned ✓' : 'Unassigned','success');
+  }catch(e){
+    if(prevSet===undefined) delete assignments[rkey]; else assignments[rkey]=prevSet;
+    render();
+    toast((e&&e.message)||'Assignment failed','error');
+  }
 }
 
 // Backwards-compatible single-cleaner shortcut. Setting cid=0/null clears.
 async function assignCleaner(rkey, cid){
   const cleanerId = cid ? Number(cid) : null;
+  const prev=assignments[rkey];
   if(cleanerId) assignments[rkey]=[cleanerId]; else assignments[rkey]=[];
   render();
-  await api('assignCleaner',{body:{reservation_key:rkey, cleaner_id:cleanerId, mode: cleanerId?'set':'clear'}});
-  toast(cleanerId?'Assigned ✓':'Unassigned','success');
+  try{
+    // apiWrite throws sur erreur serveur (409 congé, etc.) au lieu de renvoyer {error}.
+    await apiWrite('assignCleaner',{body:{reservation_key:rkey, cleaner_id:cleanerId, mode: cleanerId?'set':'clear'}});
+    toast(cleanerId?'Assigned ✓':'Unassigned','success');
+  }catch(e){
+    if(prev===undefined) delete assignments[rkey]; else assignments[rkey]=prev;
+    render();
+    toast((e&&e.message)||'Assignment failed','error');
+  }
 }
 
 // #7 Auto-assign
@@ -2154,6 +2195,8 @@ async function smartAssign(){
   // Group by date
   const byDate={};unassigned.forEach(r=>{if(!byDate[r.co])byDate[r.co]=[];byDate[r.co].push(r);});
   let assignedCount=0;
+  // Compteurs d'échecs pour reporter sans interrompre la boucle (Task 11).
+  let smartFailures=0;const smartFailMsgs=[];
   for(const[date,dateRes]of Object.entries(byDate)){
     // Count existing assignments per cleaner for this date
     const load={};assignable.forEach(c=>{load[c.id]=RESERVATIONS.filter(r=>r.co===date&&isAssignedTo(keyFor(r), c.id)).length;});
@@ -2167,11 +2210,22 @@ async function smartAssign(){
         return(aAvg||999)-(bAvg||999);
       })[0];
       const key=keyFor(r);
+      const prevSmart=assignments[key];
       assignments[key]=[best.id];load[best.id]++;assignedCount++;
-      api('assignCleaner',{body:{reservation_key:key,cleaner_id:best.id,mode:'set'}});
+      // apiWrite throws sur refus serveur (409 congé, etc.) ; on revert et on compte.
+      try{
+        await apiWrite('assignCleaner',{body:{reservation_key:key,cleaner_id:best.id,mode:'set'}});
+      }catch(e){
+        if(prevSmart===undefined) delete assignments[key]; else assignments[key]=prevSmart;
+        load[best.id]--;assignedCount--;
+        smartFailures++;
+        smartFailMsgs.push(e&&e.message?e.message:key);
+      }
     }
   }
-  render();toast(assignedCount+' smart-assigned ✓','success');
+  render();
+  if(smartFailures>0) toast(smartFailures+' assignment'+(smartFailures>1?'s':'')+' refused by server: '+smartFailMsgs[0]+(smartFailures>1?' (+'+(smartFailures-1)+' more)':''),'error');
+  if(assignedCount>0) toast(assignedCount+' smart-assigned ✓','success');
 }
 function getCleanerAvgTime(cid){
   const cTimers=Object.entries(timers).filter(([k,t])=>t&&t.duration_minutes&&isAssignedTo(k, cid)).map(([k,t])=>t.duration_minutes);
