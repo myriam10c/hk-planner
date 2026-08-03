@@ -677,6 +677,8 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["hrCancelLeave", "POST"],
   ["hrSaveEmployee", "POST"],
   ["hrDeleteEmployee", "POST"],
+  ["hrSaveDocument", "POST"],
+  ["hrDeleteDocument", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -2059,11 +2061,12 @@ Deno.serve(async (req: Request) => {
       if (g.err) return g.err;
       const today = HR_TODAY();
       const horizon = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
-      const [empRes, pendingRes, upcomingRes, takenRes] = await Promise.all([
+      const [empRes, pendingRes, upcomingRes, takenRes, docRes] = await Promise.all([
         sb.from("employees").select(HR_EMPLOYEE_PUBLIC_COLS).order("hire_date"),
         sb.from("leave_requests").select("*").eq("status", "pending").order("start_date"),
         sb.from("leave_requests").select("*").eq("status", "approved").gte("end_date", today).lte("start_date", horizon).order("start_date"),
         sb.from("leave_requests").select("cleaner_id, leave_type, days, start_date, end_date").eq("status", "approved"),
+        sb.from("employee_documents").select("*").order("expiry_date", { nullsFirst: false }),
       ]);
       // Cumul des jours approuvés par employé et par type, pour que le client
       // puisse afficher un solde sans refaire un aller-retour par personne.
@@ -2073,6 +2076,9 @@ Deno.serve(async (req: Request) => {
         if (!taken[k]) taken[k] = {};
         taken[k][r.leave_type] = (taken[k][r.leave_type] || 0) + Number(r.days || 0);
       });
+      // Documents expirant dans moins de 60 jours ou déjà expirés.
+      const horizon60 = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
+      const expiring = (docRes.data || []).filter((d: any) => d.expiry_date && d.expiry_date <= horizon60);
       return jsonResp({
         status: "success",
         employees: empRes.data || [],
@@ -2081,6 +2087,8 @@ Deno.serve(async (req: Request) => {
         taken,
         today,
         isOwner: g.isOwner,
+        documents: docRes.data || [],
+        expiring,
       });
     }
 
@@ -2274,6 +2282,47 @@ Deno.serve(async (req: Request) => {
         .select("id", { count: "exact", head: true }).eq("cleaner_id", cleanerId);
       if ((count || 0) > 0) return jsonResp({ error: `${count} leave request(s) exist, delete them first` }, 409);
       const { error } = await sb.from("employees").delete().eq("cleaner_id", cleanerId);
+      if (error) return jsonResp({ error: error.message }, 500);
+      return jsonResp({ status: "success" });
+    }
+
+    if (action === "hrSaveDocument" && req.method === "POST") {
+      // Création ou mise à jour d'un document employé (passeport, visa, etc.).
+      const g = await hrAuth(sb, req, "manager");
+      if (g.err) return g.err;
+      const body = await req.json();
+      const DOC_TYPES = new Set(["passport", "emirates_id", "visa", "labour_card", "medical_insurance", "contract", "other"]);
+      if (!DOC_TYPES.has(String(body.doc_type))) return jsonResp({ error: "invalid doc_type" }, 400);
+      const cleanerId = Number(body.cleaner_id);
+      if (!cleanerId) return jsonResp({ error: "cleaner_id required" }, 400);
+      const isDate = (v: any) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+      if (body.issue_date && !isDate(body.issue_date)) return jsonResp({ error: "issue_date must be YYYY-MM-DD" }, 400);
+      if (body.expiry_date && !isDate(body.expiry_date)) return jsonResp({ error: "expiry_date must be YYYY-MM-DD" }, 400);
+
+      const row: Record<string, any> = {
+        cleaner_id: cleanerId,
+        doc_type: String(body.doc_type),
+        // Un numéro de document n'a pas à être stocké en entier ici : on garde
+        // ce que le manager saisit, borné, et on ne l'affiche qu'aux managers.
+        doc_number: body.doc_number ? String(body.doc_number).slice(0, 60) : null,
+        issue_date: body.issue_date || null,
+        expiry_date: body.expiry_date || null,
+        note: body.note ? String(body.note).slice(0, 500) : null,
+        updated_at: new Date().toISOString(),
+      };
+      if (body.id) row.id = Number(body.id);
+      const { data, error } = await sb.from("employee_documents").upsert(row).select().single();
+      if (error) return jsonResp({ error: error.message }, 500);
+      return jsonResp({ status: "success", document: data });
+    }
+
+    if (action === "hrDeleteDocument" && req.method === "POST") {
+      // Suppression d'un document employé, réservée aux managers.
+      const g = await hrAuth(sb, req, "manager");
+      if (g.err) return g.err;
+      const id = Number((await req.json()).id);
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      const { error } = await sb.from("employee_documents").delete().eq("id", id);
       if (error) return jsonResp({ error: error.message }, 500);
       return jsonResp({ status: "success" });
     }
