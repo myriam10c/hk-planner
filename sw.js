@@ -8,7 +8,7 @@
 
 const VERSION = 'v-20260731-1541-f894f83';
 const CACHE = 'hk-planner-' + VERSION;
-const PRECACHE = ['/', '/index.html', '/app.js', '/styles.css', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
+const PRECACHE = ['/', '/index.html', '/hr.js', '/app.js', '/styles.css', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
@@ -45,7 +45,7 @@ self.addEventListener('fetch', (e) => {
   if (url.origin === location.origin) {
     // Navigations + core app shell: network-first so a fresh deploy is picked up
     // immediately; cached copy is only a fallback when offline.
-    if (req.mode === 'navigate' || url.pathname === '/app.js' || url.pathname === '/styles.css') {
+    if (req.mode === 'navigate' || url.pathname === '/app.js' || url.pathname === '/hr.js' || url.pathname === '/styles.css') {
       e.respondWith(networkFirst(req));
     } else {
       e.respondWith(staleWhileRevalidate(req));
