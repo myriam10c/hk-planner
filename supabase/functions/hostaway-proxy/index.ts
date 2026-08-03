@@ -718,6 +718,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["hrSaveDocument", "POST"],
   ["hrDeleteDocument", "POST"],
   ["hrCheckExpiries", "POST"],
+  ["hrGetCompensation", "GET"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -2395,6 +2396,40 @@ Deno.serve(async (req: Request) => {
       // qu'un manager ait besoin d'ouvrir l'app.
       const sent = await hrRunExpiryAlerts(sb);
       return jsonResp({ status: "success", sent });
+    }
+
+    // ========== RH : REMUNERATION (CEO seulement) ==========
+    if (action === "hrGetCompensation") {
+      // SEULE route du proxy qui renvoie des montants de salaire. Gate owner :
+      // les autres managers recoivent 403. Ne jamais elargir ce gate ni ajouter
+      // ces colonnes a une autre route.
+      const g = await hrAuth(sb, req, "owner");
+      if (g.err) return g.err;
+      const cleanerId = Number(url.searchParams.get("cleaner_id"));
+      if (!cleanerId) return jsonResp({ error: "cleaner_id required" }, 400);
+      const { data: emp } = await sb.from("employees")
+        .select("cleaner_id, hire_date, end_date, basic_salary, housing_allowance, transport_allowance, other_allowance")
+        .eq("cleaner_id", cleanerId).maybeSingle();
+      if (!emp) return jsonResp({ error: "no employee record" }, 404);
+      // Les conges non payes ne comptent pas dans l'anciennete servant a la gratuity.
+      const { data: unpaid } = await sb.from("leave_requests")
+        .select("days").eq("cleaner_id", cleanerId).eq("status", "approved").eq("leave_type", "unpaid");
+      const unpaidDays = (unpaid || []).reduce((s: number, r: any) => s + Number(r.days || 0), 0);
+      const n = (v: any) => Number(v || 0);
+      return jsonResp({
+        status: "success",
+        compensation: {
+          cleaner_id: emp.cleaner_id,
+          hire_date: emp.hire_date,
+          end_date: emp.end_date,
+          basic_salary: emp.basic_salary,
+          housing_allowance: emp.housing_allowance,
+          transport_allowance: emp.transport_allowance,
+          other_allowance: emp.other_allowance,
+          total: n(emp.basic_salary) + n(emp.housing_allowance) + n(emp.transport_allowance) + n(emp.other_allowance),
+          unpaid_days: unpaidDays,
+        },
+      });
     }
 
     // ========== PROPERTY HEATMAP ==========
