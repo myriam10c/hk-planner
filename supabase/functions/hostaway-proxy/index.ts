@@ -359,20 +359,30 @@ const HR_LEAVE_LABELS: Record<string, string> = {
   bereavement: "Bereavement leave", hajj: "Hajj leave", other: "Leave",
 };
 
-// Notifie tous les managers actifs ayant un chat Telegram. Les echecs sont
-// avales par sendTelegram : une notif ratee ne doit pas faire echouer la
-// demande de conge.
+// Notifie tous les managers actifs ayant un chat Telegram. Best-effort : toute
+// erreur (reseau, Supabase, Telegram) est avalee afin de ne jamais impacter
+// la reponse HTTP de la route appelante.
 async function hrNotifyManagers(sb: any, text: string) {
-  const { data } = await sb.from("cleaners")
-    .select("telegram_chat_id").eq("role", "manager").eq("is_active", true)
-    .not("telegram_chat_id", "is", null);
-  await Promise.all((data || []).map((c: any) => sendTelegram(c.telegram_chat_id, text)));
+  try {
+    const { data } = await sb.from("cleaners")
+      .select("telegram_chat_id").eq("role", "manager").eq("is_active", true)
+      .not("telegram_chat_id", "is", null);
+    await Promise.all((data || []).map((c: any) => sendTelegram(c.telegram_chat_id, text)));
+  } catch (e) {
+    console.warn("[hrNotifyManagers] notification failed:", e);
+  }
 }
 
-// Notifie un salarie specifique par son cleaner_id (best-effort).
+// Notifie un salarie specifique par son cleaner_id. Best-effort : toute
+// erreur (reseau, Supabase, Telegram) est avalee afin de ne jamais impacter
+// la reponse HTTP de la route appelante.
 async function hrNotifyCleaner(sb: any, cleanerId: number, text: string) {
-  const { data } = await sb.from("cleaners").select("telegram_chat_id").eq("id", cleanerId).maybeSingle();
-  if (data && data.telegram_chat_id) await sendTelegram(data.telegram_chat_id, text);
+  try {
+    const { data } = await sb.from("cleaners").select("telegram_chat_id").eq("id", cleanerId).maybeSingle();
+    if (data && data.telegram_chat_id) await sendTelegram(data.telegram_chat_id, text);
+  } catch (e) {
+    console.warn("[hrNotifyCleaner] notification failed:", e);
+  }
 }
 
 // ========== Telegram notifications (team_tasks) ==========
