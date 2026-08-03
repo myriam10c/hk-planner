@@ -2192,37 +2192,56 @@ async function smartAssign(){
   const assignable=cleaners.filter(c=>(c.role||'cleaner')==='cleaner');
   if(assignable.length===0){toast('Add cleaners first','error');return;}
   toast('Smart assigning '+unassigned.length+'...');
-  // Group by date
+  // Regroupement par date de checkout (co)
   const byDate={};unassigned.forEach(r=>{if(!byDate[r.co])byDate[r.co]=[];byDate[r.co].push(r);});
-  let assignedCount=0;
-  // Compteurs d'échecs pour reporter sans interrompre la boucle (Task 11).
-  let smartFailures=0;const smartFailMsgs=[];
+  // Phase 1 : attribution sequentielle (load partagé par date, must be serial).
+  // Phase 2 : envoi concurrent des requetes reseau (Promise.allSettled).
+  // On collecte ici les taches a dispatcher apres la boucle de selection.
+  const dispatchJobs=[];
   for(const[date,dateRes]of Object.entries(byDate)){
-    // Count existing assignments per cleaner for this date
+    // Charge initiale par cleaner pour cette date
     const load={};assignable.forEach(c=>{load[c.id]=RESERVATIONS.filter(r=>r.co===date&&isAssignedTo(keyFor(r), c.id)).length;});
-    // Sort by estimated time (heaviest first) for better balancing
+    // Tri par temps estimé décroissant (nettoyages longs en premier pour meilleur équilibrage)
     dateRes.sort((a,b)=>(getEstTime(b.listingId)||60)-(getEstTime(a.listingId)||60));
     for(const r of dateRes){
-      // Pick cleaner with lowest load, tie-break by fastest avg time
-      const best=assignable.slice().sort((a,b)=>{
+      const key=keyFor(r);
+      // Finding 1 : filtrer les congés approuvés AVANT de choisir (cohérent avec autoAssign serveur).
+      // Si le pool est vide pour ce jour, on saute ce ménage sans assigner personne.
+      const day=(typeof hrDayOfKey==='function')?hrDayOfKey(key):null;
+      const pool=assignable.filter(c=>!(typeof hrOnLeaveOn==='function'&&hrOnLeaveOn(c.id,day)));
+      if(!pool.length) continue;
+      // Choix du cleaner le moins chargé ; tie-break sur temps moyen
+      const best=pool.slice().sort((a,b)=>{
         if(load[a.id]!==load[b.id])return load[a.id]-load[b.id];
         const aAvg=getCleanerAvgTime(a.id),bAvg=getCleanerAvgTime(b.id);
         return(aAvg||999)-(bAvg||999);
       })[0];
-      const key=keyFor(r);
+      // Mise à jour optimiste locale (séquentielle, pour que le prochain pick voie la charge correcte)
       const prevSmart=assignments[key];
-      assignments[key]=[best.id];load[best.id]++;assignedCount++;
-      // apiWrite throws sur refus serveur (409 congé, etc.) ; on revert et on compte.
-      try{
-        await apiWrite('assignCleaner',{body:{reservation_key:key,cleaner_id:best.id,mode:'set'}});
-      }catch(e){
-        if(prevSmart===undefined) delete assignments[key]; else assignments[key]=prevSmart;
-        load[best.id]--;assignedCount--;
-        smartFailures++;
-        smartFailMsgs.push(e&&e.message?e.message:key);
-      }
+      assignments[key]=[best.id];
+      load[best.id]++;
+      // Enregistrement de la tache reseau : chaque job capture ses propres variables (Finding 2).
+      // prevSmart est propre a ce job ; le revert ne touche que assignments[key] de cet item.
+      const jobKey=key,jobBestId=best.id,jobPrev=prevSmart,jobLoadRef=load;
+      dispatchJobs.push({jobKey,jobBestId,jobPrev,jobLoadRef});
     }
   }
+  // Phase 2 : envoi concurrent de toutes les requetes reseau.
+  // Finding 2 : Promise.allSettled restaure la concurrence sans perdre le revert par item.
+  let assignedCount=0,smartFailures=0;const smartFailMsgs=[];
+  const results=await Promise.allSettled(
+    dispatchJobs.map(({jobKey,jobBestId,jobPrev,jobLoadRef})=>
+      apiWrite('assignCleaner',{body:{reservation_key:jobKey,cleaner_id:jobBestId,mode:'set'}})
+        .then(()=>{assignedCount++;})
+        .catch(e=>{
+          // Revert uniquement pour cet item : jobPrev n'est jamais partagé entre jobs.
+          if(jobPrev===undefined) delete assignments[jobKey]; else assignments[jobKey]=jobPrev;
+          jobLoadRef[jobBestId]--;
+          smartFailures++;
+          smartFailMsgs.push(e&&e.message?e.message:jobKey);
+        })
+    )
+  );void results;
   render();
   if(smartFailures>0) toast(smartFailures+' assignment'+(smartFailures>1?'s':'')+' refused by server: '+smartFailMsgs[0]+(smartFailures>1?' (+'+(smartFailures-1)+' more)':''),'error');
   if(assignedCount>0) toast(assignedCount+' smart-assigned ✓','success');
