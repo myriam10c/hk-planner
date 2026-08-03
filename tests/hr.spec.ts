@@ -8,6 +8,10 @@ import { test, expect } from '@playwright/test';
 //   python3 -m http.server 8888
 //   HK_PLANNER_URL=http://localhost:8888 npx playwright test tests/hr.spec.ts --project=desktop
 
+// `postponed` est declaree par app.js avec `let` : c'est une globale lexicale, donc
+// absente de window. On la reference directement dans le contexte de la page.
+declare const postponed: Record<string, any>;
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(
@@ -176,4 +180,61 @@ test('HR_LEAVE_TYPES est la liste figée des types de conge', async ({ page }) =
     'annual', 'sick', 'unpaid', 'maternity', 'parental', 'bereavement', 'hajj', 'other',
   ]);
   types.forEach((x: any) => expect(typeof x.label).toBe('string'));
+});
+
+// ===========================================================================
+// Date effective d'un ménage. Une prestation reportée garde sa clé figée sur la
+// date d'origine : sans résolution du report, un ménage déplacé DANS un congé
+// approuvé échappe au blocage, et un ménage déplacé HORS du congé est bloqué a tort.
+// ===========================================================================
+
+test('hrDayOfKey rend la date effective, report compris', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const w = window as any;
+    const plainKey = '2026-08-10_Jane Doe';
+    const movedKey = '2026-08-11_John Roe';
+    const extraKey = 'extra_2026-08-12_ab12cd34';
+    postponed[movedKey] = { original_date: '2026-08-11', new_date: '2026-08-14' };
+    postponed[extraKey] = { original_date: '2026-08-12', new_date: '2026-08-13' };
+    const out = {
+      plain: w.hrDayOfKey(plainKey),
+      moved: w.hrDayOfKey(movedKey),
+      extra: w.hrDayOfKey(extraKey),
+      garbage: w.hrDayOfKey('no-date-in-this-key'),
+      empty: w.hrDayOfKey(''),
+    };
+    delete postponed[movedKey];
+    delete postponed[extraKey];
+    return out;
+  });
+  expect(r.plain).toBe('2026-08-10');   // pas de report : date de la clé
+  expect(r.moved).toBe('2026-08-14');   // report : new_date, pas la clé
+  expect(r.extra).toBe('2026-08-13');   // idem pour un ménage extra
+  expect(r.garbage).toBeNull();
+  expect(r.empty).toBeNull();
+});
+
+test('un ménage reporté est évalué sur le congé du jour où il a lieu', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const w = window as any;
+    const intoLeave = '2026-08-10_Guest A';   // clé au 10, déplacé au 12 : DANS le congé
+    const outOfLeave = '2026-08-13_Guest B';  // clé au 13 (dans le congé), déplacé au 16
+    postponed[intoLeave] = { original_date: '2026-08-10', new_date: '2026-08-12' };
+    postponed[outOfLeave] = { original_date: '2026-08-13', new_date: '2026-08-16' };
+    w.hrSetApprovedLeaves([{ cleaner_id: 7, start_date: '2026-08-12', end_date: '2026-08-14' }]);
+    const out = {
+      movedIntoLeave: w.hrOnLeaveOn(7, w.hrDayOfKey(intoLeave)),
+      movedOutOfLeave: w.hrOnLeaveOn(7, w.hrDayOfKey(outOfLeave)),
+      otherCleaner: w.hrOnLeaveOn(8, w.hrDayOfKey(intoLeave)),
+      keyDateStillFrozen: w.hrDayOfKey(intoLeave) !== '2026-08-10',
+    };
+    delete postponed[intoLeave];
+    delete postponed[outOfLeave];
+    w.hrSetApprovedLeaves([]);
+    return out;
+  });
+  expect(r.movedIntoLeave).toBe(true);    // bloqué : le ménage a lieu pendant le congé
+  expect(r.movedOutOfLeave).toBe(false);  // libéré : il a lieu après le congé
+  expect(r.otherCleaner).toBe(false);
+  expect(r.keyDateStillFrozen).toBe(true);
 });

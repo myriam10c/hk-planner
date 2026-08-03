@@ -271,6 +271,35 @@ async function addLog(sb: any, key: string, action: string, actor?: string | nul
   if (error) console.error("[addLog] insert failed:", action, key, error.message);
 }
 
+// ========== Date effective d'un ménage ==========
+// Une prestation reportée garde VOLONTAIREMENT sa reservation_key figée sur la date
+// d'origine (voir applyPostponements dans app.js : l'assignation, l'état "fait" et la
+// checklist sont indexés sur cette clé). La date réelle vit dans cleaning_postponed.
+// Toute vérification de congé doit donc raisonner sur new_date ?? date de la clé, sinon
+// un ménage déplacé DANS une période de congé passe a travers le blocage strict, et un
+// ménage déplacé HORS de la période est bloqué a tort.
+function dateFromKey(key: string): string | null {
+  const m = String(key || "").match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
+  return m ? m[1] : null;
+}
+
+// Charge en UNE fois (jamais dans une boucle par ménage) les reports d'une liste de
+// clés. Renvoie une map clé -> new_date. Les clés sont découpées par paquets de 100
+// pour ne pas fabriquer une URL PostgREST démesurée sur un gros lot.
+// Lève en cas d'erreur de lecture : c'est a l'appelant de décider s'il échoue fermé
+// (assignation unitaire) ou ouvert (traitement par lot).
+async function loadPostponedDates(sb: any, keys: string[]): Promise<Record<string, string>> {
+  const map: Record<string, string> = {};
+  const uniq = [...new Set((keys || []).map((k) => String(k)).filter((k) => !!k))];
+  for (let i = 0; i < uniq.length; i += 100) {
+    const { data, error } = await sb.from("cleaning_postponed")
+      .select("reservation_key, new_date").in("reservation_key", uniq.slice(i, i + 100));
+    if (error) throw error;
+    (data || []).forEach((p: any) => { if (p.new_date) map[p.reservation_key] = p.new_date; });
+  }
+  return map;
+}
+
 // ========== Linge : champs quantités ==========
 const LAUNDRY_FIELDS = [
   "pillowcases", "bed_sheets", "duvet_covers",
@@ -1205,14 +1234,24 @@ Deno.serve(async (req: Request) => {
       const op = mode || (list !== null ? "set" : (single ? "add" : "clear"));
 
       // Blocage strict : on n'assigne pas un menage a quelqu'un dont le conge
-      // est approuve ce jour-la. La date se lit dans la reservation_key
-      // (YYYY-MM-DD_guest, ou extra_YYYY-MM-DD_... pour les menages hors Hostaway).
-      const dm = String(reservation_key).match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
-      const cleaningDate = dm ? dm[1] : null;
+      // est approuve ce jour-la. La date de la cle (YYYY-MM-DD_guest, ou
+      // extra_YYYY-MM-DD_... pour les menages hors Hostaway) n'est qu'un point de
+      // depart : un menage reporte garde sa cle figee, sa vraie date est dans
+      // cleaning_postponed.new_date.
+      const keyDate = dateFromKey(String(reservation_key));
       const candidates: number[] = op === "set"
         ? (Array.isArray(list) ? list.map(Number) : (single ? [Number(single)] : []))
         : (op === "add" && single ? [Number(single)] : []);
-      if (cleaningDate && candidates.length) {
+      if (keyDate && candidates.length) {
+        // Echec ferme aussi sur la lecture des reports : assigner sur une date fausse
+        // reviendrait a contourner le blocage strict.
+        let cleaningDate = keyDate;
+        try {
+          const postMap = await loadPostponedDates(sb, [String(reservation_key)]);
+          if (postMap[String(reservation_key)]) cleaningDate = postMap[String(reservation_key)];
+        } catch (_e) {
+          return jsonResp({ error: "Failed to verify the cleaning date" }, 500);
+        }
         // Echec ferme : si la lecture echoue, on bloque plutot que d'autoriser en silence.
         const { data: onLeave, error: leaveErr } = await sb.from("leave_requests")
           .select("cleaner_id").eq("status", "approved")
@@ -1281,6 +1320,16 @@ Deno.serve(async (req: Request) => {
       const isOnLeave = (cid: number, day: string | null) =>
         !!day && (leaveRows || []).some((l: any) =>
           l.cleaner_id === cid && l.start_date <= day && l.end_date >= day);
+      // Dates effectives du lot, chargees en une fois avant la boucle. Traitement par
+      // lot => echec OUVERT : si la lecture des reports echoue, on retombe sur la date
+      // de la cle plutot que de tuer tout le lot.
+      let postMap: Record<string, string> = {};
+      try {
+        postMap = await loadPostponedDates(sb, reservations.map((r: any) => String(r.key)));
+      } catch (e) {
+        console.warn("[autoAssign] postponed lookup failed, falling back to key dates:", (e as any)?.message);
+      }
+      const effectiveDay = (key: string) => postMap[String(key)] || dateFromKey(key);
       const { data: existingAssign } = await sb.from("cleaning_assignments").select("reservation_key, cleaner_id");
       // Multi-assign: existingMap[key] is now a Set<cleaner_id>. "Already assigned" =
       // at least one cleaner attached to that key.
@@ -1295,8 +1344,7 @@ Deno.serve(async (req: Request) => {
       let assigned = 0;
       for (const r of reservations) {
         if (existingMap[r.key] && existingMap[r.key].size > 0) continue;
-        const dm = String(r.key).match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
-        const day = dm ? dm[1] : null;
+        const day = effectiveDay(String(r.key));
         const pool = cls.filter((c: any) => !isOnLeave(c.id, day));
         if (!pool.length) continue; // personne de disponible ce jour-la
         let minLoad = Infinity, minId = pool[0].id;
@@ -1908,10 +1956,17 @@ Deno.serve(async (req: Request) => {
         const isOnLeaveAuto = (cid: number, day: string | null) =>
           !!day && (apLeaveRows || []).some((l: any) =>
             l.cleaner_id === cid && l.start_date <= day && l.end_date >= day);
+        // Dates effectives (reports) chargees une seule fois avant la boucle.
+        // Meme regle d'echec ouvert que le reste de l'autopilote.
+        let apPostMap: Record<string, string> = {};
+        try {
+          apPostMap = await loadPostponedDates(sb, unassigned.map((r: any) => String(r.key)));
+        } catch (e) {
+          console.warn("[runAutopilot] postponed lookup failed, falling back to key dates:", (e as any)?.message);
+        }
         for (const r of unassigned) {
-          // Extraire la date de la cle pour filtrer le pool par conge.
-          const dm2 = String(r.key).match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
-          const day2 = dm2 ? dm2[1] : null;
+          // Date effective du menage : report eventuel, sinon date de la cle.
+          const day2 = apPostMap[String(r.key)] || dateFromKey(String(r.key));
           const pool = cls.filter((c: any) => !isOnLeaveAuto(c.id, day2));
           if (!pool.length) continue; // aucun cleaner disponible ce jour-la, on saute
           let minLoad = Infinity, minId = pool[0].id;
@@ -2701,6 +2756,46 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { id, label, guest_name, price_billed, cleaner_price, notes, status, cleaning_date, listing_id } = body;
       if (!id) return jsonResp({ error: "id required" }, 400);
+
+      // Blocage strict AVANT tout write, comme addExtraCleaning : deplacer une prestation
+      // vers un jour ou son cleaner est en conge approuve doit etre refuse. Sans ce
+      // controle, updateExtraCleaning etait la porte derobee du blocage.
+      // Assignation unitaire => echec FERME sur toute erreur de lecture.
+      if (cleaning_date !== undefined && cleaning_date) {
+        const { data: ecRows, error: ecErr } = await sb.from("extra_cleanings")
+          .select("reservation_key").eq("id", id).limit(1);
+        if (ecErr) return jsonResp({ error: "Failed to verify leave status" }, 500);
+        const ecKey = ecRows && ecRows[0] ? ecRows[0].reservation_key : null;
+        if (ecKey) {
+          // Date effective : un report deja pose prime sur la nouvelle cleaning_date,
+          // exactement comme applyPostponements cote client.
+          let effDate = String(cleaning_date);
+          try {
+            const ecPost = await loadPostponedDates(sb, [ecKey]);
+            if (ecPost[ecKey]) effDate = ecPost[ecKey];
+          } catch (_e) {
+            return jsonResp({ error: "Failed to verify the cleaning date" }, 500);
+          }
+          const { data: ecAssign, error: ecAssignErr } = await sb.from("cleaning_assignments")
+            .select("cleaner_id").eq("reservation_key", ecKey);
+          if (ecAssignErr) return jsonResp({ error: "Failed to verify leave status" }, 500);
+          const ecIds = [...new Set((ecAssign || []).map((a: any) => Number(a.cleaner_id)))];
+          if (ecIds.length) {
+            const { data: ecLeave, error: ecLeaveErr } = await sb.from("leave_requests")
+              .select("cleaner_id").eq("status", "approved")
+              .in("cleaner_id", ecIds)
+              .lte("start_date", effDate).gte("end_date", effDate);
+            if (ecLeaveErr) return jsonResp({ error: "Failed to verify leave status" }, 500);
+            if (ecLeave && ecLeave.length) {
+              const ids = [...new Set(ecLeave.map((r: any) => r.cleaner_id))];
+              const { data: ecNames } = await sb.from("cleaners").select("name").in("id", ids);
+              const who = (ecNames || []).map((n: any) => n.name).join(", ") || "This person";
+              return jsonResp({ error: `${who} is on approved leave on ${effDate}` }, 409);
+            }
+          }
+        }
+      }
+
       const upd: any = {};
       if (label !== undefined) upd.label = label;
       if (guest_name !== undefined) upd.guest_name = guest_name;

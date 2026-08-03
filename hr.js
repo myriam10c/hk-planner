@@ -131,8 +131,17 @@ function hrOnLeaveOn(cleanerId, day){
   return hrApprovedLeaves.some(l => Number(l.cleaner_id) === cid && l.start_date <= day && l.end_date >= day);
 }
 
+// Jour EFFECTIF d'un ménage, pas celui de sa clé. Une prestation reportée garde
+// volontairement sa reservation_key figée sur la date d'origine (voir applyPostponements
+// dans app.js : assignation, état "fait" et checklist sont indexés dessus), et sa vraie
+// date vit dans postponed[key].new_date. Sans cette résolution, un ménage déplacé DANS
+// une période de congé échappait au grisage et au filtre de pool de smartAssign.
+// `postponed` est la globale d'app.js ; le typeof couvre le cas ou hr.js tourne seul.
 function hrDayOfKey(reservationKey){
-  const m = String(reservationKey || '').match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
+  const key = String(reservationKey || '');
+  const p = (typeof postponed !== 'undefined' && postponed) ? postponed[key] : null;
+  if (p && p.new_date) return p.new_date;
+  const m = key.match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
   return m ? m[1] : null;
 }
 
