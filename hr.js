@@ -183,9 +183,126 @@ function renderHR(){
     (hrIsManager() ? renderHRManager() : renderHRMine()) + renderBottomNav();
 }
 
+// Solde de congés annuels d'un employé : acquis légal moins jours approuvés.
+function hrAnnualBalance(emp){
+  const taken = ((hrData && hrData.taken) || {})[String(emp.cleaner_id)] || {};
+  const asOf = emp.end_date && emp.end_date < hrToday() ? emp.end_date : hrToday();
+  const accrued = accruedAnnualDays(emp.hire_date, asOf, emp.opening_annual_days, emp.opening_date);
+  const used = Number(taken.annual || 0);
+  return { accrued: accrued, used: used, left: Math.round((accrued - used) * 100) / 100 };
+}
+
+function hrIsOnLeave(cleanerId, day){
+  return ((hrData && hrData.upcoming) || []).some(l =>
+    l.cleaner_id === Number(cleanerId) && rangesOverlap(l.start_date, l.end_date, day, day));
+}
+
+// Carte HTML d'une demande de congé. withActions ajoute les boutons Approve/Reject.
+function hrRequestCard(r, withActions){
+  const days = Number(r.days || 0);
+  return '<div class="hr-card"><div class="hr-row">' +
+    '<div class="hr-grow"><div class="hr-name">' + esc(hrCleanerName(r.cleaner_id)) + '</div>' +
+    '<div class="hr-meta">' + esc(hrTypeLabel(r.leave_type)) + ' · ' + esc(r.start_date) + ' to ' + esc(r.end_date) +
+    ' · ' + days + ' day' + (days > 1 ? 's' : '') + '</div>' +
+    (r.reason ? '<div class="hr-meta">"' + esc(r.reason) + '"</div>' : '') +
+    (r.decided_by ? '<div class="hr-meta">' + esc(r.status) + ' by ' + esc(r.decided_by) + '</div>' : '') +
+    '</div>' +
+    '<span class="hr-badge ' + esc(r.status) + '">' + esc(r.status) + '</span>' +
+    '</div>' +
+    (withActions ? '<div class="hr-actions">' +
+      '<button class="hr-btn-ok" data-action="hrDecide" data-arg0="' + r.id + '" data-arg1="approved">Approve</button>' +
+      '<button class="hr-btn-no" data-action="hrDecide" data-arg0="' + r.id + '" data-arg1="rejected">Reject</button>' +
+      '</div>' : '') +
+    '</div>';
+}
+
 function renderHRManager(){
-  return '<div class="header"><div class="header-top"><h1>&#x1F464; HR</h1></div></div>' +
-    '<div class="container"><div class="hr-empty">Manager view coming next.</div></div>';
+  const today = hrToday();
+  const employees = (hrData.employees || []).slice();
+  const pending = hrData.pending || [];
+  const upcoming = hrData.upcoming || [];
+  const known = new Set(employees.map(e => e.cleaner_id));
+  const staff = (typeof cleaners !== 'undefined' ? cleaners : [])
+    .filter(c => (c.role || 'cleaner') !== 'subcontractor');
+  const missing = staff.filter(c => !known.has(c.id));
+
+  let h = '<div class="header"><div class="header-top"><h1>👤 HR</h1>' +
+    '<div class="header-actions"><button data-action="hrRefresh" title="Refresh" aria-label="Refresh">' + icon('refresh', 18) + '</button></div></div></div>';
+  h += '<div class="container">';
+
+  if (hrSelected) { h += renderHRDetail(hrSelected); h += '</div>'; return h; }
+
+  h += '<div class="hr-section"><h3>Pending requests (' + pending.length + ')</h3>';
+  h += pending.length
+    ? pending.map(r => hrRequestCard(r, true)).join('')
+    : '<div class="hr-empty">Nothing waiting for a decision.</div>';
+  h += '</div>';
+
+  const onLeaveNow = upcoming.filter(l => rangesOverlap(l.start_date, l.end_date, today, today));
+  if (onLeaveNow.length) {
+    h += '<div class="hr-section"><h3>Away today</h3>';
+    h += onLeaveNow.map(l => '<div class="hr-card"><div class="hr-row">' +
+      '<div class="hr-grow"><div class="hr-name">' + esc(hrCleanerName(l.cleaner_id)) + '</div>' +
+      '<div class="hr-meta">Back on ' + esc(new Date(Date.parse(l.end_date + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10)) + '</div></div>' +
+      '<span class="hr-badge onleave">on leave</span></div></div>').join('');
+    h += '</div>';
+  }
+
+  h += '<div class="hr-section"><h3>Team (' + employees.length + ')</h3>';
+  employees.forEach(e => {
+    const bal = hrAnnualBalance(e);
+    const away = hrIsOnLeave(e.cleaner_id, today);
+    h += '<div class="hr-card" data-action="hrOpen" data-arg0="' + e.cleaner_id + '" style="cursor:pointer">' +
+      '<div class="hr-row"><div class="hr-grow">' +
+      '<div class="hr-name">' + esc(hrCleanerName(e.cleaner_id)) + (away ? ' <span class="hr-badge onleave">away</span>' : '') + '</div>' +
+      '<div class="hr-meta">' + esc(e.job_title || 'Employee') + ' · since ' + esc(e.hire_date) +
+      (e.end_date ? ' · left ' + esc(e.end_date) : '') + '</div></div>' +
+      '<div style="text-align:right"><div class="hr-name">' + bal.left + '</div>' +
+      '<div class="hr-meta">days left</div></div></div></div>';
+  });
+  if (!employees.length) h += '<div class="hr-empty">No employee record yet.</div>';
+  h += '</div>';
+
+  if (missing.length) {
+    h += '<div class="hr-section"><h3>Not set up yet</h3>';
+    missing.forEach(c => {
+      h += '<div class="hr-card"><div class="hr-row"><div class="hr-grow">' +
+        '<div class="hr-name">' + esc(c.name) + '</div><div class="hr-meta">' + esc(c.role || 'cleaner') + '</div></div>' +
+        '<button class="hr-btn-alt" style="padding:8px 12px;border:none;border-radius:8px;font-weight:700;cursor:pointer" data-action="hrOpen" data-arg0="' + c.id + '">Set up</button>' +
+        '</div></div>';
+    });
+    h += '</div>';
+  }
+
+  h += '</div>';
+  return h;
+}
+
+// Approuve ou rejette une demande de congé, puis recharge les données RH.
+async function hrDecide(id, decision){
+  if (hrSubmitting) return;
+  hrSubmitting = true;
+  try {
+    await apiWrite('hrDecideLeave', { body: { id: id, decision: decision } });
+    toast('Leave ' + decision, decision === 'approved' ? 'success' : 'info');
+    hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed', 'error');
+  } finally {
+    hrSubmitting = false;
+  }
+}
+
+// Ouvre le dossier d'un employé (vue détail, remplacée en Task 9).
+function hrOpen(cleanerId){ hrSelected = Number(cleanerId); render(); }
+// Ferme le dossier et revient a la liste.
+function hrCloseDetail(){ hrSelected = null; render(); }
+
+// Stub de détail remplacé en Task 9.
+function renderHRDetail(cleanerId){
+  return '<div class="hr-card">Detail for ' + esc(hrCleanerName(cleanerId)) +
+    ' <button class="hr-btn-alt" data-action="hrCloseDetail">Back</button></div>';
 }
 
 function renderHRMine(){
