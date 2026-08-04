@@ -212,6 +212,14 @@ function hrRefresh(){
   render();
 }
 
+// Ouvre l'ecran de code PIN. On vide l'etat RH pour que le retour apres login
+// relance loadHR : la garde de render() exige hrData null ET hrError null.
+function hrGoToLogin(){
+  hrData = null; hrError = null;
+  window.location.hash = '#cleaner';
+  render();
+}
+
 // Remet a zero tout l'etat de rémunération et périme les réponses en vol.
 // Incrémenter hrCompReqId suffit : la réponse d'une requête déja partie sera
 // jetée a son retour, donc elle ne peut plus peupler le panneau d'un autre dossier.
@@ -279,10 +287,18 @@ function renderHR(){
     return;
   }
   if (hrError) {
+    // Sans login PIN, api() n'envoie aucun X-Cleaner-Token et les routes RH repondent 401.
+    // Un Retry echouerait alors a l'identique : il faut envoyer vers l'ecran de code.
+    const needsLogin = /auth required/i.test(hrError);
     document.getElementById('app').innerHTML =
       '<div class="header"><div class="header-top"><h1>&#x1F464; HR</h1></div></div>' +
-      '<div class="container"><div class="hr-empty">' + esc(hrError) +
-      ' <button class="btn-secondary" data-action="hrRefresh">Retry</button></div></div>' + renderBottomNav();
+      '<div class="container"><div class="hr-empty">' +
+      (needsLogin
+        ? 'Sign in with your PIN to open HR. '
+          + '<button class="btn-secondary" data-action="hrGoToLogin">Sign in</button>'
+        : esc(hrError)
+          + ' <button class="btn-secondary" data-action="hrRefresh">Retry</button>') +
+      '</div></div>' + renderBottomNav();
     return;
   }
   document.getElementById('app').innerHTML =

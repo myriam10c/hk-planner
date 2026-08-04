@@ -11,6 +11,11 @@ import { test, expect } from '@playwright/test';
 // `postponed` est declaree par app.js avec `let` : c'est une globale lexicale, donc
 // absente de window. On la reference directement dans le contexte de la page.
 declare const postponed: Record<string, any>;
+// Idem pour l'etat RH et la session, declares avec `let` dans hr.js / app.js.
+declare let hrError: string | null;
+declare let hrData: any;
+declare let cleanerToken: string | null;
+declare let currentTab: string;
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -237,4 +242,28 @@ test('un ménage reporté est évalué sur le congé du jour où il a lieu', asy
   expect(r.movedOutOfLeave).toBe(false);  // libéré : il a lieu après le congé
   expect(r.otherCleaner).toBe(false);
   expect(r.keyDateStillFrozen).toBe(true);
+});
+
+// Sans login PIN, api() n'envoie aucun X-Cleaner-Token et hrOverview repond 401.
+// Un bouton Retry ne peut alors jamais aboutir : l'ecran doit envoyer vers le code.
+test("l'écran HR sans session propose de se connecter, pas un Retry sans issue", async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const w = window as any;
+    const prev = { tok: cleanerToken, err: hrError, data: hrData, tab: currentTab, hash: location.hash };
+    const grab = (msg: string) => {
+      cleanerToken = null; hrData = null; hrError = msg; currentTab = 'hr';
+      w.renderHR();
+      return document.getElementById('app')!.innerHTML;
+    };
+    const out = { auth: grab('auth required'), network: grab('Network error — check connection') };
+    cleanerToken = prev.tok; hrError = prev.err; hrData = prev.data; currentTab = prev.tab;
+    location.hash = prev.hash;
+    return out;
+  });
+  // 401 : bouton de connexion, et surtout pas un Retry qui echouera a l'identique.
+  expect(r.auth).toContain('hrGoToLogin');
+  expect(r.auth).not.toContain('hrRefresh');
+  // Toute autre panne garde le Retry, qui lui a un sens.
+  expect(r.network).toContain('hrRefresh');
+  expect(r.network).not.toContain('hrGoToLogin');
 });
