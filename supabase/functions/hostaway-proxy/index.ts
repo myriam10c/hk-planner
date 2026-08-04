@@ -2761,12 +2761,16 @@ Deno.serve(async (req: Request) => {
       // vers un jour ou son cleaner est en conge approuve doit etre refuse. Sans ce
       // controle, updateExtraCleaning etait la porte derobee du blocage.
       // Assignation unitaire => echec FERME sur toute erreur de lecture.
+      // saveExtra renvoie toujours cleaning_date, meme pour une edition de prix ou de
+      // notes : ne declencher le controle que si la date change vraiment, sinon toute
+      // edition legitime d'une prestation deja posee sur un conge devient impossible.
       if (cleaning_date !== undefined && cleaning_date) {
         const { data: ecRows, error: ecErr } = await sb.from("extra_cleanings")
-          .select("reservation_key").eq("id", id).limit(1);
+          .select("reservation_key, cleaning_date").eq("id", id).limit(1);
         if (ecErr) return jsonResp({ error: "Failed to verify leave status" }, 500);
         const ecKey = ecRows && ecRows[0] ? ecRows[0].reservation_key : null;
-        if (ecKey) {
+        const ecOldDate = ecRows && ecRows[0] ? String(ecRows[0].cleaning_date || "") : "";
+        if (ecKey && ecOldDate !== String(cleaning_date)) {
           // Date effective : un report deja pose prime sur la nouvelle cleaning_date,
           // exactement comme applyPostponements cote client.
           let effDate = String(cleaning_date);

@@ -649,7 +649,7 @@ async function hrDeleteEmployeeRecord(cleanerId){
   try {
     await apiWrite('hrDeleteEmployee', { body: { cleaner_id: Number(cleanerId) } });
     toast('Record deleted', 'success');
-    hrSelected = null; hrData = null;
+    hrSelected = null; hrData = null; hrResetComp();
     await loadHR();
   } catch (e) {
     toast((e && e.message) || 'Failed to delete', 'error');
