@@ -446,12 +446,20 @@ function renderHRManager(){
   return h;
 }
 
-// Approuve ou rejette une demande de congé, puis recharge les données RH.
-async function hrDecide(id, decision){
+// Approve exige la signature du manager (pad) ; reject part directement.
+function hrDecide(id, decision){
+  if (decision === 'approved') {
+    hrOpenSignaturePad('Manager signature to approve', (signature) => hrSendDecision(id, 'approved', signature));
+  } else {
+    hrSendDecision(id, decision, null);
+  }
+}
+
+async function hrSendDecision(id, decision, signature){
   if (hrSubmitting) return;
   hrSubmitting = true;
   try {
-    await apiWrite('hrDecideLeave', { body: { id: id, decision: decision } });
+    await apiWrite('hrDecideLeave', { body: { id: id, decision: decision, manager_signature: signature } });
     toast('Leave ' + decision, decision === 'approved' ? 'success' : 'info');
     hrData = null;
     await loadHR();
@@ -907,18 +915,23 @@ async function hrSubmitMine(){
   const d = leaveDays(start, end);
   if (!d) { toast('End date must be on or after start date', 'error'); return; }
   if (!confirm('Request ' + d + ' day' + (d > 1 ? 's' : '') + ' off, from ' + start + ' to ' + end + '?')) return;
-  hrSubmitting = true;
-  try {
-    await apiWrite('hrSubmitLeave', { body: {
-      leave_type: hrVal('hrMineType') || 'annual',
-      start_date: start, end_date: end, reason: hrVal('hrMineReason') || null,
-    }});
-    toast('Request sent to your manager', 'success');
-    hrData = null;
-    await loadHR();
-  } catch (e) {
-    toast((e && e.message) || 'Failed to send', 'error');
-  } finally {
-    hrSubmitting = false;
-  }
+  const leaveType = hrVal('hrMineType') || 'annual';
+  const reason = hrVal('hrMineReason') || null;
+  hrOpenSignaturePad('Sign your leave request', async (signature) => {
+    if (hrSubmitting) return;
+    hrSubmitting = true;
+    try {
+      await apiWrite('hrSubmitLeave', { body: {
+        leave_type: leaveType, start_date: start, end_date: end,
+        reason: reason, employee_signature: signature,
+      }});
+      toast('Request sent to your manager', 'success');
+      hrData = null;
+      await loadHR();
+    } catch (e) {
+      toast((e && e.message) || 'Failed to send', 'error');
+    } finally {
+      hrSubmitting = false;
+    }
+  });
 }
