@@ -661,6 +661,65 @@ async function hrSaveComp(cleanerId){
 // Lit la valeur d'un champ formulaire par son id.
 function hrVal(id){ const el = document.getElementById(id); return el ? el.value.trim() : ''; }
 
+// ===========================================================================
+// Pad de signature. Modale canvas dans #modal (meme hote que closeModal).
+// Les traits sont captures en pointer events ; touch-action:none empeche le
+// scroll de la page pendant qu'on dessine sur mobile.
+// ===========================================================================
+let hrSigOnDone = null;
+let hrSigDrawn = false;
+
+function hrOpenSignaturePad(title, onDone){
+  hrSigOnDone = onDone;
+  hrSigDrawn = false;
+  document.getElementById('modal').innerHTML =
+    '<div class="modal-overlay"><div class="hr-card" style="max-width:380px;margin:auto;padding:16px;border-radius:12px;background:var(--bg2,#fff)">' +
+    '<div class="hr-name" style="margin-bottom:4px">' + esc(title) + '</div>' +
+    '<div class="hr-meta" style="margin-bottom:8px">Draw your signature below with your finger.</div>' +
+    '<canvas id="hrSigCanvas" width="640" height="280" style="background:#fff;border:1px dashed #999;border-radius:8px;touch-action:none;width:100%;display:block"></canvas>' +
+    '<div class="hr-actions" style="margin-top:10px">' +
+    '<button class="hr-btn-alt" data-action="hrSigClear">Clear</button>' +
+    '<button class="hr-btn-alt" data-action="hrSigCancel">Cancel</button>' +
+    '<button class="hr-btn-ok" data-action="hrSigConfirm">Confirm</button>' +
+    '</div></div></div>';
+  hrSigBind();
+}
+
+function hrSigBind(){
+  const c = document.getElementById('hrSigCanvas');
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.strokeStyle = '#14213d'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  let drawing = false;
+  const pos = (e) => {
+    const r = c.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) };
+  };
+  c.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); drawing = true; hrSigDrawn = true;
+    c.setPointerCapture(e.pointerId);
+    const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 0.1, p.y + 0.1); ctx.stroke();
+  });
+  c.addEventListener('pointermove', (e) => {
+    if (!drawing) return; e.preventDefault();
+    const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke();
+  });
+  const stop = () => { drawing = false; };
+  c.addEventListener('pointerup', stop);
+  c.addEventListener('pointercancel', stop);
+}
+
+function hrSigClear(){ hrSigDrawn = false; hrSigBind(); }
+function hrSigCancel(){ hrSigOnDone = null; document.getElementById('modal').innerHTML = ''; }
+function hrSigConfirm(){
+  if (!hrSigDrawn) { toast('Please sign first', 'error'); return; }
+  const c = document.getElementById('hrSigCanvas');
+  const data = c.toDataURL('image/png');
+  const cb = hrSigOnDone;
+  hrSigCancel();
+  if (cb) cb(data);
+}
+
 // Sauvegarde (création ou mise à jour) du dossier employé via hrSaveEmployee.
 async function hrSaveEmployee(){
   if (hrSubmitting) return;
