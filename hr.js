@@ -365,7 +365,8 @@ async function hrDownloadForm(id){
   }
 }
 
-// Carte HTML d'une demande de congé. withActions ajoute les boutons Approve/Reject.
+// Carte HTML d'une demande de congé. withActions ajoute les boutons Approve/Reject,
+// visibles uniquement pour le CEO (hrData.isOwner) : le serveur exige owner sur hrDecideLeave.
 function hrRequestCard(r, withActions){
   const days = Number(r.days || 0);
   return '<div class="hr-card"><div class="hr-row">' +
@@ -378,7 +379,7 @@ function hrRequestCard(r, withActions){
     '</div>' +
     '<span class="hr-badge ' + esc(r.status) + '">' + esc(r.status) + '</span>' +
     '</div>' +
-    (withActions ? '<div class="hr-actions">' +
+    (withActions && hrData && hrData.isOwner ? '<div class="hr-actions">' +
       '<button class="hr-btn-ok" data-action="hrDecide" data-arg0="' + r.id + '" data-arg1="approved">Approve</button>' +
       '<button class="hr-btn-no" data-action="hrDecide" data-arg0="' + r.id + '" data-arg1="rejected">Reject</button>' +
       '</div>' : '') +

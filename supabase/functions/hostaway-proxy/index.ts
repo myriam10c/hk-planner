@@ -2420,7 +2420,9 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "hrDecideLeave" && req.method === "POST") {
-      const g = await hrAuth(sb, req, "manager");
+      // Approve/Reject réservés au CEO (is_owner) : les autres managers gèrent
+      // les dossiers (soumission, fériés, formulaires) mais ne décident pas.
+      const g = await hrAuth(sb, req, "owner");
       if (g.err) return g.err;
       const body = await req.json();
       const id = Number(body.id);
@@ -2435,10 +2437,6 @@ Deno.serve(async (req: Request) => {
       const { data: lr } = await sb.from("leave_requests").select("*").eq("id", id).maybeSingle();
       if (!lr) return jsonResp({ error: "request not found" }, 404);
       if (lr.status !== "pending") return jsonResp({ error: `request already ${lr.status}` }, 409);
-      // Un manager ne valide pas sa propre demande. Seul le CEO (isOwner) le peut.
-      if (lr.cleaner_id === g.me!.cleaner_id && !g.isOwner) {
-        return jsonResp({ error: "you cannot decide your own request" }, 403);
-      }
 
       if (decision === "approved") {
         const { data: clash } = await sb.from("leave_requests")
