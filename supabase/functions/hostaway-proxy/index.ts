@@ -742,6 +742,9 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["hrSubmitLeave", "POST"],
   ["hrDecideLeave", "POST"],
   ["hrCancelLeave", "POST"],
+  ["hrSaveHoliday", "POST"],
+  ["hrDeleteHoliday", "POST"],
+  ["hrLeaveForm", "GET"],
   ["hrSaveEmployee", "POST"],
   ["hrDeleteEmployee", "POST"],
   ["hrSaveDocument", "POST"],
@@ -2093,7 +2096,7 @@ Deno.serve(async (req: Request) => {
       // Tables qui grossissent à chaque ménage (menage_done, cleaning_assignments,
       // cleaning_timer, cleaning_cancelled) : paginer pour éviter la troncature
       // silencieuse PostgREST à 1000 rows.
-      const [doneRows, assignRows, timerRows, cancelledRows, postponedRows, cleanerRes, templateRes, listingRes, ticketRes, vendorRes, equipRes, prevRes, extraRes, leaveRes] = await Promise.all([
+      const [doneRows, assignRows, timerRows, cancelledRows, postponedRows, cleanerRes, templateRes, listingRes, ticketRes, vendorRes, equipRes, prevRes, extraRes, leaveRes, holidayRes] = await Promise.all([
         fetchAllRows<any>((from, to) => sb.from("menage_done").select("reservation_key, done").order("reservation_key").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_assignments").select("reservation_key, cleaner_id, service_type").order("reservation_key").order("cleaner_id").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_timer").select("*").order("reservation_key").range(from, to)),
@@ -2117,6 +2120,10 @@ Deno.serve(async (req: Request) => {
           .eq("status", "approved")
           .gte("end_date", new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0])
           .lte("start_date", new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0]),
+        sb.from("public_holidays").select("holiday_date, name")
+          .gte("holiday_date", new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0])
+          .lte("holiday_date", new Date(Date.now() + 120 * 86400000).toISOString().split('T')[0])
+          .order("holiday_date"),
       ]);
       const cancelledMap: Record<string, any> = {};
       cancelledRows.forEach((r: any) => { cancelledMap[r.reservation_key] = { reason: r.reason, cancelled_by: r.cancelled_by, cancelled_at: r.cancelled_at }; });
@@ -2147,6 +2154,7 @@ Deno.serve(async (req: Request) => {
         postponed: postponedMap,
         extraCleanings: extraRes.data || [],
         leaves: leaveRes.data || [],
+        holidays: holidayRes.data || [],
       });
     }
 
@@ -2156,12 +2164,16 @@ Deno.serve(async (req: Request) => {
       if (g.err) return g.err;
       const today = HR_TODAY();
       const horizon = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
-      const [empRes, pendingRes, upcomingRes, takenRes, docRes] = await Promise.all([
+      const [empRes, pendingRes, upcomingRes, takenRes, docRes, historyRes, holidayRes] = await Promise.all([
         sb.from("employees").select(HR_EMPLOYEE_PUBLIC_COLS).order("hire_date"),
         sb.from("leave_requests").select("*").eq("status", "pending").order("start_date"),
         sb.from("leave_requests").select("*").eq("status", "approved").gte("end_date", today).lte("start_date", horizon).order("start_date"),
         sb.from("leave_requests").select("cleaner_id, leave_type, days, start_date, end_date").eq("status", "approved"),
         sb.from("employee_documents").select("*").order("expiry_date", { nullsFirst: false }),
+        sb.from("leave_requests").select("*").order("start_date", { ascending: false }).limit(200),
+        sb.from("public_holidays").select("id, holiday_date, name")
+          .gte("holiday_date", new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+          .order("holiday_date"),
       ]);
       // Cumul des jours approuvés par employé et par type, pour que le client
       // puisse afficher un solde sans refaire un aller-retour par personne.
@@ -2187,21 +2199,27 @@ Deno.serve(async (req: Request) => {
         isOwner: g.isOwner,
         documents: docRes.data || [],
         expiring,
+        history: historyRes.data || [],
+        holidays: holidayRes.data || [],
       });
     }
 
     if (action === "hrMyLeave") {
       const g = await hrAuth(sb, req, "staff");
       if (g.err) return g.err;
-      const [empRes, reqRes] = await Promise.all([
+      const [empRes, reqRes, holidayRes] = await Promise.all([
         sb.from("employees").select(HR_EMPLOYEE_PUBLIC_COLS).eq("cleaner_id", g.me!.cleaner_id).maybeSingle(),
         sb.from("leave_requests").select("*").eq("cleaner_id", g.me!.cleaner_id).order("start_date", { ascending: false }).limit(100),
+        sb.from("public_holidays").select("id, holiday_date, name")
+          .gte("holiday_date", new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+          .order("holiday_date"),
       ]);
       return jsonResp({
         status: "success",
         employee: empRes.data || null,
         requests: reqRes.data || [],
         today: HR_TODAY(),
+        holidays: holidayRes.data || [],
       });
     }
 
@@ -2316,6 +2334,31 @@ Deno.serve(async (req: Request) => {
           `\u{1F6AB} <b>Leave cancelled</b>\n${HR_LEAVE_LABELS[lr.leave_type] || "Leave"}: ${lr.start_date} to ${lr.end_date}\nBy ${g.me!.name}`);
       }
       return jsonResp({ status: "success", request: data });
+    }
+
+    if (action === "hrSaveHoliday" && req.method === "POST") {
+      const g = await hrAuth(sb, req, "manager");
+      if (g.err) return g.err;
+      const body = await req.json();
+      const date = String(body.holiday_date || "");
+      const name = String(body.name || "").trim().slice(0, 120);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return jsonResp({ error: "invalid holiday_date" }, 400);
+      if (!name) return jsonResp({ error: "name required" }, 400);
+      const { data, error } = await sb.from("public_holidays")
+        .upsert({ holiday_date: date, name }, { onConflict: "holiday_date" })
+        .select().single();
+      if (error) return jsonResp({ error: error.message }, 500);
+      return jsonResp({ status: "success", holiday: data });
+    }
+
+    if (action === "hrDeleteHoliday" && req.method === "POST") {
+      const g = await hrAuth(sb, req, "manager");
+      if (g.err) return g.err;
+      const id = Number((await req.json()).id);
+      if (!id) return jsonResp({ error: "id required" }, 400);
+      const { error } = await sb.from("public_holidays").delete().eq("id", id);
+      if (error) return jsonResp({ error: error.message }, 500);
+      return jsonResp({ status: "success" });
     }
 
     // ========== RH : dossier employe ==========
