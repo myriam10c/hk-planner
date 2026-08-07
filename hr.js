@@ -668,6 +668,7 @@ function hrVal(id){ const el = document.getElementById(id); return el ? el.value
 // ===========================================================================
 let hrSigOnDone = null;
 let hrSigDrawn = false;
+let hrSigListeners = { down: null, move: null, up: null, cancel: null };
 
 function hrOpenSignaturePad(title, onDone){
   hrSigOnDone = onDone;
@@ -690,26 +691,40 @@ function hrSigBind(){
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
   ctx.strokeStyle = '#14213d'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+  // Remove old listeners if they exist (only call once per pad opening, but safer for re-initialization)
+  if (hrSigListeners.down) {
+    c.removeEventListener('pointerdown', hrSigListeners.down);
+    c.removeEventListener('pointermove', hrSigListeners.move);
+    c.removeEventListener('pointerup', hrSigListeners.up);
+    c.removeEventListener('pointercancel', hrSigListeners.cancel);
+  }
+
   let drawing = false;
   const pos = (e) => {
     const r = c.getBoundingClientRect();
     return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) };
   };
-  c.addEventListener('pointerdown', (e) => {
+
+  hrSigListeners.down = (e) => {
     e.preventDefault(); drawing = true; hrSigDrawn = true;
     c.setPointerCapture(e.pointerId);
     const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 0.1, p.y + 0.1); ctx.stroke();
-  });
-  c.addEventListener('pointermove', (e) => {
+  };
+  hrSigListeners.move = (e) => {
     if (!drawing) return; e.preventDefault();
     const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke();
-  });
-  const stop = () => { drawing = false; };
-  c.addEventListener('pointerup', stop);
-  c.addEventListener('pointercancel', stop);
+  };
+  hrSigListeners.up = () => { drawing = false; };
+  hrSigListeners.cancel = hrSigListeners.up;
+
+  c.addEventListener('pointerdown', hrSigListeners.down);
+  c.addEventListener('pointermove', hrSigListeners.move);
+  c.addEventListener('pointerup', hrSigListeners.up);
+  c.addEventListener('pointercancel', hrSigListeners.cancel);
 }
 
-function hrSigClear(){ hrSigDrawn = false; hrSigBind(); }
+function hrSigClear(){ hrSigDrawn = false; const c = document.getElementById('hrSigCanvas'); const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
 function hrSigCancel(){ hrSigOnDone = null; document.getElementById('modal').innerHTML = ''; }
 function hrSigConfirm(){
   if (!hrSigDrawn) { toast('Please sign first', 'error'); return; }
