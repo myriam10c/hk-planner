@@ -431,11 +431,35 @@ async function hrNotifyCleaner(sb: any, cleanerId: number, text: string) {
 // le fichier archivé dans hr-forms n'est qu'une copie de commodité.
 // ===========================================================================
 async function hrBuildLeaveFormPdf(sb: any, lr: any): Promise<Uint8Array> {
-  const [{ data: who }, { data: emp }] = await Promise.all([
+  const [{ data: who }, { data: emp }, takenRes] = await Promise.all([
     sb.from("cleaners").select("name").eq("id", lr.cleaner_id).maybeSingle(),
     sb.from("employees").select(HR_EMPLOYEE_PUBLIC_COLS).eq("cleaner_id", lr.cleaner_id).maybeSingle(),
+    sb.from("leave_requests").select("days").eq("cleaner_id", lr.cleaner_id).eq("leave_type", "annual").eq("status", "approved"),
   ]);
   const name = (who && who.name) || `#${lr.cleaner_id}`;
+  // Compute annual leave balance at generation time (same logic as hr.js accruedAnnualDays).
+  const asOf = new Date().toISOString().slice(0, 10);
+  const hireDate = (emp && emp.hire_date) || null;
+  const openingDays = Number((emp && emp.opening_annual_days) || 0);
+  const openingDate = (emp && emp.opening_date) || hireDate;
+  let accruedAnnual = openingDays;
+  if (hireDate) {
+    const completeMonths = (from: string, to: string): number => {
+      const f = new Date(from + "T00:00:00Z");
+      const t = new Date(to + "T00:00:00Z");
+      if (isNaN(f.getTime()) || isNaN(t.getTime()) || t < f) return 0;
+      let m = (t.getUTCFullYear() - f.getUTCFullYear()) * 12 + (t.getUTCMonth() - f.getUTCMonth());
+      if (t.getUTCDate() < f.getUTCDate()) m--;
+      return Math.max(0, m);
+    };
+    const tenureMonths = completeMonths(hireDate, asOf);
+    if (tenureMonths >= 6) {
+      const earnedMonths = completeMonths(openingDate || hireDate, asOf);
+      const rate = tenureMonths >= 12 ? 2.5 : 2;
+      accruedAnnual = Math.round((openingDays + earnedMonths * rate) * 100) / 100;
+    }
+  }
+  const takenAnnual = (takenRes.data || []).reduce((s: number, r: any) => s + Number(r.days || 0), 0);
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([595, 842]);
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -458,7 +482,7 @@ async function hrBuildLeaveFormPdf(sb: any, lr: any): Promise<Uint8Array> {
   row("Request #", String(lr.id));
   row("Employee", name);
   row("Job title", (emp && emp.job_title) || "-");
-  row("Hire date", (emp && emp.hire_date) || "-");
+  row("Hire date", hireDate || "-");
   row("Nationality", (emp && emp.nationality) || "-");
   y -= 8;
   row("Leave type", HR_LEAVE_LABELS[lr.leave_type] || lr.leave_type);
@@ -466,6 +490,9 @@ async function hrBuildLeaveFormPdf(sb: any, lr: any): Promise<Uint8Array> {
   row("To", lr.end_date);
   row("Days (calendar)", String(lr.days));
   row("Reason", lr.reason || "-");
+  y -= 8;
+  row("Annual leave balance at time of generation",
+    `${accruedAnnual} days accrued, ${takenAnnual} taken`);
   y -= 8;
   row("Status", String(lr.status).toUpperCase());
   row("Requested by", lr.requested_by || name);
@@ -478,31 +505,39 @@ async function hrBuildLeaveFormPdf(sb: any, lr: any): Promise<Uint8Array> {
 
   // Blocs signatures côte à côte.
   y -= 30;
-  const sigBlock = async (x: number, title: string, sig: string | null, fallback: string) => {
-    page.drawText(title, { x, y, size: 10, font: bold, color: grey });
-    page.drawRect({ x, y: y - 84, width: 210, height: 74, borderColor: grey, borderWidth: 0.8 });
+  const sigYBaseline = y;
+  const sigBlock = async (x: number, title: string, sig: string | null, fallback: string, signerName: string, signerDate: string) => {
+    page.drawText(title, { x, y: sigYBaseline, size: 10, font: bold, color: grey });
+    page.drawRectangle({ x, y: sigYBaseline - 84, width: 210, height: 74, borderColor: grey, borderWidth: 0.8 });
     if (sig) {
       try {
         const png = await pdf.embedPng(sig);
         const dims = png.scaleToFit(190, 58);
-        page.drawImage(png, { x: x + 10, y: y - 76, width: dims.width, height: dims.height });
-        return;
-      } catch (_e) { /* signature illisible : tomber sur le fallback */ }
+        page.drawImage(png, { x: x + 10, y: sigYBaseline - 76, width: dims.width, height: dims.height });
+      } catch (_e) {
+        page.drawText("Signature on file (image unreadable)", { x: x + 10, y: sigYBaseline - 48, size: 8, font, color: grey, maxWidth: 190, lineHeight: 10 });
+      }
+    } else {
+      page.drawText(fallback, { x: x + 10, y: sigYBaseline - 48, size: 8, font, color: grey, maxWidth: 190, lineHeight: 10 });
     }
-    page.drawText(fallback, { x: x + 10, y: y - 48, size: 8, font, color: grey, maxWidth: 190, lineHeight: 10 });
+    // Name + date below the box (spec: image + nom + date).
+    page.drawText(signerName, { x, y: sigYBaseline - 96, size: 8, font: bold, color: ink });
+    page.drawText(signerDate, { x, y: sigYBaseline - 108, size: 8, font, color: grey });
   };
-  const empFallback = lr.employee_signature ? "" :
-    (lr.requested_by && lr.requested_by !== name
-      ? `Recorded by ${lr.requested_by} on behalf of employee`
-      : `Submitted in app by ${lr.requested_by || name} on ${String(lr.requested_at || "").slice(0, 10)}`);
-  const mgrFallback = lr.manager_signature ? "" :
-    (lr.decided_by ? `${String(lr.status)} in app by ${lr.decided_by} on ${String(lr.decided_at || "").slice(0, 10)}` : "Pending decision");
-  await sigBlock(60, "Employee signature", lr.employee_signature || null, empFallback);
-  await sigBlock(325, "Manager signature", lr.manager_signature || null, mgrFallback);
-  y -= 110;
+  const empFallback = lr.requested_by && lr.requested_by !== name
+    ? `Recorded by ${lr.requested_by} on behalf of employee`
+    : `Submitted in app by ${lr.requested_by || name} on ${String(lr.requested_at || "").slice(0, 10)}`;
+  const mgrFallback = lr.decided_by
+    ? `${String(lr.status)} in app by ${lr.decided_by} on ${String(lr.decided_at || "").slice(0, 10)}`
+    : "Pending decision";
+  await sigBlock(60, "Employee signature", lr.employee_signature || null, empFallback,
+    name, String(lr.requested_at || "").slice(0, 10));
+  await sigBlock(325, "Manager signature", lr.manager_signature || null, mgrFallback,
+    lr.decided_by || "-", String(lr.decided_at || "").slice(0, 10) || "-");
+  y = sigYBaseline - 125;
   page.drawText(`Generated by HK Planner on ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`,
     { x: 60, y, size: 8, font, color: grey });
-  return await pdf.save();
+  return pdf.save();
 }
 
 // Archive (ou re-archive) le PDF d'une demande. Best-effort : ne lève jamais,
@@ -517,7 +552,7 @@ async function hrArchiveLeaveForm(sb: any, lr: any): Promise<string | null> {
     await sb.from("leave_requests").update({ form_path: path }).eq("id", lr.id);
     return path;
   } catch (e) {
-    console.warn("[hr] leave form archive failed", e);
+    console.error("[hr] leave form archive failed", e);
     return null;
   }
 }
