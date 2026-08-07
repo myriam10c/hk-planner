@@ -348,6 +348,23 @@ function hrIsOnLeave(cleanerId, day){
     l.cleaner_id === Number(cleanerId) && rangesOverlap(l.start_date, l.end_date, day, day));
 }
 
+// Telecharge le formulaire PDF d'une demande via une URL signee courte duree.
+let hrFormLoading = false;
+async function hrDownloadForm(id){
+  if (hrFormLoading) return;
+  hrFormLoading = true;
+  try {
+    const r = await api('hrLeaveForm', { params: { id: Number(id) } });
+    if (r && r.error) throw new Error(r.error);
+    if (!r || !r.url) throw new Error('No download link returned');
+    window.open(r.url, '_blank');
+  } catch (e) {
+    toast((e && e.message) || 'Failed to download the form', 'error');
+  } finally {
+    hrFormLoading = false;
+  }
+}
+
 // Carte HTML d'une demande de congé. withActions ajoute les boutons Approve/Reject.
 function hrRequestCard(r, withActions){
   const days = Number(r.days || 0);
@@ -364,6 +381,9 @@ function hrRequestCard(r, withActions){
       '<button class="hr-btn-ok" data-action="hrDecide" data-arg0="' + r.id + '" data-arg1="approved">Approve</button>' +
       '<button class="hr-btn-no" data-action="hrDecide" data-arg0="' + r.id + '" data-arg1="rejected">Reject</button>' +
       '</div>' : '') +
+    (r.status !== 'cancelled'
+      ? '<div class="hr-actions" style="margin-top:6px"><button class="hr-btn-alt" data-action="hrDownloadForm" data-arg0="' + r.id + '">Download form</button></div>'
+      : '') +
     '</div>';
 }
 
@@ -484,9 +504,7 @@ function renderHRDetail(cleanerId){
   const cid = Number(cleanerId);
   const emp = (hrData.employees || []).find(e => e.cleaner_id === cid) || null;
   const taken = ((hrData && hrData.taken) || {})[String(cid)] || {};
-  const history = ((hrData.pending || []).concat(hrData.upcoming || []))
-    .filter(r => r.cleaner_id === cid)
-    .sort((a, b) => (a.start_date < b.start_date ? 1 : -1));
+  const split = hrSplitHistory(hrData.history || [], cid, hrToday());
 
   let h = '<div class="hr-row" style="margin-bottom:12px">' +
     '<button class="hr-btn-alt" style="padding:8px 12px;border:none;border-radius:8px;font-weight:700;cursor:pointer" data-action="hrCloseDetail">' + icon('chevronLeft', 14) + ' Back</button>' +
@@ -530,13 +548,20 @@ function renderHRDetail(cleanerId){
       '<button class="hr-btn-ok" data-action="hrSubmitLeaveFor" data-arg0="' + cid + '">Submit request</button>' +
       '</div></div></div>';
 
-    h += '<div class="hr-section"><h3>Current and upcoming leave</h3>';
-    h += history.length
-      ? history.map(r => hrRequestCard(r, false) +
-          (r.status === 'pending' || r.status === 'approved'
-            ? '<div class="hr-actions" style="margin-top:-4px;margin-bottom:8px"><button class="hr-btn-alt" data-action="hrCancelRequest" data-arg0="' + r.id + '">Cancel this leave</button></div>'
-            : '')).join('')
-      : '<div class="hr-empty">Nothing planned.</div>';
+    h += '<div class="hr-section"><h3>Leave history</h3>';
+    const renderRow = (r) => hrRequestCard(r, false) +
+      ((r.status === 'pending' || r.status === 'approved') && r.end_date >= hrToday()
+        ? '<div class="hr-actions" style="margin-top:-4px;margin-bottom:8px"><button class="hr-btn-alt" data-action="hrCancelRequest" data-arg0="' + r.id + '">Cancel this leave</button></div>'
+        : '');
+    if (!split.active.length && !split.past.length) {
+      h += '<div class="hr-empty">No leave request yet.</div>';
+    } else {
+      h += split.active.map(renderRow).join('');
+      if (split.past.length) {
+        h += '<div class="hr-meta" style="margin:10px 0 6px;font-weight:700">Past and closed</div>';
+        h += split.past.map(renderRow).join('');
+      }
+    }
     h += '</div>';
 
     // Section documents : liste + formulaire d'ajout.
