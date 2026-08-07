@@ -2308,11 +2308,11 @@ Deno.serve(async (req: Request) => {
       const horizon = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
       const [empRes, pendingRes, upcomingRes, takenRes, docRes, historyRes, holidayRes] = await Promise.all([
         sb.from("employees").select(HR_EMPLOYEE_PUBLIC_COLS).order("hire_date"),
-        sb.from("leave_requests").select("*").eq("status", "pending").order("start_date"),
-        sb.from("leave_requests").select("*").eq("status", "approved").gte("end_date", today).lte("start_date", horizon).order("start_date"),
+        sb.from("leave_requests").select("id, cleaner_id, leave_type, start_date, end_date, days, status, reason, requested_by, requested_at, decided_by, decided_at, decision_note, updated_at, form_path").eq("status", "pending").order("start_date"),
+        sb.from("leave_requests").select("id, cleaner_id, leave_type, start_date, end_date, days, status, reason, requested_by, requested_at, decided_by, decided_at, decision_note, updated_at, form_path").eq("status", "approved").gte("end_date", today).lte("start_date", horizon).order("start_date"),
         sb.from("leave_requests").select("cleaner_id, leave_type, days, start_date, end_date").eq("status", "approved"),
         sb.from("employee_documents").select("*").order("expiry_date", { nullsFirst: false }),
-        sb.from("leave_requests").select("*").order("start_date", { ascending: false }).limit(200),
+        sb.from("leave_requests").select("id, cleaner_id, leave_type, start_date, end_date, days, status, reason, requested_by, requested_at, decided_by, decided_at, decision_note, updated_at, form_path").order("start_date", { ascending: false }).limit(200),
         sb.from("public_holidays").select("id, holiday_date, name")
           .gte("holiday_date", `${today.slice(0, 4)}-01-01`)
           .lte("holiday_date", `${Number(today.slice(0, 4)) + 1}-12-31`)
@@ -2352,7 +2352,7 @@ Deno.serve(async (req: Request) => {
       if (g.err) return g.err;
       const [empRes, reqRes, holidayRes] = await Promise.all([
         sb.from("employees").select(HR_EMPLOYEE_PUBLIC_COLS).eq("cleaner_id", g.me!.cleaner_id).maybeSingle(),
-        sb.from("leave_requests").select("*").eq("cleaner_id", g.me!.cleaner_id).order("start_date", { ascending: false }).limit(100),
+        sb.from("leave_requests").select("id, cleaner_id, leave_type, start_date, end_date, days, status, reason, requested_by, requested_at, decided_by, decided_at, decision_note, updated_at, form_path").eq("cleaner_id", g.me!.cleaner_id).order("start_date", { ascending: false }).limit(100),
         sb.from("public_holidays").select("id, holiday_date, name")
           .gte("holiday_date", `${HR_TODAY().slice(0, 4)}-01-01`)
           .lte("holiday_date", `${Number(HR_TODAY().slice(0, 4)) + 1}-12-31`)
