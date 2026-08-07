@@ -2121,8 +2121,8 @@ Deno.serve(async (req: Request) => {
           .gte("end_date", new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0])
           .lte("start_date", new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0]),
         sb.from("public_holidays").select("holiday_date, name")
-          .gte("holiday_date", new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0])
-          .lte("holiday_date", new Date(Date.now() + 120 * 86400000).toISOString().split('T')[0])
+          .gte("holiday_date", `${new Date().getFullYear()}-01-01`)
+          .lte("holiday_date", `${new Date().getFullYear() + 1}-12-31`)
           .order("holiday_date"),
       ]);
       const cancelledMap: Record<string, any> = {};
@@ -2172,7 +2172,8 @@ Deno.serve(async (req: Request) => {
         sb.from("employee_documents").select("*").order("expiry_date", { nullsFirst: false }),
         sb.from("leave_requests").select("*").order("start_date", { ascending: false }).limit(200),
         sb.from("public_holidays").select("id, holiday_date, name")
-          .gte("holiday_date", new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+          .gte("holiday_date", `${today.slice(0, 4)}-01-01`)
+          .lte("holiday_date", `${Number(today.slice(0, 4)) + 1}-12-31`)
           .order("holiday_date"),
       ]);
       // Cumul des jours approuvés par employé et par type, pour que le client
@@ -2211,7 +2212,8 @@ Deno.serve(async (req: Request) => {
         sb.from("employees").select(HR_EMPLOYEE_PUBLIC_COLS).eq("cleaner_id", g.me!.cleaner_id).maybeSingle(),
         sb.from("leave_requests").select("*").eq("cleaner_id", g.me!.cleaner_id).order("start_date", { ascending: false }).limit(100),
         sb.from("public_holidays").select("id, holiday_date, name")
-          .gte("holiday_date", new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+          .gte("holiday_date", `${HR_TODAY().slice(0, 4)}-01-01`)
+          .lte("holiday_date", `${Number(HR_TODAY().slice(0, 4)) + 1}-12-31`)
           .order("holiday_date"),
       ]);
       return jsonResp({
