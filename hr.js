@@ -357,7 +357,7 @@ async function hrDownloadForm(id){
     const r = await api('hrLeaveForm', { params: { id: Number(id) } });
     if (r && r.error) throw new Error(r.error);
     if (!r || !r.url) throw new Error('No download link returned');
-    window.open(r.url, '_blank');
+    location.href = r.url;
   } catch (e) {
     toast((e && e.message) || 'Failed to download the form', 'error');
   } finally {
@@ -373,7 +373,8 @@ function hrRequestCard(r, withActions){
     '<div class="hr-meta">' + esc(hrTypeLabel(r.leave_type)) + ' · ' + esc(r.start_date) + ' to ' + esc(r.end_date) +
     ' · ' + days + ' day' + (days > 1 ? 's' : '') + '</div>' +
     (r.reason ? '<div class="hr-meta">"' + esc(r.reason) + '"</div>' : '') +
-    (r.decided_by ? '<div class="hr-meta">' + esc(r.status) + ' by ' + esc(r.decided_by) + '</div>' : '') +
+    (r.decided_by ? '<div class="hr-meta">' + esc(r.status) + ' by ' + esc(r.decided_by) +
+      (r.decided_at ? ' on ' + esc(String(r.decided_at).slice(0, 10)) : '') + '</div>' : '') +
     '</div>' +
     '<span class="hr-badge ' + esc(r.status) + '">' + esc(r.status) + '</span>' +
     '</div>' +
@@ -499,7 +500,7 @@ function hrOpen(cleanerId){ hrSelected = Number(cleanerId); hrResetComp(); rende
 function hrCloseDetail(){ hrSelected = null; hrResetComp(); render(); }
 
 // Panneau de détail employé : soldes, formulaire d'édition du dossier, saisie
-// de congé par le manager, et historique des congés en cours/à venir.
+// de congé par le manager, et historique complet des congés (actifs puis clôturés).
 function renderHRDetail(cleanerId){
   const cid = Number(cleanerId);
   const emp = (hrData.employees || []).find(e => e.cleaner_id === cid) || null;

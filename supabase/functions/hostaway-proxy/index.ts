@@ -2510,7 +2510,7 @@ Deno.serve(async (req: Request) => {
       let path = lr.form_path as string | null;
       if (!path) path = await hrArchiveLeaveForm(sb, lr);
       if (!path) return jsonResp({ error: "failed to build the form, try again" }, 500);
-      const { data: signed, error } = await sb.storage.from("hr-forms").createSignedUrl(path, 60);
+      const { data: signed, error } = await sb.storage.from("hr-forms").createSignedUrl(path, 60, { download: `leave-form-${id}.pdf` });
       if (error || !signed?.signedUrl) return jsonResp({ error: "failed to sign the download link" }, 500);
       return jsonResp({ status: "success", url: signed.signedUrl });
     }
