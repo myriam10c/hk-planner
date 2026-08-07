@@ -296,6 +296,7 @@ function haptic(type='light'){
   } catch(e) {}
 }
 let cleaners=[],assignments={},templates=[],expandedKey=null,listingPrices={},timers={};
+let publicHolidays=[];
 let checklistCache={},notesCache={},photosCache={};
 // URL state sync
 function readUrlState(){
@@ -1248,6 +1249,7 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
     extraCleanings=allRes.extraCleanings||[];
     // Alimente le module RH avec les congés approuvés du payload boot (Task 11).
     if(typeof hrSetApprovedLeaves==='function') hrSetApprovedLeaves(allRes.leaves||[]);
+    publicHolidays = allRes.holidays || [];
     // Inject extras into RESERVATIONS as pseudo-reservations so the full workflow applies
     const extrasAsRes=(extraCleanings||[])
       .filter(e=>e.status!=='cancelled')
@@ -3769,7 +3771,9 @@ function renderPlanner(){
     const activeItems=items.filter(r=>!cancelled[keyFor(r)]);
     const dc=activeItems.filter(r=>done[keyFor(r)]).length;
     const cancelledCnt=items.length-activeItems.length;
+    const __holiday=(typeof hrHolidayNameOn==='function')?hrHolidayNameOn(publicHolidays,date):null;
     h+='<div class="day-section"><div class="day-header"><span class="day-title">📅 '+formatDate(date)+'</span>'+
+      (__holiday?'<span class="hr-badge onleave" style="margin-left:8px">🎉 '+esc(__holiday)+'</span>':'')+
       '<span class="day-count">'+(dc===activeItems.length&&activeItems.length>0?'✓ Complete':activeItems.length+' cleaning'+(activeItems.length>1?'s':'')+(cancelledCnt?' <span style="color:var(--red);font-size:10px">+'+cancelledCnt+' cancelled</span>':''))+'</span></div>';
     // Sort items: urgency first (urgent→warning→unassigned→todo→running→done→cancelled), then by building
     const urgencyOrder=(r)=>{

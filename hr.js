@@ -437,6 +437,23 @@ function renderHRManager(){
     h += '</div>';
   }
 
+  const holidays = hrUpcomingHolidays(hrData.holidays || [], today, 12);
+  h += '<div class="hr-section"><h3>Public holidays</h3>';
+  holidays.forEach(hd => {
+    h += '<div class="hr-card"><div class="hr-row"><div class="hr-grow">' +
+      '<div class="hr-name">' + esc(hd.name) + '</div>' +
+      '<div class="hr-meta">' + esc(hd.holiday_date) + '</div></div>' +
+      '<button class="hr-btn-alt" style="padding:6px 10px;border:none;border-radius:8px;cursor:pointer" data-action="hrDeleteHolidayUI" data-arg0="' + hd.id + '" title="Delete" aria-label="Delete holiday">' + icon('trash', 14) + '</button>' +
+      '</div></div>';
+  });
+  if (!holidays.length) h += '<div class="hr-empty">No upcoming public holiday on file.</div>';
+  h += '<div class="hr-card"><div class="hr-form">' +
+    '<label>Date</label><input type="date" id="hrHolidayDate"/>' +
+    '<label>Name</label><input id="hrHolidayName" placeholder="Eid Al Fitr"/>' +
+    '</div><div class="hr-actions">' +
+    '<button class="hr-btn-ok" data-action="hrSaveHolidayUI">Add holiday</button>' +
+    '</div></div></div>';
+
   h += '<div class="hr-section"><h3>Team (' + employees.length + ')</h3>';
   employees.forEach(e => {
     const bal = hrAnnualBalance(e);
@@ -872,6 +889,13 @@ function renderHRMine(){
     '<div class="hr-stat"><span>Sick days left this year</span><b>' + sick.remaining + '</b></div>' +
     '</div></div>';
 
+  const nextHolidays = hrUpcomingHolidays(hrData.holidays || [], hrToday(), 4);
+  if (nextHolidays.length) {
+    h += '<div class="hr-section"><h3>Upcoming public holidays</h3><div class="hr-card">' +
+      nextHolidays.map(hd => '<div class="hr-stat"><span>' + esc(hd.name) + '</span><b>' + esc(hd.holiday_date) + '</b></div>').join('') +
+      '</div></div>';
+  }
+
   // Formulaire de demande de congé.
   h += '<div class="hr-section"><h3>Request leave</h3><div class="hr-card"><div class="hr-form">' +
     '<label>Type</label><select id="hrMineType">' +
@@ -893,6 +917,36 @@ function renderHRMine(){
     : '<div class="hr-empty">No request yet.</div>';
   h += '</div></div>';
   return h;
+}
+
+// CRUD feries (manager). L'upsert serveur ecrase le nom si la date existe deja.
+async function hrSaveHolidayUI(){
+  if (hrSubmitting) return;
+  const date = hrVal('hrHolidayDate'), name = hrVal('hrHolidayName');
+  if (!date || !name) { toast('Pick a date and a name', 'error'); return; }
+  hrSubmitting = true;
+  try {
+    await apiWrite('hrSaveHoliday', { body: { holiday_date: date, name: name } });
+    toast('Holiday saved', 'success');
+    hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed to save', 'error');
+  } finally {
+    hrSubmitting = false;
+  }
+}
+
+async function hrDeleteHolidayUI(id){
+  if (!confirm('Delete this public holiday?')) return;
+  try {
+    await apiWrite('hrDeleteHoliday', { body: { id: Number(id) } });
+    toast('Holiday deleted', 'info');
+    hrData = null;
+    await loadHR();
+  } catch (e) {
+    toast((e && e.message) || 'Failed to delete', 'error');
+  }
 }
 
 // Sauvegarde (création) d'un document employé via le formulaire Documents.
