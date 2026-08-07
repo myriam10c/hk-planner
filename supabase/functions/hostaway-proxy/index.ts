@@ -373,6 +373,16 @@ function hrLeaveDays(start: string, end: string): number {
   return Math.round((b - a) / 86400000) + 1;
 }
 
+// Signature dessinée : uniquement un data-URL PNG base64, 100 Ko max.
+// Tout le reste est refusé (pas de SVG, pas d'URL externe, pas de JPEG).
+const HR_SIG_PREFIX = "data:image/png;base64,";
+function hrValidSignature(s: unknown): string | null {
+  if (typeof s !== "string" || !s.startsWith(HR_SIG_PREFIX)) return null;
+  if (s.length > 100_000) return null;
+  if (!/^[A-Za-z0-9+/]+=*$/.test(s.slice(HR_SIG_PREFIX.length))) return null;
+  return s;
+}
+
 const HR_TODAY = () => new Date().toISOString().slice(0, 10);
 
 // Colonnes non sensibles d'employees. Utilisée par toutes les routes SAUF
@@ -2234,6 +2244,11 @@ Deno.serve(async (req: Request) => {
       if (target !== g.me!.cleaner_id && g.me!.role !== "manager") {
         return jsonResp({ error: "manager auth required" }, 403);
       }
+      const selfSubmit = target === g.me!.cleaner_id;
+      const employeeSignature = hrValidSignature(body.employee_signature);
+      if (selfSubmit && !employeeSignature) {
+        return jsonResp({ error: "signature required" }, 400);
+      }
       const leaveType = String(body.leave_type || "");
       if (!HR_LEAVE_LABELS[leaveType]) return jsonResp({ error: "invalid leave_type" }, 400);
       const start = String(body.start_date || "");
@@ -2258,6 +2273,7 @@ Deno.serve(async (req: Request) => {
         cleaner_id: target, leave_type: leaveType, start_date: start, end_date: end,
         days, status: "pending", reason: body.reason ? String(body.reason).slice(0, 500) : null,
         requested_by: g.me!.name,
+        employee_signature: selfSubmit ? employeeSignature : null,
       }).select().single();
       if (error) return jsonResp({ error: error.message }, 500);
 
@@ -2276,6 +2292,10 @@ Deno.serve(async (req: Request) => {
       const decision = String(body.decision || "");
       if (!id) return jsonResp({ error: "id required" }, 400);
       if (decision !== "approved" && decision !== "rejected") return jsonResp({ error: "invalid decision" }, 400);
+      const managerSignature = decision === "approved" ? hrValidSignature(body.manager_signature) : null;
+      if (decision === "approved" && !managerSignature) {
+        return jsonResp({ error: "manager signature required" }, 400);
+      }
 
       const { data: lr } = await sb.from("leave_requests").select("*").eq("id", id).maybeSingle();
       if (!lr) return jsonResp({ error: "request not found" }, 404);
@@ -2298,6 +2318,7 @@ Deno.serve(async (req: Request) => {
         status: decision, decided_by: g.me!.name, decided_at: new Date().toISOString(),
         decision_note: body.note ? String(body.note).slice(0, 500) : null,
         updated_at: new Date().toISOString(),
+        manager_signature: managerSignature,
       }).eq("id", id).eq("status", "pending").select().single();
       if (error) return jsonResp({ error: error.message }, 500);
       if (!data) return jsonResp({ error: "request already decided" }, 409);
