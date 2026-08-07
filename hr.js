@@ -111,8 +111,37 @@ function daysUntil(dateStr, todayStr){
   return Math.round((a - b) / 86400000);
 }
 
+// Découpe l'historique d'un employé : demandes vivantes (pending/approved non
+// terminées, tri chronologique) puis le reste (passé, rejeté, annulé, tri
+// antichronologique). Piloté par la vue "Leave history" du dossier manager.
+function hrSplitHistory(rows, cleanerId, today){
+  const cid = Number(cleanerId);
+  const mine = (Array.isArray(rows) ? rows : []).filter(r => Number(r.cleaner_id) === cid);
+  const isActive = r => (r.status === 'pending' || r.status === 'approved') && r.end_date >= today;
+  const active = mine.filter(isActive).sort((a, b) => (a.start_date < b.start_date ? -1 : 1));
+  const past = mine.filter(r => !isActive(r)).sort((a, b) => (a.start_date < b.start_date ? 1 : -1));
+  return { active: active, past: past };
+}
+
+// Fériés à venir (>= today), tri croissant, plafonnés à limit.
+function hrUpcomingHolidays(rows, today, limit){
+  return (Array.isArray(rows) ? rows : [])
+    .filter(h => h && h.holiday_date >= today)
+    .sort((a, b) => (a.holiday_date < b.holiday_date ? -1 : 1))
+    .slice(0, limit || 10);
+}
+
+// Nom du férié tombant ce jour-là, null sinon.
+function hrHolidayNameOn(rows, day){
+  const h = (Array.isArray(rows) ? rows : []).find(x => x && x.holiday_date === day);
+  return h ? h.name : null;
+}
+
 window.HR_LEAVE_TYPES = HR_LEAVE_TYPES;
 window.HR_DOC_TYPES = HR_DOC_TYPES;
+window.hrSplitHistory = hrSplitHistory;
+window.hrUpcomingHolidays = hrUpcomingHolidays;
+window.hrHolidayNameOn = hrHolidayNameOn;
 
 // ===========================================================================
 // Congés approuvés reçus via getAllData. Ne contiennent que cleaner_id,

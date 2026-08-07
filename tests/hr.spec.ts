@@ -267,3 +267,47 @@ test("l'écran HR sans session propose de se connecter, pas un Retry sans issue"
   expect(r.network).toContain('hrRefresh');
   expect(r.network).not.toContain('hrGoToLogin');
 });
+
+test('hrSplitHistory separe en-cours/a-venir du passe, tous statuts', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const w = window as any;
+    const rows = [
+      { id: 1, cleaner_id: 5, status: 'approved',  start_date: '2026-07-01', end_date: '2026-07-05' },
+      { id: 2, cleaner_id: 5, status: 'approved',  start_date: '2026-08-10', end_date: '2026-08-12' },
+      { id: 3, cleaner_id: 5, status: 'pending',   start_date: '2026-09-01', end_date: '2026-09-03' },
+      { id: 4, cleaner_id: 5, status: 'rejected',  start_date: '2026-08-20', end_date: '2026-08-22' },
+      { id: 5, cleaner_id: 5, status: 'cancelled', start_date: '2026-06-01', end_date: '2026-06-02' },
+      { id: 6, cleaner_id: 9, status: 'approved',  start_date: '2026-08-10', end_date: '2026-08-12' },
+      { id: 7, cleaner_id: 5, status: 'approved',  start_date: '2026-08-01', end_date: '2026-08-09' },
+    ];
+    const s = w.hrSplitHistory(rows, 5, '2026-08-07');
+    return { active: s.active.map((x: any) => x.id), past: s.past.map((x: any) => x.id) };
+  });
+  // Actifs : pending/approved dont end_date >= today, tri start croissant.
+  expect(r.active).toEqual([7, 2, 3]);
+  // Passé/terminé : le reste (approuvé passé, rejeté, annulé), tri start décroissant.
+  expect(r.past).toEqual([4, 1, 5]);
+});
+
+test('hrUpcomingHolidays filtre et trie, hrHolidayNameOn retrouve un ferie', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const w = window as any;
+    const rows = [
+      { holiday_date: '2026-12-02', name: 'Eid Al Etihad / National Day' },
+      { holiday_date: '2026-08-25', name: "Prophet's Birthday (to confirm)" },
+      { holiday_date: '2026-01-01', name: 'New Year 2026' },
+    ];
+    return {
+      upcoming: w.hrUpcomingHolidays(rows, '2026-08-07', 10).map((h: any) => h.holiday_date),
+      capped: w.hrUpcomingHolidays(rows, '2026-08-07', 1).map((h: any) => h.holiday_date),
+      hit: w.hrHolidayNameOn(rows, '2026-12-02'),
+      miss: w.hrHolidayNameOn(rows, '2026-12-04'),
+      empty: w.hrUpcomingHolidays(null, '2026-08-07', 5),
+    };
+  });
+  expect(r.upcoming).toEqual(['2026-08-25', '2026-12-02']);
+  expect(r.capped).toEqual(['2026-08-25']);
+  expect(r.hit).toBe('Eid Al Etihad / National Day');
+  expect(r.miss).toBeNull();
+  expect(r.empty).toEqual([]);
+});
