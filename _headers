@@ -16,5 +16,6 @@
   Access-Control-Allow-Origin: *
 
 /downloads/*.apk
-  Content-Type: application/vnd.android.package-archive
-  Content-Disposition: attachment
+  Content-Type: application/octet-stream
+  Content-Disposition: attachment; filename="HK-Planner-1.0.0.apk"
+  Cache-Control: no-transform
