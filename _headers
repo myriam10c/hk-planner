@@ -17,5 +17,5 @@
 
 /downloads/*.apk
   Content-Type: application/octet-stream
-  Content-Disposition: attachment; filename="HK-Planner-1.0.0.apk"
+  Content-Disposition: attachment; filename="HK-Planner.apk"
   Cache-Control: no-transform
