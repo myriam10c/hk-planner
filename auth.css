@@ -30,6 +30,9 @@
   color: var(--primary, #7c3aed);
 }
 
+/* Ecran d'attente du boot : une seule ligne sous la marque. */
+.auth-pending { margin: 12px 0 0; font-size: 15px; line-height: 1.5; color: var(--text2, #3a3a3c); }
+
 .auth-title { margin: 10px 0 18px; font-size: 21px; line-height: 1.25; }
 .auth-help { margin: -8px 0 16px; font-size: 13px; line-height: 1.5; color: var(--text2, #3a3a3c); }
 
@@ -99,6 +102,20 @@
 
 .auth-error { background: rgba(220, 38, 38, 0.1); color: #b91c1c; }
 .auth-notice { background: rgba(5, 150, 105, 0.1); color: #047857; }
+
+/* Clavier iOS ouvert : la hauteur utile tombe a environ 330 px et la carte
+   centree pousse le bouton « Sign in » sous le clavier, sans defilement
+   possible puisqu'elle fait exactement 100dvh. On ancre alors la carte en
+   haut, ce qui laisse le bouton dans la zone visible. */
+@media (max-height: 700px) {
+  .auth-screen {
+    align-items: flex-start;
+    padding-top: 12px;
+  }
+  .auth-card { padding: 18px 20px; }
+  .auth-title { margin: 8px 0 12px; }
+  .auth-primary { margin-top: 16px; }
+}
 
 /* Ecran Team : le champ email et le bouton Invite s'ajoutent a une ligne deja
    en flex-wrap, il ne reste qu'a les dimensionner. */

@@ -8,7 +8,9 @@
 
 const VERSION = 'v-20260910-1947-69e4dd2';
 const CACHE = 'hk-planner-' + VERSION;
-const PRECACHE = ['/', '/index.html', '/hr.js', '/app.js', '/styles.css', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png', '/icons/badge-96.png'];
+// /vendor/supabase-js-*.umd.js est une dependance dure : app.js appelle
+// createClient() en tete de fichier, si le vendor manque toute l'app est morte.
+const PRECACHE = ['/', '/index.html', '/hr.js', '/app.js', '/styles.css', '/auth.css', '/vendor/supabase-js-2.116.0.umd.js', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png', '/icons/badge-96.png'];
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();

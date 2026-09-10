@@ -272,6 +272,9 @@ const sbAuth=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,
   auth:{flowType:'implicit',persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'hkAuthSession'}
 });
 let authScreen=null;      // null | 'login' | 'setPassword'
+// Chaque render() reecrit #app.innerHTML : sans ce brouillon, l'email saisi
+// disparait a la premiere erreur et « Forgot password? » lit un champ vide.
+let authEmailDraft='';
 let authError='';
 let authNotice='';
 let authBusy=false;
@@ -1110,8 +1113,8 @@ en:{
   sendTestNotif:'Send test notification',
   before:'Before',after:'After',comparison:'Photo Comparison',
   avgTime:'avg',mins:'min',
-  cleanerLogin:'Cleaner Login',enterPin:'Enter your 4-digit PIN',
-  signIn:'Sign in',signingIn:'Signing in...',email:'Email',password:'Password',
+  quickUnlock:'Quick unlock',enterPin:'Enter your 4-digit PIN',
+  signIn:'Sign in',signingIn:'Signing in...',signingYouIn:'Signing you in...',email:'Email',password:'Password',
   forgotPassword:'Forgot password?',usePinInstead:'Use my PIN instead',useEmailInstead:'Sign in with email',
   setNewPassword:'Set a new password',newPassword:'New password',confirmPassword:'Confirm password',
   savePassword:'Save password',saving:'Saving...',passwordRule:'At least 8 characters.',
@@ -3182,6 +3185,9 @@ async function cleanerLogout(){
   cleanerMode=null; cleanerToken=null;
   localStorage.removeItem('cleanerMode');
   localStorage.removeItem('cleanerToken');
+  // Meme raison que dans emailLogout : le cache planner contient des donnees
+  // voyageurs, il repart avec la session.
+  localStorage.removeItem(PLANNER_CACHE_KEY);
   window.location.hash='#cleaner';
   render();
 }
@@ -4062,7 +4068,9 @@ function authErrorMessage(err){
   const code=(err&&(err.code||err.error_code))||'';
   const msg=String((err&&err.message)||'');
   if(code==='invalid_credentials'||/invalid login credentials/i.test(msg)) return 'Wrong email or password.';
-  if(code==='email_not_confirmed') return 'Open your invitation email first to set your password.';
+  // email_not_confirmed revelerait qu'un compte invite existe pour cette
+  // adresse : meme message neutre que des identifiants faux.
+  if(code==='email_not_confirmed') return 'Wrong email or password.';
   if(code==='otp_expired'||/invalid or has expired/i.test(msg)) return 'This link has expired. Tap Forgot password to get a new one.';
   if(code==='over_email_send_rate_limit'||code==='over_request_rate_limit'||/rate limit/i.test(msg)) return 'Too many attempts. Wait a minute and try again.';
   if(code==='weak_password'||/at least \d+ characters/i.test(msg)) return 'Password too short. Use at least 8 characters.';
@@ -4078,7 +4086,7 @@ function renderAuthLogin(){
       '<div class="auth-brand">HK Planner</div>'+
       '<h2 class="auth-title">'+t('signIn')+'</h2>'+
       '<label class="auth-label" for="authEmail">'+t('email')+'</label>'+
-      '<input id="authEmail" class="auth-input" type="email" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="you@example.com"/>'+
+      '<input id="authEmail" class="auth-input" type="email" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="you@example.com" value="'+esc(authEmailDraft)+'" data-action-input="__authEmailInput"/>'+
       '<label class="auth-label" for="authPassword">'+t('password')+'</label>'+
       '<input id="authPassword" class="auth-input" type="password" autocomplete="current-password" data-action-keydown="__authEnterLogin"/>'+
       (authError?'<div class="auth-error" role="alert">'+esc(authError)+'</div>':'')+
@@ -4089,6 +4097,19 @@ function renderAuthLogin(){
     '</div></div>';
   const f=document.getElementById('authEmail');
   if(f&&!f.value)f.focus();
+  else{ const pw=document.getElementById('authPassword'); if(pw)pw.focus(); }
+}
+
+// 4. Etat d'attente peint AVANT tout await du boot : sans lui, l'ecran reste
+// blanc pendant tout l'aller-retour cleanerMe (jusqu'a 15 s sur proxy lent).
+function renderAuthPending(){
+  const el=document.getElementById('app');
+  if(!el)return;
+  el.innerHTML=
+    '<div class="auth-screen"><div class="auth-card">'+
+      '<div class="auth-brand">HK Planner</div>'+
+      '<p class="auth-pending" role="status">'+t('signingYouIn')+'</p>'+
+    '</div></div>';
 }
 
 function renderAuthSetPassword(){
@@ -4106,6 +4127,7 @@ function renderAuthSetPassword(){
     '</div></div>';
 }
 
+function __authEmailInput(e){ authEmailDraft=(e&&e.target&&e.target.value)||''; }
 function __authEnterLogin(e){ if(e.key==='Enter') emailLogin(); }
 function __authEnterSetPassword(e){ if(e.key==='Enter') submitNewPassword(); }
 function usePinInstead(){ authScreen=null; authError=''; authNotice=''; window.location.hash='#cleaner'; render(); }
@@ -4139,7 +4161,8 @@ async function adoptEmailSession(){
 async function emailLogin(){
   if(authBusy)return;
   const emailEl=document.getElementById('authEmail'), pwdEl=document.getElementById('authPassword');
-  const email=((emailEl&&emailEl.value)||'').trim().toLowerCase();
+  authEmailDraft=(emailEl&&emailEl.value)||'';
+  const email=authEmailDraft.trim().toLowerCase();
   const password=(pwdEl&&pwdEl.value)||'';
   authError=''; authNotice='';
   if(!email||!password){ authError='Enter your email and your password.'; render(); return; }
@@ -4158,7 +4181,8 @@ async function emailLogin(){
 async function forgotPassword(){
   if(authBusy)return;
   const emailEl=document.getElementById('authEmail');
-  const email=((emailEl&&emailEl.value)||'').trim().toLowerCase();
+  authEmailDraft=(emailEl&&emailEl.value)||'';
+  const email=authEmailDraft.trim().toLowerCase();
   authError=''; authNotice='';
   if(!email){ authError='Enter your email first, then tap Forgot password.'; render(); return; }
   authBusy=true; render();
@@ -4211,9 +4235,16 @@ async function emailLogout(){
   }
   cleanerMode=null;
   localStorage.removeItem('cleanerMode');
-  authScreen='login'; authError=''; authNotice='';
+  // Le cache planner porte les noms et telephones des voyageurs de la derniere
+  // semaine consultee : il ne doit pas survivre a un changement de compte.
+  localStorage.removeItem(PLANNER_CACHE_KEY);
+  authScreen='login'; authError=''; authNotice=''; authEmailDraft='';
   render();
 }
+
+// Delai au-dela duquel un rafraichissement de JWT ne bloque plus le boot quand
+// une session PIN est disponible sur l'appareil.
+const AUTH_SESSION_WAIT_MS=2500;
 
 // Boot : decide quel ecran ouvrir avant le premier fetchAll().
 // Retourne true si l'app peut charger ses donnees.
@@ -4225,8 +4256,25 @@ async function hkAuthBoot(){
     render();
     return false;
   }
+  // Rien ne doit etre attendu sur un ecran vide : on peint l'etat d'attente
+  // avant le premier await, sauf quand cet appareil n'a manifestement aucune
+  // session email (un membre au PIN seul verrait un « Signing you in... » qui
+  // ne le concerne pas).
+  const maybeEmailSession=!!(function(){try{return localStorage.getItem('hkAuthSession');}catch(e){return null;}}())||h.hasToken;
+  if(maybeEmailSession) renderAuthPending();
   let session=null;
-  try{ const s=await sbAuth.auth.getSession(); session=s&&s.data?s.data.session:null; }catch(e){ session=null; }
+  try{
+    const pending=sbAuth.auth.getSession();
+    // Hors ligne avec un JWT perime, supabase-js peut passer 25 a 40 s a
+    // epuiser ses tentatives de rafraichissement. Quand une session PIN est
+    // posee sur l'appareil, on ne l'attend pas : le deverrouillage rapide
+    // ouvre l'app tout de suite, onAuthStateChange reposera le Bearer si le
+    // rafraichissement finit par aboutir.
+    const s=cleanerToken
+      ?await Promise.race([pending,new Promise(function(res){setTimeout(function(){res(null);},AUTH_SESSION_WAIT_MS);})])
+      :await pending;
+    session=s&&s.data?s.data.session:null;
+  }catch(e){ session=null; }
   authAccessToken=session?session.access_token:null;
   if(session&&(h.type==='recovery'||h.type==='invite')){
     authScreen='setPassword';
@@ -4239,7 +4287,14 @@ async function hkAuthBoot(){
     if(!cleanerToken){ authScreen='login'; render(); return false; }
     return true;
   }
-  const ok=await adoptEmailSession();
+  // adoptEmailSession appelle api('cleanerMe'), qui THROW sur panne reseau ou
+  // sur timeout de 15 s (le proxy tombe toutes les nuits de 22 h a 7 h Dubai).
+  // Sans ce filet, hkAuthBoot rejetait, render() n'etait jamais atteint et
+  // l'app restait blanche. On garde la session et on laisse fetchAll afficher
+  // son erreur habituelle ou son cache stale.
+  let ok=false;
+  try{ ok=await adoptEmailSession(); }
+  catch(e){ authScreen=null; authError=''; authNotice=''; ok=true; }
   render();
   return ok;
 }
@@ -4309,7 +4364,7 @@ function renderBottomNav(){
 
 function renderPinScreen(){
   document.getElementById('app').innerHTML=
-    '<div class="pin-screen"><div style="margin-bottom:20px">'+renderLangSelector()+'</div><h2>🔑 '+t('cleanerLogin')+'</h2><p>'+t('enterPin')+'</p>'+
+    '<div class="pin-screen"><div style="margin-bottom:20px">'+renderLangSelector()+'</div><h2>🔑 '+t('quickUnlock')+'</h2><p>'+t('enterPin')+'</p>'+
     '<input type="tel" id="pinInput" class="pin-input" maxlength="4" aria-label="4-digit PIN" data-action-input="__pinInput" autofocus/>'+
     '<div id="pinError" class="pin-error"></div>'+
     '<button class="auth-link" data-action="useEmailInstead">'+t('useEmailInstead')+'</button></div>';
