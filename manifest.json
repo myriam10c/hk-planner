@@ -1,7 +1,7 @@
 {
-  "name": "HK Planner — Housekeeping",
+  "name": "HK Planner",
   "short_name": "HK Planner",
-  "description": "Planning ménage et maintenance — Hillal medini Vacation Homes",
+  "description": "Planning ménage et maintenance, Hillal Medini Vacation Homes",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
