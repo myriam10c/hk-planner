@@ -110,3 +110,36 @@ Deno.test("verifyUserJwt rend null quand le fetch du JWKS echoue", async () => {
   assertEquals(await verifyUserJwt(token), null);
   resetJwksCache();
 });
+
+import { resolveCleanerByEmail } from "./auth.ts";
+
+// Faux client Supabase : enregistre les filtres appliques pour verifier que la
+// resolution ne rend jamais un membre desactive.
+function fakeSb(row: any) {
+  const calls: any[] = [];
+  return {
+    calls,
+    from(table: string) {
+      calls.push({ table });
+      const q: any = {
+        select: () => q,
+        eq: (col: string, val: any) => { calls.push({ col, val }); return q; },
+        maybeSingle: async () => ({ data: row, error: null }),
+      };
+      return q;
+    },
+  };
+}
+
+Deno.test("resolveCleanerByEmail rend le membre actif qui porte cet email", async () => {
+  const sb = fakeSb({ id: 8, name: "Walter", role: "manager", color: "#e94560" });
+  const me = await resolveCleanerByEmail(sb, "walter@example.com");
+  assertEquals(me, { cleaner_id: 8, name: "Walter", role: "manager", color: "#e94560" });
+  assertEquals(sb.calls.some((c: any) => c.col === "email" && c.val === "walter@example.com"), true);
+  assertEquals(sb.calls.some((c: any) => c.col === "is_active" && c.val === true), true);
+});
+
+Deno.test("resolveCleanerByEmail rend null quand aucun membre actif ne porte cet email", async () => {
+  const sb = fakeSb(null);
+  assertEquals(await resolveCleanerByEmail(sb, "inconnu@example.com"), null);
+});

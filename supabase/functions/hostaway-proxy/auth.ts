@@ -68,3 +68,19 @@ export async function verifyUserJwt(token: string | null): Promise<AuthUser | nu
     return null;
   }
 }
+
+// Un JWT valide ne donne acces qu'a un membre d'equipe ACTIF portant exactement
+// cet email. Un compte Auth orphelin (membre desactive, email retire) n'est
+// personne : le proxy repondra 401 comme pour un jeton PIN revoque.
+export async function resolveCleanerByEmail(
+  sb: any,
+  email: string,
+): Promise<{ cleaner_id: number; name: string; role: string; color: string } | null> {
+  const { data } = await sb.from("cleaners")
+    .select("id, name, role, color")
+    .eq("email", email)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (!data) return null;
+  return { cleaner_id: data.id, name: data.name, role: data.role, color: data.color };
+}

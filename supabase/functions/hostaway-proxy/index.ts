@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
+import { bearerToken, resolveCleanerByEmail, verifyUserJwt } from "./auth.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -373,6 +374,31 @@ async function validateCleanerToken(sb: any, token: string | null): Promise<{ cl
   return data[0];
 }
 
+// Session courante, deux credentials acceptes pendant toute la transition :
+//   - Authorization: Bearer <JWT Supabase Auth>  (comptes email, cible)
+//   - X-Cleaner-Token: <jeton de session PIN>    (heritage, deverrouillage rapide)
+// Le Bearer est prioritaire : si un JWT est present et valide mais ne correspond
+// a aucun membre actif, on refuse sans retomber sur le PIN, sinon un compte Auth
+// desactive pourrait continuer a agir via un vieux jeton PIN du meme appareil.
+async function currentUser(sb: any, req: Request) {
+  const token = bearerToken(req);
+  if (token) {
+    const user = await verifyUserJwt(token);
+    if (!user) {
+      console.log("[hostaway-proxy] Bearer invalide ou expire");
+      return null;
+    }
+    const me = await resolveCleanerByEmail(sb, user.email);
+    if (!me) console.log("[hostaway-proxy] JWT valide sans membre actif correspondant");
+    return me;
+  }
+  // L'en-tete est lu dans une variable a dessein : le remplacement automatique
+  // du step suivant cible la forme validateCleanerToken(sb, req.headers.get(...)),
+  // et l'ecrire ici textuellement transformerait ce repli en appel recursif.
+  const pinToken = req.headers.get("x-cleaner-token");
+  return await validateCleanerToken(sb, pinToken);
+}
+
 // Gate d'auth du module RH, a trois niveaux :
 //   staff   : n'importe quel membre authentifié (agit sur son propre dossier)
 //   manager : role === 'manager'
@@ -380,7 +406,7 @@ async function validateCleanerToken(sb: any, token: string | null): Promise<{ cl
 // Retourne { me, isOwner, err }. Si err n'est pas null, le handler doit le
 // retourner immédiatement sans rien faire d'autre.
 async function hrAuth(sb: any, req: Request, level: "staff" | "manager" | "owner") {
-  const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+  const me = await currentUser(sb, req);
   if (!me) return { me: null, isOwner: false, err: jsonResp({ error: "auth required" }, 401) };
   const { data } = await sb.from("cleaners").select("is_owner").eq("id", me.cleaner_id).maybeSingle();
   const isOwner = !!(data && data.is_owner);
@@ -1102,7 +1128,7 @@ Deno.serve(async (req: Request) => {
     // Manager-only : une session authentifiée non-manager (cleaner/maintenance/subcontractor)
     // est rejetée. Pas de token = vue manager historique (sans login) → autorisé.
     if (action === "setCancelled" && req.method === "POST") {
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
       const body = await req.json();
       const { key, cancelled, reason, actor } = body;
@@ -1123,7 +1149,7 @@ Deno.serve(async (req: Request) => {
     // postpone=true → upsert (new_date/original_date) ; postpone=false → retire l'override.
     if (action === "setPostponed" && req.method === "POST") {
       // Manager-only (même règle que setCancelled).
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
       const body = await req.json();
       const { key, postpone, new_date, original_date, actor } = body;
@@ -1230,7 +1256,7 @@ Deno.serve(async (req: Request) => {
     // ajustements restent manager-only : ce chiffre est la référence opposée à
     // la blanchisserie. Sous-traitants exclus de tout.
     if (action === "addLaundryMovement" && req.method === "POST") {
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       const isStaff = !!me && me.role !== "manager";
       if (isStaff && me!.role === "subcontractor") {
         return jsonResp({ error: "manager role required" }, 403);
@@ -1267,7 +1293,7 @@ Deno.serve(async (req: Request) => {
       // X-App-Secret est embarqué dans le bundle JS public : insuffisant pour
       // créer/modifier des comptes (PIN inclus → escalade de privilèges). On exige
       // une session valide (X-Cleaner-Token) appartenant à un cleaner role=manager.
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       if (!me || me.role !== 'manager') {
         return jsonResp({ error: "manager auth required" }, 403);
       }
@@ -1394,10 +1420,15 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success" });
     }
     if (action === "cleanerMe") {
-      const token = req.headers.get("x-cleaner-token");
-      const cleaner = await validateCleanerToken(sb, token);
+      // Point d'entree du boot front : il renvoie qui je suis pour le credential
+      // presente, sans jamais 401 (le front distingue "pas de session" de "session
+      // sans membre actif" par la valeur de cleaner).
+      const cleaner = await currentUser(sb, req);
       if (!cleaner) return jsonResp({ status: "success", cleaner: null });
-      return jsonResp({ status: "success", cleaner: { id: cleaner.cleaner_id, name: cleaner.name, color: cleaner.color, role: cleaner.role } });
+      return jsonResp({
+        status: "success",
+        cleaner: { id: cleaner.cleaner_id, name: cleaner.name, color: cleaner.color, role: cleaner.role },
+      });
     }
 
     // ==================== WEB PUSH ====================
@@ -1414,7 +1445,7 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", publicKey });
     }
     if (action === "savePushSubscription" && req.method === "POST") {
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       if (!me) return jsonResp({ error: "auth required" }, 401);
       // Corps illisible : 400 explicite plutôt qu'un 500 opaque côté client.
       const body = await req.json().catch(() => null);
@@ -1451,7 +1482,7 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success" });
     }
     if (action === "deletePushSubscription" && req.method === "POST") {
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       if (!me) return jsonResp({ error: "auth required" }, 401);
       const body = await req.json().catch(() => null);
       if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
@@ -1467,7 +1498,7 @@ Deno.serve(async (req: Request) => {
       // le contrôleur / les jobs serveur (X-Server-Secret, jamais dans le bundle JS).
       const serverSecret = req.headers.get("x-server-secret") ?? "";
       const isServer = SERVER_SHARED_SECRET !== "" && serverSecret === SERVER_SHARED_SECRET;
-      const me = isServer ? null : await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = isServer ? null : await currentUser(sb, req);
       if (!isServer && (!me || me.role !== "manager")) {
         return jsonResp({ error: "manager auth required" }, 403);
       }
@@ -3283,7 +3314,7 @@ Deno.serve(async (req: Request) => {
       const statusFilter = url.searchParams.get("status") || "open"; // open|in_progress|done|cancelled|all
       const assignedTo = url.searchParams.get("assigned_to");
       const listingId = url.searchParams.get("listing_id");
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       let q = sb.from("team_tasks").select("*").order("due_at", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false });
       if (statusFilter !== "all") q = q.eq("status", statusFilter);
       if (mine) {
@@ -3309,7 +3340,7 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", task, comments: comments || [] });
     }
     if (action === "createTeamTask" && req.method === "POST") {
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       if (!me) return jsonResp({ error: "auth required" }, 401);
       const body = await req.json();
       const { title, description, assigned_cleaner_id, priority, due_at, listing_id, category, source, source_ref } = body;
@@ -3350,7 +3381,7 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", task: data });
     }
     if (action === "updateTeamTask" && req.method === "POST") {
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       if (!me) return jsonResp({ error: "auth required" }, 401);
       const body = await req.json();
       const { id } = body;
@@ -3377,7 +3408,7 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", task: data });
     }
     if (action === "completeTeamTask" && req.method === "POST") {
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       if (!me) return jsonResp({ error: "auth required" }, 401);
       const body = await req.json();
       const { id } = body;
@@ -3828,7 +3859,7 @@ Deno.serve(async (req: Request) => {
     // Insert a command for the VPS poller to pick up. Authenticated via cleaner token
     // so we can log who initiated each action (Hillal, Walter, etc.).
     if (action === "submitHermesCommand" && req.method === "POST") {
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       const body = await req.json();
       const { command, target, payload } = body;
       const allowedCommands = new Set(["approve_action", "reject_action", "run_handler"]);
@@ -3912,7 +3943,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "addTeamTaskComment" && req.method === "POST") {
-      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      const me = await currentUser(sb, req);
       if (!me) return jsonResp({ error: "auth required" }, 401);
       const body = await req.json();
       const { task_id, body: text } = body;
