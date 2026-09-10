@@ -159,6 +159,7 @@ function __bulkAssignFromSelect(e){ bulkAssignSelected(e.target.value); e.target
 function __pinInput(e){ if(e.target.value.length===4) cleanerLogin(); }
 function __chipKeyFilterCleaner(id,e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); setFilterCleaner(id); } }
 function __headerSearchInput(e){ search=e.target.value; render(); }
+function __securitySearchInput(e){ securitySearch=e.target.value; renderSecurity(); }
 function __cardKeyActivate(e,el){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleCardClick(el.dataset.kbId, e); } }
 function __keyEnterSubmitComment(id,e){ if(e.key==='Enter') submitInlineComment(id); }
 function __keyEnterAddNote(e,el){ if(e.key==='Enter') addNote(el.dataset.rkey); }
@@ -261,6 +262,7 @@ const ICONS_SVG = {
   x:           '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
   edit:        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
   phone:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+  shield:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
 };
 function icon(name, size){
   let svg = ICONS_SVG[name];
@@ -324,7 +326,9 @@ function writeUrlState(){
   if(typeof mtSearch !== 'undefined' && mtSearch) params.set('mtSearch', mtSearch);
   if(typeof dashSection !== 'undefined' && dashSection && dashSection !== 'ops') params.set('dash', dashSection);
   const qs = params.toString();
-  const url = window.location.pathname + (qs ? '?' + qs : '');
+  // Garder le hash (#cleaner) : le perdre force render() à le re-poser, ce qui
+  // déclenche popstate et réinitialise currentTab à 'planner'.
+  const url = window.location.pathname + (qs ? '?' + qs : '') + (window.location.hash || '');
   try { history.replaceState({}, '', url); } catch(e) {}
 }
 // Desktop detection helper (S2b multi-pane)
@@ -1030,7 +1034,13 @@ en:{
   overview:'Overview',realFees:'Real cleaning fees from Hostaway',
   pricing:'Pricing per Property',templates:'Checklist Templates',
   recentActivity:'Recent Activity',noActivity:'No activity yet',
-  enableNotif:'Enable notifications to get cleaning alerts',enable:'Enable',
+  enableNotif:'Enable notifications to get task and cleaning alerts',enable:'Enable',
+  notifIosHint:'Add HK Planner to your Home Screen to receive notifications: tap the Share button, then Add to Home Screen, then open the app from the new icon.',
+  notifIosUpdate:'Notifications need iOS 16.4 or later. Update your iPhone, then reopen HK Planner from the Home Screen.',
+  notifSettings:'Notifications',
+  notifOn:'Notifications are on for this device',
+  notifOff:'Notifications are off for this device',
+  sendTestNotif:'Send test notification',
   before:'Before',after:'After',comparison:'Photo Comparison',
   avgTime:'avg',mins:'min',
   cleanerLogin:'Cleaner Login',enterPin:'Enter your 4-digit PIN',
@@ -1254,8 +1264,10 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
     const extrasAsRes=(extraCleanings||[])
       .filter(e=>e.status!=='cancelled')
       .filter(e=>{
-        // Only include extras within the current visible week range
-        return e.cleaning_date>=startDate && e.cleaning_date<=endDate;
+        // Fenêtre par date EFFECTIVE : un extra reporté (cleaning_postponed)
+        // appartient à la semaine de sa new_date, pas à celle de sa date d'origine.
+        const eff=(postponed[e.reservation_key]&&postponed[e.reservation_key].new_date)||e.cleaning_date;
+        return eff>=startDate && eff<=endDate;
       })
       .map(e=>({
         co:e.cleaning_date,
@@ -1276,6 +1288,7 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
       }));
     RESERVATIONS=RESERVATIONS.concat(extrasAsRes).sort((a,b)=>a.co.localeCompare(b.co));
     applyPostponements();
+    pruneOutsideWeek(startDate,endDate);
     RESERVATIONS.sort((a,b)=>a.co.localeCompare(b.co));
     rebuildDates();
     maintenanceTickets=allRes.maintenanceTickets||[];vendors=allRes.vendors||[];equipment=allRes.equipment||[];preventiveMaint=allRes.preventiveMaintenance||[];
@@ -1317,6 +1330,14 @@ function applyPostponements(){
       r._postponed=true;
     }
   });
+}
+// Une carte appartient à la semaine de sa date EFFECTIVE (co après report). Sans ce
+// filtre, un report qui franchit la frontière de semaine reste dans la vue source et
+// y fabrique un onglet fantôme au-delà de la plage affichée ; la semaine destination
+// le reçoit via l'extension postponed du proxy (buildCheckoutsPayload).
+function pruneOutsideWeek(s,e){
+  if(!s){const w=getWeekRange();s=w.startDate;e=w.endDate;}
+  RESERVATIONS=RESERVATIONS.filter(r=>r.co>=s&&r.co<=e);
 }
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
@@ -1733,6 +1754,10 @@ async function confirmPostpone(key){
   try{
     const res=await api('setPostponed',{body:{key,postpone:true,new_date:newDate,original_date:originalDate,actor:cleanerMode?cleanerMode.name:'Manager'}});
     if(res&&res.error)throw new Error(res.error);
+    // Report confirmé : si la nouvelle date sort de la semaine affichée, la carte
+    // part vivre dans la vue de la semaine suivante (prune après succès seulement,
+    // le revert d'erreur doit retrouver la carte dans RESERVATIONS).
+    pruneOutsideWeek();rebuildDates();render();
   }catch(err){
     if(prevPost)postponed[key]=prevPost;else delete postponed[key];
     r.co=prevCo;r._origCo=prevOrig;r._postponed=prevFlag;
@@ -1756,6 +1781,9 @@ async function restoreCleaningDate(key){
   try{
     const res=await api('setPostponed',{body:{key,postpone:false,actor:cleanerMode?cleanerMode.name:'Manager'}});
     if(res&&res.error)throw new Error(res.error);
+    // Si la date restaurée sort de la semaine affichée, la carte retourne dans la
+    // vue de sa semaine d'origine (prune après succès seulement, cf confirmPostpone).
+    pruneOutsideWeek();rebuildDates();render();
   }catch(err){
     postponed[key]=prevPost;
     r.co=prevCo;r._origCo=prevOrig;r._postponed=prevFlag;r._reservationKey=prevFrozen;
@@ -2987,7 +3015,7 @@ function getFiltered(){
 
 function countByDate(d){return RESERVATIONS.filter(r=>r.co===d&&!cancelled[keyFor(r)]).length;}
 function countDoneForDate(d){return RESERVATIONS.filter(r=>r.co===d&&done[keyFor(r)]&&!cancelled[keyFor(r)]).length;}
-function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;if(t!=='laundry'&&laundryMoveKind){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();if(t==='laundry'&&laundryData===null&&!laundryLoading)loadLaundry();if(t==='hr'&&typeof loadHR==='function'&&hrData===null&&!hrLoading&&!hrError)loadHR();}
+function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;if(t!=='laundry'&&laundryMoveKind){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();if(t==='laundry'&&laundryData===null&&!laundryLoading)loadLaundry();if(t==='hr'&&typeof loadHR==='function'&&hrData===null&&!hrLoading&&!hrError)loadHR();if(t==='security'&&securityData===null&&!securityLoading)loadSecurity();}
 let moreOpen=false;
 function openMoreMenu(){ moreOpen=true; renderMoreMenu(); }
 function closeMoreMenu(){ moreOpen=false; renderMoreMenu(); }
@@ -3004,6 +3032,7 @@ function renderMoreMenu(){
     {id:'history',icon:icon('history',22),label:'History',color:'#059669'},
     {id:'calendar',icon:icon('calendar',22),label:'Calendar',color:'#0891b2'},
     {id:'stats',icon:icon('trending',22),label:'Stats',color:'#be185d'},
+    {id:'security',icon:icon('shield',22),label:'Security',color:'#1d4ed8'},
   ];
   el.innerHTML=`
   <div class="more-overlay" data-action="__closeMoreMenuBackdrop" data-pass-event="1">
@@ -3061,6 +3090,9 @@ async function cleanerLogin(){
   }
 }
 async function cleanerLogout(){
+  // Avant d'invalider le token : deletePushSubscription exige la session courante,
+  // sinon l'appareil continuerait de recevoir les tâches de l'utilisateur précédent.
+  try{ await disablePushNotifications(); }catch(e){}
   try{ await api('cleanerLogout',{body:{}}); }catch(e){}
   cleanerMode=null; cleanerToken=null;
   localStorage.removeItem('cleanerMode');
@@ -3093,11 +3125,141 @@ function getQualityScore(key,r){
 function scoreClass(s){return s>=80?'high':s>=50?'mid':'low';}
 
 function renderLangSelector(){return '';}
+// ============ WEB PUSH ============
+// Abonnement Web Push lié à la session PIN. iOS n'expose PushManager que dans une
+// PWA installée sur l'écran d'accueil (iOS 16.4+), d'où le mode d'emploi dédié.
+const PUSH_SUB_KEY='pushSubscribed';
+
+function pushSupported(){
+  return typeof navigator!=='undefined' && 'serviceWorker' in navigator
+    && typeof window!=='undefined' && 'PushManager' in window && 'Notification' in window;
+}
+// Lue à chaque rendu (l'utilisateur peut changer la permission dans les réglages
+// système sans recharger). C'est une fonction, donc surchargeable par les tests :
+// `notifPermission` est un `let` de premier niveau, absent de window.
+function pushPermission(){
+  try{ return typeof Notification!=='undefined'?Notification.permission:'denied'; }
+  catch(e){ return 'denied'; }
+}
+function isStandalonePWA(){
+  try{
+    if(window.navigator.standalone===true) return true;
+    return window.matchMedia && window.matchMedia('(display-mode: standalone)').matches===true;
+  }catch(e){ return false; }
+}
+function isIOSLike(){
+  const ua=navigator.userAgent||'';
+  if(/iPhone|iPad|iPod/.test(ua)) return true;
+  // iPadOS 13+ se déclare en Macintosh mais reste tactile.
+  return /Macintosh/.test(ua) && typeof document!=='undefined' && 'ontouchend' in document;
+}
+// base64url -> Uint8Array : Safari refuse la chaîne brute pour applicationServerKey.
+function urlBase64ToUint8Array(base64){
+  const padding='='.repeat((4-base64.length%4)%4);
+  const b64=(base64+padding).replace(/-/g,'+').replace(/_/g,'/');
+  const raw=atob(b64);
+  const out=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) out[i]=raw.charCodeAt(i);
+  return out;
+}
+// Couture de test : les tests remplacent cette fonction par un faux registration.
+async function pushRegistration(){ return navigator.serviceWorker.ready; }
+
+async function subscribePush(){
+  const reg=await pushRegistration();
+  let sub=await reg.pushManager.getSubscription();
+  if(!sub){
+    const res=await api('getVapidPublicKey');
+    if(!res||!res.publicKey) throw new Error('Push is not configured on the server');
+    sub=await reg.pushManager.subscribe({
+      userVisibleOnly:true,
+      applicationServerKey:urlBase64ToUint8Array(res.publicKey)
+    });
+  }
+  const j=sub.toJSON();
+  await apiWrite('savePushSubscription',{body:{
+    endpoint:j.endpoint,
+    keys:{p256dh:j.keys.p256dh,auth:j.keys.auth},
+    user_agent:(navigator.userAgent||'').slice(0,300)
+  }});
+  try{ localStorage.setItem(PUSH_SUB_KEY,'1'); }catch(e){}
+}
+
+// Appelée depuis un geste utilisateur uniquement (exigence Safari et Chrome).
+async function enablePushNotifications(){
+  if(!pushSupported()){
+    toast(isIOSLike()?'Add HK Planner to your Home Screen first':'Notifications are not supported on this browser','error');
+    return;
+  }
+  try{
+    const perm=await Notification.requestPermission();
+    notifPermission=perm;
+    if(perm!=='granted'){ toast('Notifications blocked. Allow them in your device settings.','error'); render(); return; }
+    await subscribePush();
+    toast('Notifications enabled ✓','success');
+  }catch(e){
+    toast('Could not enable notifications: '+(e&&e.message?e.message:'unknown error'),'error');
+  }
+  render();
+}
+
+async function disablePushNotifications(){
+  try{
+    const reg=await pushRegistration();
+    const sub=await reg.pushManager.getSubscription();
+    if(sub){
+      const endpoint=sub.toJSON().endpoint;
+      try{ await apiWrite('deletePushSubscription',{body:{endpoint:endpoint}}); }catch(e){}
+      try{ await sub.unsubscribe(); }catch(e){}
+    }
+  }catch(e){}
+  try{ localStorage.removeItem(PUSH_SUB_KEY); }catch(e){}
+}
+
+async function togglePushNotifications(){
+  const on=pushPermission()==='granted'&&localStorage.getItem(PUSH_SUB_KEY)==='1';
+  if(on){ await disablePushNotifications(); toast('Notifications turned off','success'); render(); }
+  else { await enablePushNotifications(); }
+}
+
+// Au démarrage : l'endpoint peut avoir tourné (réinstallation, rotation du push
+// service). On ré-enregistre silencieusement l'abonnement courant.
+async function syncPushSubscription(){
+  if(!pushSupported()) return;
+  if(typeof Notification==='undefined'||Notification.permission!=='granted') return;
+  if(localStorage.getItem(PUSH_SUB_KEY)!=='1') return;
+  if(!cleanerToken) return;
+  try{ await subscribePush(); }
+  catch(e){ console.warn('[push] resync failed',e); }
+}
+
+async function sendPushTest(){
+  try{
+    const r=await apiWrite('pushTest',{body:{}});
+    if(r&&r.sent>0){ toast('Test notification sent ✓','success'); return; }
+    // Le proxy dit pourquoi rien n'est parti (champ `skipped`) : heures de silence,
+    // aucun appareil abonné, ou clés VAPID absentes côté serveur. Sans ça, les trois
+    // cas se ressembleraient et enverraient chercher le mauvais problème.
+    const why=r&&r.skipped;
+    toast(why==='quiet_hours'?'Quiet hours (22:00 to 08:30 Dubai): only urgent notifications are sent'
+      :why==='vapid_not_configured'?'Push is not configured on the server yet'
+      :'No device subscribed yet','success');
+  }catch(e){
+    toast('Test failed: '+(e&&e.message?e.message:'unknown error'),'error');
+  }
+}
+
 function renderNotifBanner(){
-  if(notifPermission==='granted'||typeof Notification==='undefined')return'';
   if(localStorage.getItem('notifBannerDismissed'))return'';
-  return '<div class="notif-banner">🔔 '+t('enableNotif')+'<button data-action="requestNotifPermission">'+t('enable')+'</button>'+
-    '<button data-action="dismissNotifBanner" aria-label="Dismiss" title="Dismiss" style="background:none;border:none;color:inherit;font-size:16px;line-height:1;padding:4px 8px;cursor:pointer;opacity:0.7">✕</button></div>';
+  const dismiss='<button data-action="dismissNotifBanner" aria-label="Dismiss" title="Dismiss" style="background:none;border:none;color:inherit;font-size:16px;line-height:1;padding:4px 8px;cursor:pointer;opacity:0.7">✕</button>';
+  if(!pushSupported()){
+    if(!isIOSLike()) return '';
+    const msg=isStandalonePWA()?t('notifIosUpdate'):t('notifIosHint');
+    return '<div class="notif-banner">🔔 '+msg+dismiss+'</div>';
+  }
+  if(pushPermission()==='granted'&&localStorage.getItem(PUSH_SUB_KEY)==='1')return'';
+  return '<div class="notif-banner">🔔 '+t('enableNotif')+
+    '<button data-action="enablePushNotifications">'+t('enable')+'</button>'+dismiss+'</div>';
 }
 function dismissNotifBanner(){localStorage.setItem('notifBannerDismissed','1');render();}
 
@@ -3105,10 +3267,13 @@ function dismissNotifBanner(){localStorage.setItem('notifBannerDismissed','1');r
 // Fixed list. Adding an item means a migration plus a proxy change, by design.
 const LAUNDRY_ITEMS=[
   {key:'pillowcases',label:'Pillowcases'},
-  {key:'bed_sheets',label:'Bed sheets'},
-  {key:'duvet_covers',label:'Duvet covers'},
-  {key:'small_towels',label:'Small towels'},
-  {key:'large_towels',label:'Large towels'},
+  {key:'bed_sheets',label:'Bed sheets (queen+twin)'},
+  {key:'duvet_covers',label:'Duvet covers (queen+twin)'},
+  // Les clés restent small/large_towels (colonnes DB) ; seuls les libellés
+  // parlent le langage de l'équipe.
+  {key:'small_towels',label:'Hand towels'},
+  {key:'face_towels',label:'Face towels (square)'},
+  {key:'large_towels',label:'Bath towels'},
   {key:'bath_mats',label:'Bath mats'},
 ];
 // const is lexical, so it never lands on window on its own. Tests need it.
@@ -3337,6 +3502,157 @@ async function submitLaundrySheet(){
   else toast('Laundry count saved','success');
 }
 
+// ============ SECURITY CONTACTS tab ============
+let securityData=null;
+let securityLoading=false;
+let securityError=null;
+let securitySearch='';
+
+async function loadSecurity(){
+  securityLoading=true; securityError=null; render();
+  try{
+    const res=await fetch('security-contacts.json');
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    securityData=await res.json();
+  }catch(e){
+    securityError=(e&&e.message)||'Failed to load security contacts.';
+  }
+  securityLoading=false; render();
+}
+
+function renderSecurity(){
+  let h='<div class="header"><div class="header-top">'+
+    '<h1>'+icon('shield',20)+' Security contacts</h1>'+
+    '<div style="flex:1"></div>'+
+    '<button class="icon-btn" data-action="loadSecurity" title="Refresh" aria-label="Refresh">'+icon('refresh',18)+'</button>'+
+    '</div>'+
+    '<div class="sec-search-wrap">'+
+      icon('search',16)+
+      '<input id="secSearchInput" class="sec-search" type="text" placeholder="Search building, unit, email, phone..." aria-label="Search security contacts" value="'+esc(securitySearch)+'" data-action-input="__securitySearchInput" autofocus />'+
+    '</div>'+
+  '</div>';
+  h+='<div class="container">';
+  if(securityLoading && !securityData){
+    h+='<div class="sec-loading">Loading...</div>';
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h; return;
+  }
+  if(securityError){
+    h+='<div class="sec-error-state"><div>'+esc(securityError)+'</div>'+
+      '<button class="btn-secondary" data-action="loadSecurity" style="margin-top:12px">Retry</button></div>';
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h; return;
+  }
+  const buildings=(securityData&&securityData.buildings)||[];
+  const q=securitySearch.trim().toLowerCase();
+  function normalise(s){ return s?s.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase():''; }
+  const filtered=q?buildings.filter(function(b){
+    const nq=normalise(q);
+    if(normalise(b.name).includes(nq)) return true;
+    return (b.groups||[]).some(function(g){
+      if((g.units||[]).some(function(u){ return normalise(u).includes(nq); })) return true;
+      if((g.emails||[]).some(function(em){ return normalise(em).includes(nq); })) return true;
+      if(g.phone && normalise(g.phone).includes(nq)) return true;
+      if(g.phoneDigits && g.phoneDigits.includes(q)) return true;
+      return false;
+    });
+  }):buildings;
+  if(!filtered.length){
+    h+='<div class="sec-empty">No contacts match your search.</div>';
+    h+='</div>'+renderBottomNav();
+    document.getElementById('app').innerHTML=h; return;
+  }
+  filtered.forEach(function(b){
+    const unitCount=(b.groups||[]).reduce(function(s,g){return s+(g.units||[]).length;},0);
+    h+='<div class="sec-card">'+
+      '<div class="sec-card-header">'+
+        '<span class="sec-building-name">'+esc(b.name)+'</span>'+
+        '<span class="sec-unit-count">'+unitCount+' unit'+(unitCount===1?'':'s')+'</span>'+
+      '</div>';
+    (b.groups||[]).forEach(function(g){
+      h+='<div class="sec-group">';
+      // Unit chips
+      if((g.units||[]).length){
+        h+='<div class="sec-chips">';
+        (g.units||[]).forEach(function(u){ h+='<span class="sec-chip">'+esc(u)+'</span>'; });
+        h+='</div>';
+      }
+      // Emails
+      (g.emails||[]).forEach(function(em){
+        h+='<div class="sec-action-row">'+
+          icon('clipboard',14)+
+          '<a href="mailto:'+esc(em)+'" class="sec-link">'+esc(em)+'</a>'+
+        '</div>';
+      });
+      // Phone
+      if(g.phone||g.phoneDigits){
+        const digits=esc(g.phoneDigits||'');
+        const display=esc(g.phone||g.phoneDigits||'');
+        h+='<div class="sec-action-row sec-phone-row">'+
+          icon('phone',14)+
+          '<span class="sec-phone-display">'+display+'</span>'+
+          '<div class="sec-phone-btns">'+
+            '<a href="tel:+'+digits+'" class="btn-secondary sec-btn" aria-label="Call">Call</a>'+
+            '<a href="https://wa.me/'+digits+'" target="_blank" rel="noopener noreferrer" class="btn-secondary sec-btn sec-wa-btn" aria-label="WhatsApp">WhatsApp</a>'+
+          '</div>'+
+        '</div>';
+      }
+      // Portal link
+      if(g.portal){
+        h+='<div class="sec-action-row">'+
+          icon('home',14)+
+          '<a href="'+esc(g.portal)+'" target="_blank" rel="noopener noreferrer" class="btn-secondary sec-btn">Portal</a>'+
+        '</div>';
+      }
+      // Portal ID
+      if(g.portalId){
+        h+='<div class="sec-action-row sec-cred-row">'+
+          '<span class="sec-cred-label">ID</span>'+
+          '<span class="sec-cred-value">'+esc(g.portalId)+'</span>'+
+          '<button class="btn-secondary sec-btn sec-copy-btn" data-action="copySecurityValue" data-arg0="'+esc(g.portalId)+'" aria-label="Copy ID">'+icon('clipboard',13)+'</button>'+
+        '</div>';
+      }
+      // Portal password
+      if(g.portalPassword){
+        h+='<div class="sec-action-row sec-cred-row">'+
+          '<span class="sec-cred-label">Password</span>'+
+          '<span class="sec-cred-value">'+esc(g.portalPassword)+'</span>'+
+          '<button class="btn-secondary sec-btn sec-copy-btn" data-action="copySecurityValue" data-arg0="'+esc(g.portalPassword)+'" aria-label="Copy password">'+icon('clipboard',13)+'</button>'+
+        '</div>';
+      }
+      // Notes badges
+      if((g.notes||[]).length){
+        h+='<div class="sec-notes">';
+        (g.notes||[]).forEach(function(n){ h+='<span class="sec-note-badge">'+esc(n)+'</span>'; });
+        h+='</div>';
+      }
+      // Unit links (Permit / DET)
+      if((g.unitLinks||[]).length){
+        const linksWithData=(g.unitLinks||[]).filter(function(ul){ return ul.dtcm||ul.det; });
+        if(linksWithData.length){
+          h+='<div class="sec-unit-links">';
+          linksWithData.forEach(function(ul){
+            h+='<span class="sec-ul-unit">'+esc(ul.unit)+'</span>';
+            if(ul.dtcm) h+='<a href="'+esc(ul.dtcm)+'" target="_blank" rel="noopener noreferrer" class="sec-doc-link">Permit</a>';
+            if(ul.det)  h+='<a href="'+esc(ul.det)+'" target="_blank" rel="noopener noreferrer" class="sec-doc-link">DET</a>';
+          });
+          h+='</div>';
+        }
+      }
+      h+='</div>'; // .sec-group
+    });
+    h+='</div>'; // .sec-card
+  });
+  h+='</div>'+renderBottomNav();
+  // Check if search input was focused before render
+  const wasFocused=document.activeElement && document.activeElement.id==='secSearchInput';
+  document.getElementById('app').innerHTML=h;
+  // Restore focus if input was focused
+  if(wasFocused){
+    setTimeout(()=>{const el=document.getElementById('secSearchInput');if(el){el.focus();const v=el.value;el.setSelectionRange(v.length,v.length);}},0);
+  }
+}
+
 // ============ LAUNDRY: manager tab ============
 let laundryData=null;      // {counts:[], balances:{store,laundry}}
 let laundryMoves=null;     // recent movements
@@ -3467,7 +3783,7 @@ function renderLaundryMoveForm(){
   });
 }
 
-function openLaundryMoveForm(kind){laundryMoveKind=kind;renderLaundryMoveForm();}
+function openLaundryMoveForm(kind){if(kind==='adjust'&&cleanerMode&&cleanerMode.role!=='manager')return;laundryMoveKind=kind;renderLaundryMoveForm();}
 function closeLaundryMoveForm(){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}
 function __closeLaundryMoveBackdrop(e){ if(e.target.classList.contains('modal-overlay'))closeLaundryMoveForm(); }
 
@@ -3559,38 +3875,58 @@ function renderLaundry(){
     return;
   }
   const bal=(laundryData&&laundryData.balances)||{};
-  // Only an adjustment seeds a balance, so a pickup must not silence the banner:
-  // without seeding, dirty_at_store under-reports forever and nothing says so.
-  const noMovementsEver=!(laundryMoves||[]).some(m=>String(m.kind).indexOf('adjust')===0);
-  if(noMovementsEver){
+  // Staff au local : uniquement enregistrer un pickup/retour et voir les
+  // derniers mouvements. Soldes, comptages et Adjust restent côté manager.
+  const staffView=!!(cleanerMode&&cleanerMode.role!=='manager');
+  if(!staffView){
+    // Only an adjustment seeds a balance, so a pickup must not silence the banner:
+    // without seeding, dirty_at_store under-reports forever and nothing says so.
+    const noMovementsEver=!(laundryMoves||[]).some(m=>String(m.kind).indexOf('adjust')===0);
+    if(noMovementsEver){
+      h+='<div class="laundry-onboard">'+
+        '<strong>Start with what you already have.</strong> '+
+        'Record the dirty linen sitting at the store right now, and what is still at the laundry, '+
+        'so both balances start from the truth. Use Adjust.'+
+        '</div>';
+    }
+    h+='<div class="laundry-bals">'+
+      laundryBalanceCard('Dirty at store',bal.store,'warn')+
+      laundryBalanceCard('At laundry',bal.laundry,'info')+
+      '</div>';
+  }else{
     h+='<div class="laundry-onboard">'+
-      '<strong>Start with what you already have.</strong> '+
-      'Record the dirty linen sitting at the store right now, and what is still at the laundry, '+
-      'so both balances start from the truth. Use Adjust.'+
+      '<strong>Laundry company at the store?</strong> '+
+      'Record it right away: <strong>Pickup</strong> when they collect dirty linen, '+
+      '<strong>Return</strong> when they deliver it back.'+
       '</div>';
   }
-  h+='<div class="laundry-bals">'+
-    laundryBalanceCard('Dirty at store',bal.store,'warn')+
-    laundryBalanceCard('At laundry',bal.laundry,'info')+
-    '</div>';
   h+='<div class="laundry-cta">'+
     '<button class="btn-success" data-action="openLaundryMoveForm" data-arg0="out">Pickup</button>'+
     '<button class="btn-primary" data-action="openLaundryMoveForm" data-arg0="in">Return</button>'+
-    '<button class="btn-secondary" data-action="openLaundryMoveForm" data-arg0="adjust">Adjust</button>'+
+    (staffView?'':'<button class="btn-secondary" data-action="openLaundryMoveForm" data-arg0="adjust">Adjust</button>')+
     '</div>';
 
-  h+=renderLaundryTable(r);
+  if(!staffView)h+=renderLaundryTable(r);
 
   h+='<h3 class="laundry-h3">Recent movements</h3>';
   if(!laundryMoves||!laundryMoves.length){
     h+='<div style="text-align:center;padding:24px;color:var(--text3);font-size:13px">No movement recorded yet.</div>';
+  }else if(staffView){
+    h+='<div class="laundry-move-list">'+laundryMoves.map(m=>{
+      const items=LAUNDRY_ITEMS.filter(i=>Number(m[i.key]))
+        .map(i=>i.label+' '+Number(m[i.key])).join(' · ');
+      return '<div class="laundry-move-card"><div class="laundry-move-top">'+
+        '<span class="lm-date">'+esc(m.moved_on||'')+'</span>'+laundryMoveBadge(m.kind)+
+        '<span class="lm-total">'+laundryTotal(m)+' pcs</span></div>'+
+        '<div class="laundry-move-items">'+esc(items||'No quantities')+(m.author?' · by '+esc(m.author):'')+'</div>'+
+        '</div>';
+    }).join('')+'</div>';
   }else{
     h+='<div style="overflow-x:auto"><table class="laundry-table"><thead><tr>'+
       '<th>Date</th><th>Type</th>'+LAUNDRY_ITEMS.map(i=>'<th>'+i.label+'</th>').join('')+
       '<th>Total</th><th>By</th><th>Note</th></tr></thead><tbody>';
     laundryMoves.forEach(m=>{
-      const label={out:'Pickup',in:'Return',adjust_store:'Adjust store',adjust_laundry:'Adjust laundry'}[m.kind];
-      h+='<tr><td>'+esc(m.moved_on||'')+'</td><td>'+label+'</td>'+
+      h+='<tr><td>'+esc(m.moved_on||'')+'</td><td>'+laundryMoveBadge(m.kind)+'</td>'+
         LAUNDRY_ITEMS.map(i=>'<td>'+(Number(m[i.key])||0)+'</td>').join('')+
         '<td><strong>'+laundryTotal(m)+'</strong></td>'+
         '<td>'+esc(m.author||'')+'</td><td>'+esc(m.note||'')+'</td></tr>';
@@ -3601,6 +3937,12 @@ function renderLaundry(){
   document.getElementById('app').innerHTML=h;
 }
 
+function laundryMoveBadge(kind){
+  const map={out:['Pickup','out'],in:['Return','in'],adjust_store:['Adjust store','adj'],adjust_laundry:['Adjust laundry','adj']};
+  const m=map[kind]||[String(kind),'adj'];
+  return '<span class="laundry-kind laundry-kind-'+m[1]+'">'+esc(m[0])+'</span>';
+}
+
 // ============ RENDER ============
 function render(){
   // #6 PIN screen
@@ -3608,7 +3950,8 @@ function render(){
   if(cleanerMode&&window.location.hash!=='#cleaner')window.location.hash='#cleaner';
   try { writeUrlState(); } catch(e) {}
   try { applyPlannerLayoutMode(); } catch(e) {}
-  if(currentTab==='laundry'){if(cleanerMode&&cleanerMode.role!=='manager'){currentTab='planner';}else{if(laundryData===null&&!laundryLoading)loadLaundry();return renderLaundry();}}
+  if(currentTab==='security'){if(securityData===null&&!securityLoading)loadSecurity();return renderSecurity();}
+  if(currentTab==='laundry'){if(cleanerMode&&cleanerMode.role==='subcontractor'){currentTab='planner';}else{if(laundryData===null&&!laundryLoading)loadLaundry();return renderLaundry();}}
   if(currentTab==='hr'){
     if(typeof renderHR!=='function'){currentTab='planner';}
     else{if(hrData===null&&!hrLoading&&!hrError)loadHR();return renderHR();}
@@ -3648,10 +3991,12 @@ function renderBottomNav(){
     ];
   }else if(cleanerMode.role==='maintenance'){
     // Maintenance view
-    tabs=[{id:'maintenance',icon:icon('wrench',22),label:'Maintenance'},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'history',icon:icon('history',22),label:t('history')}];
+    tabs=[{id:'maintenance',icon:icon('wrench',22),label:'Maintenance'},{id:'laundry',icon:icon('wave',22),label:'Laundry'},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'history',icon:icon('history',22),label:t('history')},{id:'security',icon:icon('shield',22),label:'Security'}];
   }else{
     // Cleaner view (default)
-    tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')}];
+    tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')},{id:'security',icon:icon('shield',22),label:'Security'}];
+    // Le staff au local enregistre pickups/retours ; pas les sous-traitants.
+    if(cleanerMode.role!=='subcontractor')tabs.splice(1,0,{id:'laundry',icon:icon('wave',22),label:'Laundry'});
   }
   const mainIds=tabs.map(tb=>tb.id);
   return '<nav class="bottom-nav">'+tabs.map(tab=>
@@ -4982,6 +5327,21 @@ function renderSettings(){
 
   // Guest Reviews removed — belongs in PMS, not ops tool
 
+  // Notifications (push web)
+  h+='<div class="settings-panel"><h3>🔔 '+t('notifSettings')+'</h3>';
+  if(!pushSupported()){
+    h+='<div style="font-size:12px;color:var(--text2)">'+(isIOSLike()?(isStandalonePWA()?t('notifIosUpdate'):t('notifIosHint')):'This browser does not support push notifications.')+'</div>';
+  }else{
+    const pushOn=pushPermission()==='granted'&&localStorage.getItem(PUSH_SUB_KEY)==='1';
+    h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;background:var(--bg2);border-radius:10px;margin-bottom:12px">';
+    h+='<div><div style="font-weight:600;font-size:14px">Push notifications</div><div style="font-size:11px;color:var(--text2)">'+(pushOn?t('notifOn'):t('notifOff'))+'</div></div>';
+    h+='<div data-action="togglePushNotifications" role="button" tabindex="0" aria-label="Toggle push notifications" style="flex:0 0 auto;width:50px;height:28px;border-radius:14px;background:'+(pushOn?'var(--green)':'var(--border)')+';cursor:pointer;position:relative;transition:background 0.3s">';
+    h+='<div style="width:24px;height:24px;border-radius:12px;background:white;position:absolute;top:2px;'+(pushOn?'right:2px':'left:2px')+';transition:all 0.3s;box-shadow:0 1px 3px rgba(0,0,0,0.2)"></div></div>';
+    h+='</div>';
+    h+='<button data-action="sendPushTest" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;background:white;cursor:pointer;font-weight:600;font-size:13px">'+t('sendTestNotif')+'</button>';
+  }
+  h+='</div>';
+
   h+='</div>'; // end settings-grid
   h+='</div>'+renderBottomNav();
   document.getElementById('app').innerHTML=h;
@@ -5275,6 +5635,11 @@ async function toggleReplyPosted(reviewId){
 
 function copyDisputeText(text){
   if(navigator.clipboard) navigator.clipboard.writeText(text);
+  toast('Copied','success');
+}
+
+function copySecurityValue(text){
+  if(navigator.clipboard) navigator.clipboard.writeText(text).catch(function(){});
   toast('Copied','success');
 }
 
@@ -6775,7 +7140,51 @@ fetchAll();
 // Rafraichissement auto : jamais pendant que l'onglet RH est ouvert. fetchAll finit par
 // render(), qui remplace #app.innerHTML et viderait les formulaires RH (dossier salarie,
 // document, remuneration) en pleine saisie. Comportement inchange sur les autres onglets.
-setInterval(()=>{if(currentTab!=='hr')fetchAll();},5*60*1000);
+// 2026-09-10 : le cycle etait de 5 min, sans garde de visibilite ni borne. Un onglet
+// oublie la nuit generait environ 25 requetes toutes les 5 min sur la base Supabase du
+// plan gratuit (300/heure, 24h sur 24), ce qui vidait son budget de calcul et faisait
+// tomber la base tous les soirs. Desormais : 15 min, uniquement onglet visible, arret
+// complet apres AUTO_REFRESH_MAX_IDLE_CYCLES cycles sans interaction, reprise au
+// premier retour au premier plan ou a la premiere interaction.
+const AUTO_REFRESH_MS = 15 * 60 * 1000;
+const AUTO_REFRESH_MAX_IDLE_CYCLES = 8;          // 8 x 15 min = 2 h sans interaction
+let autoRefreshIdleCycles = 0;
+let autoRefreshStopped = false;
+let lastAutoFetchAt = Date.now();
+
+function autoFetch(){
+  lastAutoFetchAt = Date.now();
+  fetchAll();
+}
+
+function noteUserActivity(){
+  autoRefreshIdleCycles = 0;
+  autoRefreshStopped = false;
+}
+['click','keydown','touchstart'].forEach(function(ev){
+  document.addEventListener(ev, noteUserActivity, {passive:true, capture:true});
+});
+
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState !== 'visible') return;
+  noteUserActivity();
+  if(currentTab === 'hr') return;
+  // Anti alt-tab : au plus un rafraichissement par minute au retour au premier plan.
+  if(Date.now() - lastAutoFetchAt < 60 * 1000) return;
+  autoFetch();
+});
+
+setInterval(function(){
+  if(document.visibilityState !== 'visible') return;   // onglet en arriere-plan : zero requete
+  if(autoRefreshStopped) return;
+  if(currentTab === 'hr') return;
+  autoRefreshIdleCycles += 1;
+  if(autoRefreshIdleCycles > AUTO_REFRESH_MAX_IDLE_CYCLES){
+    autoRefreshStopped = true;
+    return;
+  }
+  autoFetch();
+}, AUTO_REFRESH_MS);
 // Refresh timer display every minute
 setInterval(()=>{if(currentTab==='planner')render();},60000);
 // Check upcoming checkouts every 30 min
@@ -7085,5 +7494,7 @@ document.addEventListener('keydown', (e) => {
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').then(reg=>{
     console.log('SW registered',reg.scope);
+    // L'endpoint push peut avoir tourné depuis la dernière session.
+    if(typeof syncPushSubscription==='function') syncPushSubscription();
   }).catch(err=>console.log('SW failed',err));
 }
