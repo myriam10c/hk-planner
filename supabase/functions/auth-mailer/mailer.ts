@@ -97,12 +97,36 @@ function esc(s: unknown): string {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// Garde d'origine : la cible de redirection doit appartenir a l'app, sinon on la
+// remplace par APP_URL. GoTrue valide deja redirect_to contre son allow-list
+// avant de composer le payload du hook, c'est une defense en profondeur (revue
+// T4, remarque 1). Le caractere qui suit l'origine doit ouvrir un chemin, une
+// requete ou un fragment : sans ce controle, "APP_URL.evil.example" passerait le
+// simple startsWith.
+export function safeRedirectTo(raw: unknown): string {
+  const v = typeof raw === "string" ? raw.trim() : "";
+  if (!v.startsWith(APP_URL)) return APP_URL;
+  const rest = v.slice(APP_URL.length);
+  if (rest !== "" && !"/?#".includes(rest[0])) return APP_URL;
+  return v;
+}
+
+// Injection d'en-tete RFC 822 : un CR ou un LF dans le destinataire ou dans le
+// sujet fabriquerait un en-tete supplementaire (un Bcc, par exemple). Le payload
+// du hook est signe et l'adresse a deja ete validee par GoTrue, c'est une
+// defense en profondeur (revue T4, remarque 2).
+export function headerInjectionError(to: string, subject: string): string | null {
+  if (/[\r\n]/.test(String(to ?? ""))) return "invalid recipient";
+  if (/[\r\n]/.test(String(subject ?? ""))) return "invalid subject";
+  return null;
+}
+
 export function buildActionUrl(supabaseUrl: string, emailData: any): string {
   const base = String(supabaseUrl || "").replace(/\/+$/, "");
   const u = new URL(base + "/auth/v1/verify");
   u.searchParams.set("token", String(emailData?.token_hash ?? ""));
   u.searchParams.set("type", String(emailData?.email_action_type ?? ""));
-  u.searchParams.set("redirect_to", String(emailData?.redirect_to || emailData?.site_url || APP_URL));
+  u.searchParams.set("redirect_to", safeRedirectTo(emailData?.redirect_to || emailData?.site_url || APP_URL));
   return u.toString();
 }
 

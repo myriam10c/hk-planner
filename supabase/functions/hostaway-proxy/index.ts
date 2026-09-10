@@ -3,8 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
 import {
-  bearerToken, INVITE_ROLES, inviteRoleAllowed, isValidEmail,
-  normalizeEmail, resolveCleanerByEmail, verifyUserJwt,
+  currentUser, isEmailUniqueViolation, normalizeEmail, parseInviteInput,
+  planInvite, planInviteRollback, systemRowError,
 } from "./auth.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
@@ -369,14 +369,6 @@ async function sha256Hex(s: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Validate X-Cleaner-Token, return cleaner info or null (no error if token missing)
-async function validateCleanerToken(sb: any, token: string | null): Promise<{ cleaner_id: number; name: string; role: string; color: string } | null> {
-  if (!token) return null;
-  const { data, error } = await sb.rpc('validate_cleaner_session', { p_token: token });
-  if (error || !data || data.length === 0) return null;
-  return data[0];
-}
-
 // Origine de la PWA : cible des liens d'invitation et de reinitialisation. Doit
 // figurer dans l'allow-list de redirection du projet Supabase, sinon Auth renvoie
 // vers le site_url par defaut.
@@ -391,30 +383,21 @@ async function findAuthUserByEmail(sb: any, email: string): Promise<any | null> 
   return users.find((u) => String(u.email ?? "").toLowerCase() === email) ?? null;
 }
 
-// Session courante, deux credentials acceptes pendant toute la transition :
-//   - Authorization: Bearer <JWT Supabase Auth>  (comptes email, cible)
-//   - X-Cleaner-Token: <jeton de session PIN>    (heritage, deverrouillage rapide)
-// Le Bearer est prioritaire : si un JWT est present et valide mais ne correspond
-// a aucun membre actif, on refuse sans retomber sur le PIN, sinon un compte Auth
-// desactive pourrait continuer a agir via un vieux jeton PIN du meme appareil.
-async function currentUser(sb: any, req: Request) {
-  const token = bearerToken(req);
-  if (token) {
-    const user = await verifyUserJwt(token);
-    if (!user) {
-      console.log("[hostaway-proxy] Bearer invalide ou expire");
-      return null;
-    }
-    const me = await resolveCleanerByEmail(sb, user.email);
-    if (!me) console.log("[hostaway-proxy] JWT valide sans membre actif correspondant");
-    return me;
+// Defait l'ecriture de cleaners quand l'appel a l'Admin API a echoue apres elle.
+// Ne leve jamais : l'appelant est deja sur un chemin d'erreur.
+async function rollbackInvite(sb: any, plan: any, cleanerId: number): Promise<void> {
+  const undo = planInviteRollback(plan, cleanerId);
+  if (!undo) return;
+  try {
+    if (undo.op === "delete") await sb.from("cleaners").delete().eq("id", undo.id);
+    else await sb.from("cleaners").update(undo.patch).eq("id", undo.id);
+  } catch (e) {
+    console.warn("[inviteCleaner] rollback impossible: " + String(e));
   }
-  // L'en-tete est lu dans une variable a dessein : le remplacement automatique
-  // du step suivant cible la forme validateCleanerToken(sb, req.headers.get(...)),
-  // et l'ecrire ici textuellement transformerait ce repli en appel recursif.
-  const pinToken = req.headers.get("x-cleaner-token");
-  return await validateCleanerToken(sb, pinToken);
 }
+
+// `currentUser` (precedence Bearer > X-Cleaner-Token) vit dans auth.ts : index.ts
+// appelle Deno.serve au chargement et n'est donc pas testable (revue T3).
 
 // Gate d'auth du module RH, a trois niveaux :
 //   staff   : n'importe quel membre authentifié (agit sur son propre dossier)
@@ -1337,6 +1320,14 @@ Deno.serve(async (req: Request) => {
       }
       let cleanerId: number;
       if (id) {
+        // La ligne `system` (le compte du CEO Agent) n'est pas modifiable par
+        // cette route, et son role ne bascule pas : sinon deux clics de manager
+        // la font passer en `manager`, ce qui la rend invitable (revue T7,
+        // constat 5). Le refus du role `system` demande, lui, est deja pose plus
+        // haut par ALLOWED_ROLES ; systemRowError le redit pour les deux sens.
+        const { data: currentRow } = await sb.from("cleaners").select("role").eq("id", id).maybeSingle();
+        const rowErr = systemRowError(currentRow?.role, role);
+        if (rowErr) return jsonResp({ error: rowErr }, 400);
         const upd: any = { name, phone: phone || null, color: color || "#e94560" };
         if (role !== undefined) upd.role = role;
         if (normalizedTgChat !== undefined) upd.telegram_chat_id = normalizedTgChat;
@@ -1403,6 +1394,16 @@ Deno.serve(async (req: Request) => {
       }
       return jsonResp({ status: "success" });
     }
+    // inviteCleaner : cree ou relie un compte Supabase Auth a une ligne cleaners.
+    // Ordre des ecritures, et rollback qui en decoule : la ligne cleaners est
+    // ecrite d'abord, l'appel a l'Admin API vient en dernier parce que c'est lui
+    // qui envoie l'email (le faire partir avant une ecriture qui peut echouer
+    // donnerait un lien vers un compte qu'on devrait detruire ensuite). Si cet
+    // appel echoue, on defait donc l'ecriture cleaners : la ligne creee dans la
+    // requete est supprimee, une ligne existante retrouve son adresse et son etat
+    // d'activation (revue T5, constat 5). Et si l'adresse d'une ligne change,
+    // l'ancien compte Auth est supprime AVANT l'ecriture, sinon son titulaire
+    // garde un acces que le manager croit avoir coupe (revue T5, constat 1).
     if (action === "inviteCleaner" && req.method === "POST") {
       // Meme porte que saveCleaner : X-App-Secret voyage dans le bundle public,
       // seule une session manager (JWT ou PIN) autorise la creation de comptes.
@@ -1410,74 +1411,82 @@ Deno.serve(async (req: Request) => {
       if (!me || me.role !== "manager") return jsonResp({ error: "manager auth required" }, 403);
 
       const body = await req.json().catch(() => null);
-      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
-
-      const email = normalizeEmail(body.email);
-      if (!isValidEmail(email)) return jsonResp({ error: "a valid email is required" }, 400);
-      const name = typeof body.name === "string" ? body.name.trim() : "";
-      const role = body.role === undefined || body.role === null ? "cleaner" : body.role;
-      if (!inviteRoleAllowed(role)) {
-        return jsonResp({ error: "role must be one of " + [...INVITE_ROLES].join(", ") }, 400);
-      }
+      const input = parseInviteInput(body);
+      if (input.kind === "error") return jsonResp({ error: input.error }, input.status);
+      const email = input.email;
 
       // 1) La ligne cleaners : celle designee par id, sinon celle qui porte deja
       //    cet email, sinon une nouvelle.
       let target: any = null;
       if (body.id) {
-        const { data } = await sb.from("cleaners").select("id, name, role, email").eq("id", body.id).maybeSingle();
-        if (!data) return jsonResp({ error: "team member not found" }, 404);
-        if (data.role === "system") return jsonResp({ error: "this account cannot be invited" }, 400);
-        target = data;
+        const { data } = await sb.from("cleaners")
+          .select("id, name, role, email, is_active").eq("id", body.id).maybeSingle();
+        target = data ?? null;
       } else {
-        const { data } = await sb.from("cleaners").select("id, name, role, email").eq("email", email).maybeSingle();
+        const { data } = await sb.from("cleaners")
+          .select("id, name, role, email, is_active").eq("email", email).maybeSingle();
         target = data ?? null;
       }
-
       // 2) L'email ne peut pas etre vole a un autre membre.
       const { data: holder } = await sb.from("cleaners").select("id").eq("email", email).maybeSingle();
-      if (holder && (!target || Number(holder.id) !== Number(target.id))) {
-        return jsonResp({ error: "another team member already uses this email" }, 409);
+
+      const plan = planInvite(input, body.id ?? null, target, holder ? Number(holder.id) : null);
+      if (plan.kind === "error") return jsonResp({ error: plan.error }, plan.status);
+
+      // 3) L'ancien compte Auth part avant toute ecriture. S'il resiste, on ne
+      //    touche a rien : mieux vaut un refus qu'un acces fantome.
+      if (plan.kind === "update" && plan.previousEmail) {
+        try {
+          const previous = await findAuthUserByEmail(sb, plan.previousEmail);
+          if (previous) {
+            const { error } = await sb.auth.admin.deleteUser(previous.id);
+            if (error) throw error;
+          }
+        } catch (e) {
+          console.warn("[inviteCleaner] ancien compte Auth non supprime: " + String(e));
+          return jsonResp({ error: "Could not replace the previous account" }, 409);
+        }
       }
 
+      // 4) L'ecriture cleaners.
       let cleanerId: number;
-      if (target) {
-        const upd: any = { email };
-        if (name) upd.name = name;
-        if (body.role !== undefined && body.role !== null) upd.role = role;
-        if (typeof body.phone === "string") upd.phone = body.phone.trim() || null;
-        if (typeof body.color === "string" && body.color) upd.color = body.color;
-        const { error } = await sb.from("cleaners").update(upd).eq("id", target.id);
+      if (plan.kind === "update") {
+        const { error } = await sb.from("cleaners").update(plan.patch).eq("id", plan.id);
+        if (isEmailUniqueViolation(error)) {
+          return jsonResp({ error: "This email is already used by another team member" }, 409);
+        }
         if (error) throw error;
-        cleanerId = Number(target.id);
+        cleanerId = plan.id;
       } else {
-        if (!name) return jsonResp({ error: "name required" }, 400);
-        const { data: inserted, error } = await sb.from("cleaners").insert({
-          name,
-          email,
-          role,
-          phone: typeof body.phone === "string" && body.phone.trim() ? body.phone.trim() : null,
-          color: typeof body.color === "string" && body.color ? body.color : "#e94560",
-          is_active: true,
-        }).select("id").single();
+        const { data: inserted, error } = await sb.from("cleaners").insert(plan.row).select("id").single();
+        if (isEmailUniqueViolation(error)) {
+          return jsonResp({ error: "This email is already used by another team member" }, 409);
+        }
         if (error) throw error;
         cleanerId = Number(inserted.id);
       }
 
-      // 3) Le compte Supabase Auth. S'il existe deja, une seconde invitation
+      // 5) Le compte Supabase Auth. S'il existe deja, une seconde invitation
       //    echouerait : on envoie un email de reinitialisation a la place, ce qui
       //    est ce que le manager veut dans les deux cas (« renvoie-lui son lien »).
       const existing = await findAuthUserByEmail(sb, email);
       const redirectTo = APP_ORIGIN + "/";
-      if (existing) {
-        const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
-        if (error) return jsonResp({ error: "could not send the reset email: " + error.message }, 502);
-        console.log("[inviteCleaner] reset envoye pour cleaner " + String(cleanerId));
-        return jsonResp({ status: "success", id: cleanerId, mode: "reset" });
+      const authError = existing
+        ? (await sb.auth.resetPasswordForEmail(email, { redirectTo })).error
+        : (await sb.auth.admin.inviteUserByEmail(email, { redirectTo })).error;
+      if (authError) {
+        await rollbackInvite(sb, plan, cleanerId);
+        // Le libelle amont (limites de debit GoTrue et consorts) reste dans les
+        // journaux, le client ne recoit qu'un message stable.
+        console.warn("[inviteCleaner] echec de l'envoi Auth: " + String(authError.message ?? authError));
+        return jsonResp(
+          { error: existing ? "Could not send the reset email" : "Could not send the invitation" },
+          502,
+        );
       }
-      const { error: invErr } = await sb.auth.admin.inviteUserByEmail(email, { redirectTo });
-      if (invErr) return jsonResp({ error: "could not send the invitation: " + invErr.message }, 502);
-      console.log("[inviteCleaner] invitation envoyee pour cleaner " + String(cleanerId));
-      return jsonResp({ status: "success", id: cleanerId, mode: "invite" });
+      console.log("[inviteCleaner] " + (existing ? "reset" : "invitation") +
+        " envoye pour cleaner " + String(cleanerId));
+      return jsonResp({ status: "success", id: cleanerId, mode: existing ? "reset" : "invite" });
     }
     if (action === "cleanerLogin" && req.method === "POST") {
       const body = await req.json();

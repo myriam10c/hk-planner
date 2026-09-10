@@ -5,7 +5,10 @@
 // Regles : ne jamais journaliser le corps de la requete ni le lien construit
 // (ils portent le token_hash, qui vaut un mot de passe a usage unique).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { buildAuthEmail, type MailerEnv, parseHookSecret, sendGmail, verifyStandardWebhook } from "./mailer.ts";
+import {
+  buildAuthEmail, headerInjectionError, type MailerEnv,
+  parseHookSecret, sendGmail, verifyStandardWebhook,
+} from "./mailer.ts";
 
 declare const Deno: any;
 
@@ -56,6 +59,10 @@ Deno.serve(async (req: Request) => {
   const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
   try {
     const email = buildAuthEmail(supabaseUrl, body.user, body.email_data);
+    // Aucun CR/LF ne doit atteindre le message : il y fabriquerait un en-tete
+    // RFC 822 supplementaire (revue T4, remarque 2).
+    const injected = headerInjectionError(to, email.subject);
+    if (injected) return fail(400, injected);
     await sendGmail(envOrThrow(), to, email);
     // Trace volontairement pauvre : type d'action seulement, ni email, ni lien.
     console.log("[auth-mailer] envoye type=" + type);

@@ -197,3 +197,41 @@ Deno.test("sendGmail leve quand Gmail refuse", async () => {
   const e = buildAuthEmail(SUPABASE_URL, { email: "a@b.c" }, emailData("invite"));
   await assertRejects(() => sendGmail(ENV, "a@b.c", e, fake as any, Date.now()), Error, "HTTP 403");
 });
+
+// ---------------------------------------------------------------------------
+// Consolidation de la revue T4 (tache 8a).
+// ---------------------------------------------------------------------------
+
+import { headerInjectionError, safeRedirectTo } from "./mailer.ts";
+
+// T4 remarque 1 : buildActionUrl recopiait redirect_to sans le comparer a
+// l'origine de l'app. GoTrue le valide deja, c'est une defense en profondeur.
+Deno.test("safeRedirectTo n'accepte que les cibles de l'app", () => {
+  assertEquals(safeRedirectTo(APP_URL + "/"), APP_URL + "/");
+  assertEquals(safeRedirectTo(APP_URL + "/#/team?x=1"), APP_URL + "/#/team?x=1");
+  assertEquals(safeRedirectTo(APP_URL), APP_URL);
+  assertEquals(safeRedirectTo("https://evil.example/steal"), APP_URL);
+  // Prefixe trompeur : le meme debut de chaine, un autre hote.
+  assertEquals(safeRedirectTo(APP_URL + ".evil.example/steal"), APP_URL);
+  assertEquals(safeRedirectTo(""), APP_URL);
+  assertEquals(safeRedirectTo(null), APP_URL);
+});
+
+Deno.test("buildActionUrl remplace un redirect_to d'une autre origine", () => {
+  const u = new URL(buildActionUrl(SUPABASE_URL, {
+    token_hash: "hash-abc",
+    email_action_type: "invite",
+    redirect_to: "https://evil.example/steal",
+    site_url: APP_URL,
+  }));
+  assertEquals(u.searchParams.get("redirect_to"), APP_URL);
+});
+
+// T4 remarque 2 : un CR/LF dans le destinataire fabriquerait un en-tete RFC 822
+// supplementaire (Bcc, par exemple). Le sujet est traite de la meme facon.
+Deno.test("headerInjectionError refuse un CR ou un LF dans le destinataire ou le sujet", () => {
+  assertEquals(headerInjectionError("walter@example.com", "Your HK Planner account is ready"), null);
+  assertEquals(headerInjectionError("a@b.c\r\nBcc: x@y.z", "Sujet"), "invalid recipient");
+  assertEquals(headerInjectionError("a@b.c\nBcc: x@y.z", "Sujet"), "invalid recipient");
+  assertEquals(headerInjectionError("a@b.c", "Sujet\r\nBcc: x@y.z"), "invalid subject");
+});

@@ -254,3 +254,161 @@ Deno.test("inviteRoleAllowed refuse le role system et les valeurs inconnues", ()
   assertEquals(inviteRoleAllowed("admin"), false);
   assertEquals(inviteRoleAllowed(undefined), false);
 });
+
+// ---------------------------------------------------------------------------
+// Consolidation des revues T3 a T7 (tache 8a).
+// ---------------------------------------------------------------------------
+
+import {
+  currentUser,
+  isEmailUniqueViolation,
+  parseInviteInput,
+  planInvite,
+  planInviteRollback,
+  systemRowError,
+} from "./auth.ts";
+
+// Faux client complet : la resolution par email (comme fakeSb) plus le RPC de
+// session PIN, avec un compteur d'appels pour prouver qu'il n'est jamais
+// consulte quand un Bearer est present.
+function fakeSbAuth(opts: { cleanerRow?: any; pinRows?: any[] } = {}) {
+  const state = { rpcCalls: 0 };
+  return {
+    state,
+    from(_table: string) {
+      const q: any = {
+        select: () => q,
+        eq: () => q,
+        maybeSingle: async () => ({ data: opts.cleanerRow ?? null, error: null }),
+      };
+      return q;
+    },
+    async rpc(_name: string, _args: any) {
+      state.rpcCalls++;
+      return { data: opts.pinRows ?? [], error: null };
+    },
+  };
+}
+
+function reqWith(headers: Record<string, string>) {
+  return new Request("https://x.test/", { headers });
+}
+
+// T3 constat 4 : la precedence n'avait aucun test. Un Bearer valide gagne sur le
+// jeton PIN, qui n'est meme pas lu.
+Deno.test("currentUser : un Bearer valide gagne sur X-Cleaner-Token", async () => {
+  const kp = await setupKeys();
+  const sb = fakeSbAuth({
+    cleanerRow: { id: 8, name: "Walter", role: "manager", color: "#e94560" },
+    pinRows: [{ cleaner_id: 99, name: "PIN", role: "cleaner", color: "#000000" }],
+  });
+  const me = await currentUser(sb, reqWith({
+    authorization: "Bearer " + (await signWith(kp)),
+    "x-cleaner-token": "jeton-pin-valide",
+  }));
+  assertEquals(me, { cleaner_id: 8, name: "Walter", role: "manager", color: "#e94560" });
+  assertEquals(sb.state.rpcCalls, 0);
+});
+
+// T3 constat 4 (suite) : un Bearer invalide ne retombe JAMAIS sur le PIN, sinon
+// un compte desactive garderait un acces par un vieux jeton du meme appareil.
+Deno.test("currentUser : un Bearer invalide ne retombe pas sur X-Cleaner-Token", async () => {
+  await setupKeys();
+  const sb = fakeSbAuth({
+    cleanerRow: { id: 8, name: "Walter", role: "manager", color: "#e94560" },
+    pinRows: [{ cleaner_id: 99, name: "PIN", role: "cleaner", color: "#000000" }],
+  });
+  const me = await currentUser(sb, reqWith({
+    authorization: "Bearer pas.un.jwt",
+    "x-cleaner-token": "jeton-pin-valide",
+  }));
+  assertEquals(me, null);
+  assertEquals(sb.state.rpcCalls, 0);
+});
+
+// Non-regression : sans Bearer, le repli PIN reste le chemin nominal.
+Deno.test("currentUser : sans Bearer, le jeton PIN est utilise", async () => {
+  await setupKeys();
+  const sb = fakeSbAuth({
+    pinRows: [{ cleaner_id: 99, name: "PIN", role: "cleaner", color: "#000000" }],
+  });
+  const me = await currentUser(sb, reqWith({ "x-cleaner-token": "jeton-pin-valide" }));
+  assertEquals(me?.cleaner_id, 99);
+  assertEquals(sb.state.rpcCalls, 1);
+});
+
+const OK_INPUT = { email: "walter@example.com", name: "Walter", role: "manager" };
+
+// T5 constat 1 : repointer l'email d'un membre laissait vivre l'ancien compte
+// Auth. Le plan doit remonter l'ancienne adresse pour que l'appelant la revoque.
+Deno.test("planInvite remonte l'ancien email a revoquer quand l'adresse change", () => {
+  const input = parseInviteInput(OK_INPUT);
+  assertEquals(input.kind, "ok");
+  const plan = planInvite(input as any, 8, { id: 8, role: "cleaner", email: "ancien@example.com", is_active: true }, 8);
+  assertEquals(plan.kind, "update");
+  assertEquals((plan as any).previousEmail, "ancien@example.com");
+  // Meme adresse : rien a revoquer.
+  const same = planInvite(input as any, 8, { id: 8, role: "cleaner", email: "walter@example.com", is_active: true }, 8);
+  assertEquals((same as any).previousEmail, null);
+});
+
+// T5 constat 2 : inviter une ligne desactivee creait un compte inutilisable.
+Deno.test("planInvite reactive la ligne visee (is_active = true)", () => {
+  const input = parseInviteInput(OK_INPUT) as any;
+  const plan = planInvite(input, 8, { id: 8, role: "cleaner", email: null, is_active: false }, null);
+  assertEquals(plan.kind, "update");
+  assertEquals((plan as any).patch.is_active, true);
+});
+
+// T5 constat 3 : le refus du role system n'etait pose que sur la branche id.
+Deno.test("planInvite refuse la ligne system quelle que soit la branche", () => {
+  const input = parseInviteInput(OK_INPUT) as any;
+  const parId = planInvite(input, 11, { id: 11, role: "system", email: null, is_active: true }, null);
+  assertEquals(parId, { kind: "error", status: 400, error: "this account cannot be invited" });
+  // Branche par email : aucun id demande, la ligne est trouvee par son adresse.
+  const parEmail = planInvite(input, null, { id: 11, role: "system", email: "walter@example.com", is_active: true }, 11);
+  assertEquals(parEmail, { kind: "error", status: 400, error: "this account cannot be invited" });
+});
+
+// T5 constat 4 : la course entre deux invitations rendait un 500 opaque.
+Deno.test("isEmailUniqueViolation reconnait le code Postgres 23505", () => {
+  assertEquals(isEmailUniqueViolation({ code: "23505", message: "duplicate key" }), true);
+  assertEquals(isEmailUniqueViolation({ code: "23502" }), false);
+  assertEquals(isEmailUniqueViolation(null), false);
+  assertEquals(isEmailUniqueViolation(undefined), false);
+});
+
+// T5 constat 5 : aucun rollback quand l'appel Auth echoue apres l'ecriture.
+Deno.test("planInviteRollback defait l'ecriture de cleaners", () => {
+  const input = parseInviteInput({ ...OK_INPUT, id: undefined }) as any;
+  const ins = planInvite(input, null, null, null);
+  assertEquals(ins.kind, "insert");
+  assertEquals(planInviteRollback(ins, 42), { op: "delete", id: 42 });
+
+  const upd = planInvite(input, 8, { id: 8, role: "cleaner", email: "ancien@example.com", is_active: false }, 8);
+  assertEquals(planInviteRollback(upd, 8), {
+    op: "restore",
+    id: 8,
+    patch: { email: "ancien@example.com", is_active: false },
+  });
+});
+
+// T7 constat 5 : saveCleaner validait le role demande sans regarder le role
+// actuel, deux clics suffisaient a sortir la ligne system de sa reserve.
+Deno.test("systemRowError verrouille la ligne system dans les deux sens", () => {
+  assertEquals(systemRowError("system", "manager"), "this account cannot be modified");
+  assertEquals(systemRowError("system", undefined), "this account cannot be modified");
+  assertEquals(systemRowError("cleaner", "system"), "invalid role");
+  assertEquals(systemRowError("cleaner", "manager"), null);
+  assertEquals(systemRowError("manager", undefined), null);
+});
+
+// Garde-fou du parseur : il refuse avant toute lecture en base.
+Deno.test("parseInviteInput refuse une adresse invalide et un role interdit", () => {
+  assertEquals(parseInviteInput({ email: "pas-une-adresse" }).kind, "error");
+  assertEquals(parseInviteInput({ email: "walter@example.com", role: "system" }).kind, "error");
+  const ok = parseInviteInput({ email: "  Walter@Example.COM " }) as any;
+  assertEquals(ok.email, "walter@example.com");
+  assertEquals(ok.role, "cleaner");
+  assertEquals(ok.roleProvided, false);
+});
