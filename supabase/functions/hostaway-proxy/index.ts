@@ -1478,12 +1478,16 @@ Deno.serve(async (req: Request) => {
       if (!Number.isInteger(targetId) || Number(targetId) <= 0) {
         return jsonResp({ error: "cleaner_id must be a positive integer" }, 400);
       }
+      // Optional custom text (manager or server only, same gate as above): bounded, plain strings.
+      const customTitle = typeof body?.title === "string" ? body.title.trim().slice(0, 80) : "";
+      const customBody = typeof body?.body === "string" ? body.body.trim().slice(0, 300) : "";
+      const isUrgent = body?.priority === "urgent";
       const result = await sendPush(sb, targetId as number, {
-        title: "HK Planner test",
-        body: "Push notifications are working on this device.",
+        title: customTitle || "HK Planner test",
+        body: customBody || "Push notifications are working on this device.",
         url: "https://stunning-kleicha-f61101.netlify.app/",
-        tag: "hk-push-test",
-      });
+        tag: customTitle || customBody ? `hk-push-manual-${Date.now()}` : "hk-push-test",
+      }, isUrgent ? { priority: "urgent" } : undefined);
       return jsonResp({ status: "success", cleaner_id: targetId, ...result });
     }
 
