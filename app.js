@@ -137,6 +137,11 @@ function __togglePlannerBulkAllFromKeys(keysJson){ try{ togglePlannerBulkAll(JSO
 function __exportPlannerVisibleCSV(){ exportPlannerCSV(window.__plannerVisible || []); }
 function __openExtraModalById(id){ var ex=(extraCleanings||[]).find(function(e){ return e.id === id; }); if(ex) openExtraModal(ex); }
 function __saveCleanerFromForm(){
+  // « Add (PIN only) » ne cree jamais de compte : une adresse saisie serait
+  // perdue en silence, on renvoie donc vers l'autre bouton plutot que de
+  // l'ignorer.
+  const emailEl=document.getElementById('newEmail');
+  if(((emailEl&&emailEl.value)||'').trim()){ toast('Use Add & invite to send an invitation.','error'); return; }
   saveCleaner(null,
     document.getElementById('newName').value,
     document.getElementById('newPhone').value,
@@ -169,9 +174,19 @@ async function inviteCleaner(id){
   const c=(cleaners||[]).find(x=>String(x.id)===String(id));
   if(!c){ toast('Team member not found','error'); return; }
   const el=document.getElementById('cleanerEmail-'+id);
-  const email=(((el&&el.value)||c.email||'')+'').trim().toLowerCase();
+  // Le champ affiche fait foi : vider la case puis cliquer ne doit pas renvoyer
+  // l'ancienne adresse en douce. On ne retombe sur c.email que si le champ
+  // n'existe pas du tout dans le DOM.
+  const email=((el?el.value:(c.email||''))+'').trim().toLowerCase();
   if(!email){ toast('Enter an email address first','error'); return; }
   if(!isValidTeamEmail(email)){ toast('That email address is not valid','error'); return; }
+  // Remplacer l'adresse d'un membre change son identifiant de connexion, ce
+  // n'est pas une relance : on le dit avant de partir.
+  const previous=((c.email||'')+'').trim().toLowerCase();
+  if(previous && email!==previous){
+    const ok=window.confirm('Change this member\'s sign-in email from '+previous+' to '+email+'? The old account will be removed.');
+    if(!ok) return;
+  }
   try{
     const r=await apiWrite('inviteCleaner',{body:{id:c.id,name:c.name,email:email,role:c.role||'cleaner'}});
     toast(r&&r.mode==='reset'?('Password reset email sent to '+email):('Invitation sent to '+email),'success');
@@ -184,15 +199,27 @@ async function __inviteNewCleanerFromForm(){
   const email=(document.getElementById('newEmail').value||'').trim().toLowerCase();
   if(!name||!email){ toast('Name and email are required','error'); return; }
   if(!isValidTeamEmail(email)){ toast('That email address is not valid','error'); return; }
+  const role=document.getElementById('newRole').value;
+  const phone=document.getElementById('newPhone').value;
+  const color=document.getElementById('newColor').value;
+  const pinEl=document.getElementById('newPin');
+  const pin=(((pinEl&&pinEl.value)||'')+'').trim();
   try{
-    await apiWrite('inviteCleaner',{body:{
+    const r=await apiWrite('inviteCleaner',{body:{
       name:name,
       email:email,
-      role:document.getElementById('newRole').value,
-      phone:document.getElementById('newPhone').value,
-      color:document.getElementById('newColor').value,
+      role:role,
+      phone:phone,
+      color:color,
     }});
     toast('Invitation sent to '+email,'success');
+    // L'action inviteCleaner du proxy ne connait pas le PIN : on le pose sur la
+    // ligne qu'elle vient de creer, avec l'id qu'elle renvoie, donc sans
+    // doublon. saveCleaner recharge et repeint tout seul.
+    if(pin){
+      if(r&&r.id){ await saveCleaner(r.id,name,phone,color,pin,role); return; }
+      toast('PIN not saved: the server did not return the member id','error');
+    }
     fetchAll();
   }catch(e){ toast((e&&e.message)||'Error','error'); }
 }
@@ -4138,6 +4165,9 @@ function useEmailInstead(){ authScreen='login'; authError=''; authNotice=''; if(
 // compte n'est relie a aucun membre actif.
 async function adoptEmailSession(){
   const me=await api('cleanerMe');
+  // Un 401 a deja ferme la session et pose « Your session ended. » : ne pas
+  // ecraser ce message par celui du compte non rattache, qui dirait faux.
+  if(me&&me.error==='Session expired') return false;
   if(!me||!me.cleaner){
     try{ await sbAuth.auth.signOut(); }catch(e){}
     authAccessToken=null;
@@ -5641,11 +5671,17 @@ function renderSettings(){
       // refuse son invitation, on ne montre donc pas le champ sur sa ligne.
       (role==='system' ? '' :
         '<input id="cleanerEmail-'+c.id+'" class="c-email" type="email" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="email address" value="'+esc(c.email||'')+'"/>'+
-        '<button class="c-invite" data-action="inviteCleaner" data-arg0="'+c.id+'" title="'+(c.email?'Resend the account email':'Send an invitation')+'" aria-label="Invite '+esc(c.name)+'">'+(c.email?'Resend':'Invite')+'</button>')+
-      '<select data-action-change="__cleanerRoleChange" data-arg0="'+c.id+'" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
-    ['manager','cleaner','maintenance'].forEach(r=>{h+='<option value="'+r+'"'+(role===r?' selected':'')+'>'+r+'</option>';});
-    h+='</select>'+
-      '<button data-action="__sendDailyWhatsAppFromJson" data-arg0="'+JSON.stringify(c).replace(/"/g,'&quot;')+'" title="Send WhatsApp" aria-label="Send WhatsApp" style="color:var(--green)">'+icon('phone',16)+'</button>'+
+        '<button class="c-invite" data-action="inviteCleaner" data-arg0="'+c.id+'" title="'+(c.email?'Resend the account email':'Send an invitation')+'" aria-label="Invite '+esc(c.name)+'">'+(c.email?'Resend':'Invite')+'</button>');
+    // Le role `system` (agent CEO) ne change pas de role non plus : lui laisser
+    // le selecteur permettrait de le passer en manager, donc de recuperer le
+    // controle email et de contourner le refus d'invitation du proxy. Son role
+    // reste lisible dans le badge de la ligne.
+    if(role!=='system'){
+      h+='<select data-action-change="__cleanerRoleChange" data-arg0="'+c.id+'" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
+      ['manager','cleaner','maintenance'].forEach(r=>{h+='<option value="'+r+'"'+(role===r?' selected':'')+'>'+r+'</option>';});
+      h+='</select>';
+    }
+    h+='<button data-action="__sendDailyWhatsAppFromJson" data-arg0="'+JSON.stringify(c).replace(/"/g,'&quot;')+'" title="Send WhatsApp" aria-label="Send WhatsApp" style="color:var(--green)">'+icon('phone',16)+'</button>'+
       '<button data-action="deleteCleaner" data-arg0="'+c.id+'" title="Remove" aria-label="Remove" style="color:var(--red)">'+icon('trash',16)+'</button></div>';
   });
   h+='<div class="add-form">'+

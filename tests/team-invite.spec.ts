@@ -44,15 +44,21 @@ async function openTeamScreen(page: any) {
   await page.waitForFunction(() => typeof (window as any).renderSettings === 'function', null, { timeout: 10_000 });
   await page.evaluate(() => {
     const w = window as any;
-    w.__inviteCalls = [];
+    w.__inviteCalls = [];  // ce qui passe par apiWrite (action inviteCleaner)
+    w.__apiCalls = [];     // ce qui passe par api (saveCleaner, getCleaners)
     w.__seed = {
       cleaners: [
         { id: 8, name: 'Walter', role: 'manager', color: '#e94560', phone: '', email: 'walter@example.com' },
         { id: 4, name: 'Faiza', role: 'cleaner', color: '#4caf50', phone: '', email: null },
+        { id: 11, name: 'Medini CEO Agent', role: 'system', color: '#333333', phone: '', email: null },
       ],
     };
     w.eval('cleaners = window.__seed.cleaners; templates = []; currentTab = "settings";');
-    w.api = async () => ({ status: 'success' });
+    w.api = async (action: string, opts: any) => {
+      w.__apiCalls.push({ action, body: opts && opts.body });
+      if (action === 'getCleaners') return { status: 'success', cleaners: w.__seed.cleaners };
+      return { status: 'success' };
+    };
     w.apiWrite = async (action: string, opts: any) => {
       w.__inviteCalls.push({ action, body: opts && opts.body });
       return { status: 'success', id: 4, mode: 'invite' };
@@ -102,4 +108,85 @@ test('le formulaire d ajout envoie une invitation', async ({ page }) => {
   expect(calls).toHaveLength(1);
   expect(calls[0].body).toMatchObject({ name: 'Pionah', email: 'pionah@example.com', role: 'cleaner' });
   expect(calls[0].body.id).toBeUndefined();
+});
+
+// === Correctifs de la revue ===
+
+test('vider le champ email d un membre qui en a un n envoie rien', async ({ page }) => {
+  await openTeamScreen(page);
+  await page.fill('#cleanerEmail-8', '');
+  await page.click('[data-action="inviteCleaner"][data-arg0="8"]');
+  const calls = await page.evaluate(() => (window as any).__inviteCalls);
+  expect(calls).toHaveLength(0);
+  await expect(page.locator('.toast, .toast-item')).toContainText('email');
+});
+
+test('changer l adresse d un membre demande confirmation et part si elle est donnee', async ({ page }) => {
+  await openTeamScreen(page);
+  const messages: string[] = [];
+  page.on('dialog', (d: any) => { messages.push(d.message()); d.accept(); });
+  await page.fill('#cleanerEmail-8', 'walter.new@example.com');
+  await page.click('[data-action="inviteCleaner"][data-arg0="8"]');
+  const calls = await page.evaluate(() => (window as any).__inviteCalls);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].body).toMatchObject({ id: 8, email: 'walter.new@example.com' });
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toContain('walter@example.com');
+  expect(messages[0]).toContain('walter.new@example.com');
+});
+
+test('changer l adresse d un membre n envoie rien si la confirmation est refusee', async ({ page }) => {
+  await openTeamScreen(page);
+  page.on('dialog', (d: any) => d.dismiss());
+  await page.fill('#cleanerEmail-8', 'walter.new@example.com');
+  await page.click('[data-action="inviteCleaner"][data-arg0="8"]');
+  const calls = await page.evaluate(() => (window as any).__inviteCalls);
+  expect(calls).toHaveLength(0);
+});
+
+test('la meme adresse ne declenche aucune confirmation', async ({ page }) => {
+  await openTeamScreen(page);
+  const messages: string[] = [];
+  page.on('dialog', (d: any) => { messages.push(d.message()); d.accept(); });
+  await page.click('[data-action="inviteCleaner"][data-arg0="8"]');
+  const calls = await page.evaluate(() => (window as any).__inviteCalls);
+  expect(calls).toHaveLength(1);
+  expect(messages).toHaveLength(0);
+});
+
+test('Add & invite garde le PIN saisi', async ({ page }) => {
+  await openTeamScreen(page);
+  await page.fill('#newName', 'Pionah');
+  await page.fill('#newEmail', 'pionah@example.com');
+  await page.fill('#newPin', '4321');
+  await page.selectOption('#newRole', 'cleaner');
+  await page.click('[data-action="__inviteNewCleanerFromForm"]');
+  const invites = await page.evaluate(() => (window as any).__inviteCalls);
+  expect(invites).toHaveLength(1);
+  const saves = await page.evaluate(() => (window as any).__apiCalls.filter((c: any) => c.action === 'saveCleaner'));
+  expect(saves).toHaveLength(1);
+  // Une seule ligne : saveCleaner met a jour celle que inviteCleaner a creee.
+  expect(saves[0].body).toMatchObject({ id: 4, name: 'Pionah', pin: '4321', role: 'cleaner' });
+});
+
+test('Add (PIN only) refuse un email saisi au lieu de l ignorer', async ({ page }) => {
+  await openTeamScreen(page);
+  await page.fill('#newName', 'Pionah');
+  await page.fill('#newEmail', 'pionah@example.com');
+  await page.fill('#newPin', '4321');
+  await page.click('[data-action="__saveCleanerFromForm"]');
+  const invites = await page.evaluate(() => (window as any).__inviteCalls);
+  const apiCalls = await page.evaluate(() => (window as any).__apiCalls);
+  expect(invites).toHaveLength(0);
+  expect(apiCalls).toHaveLength(0);
+  await expect(page.locator('.toast, .toast-item')).toContainText('Add & invite');
+});
+
+test('la ligne system n a ni email ni bouton ni selecteur de role', async ({ page }) => {
+  await openTeamScreen(page);
+  await expect(page.locator('#cleanerEmail-11')).toHaveCount(0);
+  await expect(page.locator('[data-action="inviteCleaner"][data-arg0="11"]')).toHaveCount(0);
+  await expect(page.locator('[data-action-change="__cleanerRoleChange"][data-arg0="11"]')).toHaveCount(0);
+  // Les autres lignes gardent bien leur selecteur.
+  await expect(page.locator('[data-action-change="__cleanerRoleChange"][data-arg0="4"]')).toHaveCount(1);
 });
