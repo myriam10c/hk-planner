@@ -3,14 +3,24 @@ import { test, expect } from '@playwright/test';
 // Le service worker est bloqué par la config Playwright (`serviceWorkers: 'block'`),
 // donc on ne peut pas l'installer. On charge sw.js comme du texte et on l'exécute
 // dans un faux scope `self`, ce qui teste les vrais handlers sans navigateur SW.
-async function runSwHandlers(page: any, swSource: string, scenario: 'push' | 'click') {
+// `data` decrit ce que le push service livre : un payload complet, un payload sans
+// url, un corps qui n'est pas du JSON, ou aucun corps du tout (Apple envoie des
+// pushs vides). `clients` dit s'il existe deja une fenetre de l'app ouverte.
+type SwScenario = {
+  mode: 'push' | 'click';
+  data?: 'full' | 'nourl' | 'invalid' | 'none';
+  clients?: 'one' | 'none';
+};
+
+async function runSwHandlers(page: any, swSource: string, scenario: SwScenario) {
   return await page.evaluate(
-    ({ src, mode }: { src: string; mode: string }) => {
+    ({ src, mode, data, clientsMode }: { src: string; mode: string; data: string; clientsMode: string }) => {
       const listeners: Record<string, Function> = {};
       const shown: any[] = [];
       const focused: string[] = [];
       const opened: string[] = [];
       const closes: string[] = [];
+      const openClient = { url: 'https://app.test/', focus: () => { focused.push('focus'); return Promise.resolve(); }, navigate: (u: string) => { focused.push(u); return Promise.resolve(); } };
       const fakeSelf: any = {
         addEventListener: (name: string, fn: Function) => { listeners[name] = fn; },
         skipWaiting: () => {},
@@ -23,11 +33,7 @@ async function runSwHandlers(page: any, swSource: string, scenario: 'push' | 'cl
         },
         clients: {
           claim: () => Promise.resolve(),
-          matchAll: () => Promise.resolve(
-            mode === 'click'
-              ? [{ url: 'https://app.test/', focus: () => { focused.push('focus'); return Promise.resolve(); }, navigate: (u: string) => { focused.push(u); return Promise.resolve(); } }]
-              : [],
-          ),
+          matchAll: () => Promise.resolve(clientsMode === 'one' ? [openClient] : []),
           openWindow: (u: string) => { opened.push(u); return Promise.resolve(); },
         },
       };
@@ -36,10 +42,16 @@ async function runSwHandlers(page: any, swSource: string, scenario: 'push' | 'cl
         fakeSelf, fakeCaches, fakeSelf.location, () => Promise.reject(new Error('no network in test')),
       );
 
+      const eventData =
+        data === 'none' ? null
+        : data === 'invalid' ? { json: () => { throw new SyntaxError('not json'); }, text: () => 'plain text body' }
+        : data === 'nourl' ? { json: () => ({ title: 'New task: Fix AC', body: 'From Hillal', tag: 'team-task-42' }) }
+        : { json: () => ({ title: 'New task: Fix AC', body: 'From Hillal', url: 'https://app.test/?task=42', tag: 'team-task-42' }) };
+
       const waits: Promise<any>[] = [];
       if (mode === 'push') {
         listeners['push']({
-          data: { json: () => ({ title: 'New task: Fix AC', body: 'From Hillal', url: 'https://app.test/?task=42', tag: 'team-task-42' }) },
+          data: eventData,
           waitUntil: (p: Promise<any>) => waits.push(p),
         });
       } else {
@@ -54,14 +66,14 @@ async function runSwHandlers(page: any, swSource: string, scenario: 'push' | 'cl
         hasClick: typeof listeners['notificationclick'] === 'function',
       }));
     },
-    { src: swSource, mode: scenario },
+    { src: swSource, mode: scenario.mode, data: scenario.data ?? 'full', clientsMode: scenario.clients ?? (scenario.mode === 'click' ? 'one' : 'none') },
   );
 }
 
 test('sw.js expose un handler push qui affiche la notification du payload', async ({ page, request }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   const swSource = await (await request.get('/sw.js')).text();
-  const r = await runSwHandlers(page, swSource, 'push');
+  const r = await runSwHandlers(page, swSource, { mode: 'push' });
   expect(r.hasPush).toBe(true);
   expect(r.shown).toHaveLength(1);
   expect(r.shown[0].title).toBe('New task: Fix AC');
@@ -74,12 +86,50 @@ test('sw.js expose un handler push qui affiche la notification du payload', asyn
 test('sw.js expose un handler notificationclick qui focus la fenetre existante', async ({ page, request }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   const swSource = await (await request.get('/sw.js')).text();
-  const r = await runSwHandlers(page, swSource, 'click');
+  const r = await runSwHandlers(page, swSource, { mode: 'click' });
   expect(r.hasClick).toBe(true);
   expect(r.closes).toContain('closed');
   expect(r.focused).toContain('focus');
   expect(r.focused).toContain('https://app.test/?task=42');
   expect(r.opened).toHaveLength(0);
+});
+
+test('sw.js affiche un titre et un corps par defaut quand le payload n est pas du JSON', async ({ page, request }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  const swSource = await (await request.get('/sw.js')).text();
+  const r = await runSwHandlers(page, swSource, { mode: 'push', data: 'invalid' });
+  expect(r.shown).toHaveLength(1);
+  expect(r.shown[0].title).toBe('HK Planner');
+  expect(r.shown[0].options.body).toBe('plain text body');
+  expect(r.shown[0].options.tag).toBe('hk-planner');
+});
+
+test('sw.js affiche la notification par defaut quand le push arrive sans corps', async ({ page, request }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  const swSource = await (await request.get('/sw.js')).text();
+  const r = await runSwHandlers(page, swSource, { mode: 'push', data: 'none' });
+  expect(r.shown).toHaveLength(1);
+  expect(r.shown[0].title).toBe('HK Planner');
+  expect(r.shown[0].options.body).toBe('');
+  expect(r.shown[0].options.data.url).toBe('/');
+});
+
+test('sw.js retombe sur / quand le payload n a pas d url', async ({ page, request }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  const swSource = await (await request.get('/sw.js')).text();
+  const r = await runSwHandlers(page, swSource, { mode: 'push', data: 'nourl' });
+  expect(r.shown).toHaveLength(1);
+  expect(r.shown[0].title).toBe('New task: Fix AC');
+  expect(r.shown[0].options.data.url).toBe('/');
+});
+
+test('sw.js ouvre une fenetre au clic quand aucun onglet de l app n est ouvert', async ({ page, request }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  const swSource = await (await request.get('/sw.js')).text();
+  const r = await runSwHandlers(page, swSource, { mode: 'click', clients: 'none' });
+  expect(r.closes).toContain('closed');
+  expect(r.focused).toHaveLength(0);
+  expect(r.opened).toEqual(['https://app.test/?task=42']);
 });
 
 // ===== Front app.js =====

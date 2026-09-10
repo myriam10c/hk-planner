@@ -54,8 +54,8 @@ self.addEventListener('fetch', (e) => {
 });
 
 // ===== Web Push =====
-// Payload attendu (produit par l'edge function) : {title, body, url, tag}.
-// userVisibleOnly = true côté abonnement : on DOIT afficher une notification.
+// Expected payload (built by the edge function): {title, body, url, tag}.
+// The subscription uses userVisibleOnly = true, so we MUST show a notification.
 self.addEventListener('push', (e) => {
   let data = {};
   try {
@@ -84,7 +84,7 @@ self.addEventListener('notificationclick', (e) => {
       if (new URL(client.url).origin === self.location.origin) {
         await client.focus();
         if ('navigate' in client) {
-          try { await client.navigate(target); } catch (err) { /* onglet non navigable, on garde le focus */ }
+          try { await client.navigate(target); } catch (err) { /* tab cannot navigate, keep the focus */ }
         }
         return;
       }
