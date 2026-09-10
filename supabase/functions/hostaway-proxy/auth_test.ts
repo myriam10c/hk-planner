@@ -143,3 +143,86 @@ Deno.test("resolveCleanerByEmail rend null quand aucun membre actif ne porte cet
   const sb = fakeSb(null);
   assertEquals(await resolveCleanerByEmail(sb, "inconnu@example.com"), null);
 });
+
+// ---------------------------------------------------------------------------
+// Correctifs issus de la revue de la tache 2 (findings 1 a 5).
+// ---------------------------------------------------------------------------
+
+// Finding 1 : le jeu de cles local etait memorise une fois pour toutes. Apres une
+// rotation Supabase, un isolat deja chaud refusait les jetons signes par la
+// nouvelle cle et continuait d'accepter l'ancienne, retiree du JWKS.
+Deno.test("getJwks reconstruit le jeu local quand SUPABASE_JWKS change", async () => {
+  const kpA = await setupKeys();
+  // Chauffe le cache sur test-kid.
+  assertEquals((await verifyUserJwt(await signWith(kpA)))?.email, "walter@example.com");
+
+  const kpB = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"],
+  );
+  const jwkB: any = await exportJWK(kpB.publicKey);
+  jwkB.kid = "test-kid-b";
+  jwkB.alg = "ES256";
+  jwkB.use = "sig";
+  // Volontairement SANS resetJwksCache() : c'est exactement le cas de production.
+  Deno.env.set("SUPABASE_JWKS", JSON.stringify({ keys: [jwkB] }));
+
+  const fresh = await verifyUserJwt(await signWith(kpB, { kid: "test-kid-b" }));
+  assertEquals(fresh?.email, "walter@example.com");
+  // Et l'ancienne cle, retiree du document, n'est plus de confiance.
+  assertEquals(await verifyUserJwt(await signWith(kpA)), null);
+  resetJwksCache();
+});
+
+// Finding 2 : sans clockTolerance, jose applique 0 et la moindre derive d'horloge
+// entre le serveur Auth et le runtime edge produit des 401 parasites.
+Deno.test("verifyUserJwt tolere une petite derive d'horloge (5 s)", async () => {
+  const kp = await setupKeys();
+  const nowS = Math.floor(Date.now() / 1000);
+  const justExpired = await verifyUserJwt(await signWith(kp, { exp: nowS - 3 }));
+  assertEquals(justExpired?.email, "walter@example.com");
+  // Au dela de la tolerance, le refus reste net.
+  assertEquals(await verifyUserJwt(await signWith(kp, { exp: nowS - 30 })), null);
+});
+
+// Finding 3 : un jeton valide sans exp n'expirait jamais.
+Deno.test("verifyUserJwt refuse un jeton sans exp", async () => {
+  const kp = await setupKeys();
+  const noExp = await new SignJWT({ email: "walter@example.com", role: "authenticated" })
+    .setProtectedHeader({ alg: "ES256", kid: "test-kid" })
+    .setIssuer(ISS).setAudience("authenticated").setSubject("3333")
+    .setIssuedAt()
+    .sign(kp.privateKey);
+  assertEquals(await verifyUserJwt(noExp), null);
+});
+
+// Finding 4 : SUPABASE_URL vide degradait l'emetteur attendu en "/auth/v1", et un
+// jeton portant exactement ce iss passait le controle.
+Deno.test("verifyUserJwt refuse tout quand SUPABASE_URL est vide", async () => {
+  const kp = await setupKeys();
+  Deno.env.set("SUPABASE_URL", "");
+  const degraded = await new SignJWT({ email: "walter@example.com", role: "authenticated" })
+    .setProtectedHeader({ alg: "ES256", kid: "test-kid" })
+    .setIssuer("/auth/v1").setAudience("authenticated").setSubject("4444")
+    .setIssuedAt().setExpirationTime("1h")
+    .sign(kp.privateKey);
+  assertEquals(await verifyUserJwt(degraded), null);
+  Deno.env.set("SUPABASE_URL", PROJECT);
+  resetJwksCache();
+});
+
+// Finding 5 : Deno.env.get etait appele hors du try, la fonction pouvait donc lever
+// (hors edge, sans permission env) alors que son contrat dit « ne leve jamais ».
+Deno.test("verifyUserJwt rend null au lieu de lever si l'environnement est inaccessible", async () => {
+  const kp = await setupKeys();
+  const token = await signWith(kp);
+  const realGet = Deno.env.get.bind(Deno.env);
+  (Deno.env as any).get = (name: string) => {
+    throw new Error('NotCapable: Requires env access to "' + name + '"');
+  };
+  try {
+    assertEquals(await verifyUserJwt(token), null);
+  } finally {
+    (Deno.env as any).get = realGet;
+  }
+  resetJwksCache();
+});
