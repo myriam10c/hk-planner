@@ -1,0 +1,124 @@
+/* Ecrans de compte (connexion, mot de passe oublie, nouveau mot de passe).
+   Fichier separe de styles.css a dessein : styles.css porte des modifications
+   d'un autre chantier, il ne doit pas bouger ici. Charge apres styles.css,
+   donc a specificite egale ces regles gagnent. */
+
+.auth-screen {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--card, #ffffff);
+  border-radius: 18px;
+  padding: 26px 22px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  box-sizing: border-box;
+}
+
+.auth-brand {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary, #7c3aed);
+}
+
+.auth-title { margin: 10px 0 18px; font-size: 21px; line-height: 1.25; }
+.auth-help { margin: -8px 0 16px; font-size: 13px; line-height: 1.5; color: var(--text2, #3a3a3c); }
+
+.auth-label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2, #3a3a3c);
+}
+
+.auth-input {
+  width: 100%;
+  box-sizing: border-box;
+  /* 16px minimum : en dessous, iOS zoome au focus et casse la mise en page. */
+  font-size: 16px;
+  padding: 13px 14px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--text, #1c1c1e);
+  outline: none;
+}
+
+.auth-input:focus {
+  border-color: var(--primary, #7c3aed);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.18);
+}
+
+.auth-primary {
+  width: 100%;
+  margin-top: 20px;
+  min-height: 48px;
+  border: none;
+  border-radius: 12px;
+  background: var(--primary, #7c3aed);
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-primary[disabled] { opacity: 0.6; cursor: default; }
+
+.auth-link {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 0;
+  background: none;
+  border: none;
+  color: var(--primary, #7c3aed);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.auth-error, .auth-notice {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.auth-error { background: rgba(220, 38, 38, 0.1); color: #b91c1c; }
+.auth-notice { background: rgba(5, 150, 105, 0.1); color: #047857; }
+
+/* Ecran Team : le champ email et le bouton Invite s'ajoutent a une ligne deja
+   en flex-wrap, il ne reste qu'a les dimensionner. */
+.cleaner-row .c-email {
+  flex: 1 1 180px;
+  min-width: 0;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text, #1c1c1e);
+}
+
+.cleaner-row .c-invite {
+  flex: 0 0 auto;
+  min-width: 76px;
+  min-height: 40px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary, #7c3aed);
+}

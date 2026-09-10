@@ -212,6 +212,30 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 const API='https://dqjnqvbxfwtvrjwnnmns.supabase.co/functions/v1/hostaway-proxy';
 const APP_SHARED_SECRET='0RicFT1AZL0NDyH1M2ZWhbUvworsGOx38UhNNwFVF8dmP8SC-TRXfaoyQbR5pdn0';
+// ============ COMPTES EMAIL (Supabase Auth) ============
+const SUPABASE_URL='https://dqjnqvbxfwtvrjwnnmns.supabase.co';
+// Cle publiable : publique par construction, elle part dans le bundle de toute
+// application Supabase. Se recupere avec :
+//   npx -y supabase@2 projects api-keys --project-ref dqjnqvbxfwtvrjwnnmns
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_y_e3yvVC3OBZ3OOitrssmg_bpkTcchf';
+// Capture du fragment AVANT createClient : supabase-js consomme le
+// #access_token=...&type=recovery et vide le hash, or on a besoin de `type`
+// pour savoir quel ecran afficher.
+const BOOT_HASH=(typeof window!=='undefined'?(window.location.hash||''):'');
+// flowType implicite : les liens d'invitation et de reinitialisation sont emis
+// cote serveur, l'appareil qui recoit l'email n'a aucun verificateur PKCE. Les
+// jetons reviennent donc dans le fragment.
+const sbAuth=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{
+  auth:{flowType:'implicit',persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'hkAuthSession'}
+});
+let authScreen=null;      // null | 'login' | 'setPassword'
+let authError='';
+let authNotice='';
+let authBusy=false;
+let authAccessToken=null; // jeton courant, renvoye au proxy en Bearer
+sbAuth.auth.onAuthStateChange(function(_evt,session){
+  authAccessToken=session?session.access_token:null;
+});
 const DAYS={0:'Sun',1:'Mon',2:'Tue',3:'Wed',4:'Thu',5:'Fri',6:'Sat'};
 // ===== ICONS (Lucide SVGs, inline) =====
 const ICONS_SVG = {
@@ -1044,6 +1068,10 @@ en:{
   before:'Before',after:'After',comparison:'Photo Comparison',
   avgTime:'avg',mins:'min',
   cleanerLogin:'Cleaner Login',enterPin:'Enter your 4-digit PIN',
+  signIn:'Sign in',signingIn:'Signing in...',email:'Email',password:'Password',
+  forgotPassword:'Forgot password?',usePinInstead:'Use my PIN instead',useEmailInstead:'Sign in with email',
+  setNewPassword:'Set a new password',newPassword:'New password',confirmPassword:'Confirm password',
+  savePassword:'Save password',saving:'Saving...',passwordRule:'At least 8 characters.',
   welcome:'Welcome',logout:'Logout',refresh:'Refresh',
   saved:'Saved ✓',removed:'Removed',error:'Error',
   tapConfirm:'Tap to confirm',tapUndo:'Tap to undo',
@@ -1164,7 +1192,10 @@ async function api(action,opts){
   let url=API+'?action='+action;
   if(opts&&opts.params) for(const[k,v]of Object.entries(opts.params)) url+='&'+k+'='+encodeURIComponent(v);
   const baseHeaders={'X-App-Secret':APP_SHARED_SECRET};
-  if(cleanerToken) baseHeaders['X-Cleaner-Token']=cleanerToken;
+  // Le compte email prime sur le PIN : si une session Supabase est ouverte sur
+  // cet appareil, c'est elle qui identifie l'utilisateur cote proxy.
+  if(authAccessToken) baseHeaders['Authorization']='Bearer '+authAccessToken;
+  else if(cleanerToken) baseHeaders['X-Cleaner-Token']=cleanerToken;
   const init=opts&&opts.body
     ?{method:'POST',headers:{...baseHeaders,'Content-Type':'application/json'},body:JSON.stringify(opts.body)}
     :{headers:baseHeaders};
@@ -1180,6 +1211,16 @@ async function api(action,opts){
     throw new Error(e&&e.name==='AbortError'?'Request timed out — check connection':'Network error — check connection');
   }finally{
     clearTimeout(timeoutId);
+  }
+  if(resp.status===401 && authAccessToken){
+    // Session email expiree ou compte detache d'un membre actif.
+    try{ await sbAuth.auth.signOut(); }catch(e){}
+    authAccessToken=null; cleanerMode=null;
+    localStorage.removeItem('cleanerMode');
+    authScreen='login';
+    authError='Your session ended. Sign in again.';
+    render();
+    return {error:'Session expired'};
   }
   if(resp.status===401 && cleanerToken){
     // Session expired or revoked — force re-login
@@ -3090,6 +3131,7 @@ async function cleanerLogin(){
   }
 }
 async function cleanerLogout(){
+  if(authAccessToken){ await emailLogout(); return; }
   // Avant d'invalider le token : deletePushSubscription exige la session courante,
   // sinon l'appareil continuerait de recevoir les tâches de l'utilisateur précédent.
   try{ await disablePushNotifications(); }catch(e){}
@@ -3956,8 +3998,213 @@ function laundryMoveBadge(kind){
   return '<span class="laundry-kind laundry-kind-'+m[1]+'">'+esc(m[0])+'</span>';
 }
 
+// ============ ECRANS DE COMPTE ============
+// Le lien d'invitation et le lien de reinitialisation reviennent en fragment :
+//   #access_token=...&refresh_token=...&type=recovery
+// et en cas d'echec :
+//   #error=access_denied&error_code=otp_expired&error_description=...
+function parseAuthHash(hash){
+  const raw=String(hash||'').replace(/^#/,'');
+  const p=new URLSearchParams(raw);
+  return {
+    type:p.get('type')||'',
+    hasToken:!!p.get('access_token'),
+    error:p.get('error_code')||p.get('error')||'',
+    errorDescription:p.get('error_description')||'',
+  };
+}
+
+// Messages en anglais : l'app est utilisee par toute l'equipe.
+function authErrorMessage(err){
+  const code=(err&&(err.code||err.error_code))||'';
+  const msg=String((err&&err.message)||'');
+  if(code==='invalid_credentials'||/invalid login credentials/i.test(msg)) return 'Wrong email or password.';
+  if(code==='email_not_confirmed') return 'Open your invitation email first to set your password.';
+  if(code==='otp_expired'||/invalid or has expired/i.test(msg)) return 'This link has expired. Tap Forgot password to get a new one.';
+  if(code==='over_email_send_rate_limit'||code==='over_request_rate_limit'||/rate limit/i.test(msg)) return 'Too many attempts. Wait a minute and try again.';
+  if(code==='weak_password'||/at least \d+ characters/i.test(msg)) return 'Password too short. Use at least 8 characters.';
+  if(code==='same_password') return 'This is already your password. Choose a different one.';
+  if(code==='signup_disabled') return 'This email has no account yet. Ask a manager to invite you.';
+  if(/failed to fetch|network/i.test(msg)) return 'Network error. Check your connection.';
+  return msg||'Something went wrong. Try again.';
+}
+
+function renderAuthLogin(){
+  document.getElementById('app').innerHTML=
+    '<div class="auth-screen"><div class="auth-card">'+
+      '<div class="auth-brand">HK Planner</div>'+
+      '<h2 class="auth-title">'+t('signIn')+'</h2>'+
+      '<label class="auth-label" for="authEmail">'+t('email')+'</label>'+
+      '<input id="authEmail" class="auth-input" type="email" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="you@example.com"/>'+
+      '<label class="auth-label" for="authPassword">'+t('password')+'</label>'+
+      '<input id="authPassword" class="auth-input" type="password" autocomplete="current-password" data-action-keydown="__authEnterLogin"/>'+
+      (authError?'<div class="auth-error" role="alert">'+esc(authError)+'</div>':'')+
+      (authNotice?'<div class="auth-notice" role="status">'+esc(authNotice)+'</div>':'')+
+      '<button class="auth-primary" data-action="emailLogin"'+(authBusy?' disabled':'')+'>'+(authBusy?t('signingIn'):t('signIn'))+'</button>'+
+      '<button class="auth-link" data-action="forgotPassword">'+t('forgotPassword')+'</button>'+
+      '<button class="auth-link" data-action="usePinInstead">'+t('usePinInstead')+'</button>'+
+    '</div></div>';
+  const f=document.getElementById('authEmail');
+  if(f&&!f.value)f.focus();
+}
+
+function renderAuthSetPassword(){
+  document.getElementById('app').innerHTML=
+    '<div class="auth-screen"><div class="auth-card">'+
+      '<div class="auth-brand">HK Planner</div>'+
+      '<h2 class="auth-title">'+t('setNewPassword')+'</h2>'+
+      '<p class="auth-help">'+t('passwordRule')+'</p>'+
+      '<label class="auth-label" for="authNewPassword">'+t('newPassword')+'</label>'+
+      '<input id="authNewPassword" class="auth-input" type="password" autocomplete="new-password"/>'+
+      '<label class="auth-label" for="authNewPassword2">'+t('confirmPassword')+'</label>'+
+      '<input id="authNewPassword2" class="auth-input" type="password" autocomplete="new-password" data-action-keydown="__authEnterSetPassword"/>'+
+      (authError?'<div class="auth-error" role="alert">'+esc(authError)+'</div>':'')+
+      '<button class="auth-primary" data-action="submitNewPassword"'+(authBusy?' disabled':'')+'>'+(authBusy?t('saving'):t('savePassword'))+'</button>'+
+    '</div></div>';
+}
+
+function __authEnterLogin(e){ if(e.key==='Enter') emailLogin(); }
+function __authEnterSetPassword(e){ if(e.key==='Enter') submitNewPassword(); }
+function usePinInstead(){ authScreen=null; authError=''; authNotice=''; window.location.hash='#cleaner'; render(); }
+function useEmailInstead(){ authScreen='login'; authError=''; authNotice=''; if(window.location.hash==='#cleaner')window.location.hash=''; render(); }
+
+// Traduit une session Supabase en session applicative : qui suis-je cote
+// cleaners, et quelle vue. Retourne false et prepare l'ecran de login si le
+// compte n'est relie a aucun membre actif.
+async function adoptEmailSession(){
+  const me=await api('cleanerMe');
+  if(!me||!me.cleaner){
+    try{ await sbAuth.auth.signOut(); }catch(e){}
+    authAccessToken=null;
+    authScreen='login';
+    authError='This account is not linked to an active team member. Ask a manager.';
+    return false;
+  }
+  if(me.cleaner.role==='manager'){
+    cleanerMode=null;
+    localStorage.removeItem('cleanerMode');
+    if(window.location.hash==='#cleaner') window.location.hash='';
+  }else{
+    cleanerMode=me.cleaner;
+    localStorage.setItem('cleanerMode',JSON.stringify(cleanerMode));
+    if(window.location.hash!=='#cleaner') window.location.hash='#cleaner';
+  }
+  authScreen=null; authError=''; authNotice='';
+  return true;
+}
+
+async function emailLogin(){
+  if(authBusy)return;
+  const emailEl=document.getElementById('authEmail'), pwdEl=document.getElementById('authPassword');
+  const email=((emailEl&&emailEl.value)||'').trim().toLowerCase();
+  const password=(pwdEl&&pwdEl.value)||'';
+  authError=''; authNotice='';
+  if(!email||!password){ authError='Enter your email and your password.'; render(); return; }
+  authBusy=true; render();
+  try{
+    const r=await sbAuth.auth.signInWithPassword({email:email,password:password});
+    if(r.error){ authBusy=false; authError=authErrorMessage(r.error); render(); return; }
+    authAccessToken=r.data&&r.data.session?r.data.session.access_token:null;
+    const ok=await adoptEmailSession();
+    authBusy=false;
+    render();
+    if(ok) fetchAll();
+  }catch(e){ authBusy=false; authError=authErrorMessage(e); render(); }
+}
+
+async function forgotPassword(){
+  if(authBusy)return;
+  const emailEl=document.getElementById('authEmail');
+  const email=((emailEl&&emailEl.value)||'').trim().toLowerCase();
+  authError=''; authNotice='';
+  if(!email){ authError='Enter your email first, then tap Forgot password.'; render(); return; }
+  authBusy=true; render();
+  try{
+    // Supabase repond succes meme pour une adresse inconnue : on ne revele
+    // jamais quelles adresses ont un compte.
+    const r=await sbAuth.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+'/'});
+    authBusy=false;
+    if(r.error) authError=authErrorMessage(r.error);
+    else authNotice='If that email has an account, a reset link is on its way. Check your inbox.';
+    render();
+  }catch(e){ authBusy=false; authError=authErrorMessage(e); render(); }
+}
+
+async function submitNewPassword(){
+  if(authBusy)return;
+  const a=document.getElementById('authNewPassword'), b=document.getElementById('authNewPassword2');
+  const p1=(a&&a.value)||'', p2=(b&&b.value)||'';
+  authError=''; authNotice='';
+  if(p1.length<8){ authError='Password too short. Use at least 8 characters.'; render(); return; }
+  if(p1!==p2){ authError='The two passwords do not match.'; render(); return; }
+  authBusy=true; render();
+  try{
+    const r=await sbAuth.auth.updateUser({password:p1});
+    if(r.error){ authBusy=false; authError=authErrorMessage(r.error); render(); return; }
+    const s=await sbAuth.auth.getSession();
+    authAccessToken=s.data&&s.data.session?s.data.session.access_token:null;
+    const ok=await adoptEmailSession();
+    authBusy=false;
+    render();
+    if(ok){ toast('Password saved','success'); fetchAll(); }
+  }catch(e){ authBusy=false; authError=authErrorMessage(e); render(); }
+}
+
+async function emailLogout(){
+  // Avant d'invalider quoi que ce soit : deletePushSubscription exige la session
+  // courante, sinon l'appareil continuerait de recevoir les taches du precedent.
+  try{ await disablePushNotifications(); }catch(e){}
+  try{ await sbAuth.auth.signOut(); }catch(e){}
+  authAccessToken=null;
+  // Une session PIN peut cohabiter sur le meme appareil. La laisser vivante
+  // rouvrirait l'app en grand au rechargement suivant (hkAuthBoot repart sur le
+  // PIN quand il n'y a plus de session email), donc on la revoque aussi.
+  // authAccessToken vient d'etre remis a null : api() envoie donc bien
+  // X-Cleaner-Token, le seul en-tete que lit l'action cleanerLogout du proxy.
+  if(cleanerToken){
+    try{ await api('cleanerLogout',{body:{}}); }catch(e){}
+    cleanerToken=null;
+    localStorage.removeItem('cleanerToken');
+  }
+  cleanerMode=null;
+  localStorage.removeItem('cleanerMode');
+  authScreen='login'; authError=''; authNotice='';
+  render();
+}
+
+// Boot : decide quel ecran ouvrir avant le premier fetchAll().
+// Retourne true si l'app peut charger ses donnees.
+async function hkAuthBoot(){
+  const h=parseAuthHash(BOOT_HASH);
+  if(h.error){
+    authScreen='login';
+    authError=authErrorMessage({code:h.error,message:h.errorDescription});
+    render();
+    return false;
+  }
+  let session=null;
+  try{ const s=await sbAuth.auth.getSession(); session=s&&s.data?s.data.session:null; }catch(e){ session=null; }
+  authAccessToken=session?session.access_token:null;
+  if(session&&(h.type==='recovery'||h.type==='invite')){
+    authScreen='setPassword';
+    render();
+    return false;
+  }
+  if(!session){
+    // Aucun compte email sur cet appareil : on laisse vivre la session PIN si
+    // elle existe (deverrouillage rapide), sinon on ouvre le login par email.
+    if(!cleanerToken){ authScreen='login'; render(); return false; }
+    return true;
+  }
+  const ok=await adoptEmailSession();
+  render();
+  return ok;
+}
+
 // ============ RENDER ============
 function render(){
+  if(authScreen==='setPassword'){renderAuthSetPassword();return;}
+  if(authScreen==='login'){renderAuthLogin();return;}
   // #6 PIN screen
   if(!cleanerMode&&window.location.hash==='#cleaner'){renderPinScreen();return;}
   if(cleanerMode&&window.location.hash!=='#cleaner')window.location.hash='#cleaner';
@@ -4021,7 +4268,8 @@ function renderPinScreen(){
   document.getElementById('app').innerHTML=
     '<div class="pin-screen"><div style="margin-bottom:20px">'+renderLangSelector()+'</div><h2>🔑 '+t('cleanerLogin')+'</h2><p>'+t('enterPin')+'</p>'+
     '<input type="tel" id="pinInput" class="pin-input" maxlength="4" aria-label="4-digit PIN" data-action-input="__pinInput" autofocus/>'+
-    '<div id="pinError" class="pin-error"></div></div>';
+    '<div id="pinError" class="pin-error"></div>'+
+    '<button class="auth-link" data-action="useEmailInstead">'+t('useEmailInstead')+'</button></div>';
 }
 
 function renderPlanner(){
@@ -7149,7 +7397,7 @@ window.addEventListener('popstate', () => {
   render();
 });
 initSwipe();
-fetchAll();
+hkAuthBoot().then(function(ok){ if(ok) fetchAll(); });
 // Rafraichissement auto : jamais pendant que l'onglet RH est ouvert. fetchAll finit par
 // render(), qui remplace #app.innerHTML et viderait les formulaires RH (dossier salarie,
 // document, remuneration) en pleine saisie. Comportement inchange sur les autres onglets.
