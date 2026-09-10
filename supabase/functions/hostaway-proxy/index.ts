@@ -719,6 +719,15 @@ function decideTaskFromEvent(ev: any, ids: any): any | null {
   return null;
 }
 
+// Prolonge la vie de l'isolate le temps d'un side-effect (Telegram, Web Push).
+// Sans ça, l'isolate peut être recyclé dès la réponse renvoyée et la notification
+// est perdue en vol. Repli : si EdgeRuntime n'expose pas waitUntil (dev local),
+// la promesse tourne quand même, on se contente d'avaler son erreur.
+function keepAlive(p: Promise<unknown>): void {
+  const safe = Promise.resolve(p).catch((e) => console.warn("[keepAlive]", e));
+  try { (globalThis as any).EdgeRuntime?.waitUntil?.(safe); } catch (_e) { /* best effort */ }
+}
+
 // Notifie l'assigné de la tâche : Telegram si telegram_chat_id est configuré
 // (aujourd'hui Hillal seul), ET Web Push sur tous ses abonnements vivants.
 // Les deux canaux sont indépendants : l'absence de chat_id ne coupe plus le push.
@@ -1313,6 +1322,16 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
       // Revoke all sessions of this cleaner
       await sb.from("cleaner_sessions").delete().eq("cleaner_id", body.id);
+      // Et couper ses notifications push : le soft delete laisserait sinon des
+      // abonnements vivants sur son téléphone. Ne bloque pas la désactivation.
+      try {
+        const { error: pErr } = await sb.from("push_subscriptions")
+          .update({ disabled_at: new Date().toISOString() })
+          .eq("cleaner_id", body.id).is("disabled_at", null);
+        if (pErr) console.warn("[deleteCleaner] push_subscriptions disable failed:", pErr);
+      } catch (e) {
+        console.warn("[deleteCleaner] push_subscriptions disable threw:", e);
+      }
       return jsonResp({ status: "success" });
     }
     if (action === "cleanerLogin" && req.method === "POST") {
@@ -1397,7 +1416,9 @@ Deno.serve(async (req: Request) => {
     if (action === "savePushSubscription" && req.method === "POST") {
       const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
       if (!me) return jsonResp({ error: "auth required" }, 401);
-      const body = await req.json();
+      // Corps illisible : 400 explicite plutôt qu'un 500 opaque côté client.
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
       const endpoint = typeof body?.endpoint === "string" ? body.endpoint.trim() : "";
       const p256dh = typeof body?.keys?.p256dh === "string" ? body.keys.p256dh : "";
       const auth = typeof body?.keys?.auth === "string" ? body.keys.auth : "";
@@ -1408,6 +1429,15 @@ Deno.serve(async (req: Request) => {
       const ua = typeof body?.user_agent === "string" ? body.user_agent.slice(0, 300) : (req.headers.get("user-agent") ?? null);
       // Upsert sur endpoint : un même navigateur qui se reconnecte sous un autre PIN
       // doit basculer l'abonnement sur le nouveau cleaner, pas en créer un second.
+      // Ce basculement est journalisé (ids seuls, jamais l'endpoint qui est un
+      // secret d'appareil) : c'est la trace qui explique qu'un push soit parti
+      // sur le téléphone d'un collègue après un partage de tablette.
+      const { data: owner } = await sb.from("push_subscriptions")
+        .select("id, cleaner_id").eq("endpoint", endpoint).maybeSingle();
+      if (owner && Number(owner.cleaner_id) !== Number(me.cleaner_id)) {
+        console.log("[savePushSubscription] endpoint " + String(owner.id) +
+          " moves from cleaner " + String(owner.cleaner_id) + " to " + String(me.cleaner_id));
+      }
       const { error } = await sb.from("push_subscriptions").upsert({
         cleaner_id: me.cleaner_id,
         endpoint,
@@ -1423,7 +1453,8 @@ Deno.serve(async (req: Request) => {
     if (action === "deletePushSubscription" && req.method === "POST") {
       const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
       if (!me) return jsonResp({ error: "auth required" }, 401);
-      const body = await req.json();
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
       const endpoint = typeof body?.endpoint === "string" ? body.endpoint.trim() : "";
       if (!endpoint) return jsonResp({ error: "endpoint required" }, 400);
       const { data, error } = await sb.from("push_subscriptions")
@@ -1444,7 +1475,9 @@ Deno.serve(async (req: Request) => {
       const targetId = body?.cleaner_id !== undefined && body?.cleaner_id !== null
         ? Number(body.cleaner_id)
         : me?.cleaner_id;
-      if (!Number.isInteger(targetId)) return jsonResp({ error: "cleaner_id required" }, 400);
+      if (!Number.isInteger(targetId) || Number(targetId) <= 0) {
+        return jsonResp({ error: "cleaner_id must be a positive integer" }, 400);
+      }
       const result = await sendPush(sb, targetId as number, {
         title: "HK Planner test",
         body: "Push notifications are working on this device.",
@@ -1605,15 +1638,19 @@ Deno.serve(async (req: Request) => {
       // ménage n'est jamais `urgent`, elle respecte donc les heures de silence
       // (22:00 à 08:30 Dubai). sendPush ne lève jamais, mais on double la garde :
       // une notification ratée ne doit pas annuler une affectation déjà écrite.
-      for (const cid of pushTargets) {
-        try {
-          await sendPush(sb, cid, assignmentPushPayload(String(reservation_key), stype), {
-            dedupeKey: "cleaning-assignment:" + String(reservation_key) + ":" + String(cid),
-          });
-        } catch (e) {
-          console.warn("[assignCleaner] push failed for cleaner " + String(cid) + ":", e);
+      // Hors du chemin de réponse (keepAlive) : l'affectation est déjà écrite,
+      // l'écran n'a pas à attendre les appels au push service.
+      keepAlive((async () => {
+        for (const cid of pushTargets) {
+          try {
+            await sendPush(sb, cid, assignmentPushPayload(String(reservation_key), stype), {
+              dedupeKey: "cleaning-assignment:" + String(reservation_key) + ":" + String(cid),
+            });
+          } catch (e) {
+            console.warn("[assignCleaner] push failed for cleaner " + String(cid) + ":", e);
+          }
         }
-      }
+      })());
       return jsonResp({ status: "success" });
     }
     if (action === "autoAssign" && req.method === "POST") {
@@ -3305,7 +3342,7 @@ Deno.serve(async (req: Request) => {
         throw error;
       }
       // Notif Telegram à l'assigné (si chat_id configuré) — side-effect, fail-soft
-      notifyAssignee(sb, data).catch(e => console.warn("[notifyAssignee create]", e));
+      keepAlive(notifyAssignee(sb, data).catch(e => console.warn("[notifyAssignee create]", e)));
       return jsonResp({ status: "success", task: data });
     }
     if (action === "updateTeamTask" && req.method === "POST") {
@@ -3331,7 +3368,7 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
       // Notif Telegram uniquement si réassignation vers un NOUVEAU cleaner (pas si on update juste le titre)
       if (data && data.assigned_cleaner_id && data.assigned_cleaner_id !== prevAssignee) {
-        notifyAssignee(sb, data).catch(e => console.warn("[notifyAssignee reassign]", e));
+        keepAlive(notifyAssignee(sb, data).catch(e => console.warn("[notifyAssignee reassign]", e)));
       }
       return jsonResp({ status: "success", task: data });
     }
@@ -3418,7 +3455,7 @@ Deno.serve(async (req: Request) => {
             } else {
               results.dispatched++;
               results.tasks.push({ event_id: ev.id, task_id: newTask.id, title: newTask.title, assignee_id: newTask.assigned_cleaner_id });
-              notifyAssignee(sb, newTask).catch(e => console.warn("[notif dispatch]", e));
+              keepAlive(notifyAssignee(sb, newTask).catch(e => console.warn("[notif dispatch]", e)));
             }
           }
         } else {
@@ -3515,7 +3552,7 @@ Deno.serve(async (req: Request) => {
         }
         results.dispatched++;
         results.tasks.push({ ticket_id: t.id, task_id: newTask.id, title: newTask.title, priority: newTask.priority });
-        notifyAssignee(sb, newTask).catch(e => console.warn("[notif maintenance]", e));
+        keepAlive(notifyAssignee(sb, newTask).catch(e => console.warn("[notif maintenance]", e)));
       }
 
       return jsonResp({ status: "success", ...results });
