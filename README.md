@@ -118,6 +118,49 @@ The private key is never printed and never written anywhere but that 0600 temp f
 `rm -P` overwrites. Only the public key is echoed: it is not a secret, every browser gets it.
 Hand `docs/push-notifications-team.md` to each person when they have to re-enable.
 
+### Team accounts (Supabase Auth)
+
+Team members sign in with an email and a password. Supabase Auth holds the
+identity, `cleaners.email` links it to the team member, and the proxy accepts the
+user JWT in `Authorization: Bearer` (PIN sessions still work).
+
+Auth emails do not go through Supabase's built-in SMTP (2 messages per hour).
+The "Send Email" auth hook posts to the `auth-mailer` edge function, which sends
+through the Gmail API with the OAuth refresh token also used by the agent harness.
+
+Give `docs/accounts-team.md` to anyone getting an account.
+
+**Rotate the hook secret** (only if it leaked: rotating it breaks every auth email
+until both sides carry the new value). The secret is never echoed: it is written to
+a 0600 temp file, read back from it, then the file is overwritten by `rm -P`.
+
+```bash
+HOOK_DIR="$(mktemp -d)"; HOOK_ENV="$HOOK_DIR/hook.env"; umask 077
+echo "SEND_EMAIL_HOOK_SECRET=v1,whsec_$(openssl rand -base64 32 | tr -d '\n')" > "$HOOK_ENV"
+export SUPABASE_ACCESS_TOKEN="$(cat "$HOME/.supabase/access-token")"
+npx -y supabase@2 secrets set --env-file "$HOOK_ENV" --project-ref dqjnqvbxfwtvrjwnnmns
+python3 - "$SUPABASE_ACCESS_TOKEN" "$(grep '^SEND_EMAIL_HOOK_SECRET=' "$HOOK_ENV" | cut -d= -f2-)" <<'PY'
+import json, sys, urllib.request
+token, secret = sys.argv[1], sys.argv[2]
+req = urllib.request.Request(
+    "https://api.supabase.com/v1/projects/dqjnqvbxfwtvrjwnnmns/config/auth",
+    data=json.dumps({"hook_send_email_secrets": secret}).encode(), method="PATCH",
+    headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+with urllib.request.urlopen(req) as r:
+    print("HTTP", r.status)
+PY
+rm -P "$HOOK_ENV"; rmdir "$HOOK_DIR"
+```
+
+**Redeploy the mailer**: `npx -y supabase@2 functions deploy auth-mailer --project-ref dqjnqvbxfwtvrjwnnmns --no-verify-jwt`
+
+**Run the function tests**:
+
+```bash
+npx -y deno@2.9.6 test --no-lock --allow-env --allow-net supabase/functions/auth-mailer/mailer_test.ts
+npx -y deno@2.9.6 test --no-lock --allow-env --allow-net supabase/functions/hostaway-proxy/auth_test.ts
+```
+
 ### Apply a schema change
 
 1. Add `supabase/migrations/YYYYMMDDHHMMSS_short_description.sql`
