@@ -91,6 +91,33 @@ curl -s -X POST \
   https://api.netlify.com/api/v1/sites/d6377da2-9acb-4fbf-84a5-f7bdd87e120b/deploys
 ```
 
+### Rotate the VAPID keys (leak only)
+
+Web Push identifies this app to Apple's and Google's push services with a VAPID key pair,
+stored only as Supabase Edge Function secrets (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+`VAPID_SUBJECT`). They are never committed.
+
+**Rotating them invalidates every existing subscription.** Every team member has to open
+HK Planner from their Home Screen and tap Enable again. So rotate only if the private key
+has actually leaked, never as routine hygiene.
+
+To rotate: regenerate with `scripts/gen-vapid-keys.ts`, push the new secrets, redeploy the
+edge function, delete the stale rows (`delete from public.push_subscriptions`), then walk
+the team through re-enabling notifications.
+
+```bash
+VAPID_ENV="$(mktemp -d)/vapid.env"
+npx -y deno@2.9.6 run --no-lock --allow-write="$VAPID_ENV" scripts/gen-vapid-keys.ts "$VAPID_ENV"
+export SUPABASE_ACCESS_TOKEN="$(cat "$HOME/.supabase/access-token")"
+npx -y supabase@2 secrets set --env-file "$VAPID_ENV" --project-ref dqjnqvbxfwtvrjwnnmns
+rm -P "$VAPID_ENV"
+./deploy-proxy.sh
+```
+
+The private key is never printed and never written anywhere but that 0600 temp file, which
+`rm -P` overwrites. Only the public key is echoed: it is not a secret, every browser gets it.
+Hand `docs/push-notifications-team.md` to each person when they have to re-enable.
+
 ### Apply a schema change
 
 1. Add `supabase/migrations/YYYYMMDDHHMMSS_short_description.sql`
