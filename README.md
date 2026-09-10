@@ -14,7 +14,6 @@ Housekeeping & maintenance scheduling app for ~108 Dubai short-term rentals.
 ├── index.html                    # the app (~5,100 lines, HTML+JS — CSS extracted)
 ├── styles/styles.css             # all of the app's CSS (~2,350 lines, single file for now)
 ├── hostaway-proxy-patched.ts     # the edge function (~1,660 lines, 75 actions)
-├── medini-bot-patched.ts         # legacy WhatsApp bot edge function
 ├── migrate-photos.ts             # one-shot photo bucket migration (already ran)
 ├── deploy-proxy.sh               # one-command edge function deploy
 ├── deploy-netlify/               # static-site bundle ready for Netlify (zip-deploy)

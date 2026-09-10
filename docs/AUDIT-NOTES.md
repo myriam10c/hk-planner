@@ -18,10 +18,8 @@ Audit réalisé le 21-22 Avril 2026.
 - Actions ajoutées : `cleanerLogin` (sans fuite du PIN dans la réponse), `cleanerLogout`, `cleanerMe`
 - Frontend : header `X-Cleaner-Token` sur toutes les requêtes
 
-## Phase 2 — Isolation bot trading
-- Tables `bot_*` (43 000+ lignes) déplacées vers schema `trading` (non exposé à PostgREST)
-- `medini-bot` : service_role + schema('trading') (plus d'ANON hardcodée)
-- Policies `service_role_only` sur les tables déplacées
+## Phase 2 — Isolation d'un service tiers (supprimé le 2026-09-10)
+- Le service tiers hébergé sur ce projet a été isolé dans son propre schema, puis entièrement supprimé le 2026-09-10 (schema, tables, fonction edge et job pg_cron).
 
 ## Phase 3 — Photos → Storage
 - Bucket `cleaning-photos` (privé, 10 MB max, images only)

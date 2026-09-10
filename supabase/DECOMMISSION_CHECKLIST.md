@@ -16,7 +16,6 @@ Three Supabase projects exist; two of them need attention.
 This was the original WhatsApp-Ops monitoring source. Monitoring tables (`monitoring_events`, `monitoring_alerts`, `monitoring_reports`, `monitoring_templates`, `monitoring_config`, `monitoring_whatsapp_debug`, `listings_map`, `email_log`) have been copied to `dqjnqvbxfwtvrjwnnmns`.
 
 It also hosts unrelated production functions for other businesses:
-- `medini-bot` (Medini)
 - `passport-upload`, `scan-passports`, `extract-passport-data` (passport flow)
 - `sakani-register`, `sakani-debug` (Sakani)
 - `iskaan-trigger`, `portal-helper` (Iskaan)
