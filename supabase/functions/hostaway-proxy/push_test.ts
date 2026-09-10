@@ -47,17 +47,67 @@ async function fakeSubscriptionKeys() {
 }
 
 // Faux client supabase-js : ne gere que le sous-ensemble utilise par sendPush.
+// `state.dedupe` = la ligne push_dedupe deja presente (null = aucune).
+// `state.cleaner` = la ligne cleaners rendue par la verification is_active.
+// `state.failUpdates` = fait lever chaque ecriture de bookkeeping.
+// `state.events` = journal ordonne (dedupe-insert, dedupe-claim, send) pour verifier
+// que la cle de dedupe est posee AVANT le premier envoi.
 function fakeSb(rows: any[]) {
-  const state = { rows, updates: [] as any[], upserts: [] as any[], dedupe: null as any };
+  const state = {
+    rows,
+    updates: [] as any[],
+    inserts: [] as any[],
+    dedupeUpdates: [] as any[],
+    events: [] as string[],
+    dedupe: null as any,
+    cleaner: { is_active: true } as any,
+    failUpdates: false,
+  };
   const api: any = {
     state,
     from(table: string) {
-      if (table === "push_dedupe") {
+      if (table === "cleaners") {
         return {
           select: () => ({
-            eq: () => ({ maybeSingle: async () => ({ data: state.dedupe, error: null }) }),
+            eq: () => ({ maybeSingle: async () => ({ data: state.cleaner, error: null }) }),
           }),
-          upsert: async (row: any) => { state.upserts.push(row); return { error: null }; },
+        };
+      }
+      if (table === "push_dedupe") {
+        return {
+          insert: async (row: any) => {
+            state.events.push("dedupe-insert");
+            if (state.dedupe) {
+              return { error: { code: "23505", message: "duplicate key value violates unique constraint" } };
+            }
+            state.dedupe = { ...row };
+            state.inserts.push(row);
+            return { error: null };
+          },
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => {
+                state.events.push("dedupe-read");
+                return { data: state.dedupe, error: null };
+              },
+            }),
+          }),
+          update: (patch: any) => ({
+            eq: () => ({
+              lt: (_col: string, cutoff: string) => ({
+                select: async () => {
+                  state.events.push("dedupe-claim");
+                  const prev = state.dedupe?.sent_at ?? null;
+                  const claimed = !!prev && prev < cutoff;
+                  if (claimed) {
+                    state.dedupe = { ...state.dedupe, ...patch };
+                    state.dedupeUpdates.push(patch);
+                  }
+                  return { data: claimed ? [{ dedupe_key: "claimed" }] : [], error: null };
+                },
+              }),
+            }),
+          }),
         };
       }
       // push_subscriptions
@@ -69,6 +119,7 @@ function fakeSb(rows: any[]) {
         }),
         update: (patch: any) => ({
           eq: async (_col: string, val: any) => {
+            if (state.failUpdates) throw new Error("bookkeeping write failed");
             state.updates.push({ id: val, patch });
             return { error: null };
           },
@@ -206,7 +257,7 @@ Deno.test("sendPush saute un doublon dans la fenetre", async () => {
   await setVapidEnv();
   const keys = await fakeSubscriptionKeys();
   const sb = fakeSb([{ id: 1, endpoint: "https://push.example/a", ...keys }]);
-  sb.state.dedupe = { sent_at: new Date().toISOString() };
+  sb.state.dedupe = { sent_at: new Date(DAY - 10_000).toISOString() };
   const realFetch = globalThis.fetch;
   let called = 0;
   globalThis.fetch = async () => { called++; return new Response(null, { status: 201 }); };
@@ -273,6 +324,82 @@ Deno.test("sendPush envoie une priorite normale en journee", async () => {
       { priority: "normal", nowMs: DAY });
     assertEquals(r.sent, 1);
     assertEquals(r.skipped, null);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+Deno.test("sendPush pose la cle de dedupe avant le premier envoi", async () => {
+  await setVapidEnv();
+  const keys = await fakeSubscriptionKeys();
+  const sb = fakeSb([{ id: 1, endpoint: "https://push.example/a", ...keys }]);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { sb.state.events.push("send"); return new Response(null, { status: 201 }); };
+  try {
+    const r = await sendPush(sb, 6, { title: "T", body: "B", url: "/", tag: "t" },
+      { dedupeKey: "team-task:9:6", nowMs: DAY });
+    assertEquals(r.sent, 1);
+    assertEquals(sb.state.events, ["dedupe-insert", "send"]);
+    assertEquals(sb.state.inserts.length, 1);
+    assertEquals(sb.state.inserts[0].dedupe_key, "team-task:9:6");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+Deno.test("sendPush reprend une cle de dedupe hors fenetre", async () => {
+  await setVapidEnv();
+  const keys = await fakeSubscriptionKeys();
+  const sb = fakeSb([{ id: 1, endpoint: "https://push.example/a", ...keys }]);
+  // Envoi precedent il y a 10 minutes : hors fenetre, la cle est reprise.
+  sb.state.dedupe = { sent_at: new Date(DAY - 600_000).toISOString() };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { sb.state.events.push("send"); return new Response(null, { status: 201 }); };
+  try {
+    const r = await sendPush(sb, 6, { title: "T", body: "B", url: "/", tag: "t" },
+      { dedupeKey: "team-task:9:6", nowMs: DAY });
+    assertEquals(r.sent, 1);
+    assertEquals(r.skipped, null);
+    assertEquals(sb.state.events, ["dedupe-insert", "dedupe-read", "dedupe-claim", "send"]);
+    assertEquals(sb.state.dedupeUpdates.length, 1);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+Deno.test("sendPush garde ses compteurs quand une ecriture de bookkeeping leve", async () => {
+  await setVapidEnv();
+  const keys = await fakeSubscriptionKeys();
+  const sb = fakeSb([
+    { id: 1, endpoint: "https://push.example/ok", ...keys },
+    { id: 2, endpoint: "https://push.example/gone", ...keys },
+  ]);
+  sb.state.failUpdates = true;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (input: any) =>
+    String(input).endsWith("/gone")
+      ? new Response(null, { status: 410, statusText: "Gone" })
+      : new Response(null, { status: 201 });
+  try {
+    const r = await sendPush(sb, 6, { title: "T", body: "B", url: "/", tag: "t" }, { nowMs: DAY });
+    assertEquals(r, { sent: 1, pruned: 1, skipped: null });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+Deno.test("sendPush ignore un cleaner desactive", async () => {
+  await setVapidEnv();
+  const keys = await fakeSubscriptionKeys();
+  const sb = fakeSb([{ id: 1, endpoint: "https://push.example/a", ...keys }]);
+  sb.state.cleaner = { is_active: false };
+  const realFetch = globalThis.fetch;
+  let called = 0;
+  globalThis.fetch = async () => { called++; return new Response(null, { status: 201 }); };
+  try {
+    const r = await sendPush(sb, 6, { title: "T", body: "B", url: "/", tag: "t" }, { nowMs: DAY });
+    assertEquals(r, { sent: 0, pruned: 0, skipped: "cleaner_inactive" });
+    assertEquals(called, 0);
   } finally {
     globalThis.fetch = realFetch;
   }
