@@ -6,7 +6,7 @@
 //  - API calls (Supabase functions, Hostaway, etc.) bypass the cache entirely.
 //  - Bump VERSION to force all clients to drop the old cache.
 
-const VERSION = 'v-20260808-0241-e1feb13';
+const VERSION = 'v-20260910-0724-7b0a377';
 const CACHE = 'hk-planner-' + VERSION;
 const PRECACHE = ['/', '/index.html', '/hr.js', '/app.js', '/styles.css', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
 
@@ -51,6 +51,46 @@ self.addEventListener('fetch', (e) => {
       e.respondWith(staleWhileRevalidate(req));
     }
   }
+});
+
+// ===== Web Push =====
+// Payload attendu (produit par l'edge function) : {title, body, url, tag}.
+// userVisibleOnly = true côté abonnement : on DOIT afficher une notification.
+self.addEventListener('push', (e) => {
+  let data = {};
+  try {
+    data = e.data ? e.data.json() : {};
+  } catch (err) {
+    data = { body: e.data ? e.data.text() : '' };
+  }
+  const title = data.title || 'HK Planner';
+  const options = {
+    body: data.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: data.tag || 'hk-planner',
+    renotify: true,
+    data: { url: data.url || '/' },
+  };
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of all) {
+      if (new URL(client.url).origin === self.location.origin) {
+        await client.focus();
+        if ('navigate' in client) {
+          try { await client.navigate(target); } catch (err) { /* onglet non navigable, on garde le focus */ }
+        }
+        return;
+      }
+    }
+    await self.clients.openWindow(target);
+  })());
 });
 
 async function networkFirst(req) {
