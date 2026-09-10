@@ -102,3 +102,25 @@ export async function resolveCleanerByEmail(
   if (!data) return null;
   return { cleaner_id: data.id, name: data.name, role: data.role, color: data.color };
 }
+
+// Roles auxquels on peut attacher un compte email. `system` (le compte du CEO
+// Agent) en est exclu volontairement : c'est un acteur machine, il ne se
+// connecte jamais et ne doit jamais recevoir d'invitation.
+export const INVITE_ROLES = new Set(["cleaner", "manager", "maintenance", "subcontractor"]);
+
+export function normalizeEmail(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().toLowerCase() : "";
+}
+
+// Volontairement permissif sur la partie locale et strict sur la forme : un
+// domaine avec un point, pas d'espace, pas de second arobase. Miroir exact de
+// la contrainte cleaners_email_format_chk cote base.
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+export function isValidEmail(email: string): boolean {
+  return typeof email === "string" && email.length > 0 && email.length <= 200 && EMAIL_RE.test(email);
+}
+
+export function inviteRoleAllowed(role: unknown): boolean {
+  return typeof role === "string" && INVITE_ROLES.has(role);
+}

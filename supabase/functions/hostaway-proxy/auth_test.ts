@@ -226,3 +226,31 @@ Deno.test("verifyUserJwt rend null au lieu de lever si l'environnement est inacc
   }
   resetJwksCache();
 });
+
+import { inviteRoleAllowed, isValidEmail, normalizeEmail } from "./auth.ts";
+
+Deno.test("normalizeEmail met en minuscules et enleve les espaces", () => {
+  assertEquals(normalizeEmail("  Walter@Example.COM "), "walter@example.com");
+  assertEquals(normalizeEmail(null), "");
+  assertEquals(normalizeEmail(42), "");
+});
+
+Deno.test("isValidEmail accepte une adresse simple et refuse le reste", () => {
+  assertEquals(isValidEmail("walter@example.com"), true);
+  assertEquals(isValidEmail("walter+hk@example.co.uk"), true);
+  assertEquals(isValidEmail("walter@example"), false);
+  assertEquals(isValidEmail("walter example@x.com"), false);
+  assertEquals(isValidEmail("@example.com"), false);
+  assertEquals(isValidEmail(""), false);
+  assertEquals(isValidEmail("a".repeat(200) + "@example.com"), false);
+});
+
+Deno.test("inviteRoleAllowed refuse le role system et les valeurs inconnues", () => {
+  assertEquals(inviteRoleAllowed("cleaner"), true);
+  assertEquals(inviteRoleAllowed("manager"), true);
+  assertEquals(inviteRoleAllowed("maintenance"), true);
+  assertEquals(inviteRoleAllowed("subcontractor"), true);
+  assertEquals(inviteRoleAllowed("system"), false);
+  assertEquals(inviteRoleAllowed("admin"), false);
+  assertEquals(inviteRoleAllowed(undefined), false);
+});
