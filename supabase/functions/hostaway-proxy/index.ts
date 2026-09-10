@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
+import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -172,16 +173,37 @@ function extractAptNumber(s: string | null | undefined): string | null {
 const CHECKOUTS_FRESH_MS = 2 * 60 * 1000;   // newer: serve as-is, no revalidate
 const CHECKOUTS_STALE_MS = 10 * 60 * 1000;  // older: fetch Hostaway synchronously
 
-async function buildCheckoutsPayload(startDate: string, endDate: string) {
+async function buildCheckoutsPayload(sb: any, startDate: string, endDate: string) {
   const token = await getAccessToken();
   const validStatuses = ['new','modified','confirmed','ownerStay','reserved'];
-  const departuresUrl = API_BASE + "/reservations?departureStartDate=" + startDate + "&departureEndDate=" + endDate + "&sortOrder=departureDate&orderDirection=asc";
+  // Reports (cleaning_postponed) qui atterrissent dans la fenêtre demandée depuis
+  // une date ANTÉRIEURE : leur réservation source part avant startDate, donc la
+  // requête departures ne la renverrait pas et le ménage disparaîtrait de la
+  // semaine de sa date effective (bug du report dimanche→lundi cross-semaine).
+  // On étend la fenêtre en arrière jusqu'à la plus ancienne original_date, puis
+  // on ne garde des departures hors plage QUE celles dont la clé est reportée ici.
+  let postponedIn: Array<{ reservation_key: string; original_date: string }> = [];
+  try {
+    const { data } = await sb.from("cleaning_postponed")
+      .select("reservation_key, original_date")
+      .gte("new_date", startDate).lte("new_date", endDate)
+      .lt("original_date", startDate);
+    // Les extras ne viennent pas de Hostaway : le front les fenêtre lui-même.
+    postponedIn = (data || []).filter((r: any) => !String(r.reservation_key).startsWith("extra_"));
+  } catch (e) {
+    console.error("[buildCheckoutsPayload] cleaning_postponed read failed:", (e as any)?.message);
+  }
+  const effStart = postponedIn.length
+    ? postponedIn.map((r) => r.original_date).sort()[0]
+    : startDate;
+  const postKeys = new Set(postponedIn.map((r) => r.reservation_key));
+  const departuresUrl = API_BASE + "/reservations?departureStartDate=" + effStart + "&departureEndDate=" + endDate + "&sortOrder=departureDate&orderDirection=asc";
   // Arrivals window extends 14 days past endDate so each departure can be
   // matched to the NEXT arrival even when it falls outside the queried week.
   const arrEndD = new Date(endDate + "T00:00:00Z");
   arrEndD.setUTCDate(arrEndD.getUTCDate() + 14);
   const arrivalsEnd = arrEndD.toISOString().split("T")[0];
-  const arrivalsUrl = API_BASE + "/reservations?arrivalStartDate=" + startDate + "&arrivalEndDate=" + arrivalsEnd + "&sortOrder=arrivalDate&orderDirection=asc";
+  const arrivalsUrl = API_BASE + "/reservations?arrivalStartDate=" + effStart + "&arrivalEndDate=" + arrivalsEnd + "&sortOrder=arrivalDate&orderDirection=asc";
   const authHeaders = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
   const [depResults, arrResults] = await Promise.all([
     fetchAllPages(departuresUrl, authHeaders),
@@ -214,7 +236,10 @@ async function buildCheckoutsPayload(startDate: string, endDate: string) {
       numberOfGuests: r.numberOfGuests || 0, cleaningFee: r.cleaningFee != null ? Number(r.cleaningFee) : 0,
       nextGuest: nextGuest ? { guest: nextGuest.guest, date: nextGuest.date, checkInTime: nextGuest.checkInTime, sameDay: nextGuest.date === depDate } : null,
     };
-  });
+  }).filter((r: any) =>
+    // Hors plage = uniquement les departures dont le ménage est reporté DANS la
+    // plage. La clé miroir de keyFor() côté app : `${checkOut}_${guest||'Guest'}`.
+    r.checkOut >= startDate || postKeys.has(r.checkOut + "_" + (r.guest || "Guest")));
   return { status: "success", count: reservations.length, reservations };
 }
 
@@ -304,7 +329,7 @@ async function loadPostponedDates(sb: any, keys: string[]): Promise<Record<strin
 // ========== Linge : champs quantités ==========
 const LAUNDRY_FIELDS = [
   "pillowcases", "bed_sheets", "duvet_covers",
-  "small_towels", "large_towels", "bath_mats",
+  "small_towels", "face_towels", "large_towels", "bath_mats",
 ] as const;
 
 // Retourne {values} ou {error}. allowNegative est vrai uniquement pour les
@@ -314,6 +339,9 @@ const LAUNDRY_FIELDS = [
 function readLaundryQty(body: Record<string, any>, allowNegative: boolean) {
   const values: Record<string, number> = {};
   for (const f of LAUNDRY_FIELDS) {
+    // face_towels ajouté le 2026-08-12 : les vieux bundles frontend en cache
+    // (raccourci Chrome figé) ne l'envoient pas. Absent = 0, comme l'historique.
+    if (f === "face_towels" && body[f] === undefined) { values[f] = 0; continue; }
     if (body[f] === null) return { error: `${f} must be an integer` };
     const n = Number(body[f]);
     if (!Number.isInteger(n)) return { error: `${f} must be an integer` };
@@ -691,20 +719,37 @@ function decideTaskFromEvent(ev: any, ids: any): any | null {
   return null;
 }
 
-// Notifie l'assigné de la tâche par Telegram si chat_id configuré.
-// Idempotent côté Telegram (un message envoyé = un message reçu, pas de dédup nécessaire pour ce MVP).
+// Notifie l'assigné de la tâche : Telegram si telegram_chat_id est configuré
+// (aujourd'hui Hillal seul), ET Web Push sur tous ses abonnements vivants.
+// Les deux canaux sont indépendants : l'absence de chat_id ne coupe plus le push.
+// Cette fonction NE LEVE JAMAIS : elle est appelée en side-effect d'une écriture.
 async function notifyAssignee(sb: any, task: any): Promise<void> {
-  if (!task?.assigned_cleaner_id) return;
-  const { data: assignee } = await sb.from("cleaners")
-    .select("id, name, telegram_chat_id")
-    .eq("id", task.assigned_cleaner_id).single();
-  if (!assignee?.telegram_chat_id) return;
-  let createdBy: { name?: string } | null = null;
-  if (task.created_by_cleaner_id) {
-    const { data: c } = await sb.from("cleaners").select("name").eq("id", task.created_by_cleaner_id).single();
-    createdBy = c || null;
+  try {
+    if (!task?.assigned_cleaner_id) return;
+    const { data: assignee } = await sb.from("cleaners")
+      .select("id, name, telegram_chat_id")
+      .eq("id", task.assigned_cleaner_id).single();
+    if (!assignee) return;
+    let createdBy: { name?: string } | null = null;
+    if (task.created_by_cleaner_id) {
+      const { data: c } = await sb.from("cleaners").select("name").eq("id", task.created_by_cleaner_id).single();
+      createdBy = c || null;
+    }
+    if (assignee.telegram_chat_id) {
+      await sendTelegram(assignee.telegram_chat_id, formatTaskNotification(task, createdBy, assignee));
+    }
+    // La priorité de la tâche porte la garde des heures de silence (ruling Q3) :
+    // seule une tâche `urgent` réveille l'assigné entre 22:00 et 08:30 Dubai.
+    const result = await sendPush(sb, assignee.id, taskPushPayload(task, createdBy), {
+      dedupeKey: "team-task:" + String(task.id) + ":" + String(assignee.id),
+      priority: task.priority,
+    });
+    if (result.skipped) {
+      console.log("[notifyAssignee] push skipped for cleaner " + String(assignee.id) + ": " + result.skipped);
+    }
+  } catch (e) {
+    console.warn("[notifyAssignee] failed:", e);
   }
-  await sendTelegram(assignee.telegram_chat_id, formatTaskNotification(task, createdBy, assignee));
 }
 
 // ========== Phase 3 : photos bucket helpers ==========
@@ -766,6 +811,11 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["cleanerLogin", "POST"],
   ["cleanerLogout", "POST"],
   ["cleanerMe", "GET"],
+  // ===== Web Push =====
+  ["getVapidPublicKey", "GET"],
+  ["savePushSubscription", "POST"],
+  ["deletePushSubscription", "POST"],
+  ["pushTest", "POST"],
   // ===== Assignments =====
   ["getAssignments", "GET"],
   ["assignCleaner", "POST"],
@@ -965,7 +1015,7 @@ Deno.serve(async (req: Request) => {
             const age = Date.now() - new Date(row.updated_at).getTime();
             if (age < CHECKOUTS_STALE_MS) {
               if (age > CHECKOUTS_FRESH_MS) {
-                const revalidate = buildCheckoutsPayload(startDate, endDate)
+                const revalidate = buildCheckoutsPayload(sb, startDate, endDate)
                   .then((payload) => sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() }))
                   .catch((e) => console.error("[hostaway-proxy] checkouts revalidate failed:", e));
                 try { (globalThis as any).EdgeRuntime?.waitUntil?.(revalidate); } catch (_e) { /* best effort */ }
@@ -977,7 +1027,7 @@ Deno.serve(async (req: Request) => {
           console.error("[hostaway-proxy] proxy_cache read failed:", e);
         }
       }
-      const payload = await buildCheckoutsPayload(startDate, endDate);
+      const payload = await buildCheckoutsPayload(sb, startDate, endDate);
       try {
         await sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() });
       } catch (e) {
@@ -1078,6 +1128,13 @@ Deno.serve(async (req: Request) => {
         if (error) throw error;
       }
       await addLog(sb, key, postpone ? "postponed" : "unpostponed", actor, postpone ? { new_date, original_date } : null);
+      // Le payload checkouts dépend maintenant des reports : purge du cache pour que
+      // la semaine destination voie le ménage sans attendre l'expiration (10 min).
+      try {
+        await sb.from("proxy_cache").delete().like("key", "checkouts:%");
+      } catch (e) {
+        console.error("[setPostponed] proxy_cache purge failed:", (e as any)?.message);
+      }
       return jsonResp({ status: "success", key, postpone });
     }
 
@@ -1159,15 +1216,23 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ movements: data || [] });
     }
 
-    // Manager-only, même règle que setCancelled / setPostponed : ce chiffre est
-    // la référence opposée à la blanchisserie, il ne s'écrit pas depuis un compte cleaner.
+    // Pickup/retour : ouverts au staff présent au local quand la blanchisserie
+    // passe (auteur forcé depuis la session, jamais depuis le body). Les
+    // ajustements restent manager-only : ce chiffre est la référence opposée à
+    // la blanchisserie. Sous-traitants exclus de tout.
     if (action === "addLaundryMovement" && req.method === "POST") {
       const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
-      if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
+      const isStaff = !!me && me.role !== "manager";
+      if (isStaff && me!.role === "subcontractor") {
+        return jsonResp({ error: "manager role required" }, 403);
+      }
       const body = await req.json();
-      const { kind, moved_on, note, author } = body;
+      const { kind, moved_on, note } = body;
       if (!["out", "in", "adjust_store", "adjust_laundry"].includes(kind)) {
         return jsonResp({ error: "invalid kind" }, 400);
+      }
+      if (isStaff && String(kind).startsWith("adjust_")) {
+        return jsonResp({ error: "adjustments are manager-only" }, 403);
       }
       if (!moved_on || !/^\d{4}-\d{2}-\d{2}$/.test(String(moved_on))) {
         return jsonResp({ error: "moved_on required (YYYY-MM-DD)" }, 400);
@@ -1177,7 +1242,7 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await sb.from("laundry_movements").insert({
         kind, ...q.values, moved_on,
         note: note || null,
-        author: author || "Manager",
+        author: isStaff ? me!.name : (body.author || "Manager"),
       }).select().single();
       if (error) throw error;
       return jsonResp({ status: "success", movement: data });
@@ -1316,6 +1381,79 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", cleaner: { id: cleaner.cleaner_id, name: cleaner.name, color: cleaner.color, role: cleaner.role } });
     }
 
+    // ==================== WEB PUSH ====================
+    // La clé publique VAPID n'est pas un secret : elle doit atteindre le navigateur
+    // pour pushManager.subscribe(). X-App-Secret (gate d'entrée) suffit.
+    if (action === "getVapidPublicKey") {
+      const publicKey = await getApplicationServerKey();
+      // Secrets VAPID absents (ou illisibles) : 503 explicite plutôt qu'un
+      // succès à null, pour que le front et le contrôleur voient tout de suite
+      // que c'est la configuration serveur qui manque, pas le navigateur.
+      if (!publicKey) {
+        return jsonResp({ error: "push is not configured on this server", publicKey: null }, 503);
+      }
+      return jsonResp({ status: "success", publicKey });
+    }
+    if (action === "savePushSubscription" && req.method === "POST") {
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      const body = await req.json();
+      const endpoint = typeof body?.endpoint === "string" ? body.endpoint.trim() : "";
+      const p256dh = typeof body?.keys?.p256dh === "string" ? body.keys.p256dh : "";
+      const auth = typeof body?.keys?.auth === "string" ? body.keys.auth : "";
+      if (!endpoint || !/^https:\/\//.test(endpoint) || endpoint.length > 2000) {
+        return jsonResp({ error: "endpoint must be an https url" }, 400);
+      }
+      if (!p256dh || !auth) return jsonResp({ error: "keys.p256dh and keys.auth required" }, 400);
+      const ua = typeof body?.user_agent === "string" ? body.user_agent.slice(0, 300) : (req.headers.get("user-agent") ?? null);
+      // Upsert sur endpoint : un même navigateur qui se reconnecte sous un autre PIN
+      // doit basculer l'abonnement sur le nouveau cleaner, pas en créer un second.
+      const { error } = await sb.from("push_subscriptions").upsert({
+        cleaner_id: me.cleaner_id,
+        endpoint,
+        p256dh,
+        auth,
+        user_agent: ua,
+        disabled_at: null,
+        last_error: null,
+      }, { onConflict: "endpoint" });
+      if (error) throw error;
+      return jsonResp({ status: "success" });
+    }
+    if (action === "deletePushSubscription" && req.method === "POST") {
+      const me = await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      const body = await req.json();
+      const endpoint = typeof body?.endpoint === "string" ? body.endpoint.trim() : "";
+      if (!endpoint) return jsonResp({ error: "endpoint required" }, 400);
+      const { data, error } = await sb.from("push_subscriptions")
+        .delete().eq("endpoint", endpoint).eq("cleaner_id", me.cleaner_id).select("id");
+      if (error) throw error;
+      return jsonResp({ status: "success", deleted: (data ?? []).length });
+    }
+    if (action === "pushTest" && req.method === "POST") {
+      // Deux portes : le bouton manager du front (X-Cleaner-Token role=manager) et
+      // le contrôleur / les jobs serveur (X-Server-Secret, jamais dans le bundle JS).
+      const serverSecret = req.headers.get("x-server-secret") ?? "";
+      const isServer = SERVER_SHARED_SECRET !== "" && serverSecret === SERVER_SHARED_SECRET;
+      const me = isServer ? null : await validateCleanerToken(sb, req.headers.get("x-cleaner-token"));
+      if (!isServer && (!me || me.role !== "manager")) {
+        return jsonResp({ error: "manager auth required" }, 403);
+      }
+      const body = await req.json().catch(() => ({}));
+      const targetId = body?.cleaner_id !== undefined && body?.cleaner_id !== null
+        ? Number(body.cleaner_id)
+        : me?.cleaner_id;
+      if (!Number.isInteger(targetId)) return jsonResp({ error: "cleaner_id required" }, 400);
+      const result = await sendPush(sb, targetId as number, {
+        title: "HK Planner test",
+        body: "Push notifications are working on this device.",
+        url: "https://stunning-kleicha-f61101.netlify.app/",
+        tag: "hk-push-test",
+      });
+      return jsonResp({ status: "success", cleaner_id: targetId, ...result });
+    }
+
     // ==================== ASSIGNMENTS ====================
     if (action === "getAssignments") {
       const data = await fetchAllRows<any>((from, to) =>
@@ -1378,6 +1516,11 @@ Deno.serve(async (req: Request) => {
 
       const op = mode || (list !== null ? "set" : (single ? "add" : "clear"));
 
+      // Ruling Q1 : les cleaners NOUVELLEMENT affectés reçoivent un push. On les
+      // accumule ici et on envoie après l'écriture, pour ne jamais notifier une
+      // affectation qui a échoué. Une réaffectation à l'identique ne renotifie pas.
+      const pushTargets: number[] = [];
+
       // Blocage strict : on n'assigne pas un menage a quelqu'un dont le conge
       // est approuve ce jour-la. La date de la cle (YYYY-MM-DD_guest, ou
       // extra_YYYY-MM-DD_... pour les menages hors Hostaway) n'est qu'un point de
@@ -1413,6 +1556,10 @@ Deno.serve(async (req: Request) => {
 
       if (op === "set") {
         // Replace all rows for this key.
+        // Liste avant écriture : sert à ne pousser que vers les nouveaux affectés.
+        const { data: beforeRows } = await sb.from("cleaning_assignments")
+          .select("cleaner_id").eq("reservation_key", reservation_key);
+        const beforeIds = new Set<number>((beforeRows || []).map((r: any) => Number(r.cleaner_id)));
         const { error: dErr } = await sb.from("cleaning_assignments").delete().eq("reservation_key", reservation_key);
         if (dErr) throw dErr;
         const newList = list || (single ? [single] : []);
@@ -1421,13 +1568,19 @@ Deno.serve(async (req: Request) => {
           const { error: iErr } = await sb.from("cleaning_assignments").insert(rows);
           if (iErr) throw iErr;
         }
+        for (const cid of newList) if (!beforeIds.has(Number(cid))) pushTargets.push(Number(cid));
         await addLog(sb, reservation_key, newList.length ? "assigned" : "unassigned", actor, { cleaner_ids: newList, service_type: stype });
       } else if (op === "add") {
         if (!single) return jsonResp({ error: "cleaner_id required for add" }, 400);
+        // L'upsert est silencieux sur conflit : on regarde avant pour savoir si
+        // c'est une vraie nouvelle affectation ou un simple re-clic.
+        const { data: existingRow } = await sb.from("cleaning_assignments")
+          .select("cleaner_id").eq("reservation_key", reservation_key).eq("cleaner_id", single).maybeSingle();
         const { error: iErr } = await sb.from("cleaning_assignments")
           .upsert({ reservation_key, cleaner_id: single, service_type: stype, assigned_at: new Date().toISOString() },
                   { onConflict: "reservation_key,cleaner_id" });
         if (iErr) throw iErr;
+        if (!existingRow) pushTargets.push(Number(single));
         await addLog(sb, reservation_key, "assigned", actor, { cleaner_id: single, mode: "add", service_type: stype });
       } else if (op === "update_service_type") {
         // Modif du service_type sans toucher aux assignés
@@ -1447,6 +1600,19 @@ Deno.serve(async (req: Request) => {
         await addLog(sb, reservation_key, "unassigned", actor);
       } else {
         return jsonResp({ error: "unknown mode: " + op }, 400);
+      }
+      // Push aux nouveaux affectés. Aucune priorité passée : une affectation de
+      // ménage n'est jamais `urgent`, elle respecte donc les heures de silence
+      // (22:00 à 08:30 Dubai). sendPush ne lève jamais, mais on double la garde :
+      // une notification ratée ne doit pas annuler une affectation déjà écrite.
+      for (const cid of pushTargets) {
+        try {
+          await sendPush(sb, cid, assignmentPushPayload(String(reservation_key), stype), {
+            dedupeKey: "cleaning-assignment:" + String(reservation_key) + ":" + String(cid),
+          });
+        } catch (e) {
+          console.warn("[assignCleaner] push failed for cleaner " + String(cid) + ":", e);
+        }
       }
       return jsonResp({ status: "success" });
     }
@@ -2474,12 +2640,12 @@ Deno.serve(async (req: Request) => {
       const { data: lr } = await sb.from("leave_requests").select("*").eq("id", id).maybeSingle();
       if (!lr) return jsonResp({ error: "request not found" }, 404);
       const isMine = lr.cleaner_id === g.me!.cleaner_id;
-      const isManager = g.me!.role === "manager";
-      if (!isMine && !isManager) return jsonResp({ error: "not your request" }, 403);
-      // Un salarie n'annule que ses demandes encore en attente. Un manager peut
-      // aussi annuler un conge deja approuve : c'est la soupape qui debloque
-      // une assignation refusee par le blocage strict.
-      if (!isManager && lr.status !== "pending") return jsonResp({ error: "only pending requests can be cancelled" }, 409);
+      // Un salarie n'annule que ses demandes encore en attente. Effacer un
+      // conge approuve (ou celui d'un autre) est reserve au CEO depuis le
+      // 2026-08-12 : les managers non-owner n'ont plus cette soupape.
+      if (!(isMine && lr.status === "pending") && !g.isOwner) {
+        return jsonResp({ error: "owner auth required" }, 403);
+      }
       if (lr.status === "cancelled" || lr.status === "rejected") return jsonResp({ error: `already ${lr.status}` }, 409);
 
       const { data, error } = await sb.from("leave_requests").update({
@@ -2529,7 +2695,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "hrDeleteHoliday" && req.method === "POST") {
-      const g = await hrAuth(sb, req, "manager");
+      const g = await hrAuth(sb, req, "owner");
       if (g.err) return g.err;
       const id = Number((await req.json()).id);
       if (!id) return jsonResp({ error: "id required" }, 400);
