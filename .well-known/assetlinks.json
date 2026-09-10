@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.medini.hkplanner",
+      "sha256_cert_fingerprints": [
+        "44:94:F1:C0:1A:62:26:A5:47:D3:C3:2E:7D:8D:19:94:F4:A6:90:F4:26:9E:B6:5A:BE:D3:11:47:27:80:8B:CD"
+      ]
+    }
+  }
+]

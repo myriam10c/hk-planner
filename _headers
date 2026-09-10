@@ -10,3 +10,7 @@
 
 /
   Content-Type: text/html; charset=utf-8
+
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  Access-Control-Allow-Origin: *
