@@ -154,6 +154,49 @@ function __updateCleanerRole(id, role){
   saveCleaner(c.id, c.name, c.phone||'', c.color, c.pin||'', role);
 }
 
+// Miroir exact d'isValidEmail cote proxy (supabase/functions/hostaway-proxy/auth.ts)
+// et de la contrainte cleaners_email_format_chk en base : pas d'espace, un seul
+// arobase, un point dans le domaine, 200 caracteres au maximum. On valide ici
+// pour eviter un aller-retour reseau, le serveur revalide de toute facon.
+const TEAM_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+function isValidTeamEmail(email){
+  return typeof email==='string' && email.length>0 && email.length<=200 && TEAM_EMAIL_RE.test(email);
+}
+
+// Invitation ou relance : le proxy tranche (invitation si le compte Auth
+// n'existe pas encore, email de reinitialisation sinon).
+async function inviteCleaner(id){
+  const c=(cleaners||[]).find(x=>String(x.id)===String(id));
+  if(!c){ toast('Team member not found','error'); return; }
+  const el=document.getElementById('cleanerEmail-'+id);
+  const email=(((el&&el.value)||c.email||'')+'').trim().toLowerCase();
+  if(!email){ toast('Enter an email address first','error'); return; }
+  if(!isValidTeamEmail(email)){ toast('That email address is not valid','error'); return; }
+  try{
+    const r=await apiWrite('inviteCleaner',{body:{id:c.id,name:c.name,email:email,role:c.role||'cleaner'}});
+    toast(r&&r.mode==='reset'?('Password reset email sent to '+email):('Invitation sent to '+email),'success');
+    fetchAll();
+  }catch(e){ toast((e&&e.message)||'Error','error'); }
+}
+
+async function __inviteNewCleanerFromForm(){
+  const name=(document.getElementById('newName').value||'').trim();
+  const email=(document.getElementById('newEmail').value||'').trim().toLowerCase();
+  if(!name||!email){ toast('Name and email are required','error'); return; }
+  if(!isValidTeamEmail(email)){ toast('That email address is not valid','error'); return; }
+  try{
+    await apiWrite('inviteCleaner',{body:{
+      name:name,
+      email:email,
+      role:document.getElementById('newRole').value,
+      phone:document.getElementById('newPhone').value,
+      color:document.getElementById('newColor').value,
+    }});
+    toast('Invitation sent to '+email,'success');
+    fetchAll();
+  }catch(e){ toast((e&&e.message)||'Error','error'); }
+}
+
 // === Phase 4 input/change/keydown delegated wrappers ===
 function __bulkAssignFromSelect(e){ bulkAssignSelected(e.target.value); e.target.value=''; }
 function __pinInput(e){ if(e.target.value.length===4) cleanerLogin(); }
@@ -5539,6 +5582,11 @@ function renderSettings(){
       '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(ROLE_COLOR[role]||'#999')+'22;color:'+(ROLE_COLOR[role]||'#999')+';font-weight:600">'+(ROLE_BADGE[role]||role)+'</span>'+
       '<div class="c-phone">'+esc(c.phone||'')+'</div>'+
       '<div class="c-pin'+(c.pin?'':' no-pin')+'">'+(c.pin?'PIN: '+c.pin:'No PIN')+'</div>'+
+      // Le role `system` (agent CEO) n'a jamais ni email ni compte : le proxy
+      // refuse son invitation, on ne montre donc pas le champ sur sa ligne.
+      (role==='system' ? '' :
+        '<input id="cleanerEmail-'+c.id+'" class="c-email" type="email" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="email address" value="'+esc(c.email||'')+'"/>'+
+        '<button class="c-invite" data-action="inviteCleaner" data-arg0="'+c.id+'" title="'+(c.email?'Resend the account email':'Send an invitation')+'" aria-label="Invite '+esc(c.name)+'">'+(c.email?'Resend':'Invite')+'</button>')+
       '<select data-action-change="__cleanerRoleChange" data-arg0="'+c.id+'" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">';
     ['manager','cleaner','maintenance'].forEach(r=>{h+='<option value="'+r+'"'+(role===r?' selected':'')+'>'+r+'</option>';});
     h+='</select>'+
@@ -5548,10 +5596,12 @@ function renderSettings(){
   h+='<div class="add-form">'+
     '<input id="newName" placeholder="Name"/>'+
     '<input id="newPhone" placeholder="Phone" style="width:100px"/>'+
+    '<input id="newEmail" type="email" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="Email" style="min-width:170px"/>'+
     '<input id="newPin" placeholder="PIN" maxlength="4" style="width:60px"/>'+
     '<select id="newRole" style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:6px"><option value="cleaner">🧹 Cleaner</option><option value="maintenance">🔧 Maintenance</option><option value="manager">👔 Manager</option></select>'+
     '<input id="newColor" type="color" value="#7c3aed" style="width:40px"/>'+
-    '<button data-action="__saveCleanerFromForm">Add</button></div>';
+    '<button data-action="__inviteNewCleanerFromForm">Add &amp; invite</button>'+
+    '<button data-action="__saveCleanerFromForm" title="Create with a PIN only, no email account">Add (PIN only)</button></div>';
   // #8 Send all daily WhatsApp
   if(cleaners.length>0) h+='<button class="wa-btn" style="margin-top:10px" data-action="__sendDailyToAllCleaners">'+icon('phone',14)+' Send daily recap to all</button>';
   h+='<div style="margin-top:10px"><a href="#cleaner" data-action="render" style="color:var(--primary);font-size:12px;font-weight:600">🔑 Open Cleaner Login View</a></div></div>';
