@@ -3,8 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
 import {
-  currentUser, isEmailUniqueViolation, normalizeEmail, parseInviteInput,
-  planInvite, planInviteRollback, systemRowError,
+  applyInvite, currentUser, findAuthUserByEmail, normalizeEmail,
+  parseInviteInput, planInvite, systemRowGuard,
 } from "./auth.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
@@ -373,28 +373,6 @@ async function sha256Hex(s: string): Promise<string> {
 // figurer dans l'allow-list de redirection du projet Supabase, sinon Auth renvoie
 // vers le site_url par defaut.
 const APP_ORIGIN = "https://stunning-kleicha-f61101.netlify.app";
-
-// L'admin API n'expose pas de recherche par email. L'equipe tient tres largement
-// sur une page, on liste et on filtre. Ne journalise jamais la liste.
-async function findAuthUserByEmail(sb: any, email: string): Promise<any | null> {
-  const { data, error } = await sb.auth.admin.listUsers({ page: 1, perPage: 200 });
-  if (error) throw error;
-  const users = (data?.users ?? []) as any[];
-  return users.find((u) => String(u.email ?? "").toLowerCase() === email) ?? null;
-}
-
-// Defait l'ecriture de cleaners quand l'appel a l'Admin API a echoue apres elle.
-// Ne leve jamais : l'appelant est deja sur un chemin d'erreur.
-async function rollbackInvite(sb: any, plan: any, cleanerId: number): Promise<void> {
-  const undo = planInviteRollback(plan, cleanerId);
-  if (!undo) return;
-  try {
-    if (undo.op === "delete") await sb.from("cleaners").delete().eq("id", undo.id);
-    else await sb.from("cleaners").update(undo.patch).eq("id", undo.id);
-  } catch (e) {
-    console.warn("[inviteCleaner] rollback impossible: " + String(e));
-  }
-}
 
 // `currentUser` (precedence Bearer > X-Cleaner-Token) vit dans auth.ts : index.ts
 // appelle Deno.serve au chargement et n'est donc pas testable (revue T3).
@@ -1324,10 +1302,10 @@ Deno.serve(async (req: Request) => {
         // cette route, et son role ne bascule pas : sinon deux clics de manager
         // la font passer en `manager`, ce qui la rend invitable (revue T7,
         // constat 5). Le refus du role `system` demande, lui, est deja pose plus
-        // haut par ALLOWED_ROLES ; systemRowError le redit pour les deux sens.
-        const { data: currentRow } = await sb.from("cleaners").select("role").eq("id", id).maybeSingle();
-        const rowErr = systemRowError(currentRow?.role, role);
-        if (rowErr) return jsonResp({ error: rowErr }, 400);
+        // haut par ALLOWED_ROLES ; la garde le redit pour les deux sens, et elle
+        // echoue FERMEE si la lecture du role ne repond pas (revue 8a, constat 4).
+        const guard = await systemRowGuard(sb, id, role);
+        if (guard) return jsonResp({ error: guard.error }, guard.status);
         const upd: any = { name, phone: phone || null, color: color || "#e94560" };
         if (role !== undefined) upd.role = role;
         if (normalizedTgChat !== undefined) upd.telegram_chat_id = normalizedTgChat;
@@ -1395,15 +1373,9 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success" });
     }
     // inviteCleaner : cree ou relie un compte Supabase Auth a une ligne cleaners.
-    // Ordre des ecritures, et rollback qui en decoule : la ligne cleaners est
-    // ecrite d'abord, l'appel a l'Admin API vient en dernier parce que c'est lui
-    // qui envoie l'email (le faire partir avant une ecriture qui peut echouer
-    // donnerait un lien vers un compte qu'on devrait detruire ensuite). Si cet
-    // appel echoue, on defait donc l'ecriture cleaners : la ligne creee dans la
-    // requete est supprimee, une ligne existante retrouve son adresse et son etat
-    // d'activation (revue T5, constat 5). Et si l'adresse d'une ligne change,
-    // l'ancien compte Auth est supprime AVANT l'ecriture, sinon son titulaire
-    // garde un acces que le manager croit avoir coupe (revue T5, constat 1).
+    // Ce gestionnaire ne fait que resoudre la ligne visee et laisser planInvite
+    // decider ; la sequence des ecritures et son rollback vivent dans
+    // applyInvite (auth.ts), avec le commentaire qui les justifie.
     if (action === "inviteCleaner" && req.method === "POST") {
       // Meme porte que saveCleaner : X-App-Secret voyage dans le bundle public,
       // seule une session manager (JWT ou PIN) autorise la creation de comptes.
@@ -1416,77 +1388,23 @@ Deno.serve(async (req: Request) => {
       const email = input.email;
 
       // 1) La ligne cleaners : celle designee par id, sinon celle qui porte deja
-      //    cet email, sinon une nouvelle.
+      //    cet email, sinon une nouvelle. Toutes les colonnes que le patch peut
+      //    toucher sont lues, sinon le rollback ne saurait pas quoi restaurer.
+      const COLS = "id, name, role, email, is_active, phone, color";
       let target: any = null;
       if (body.id) {
-        const { data } = await sb.from("cleaners")
-          .select("id, name, role, email, is_active").eq("id", body.id).maybeSingle();
+        const { data } = await sb.from("cleaners").select(COLS).eq("id", body.id).maybeSingle();
         target = data ?? null;
       } else {
-        const { data } = await sb.from("cleaners")
-          .select("id, name, role, email, is_active").eq("email", email).maybeSingle();
+        const { data } = await sb.from("cleaners").select(COLS).eq("email", email).maybeSingle();
         target = data ?? null;
       }
       // 2) L'email ne peut pas etre vole a un autre membre.
       const { data: holder } = await sb.from("cleaners").select("id").eq("email", email).maybeSingle();
 
       const plan = planInvite(input, body.id ?? null, target, holder ? Number(holder.id) : null);
-      if (plan.kind === "error") return jsonResp({ error: plan.error }, plan.status);
-
-      // 3) L'ancien compte Auth part avant toute ecriture. S'il resiste, on ne
-      //    touche a rien : mieux vaut un refus qu'un acces fantome.
-      if (plan.kind === "update" && plan.previousEmail) {
-        try {
-          const previous = await findAuthUserByEmail(sb, plan.previousEmail);
-          if (previous) {
-            const { error } = await sb.auth.admin.deleteUser(previous.id);
-            if (error) throw error;
-          }
-        } catch (e) {
-          console.warn("[inviteCleaner] ancien compte Auth non supprime: " + String(e));
-          return jsonResp({ error: "Could not replace the previous account" }, 409);
-        }
-      }
-
-      // 4) L'ecriture cleaners.
-      let cleanerId: number;
-      if (plan.kind === "update") {
-        const { error } = await sb.from("cleaners").update(plan.patch).eq("id", plan.id);
-        if (isEmailUniqueViolation(error)) {
-          return jsonResp({ error: "This email is already used by another team member" }, 409);
-        }
-        if (error) throw error;
-        cleanerId = plan.id;
-      } else {
-        const { data: inserted, error } = await sb.from("cleaners").insert(plan.row).select("id").single();
-        if (isEmailUniqueViolation(error)) {
-          return jsonResp({ error: "This email is already used by another team member" }, 409);
-        }
-        if (error) throw error;
-        cleanerId = Number(inserted.id);
-      }
-
-      // 5) Le compte Supabase Auth. S'il existe deja, une seconde invitation
-      //    echouerait : on envoie un email de reinitialisation a la place, ce qui
-      //    est ce que le manager veut dans les deux cas (« renvoie-lui son lien »).
-      const existing = await findAuthUserByEmail(sb, email);
-      const redirectTo = APP_ORIGIN + "/";
-      const authError = existing
-        ? (await sb.auth.resetPasswordForEmail(email, { redirectTo })).error
-        : (await sb.auth.admin.inviteUserByEmail(email, { redirectTo })).error;
-      if (authError) {
-        await rollbackInvite(sb, plan, cleanerId);
-        // Le libelle amont (limites de debit GoTrue et consorts) reste dans les
-        // journaux, le client ne recoit qu'un message stable.
-        console.warn("[inviteCleaner] echec de l'envoi Auth: " + String(authError.message ?? authError));
-        return jsonResp(
-          { error: existing ? "Could not send the reset email" : "Could not send the invitation" },
-          502,
-        );
-      }
-      console.log("[inviteCleaner] " + (existing ? "reset" : "invitation") +
-        " envoye pour cleaner " + String(cleanerId));
-      return jsonResp({ status: "success", id: cleanerId, mode: existing ? "reset" : "invite" });
+      const result = await applyInvite(sb, plan, email, APP_ORIGIN + "/");
+      return jsonResp(result.body, result.status);
     }
     if (action === "cleanerLogin" && req.method === "POST") {
       const body = await req.json();

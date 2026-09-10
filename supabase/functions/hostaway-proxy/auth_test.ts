@@ -379,17 +379,53 @@ Deno.test("isEmailUniqueViolation reconnait le code Postgres 23505", () => {
 });
 
 // T5 constat 5 : aucun rollback quand l'appel Auth echoue apres l'ecriture.
+// Revue 8a constat 1 : le restore doit porter le meme jeu de colonnes que le
+// patch, sinon un changement de nom, de role, de telephone ou de couleur reste
+// applique alors que le manager recoit une erreur.
 Deno.test("planInviteRollback defait l'ecriture de cleaners", () => {
-  const input = parseInviteInput({ ...OK_INPUT, id: undefined }) as any;
+  const input = parseInviteInput({ ...OK_INPUT, id: undefined, phone: "+971500000000", color: "#123456" }) as any;
   const ins = planInvite(input, null, null, null);
   assertEquals(ins.kind, "insert");
   assertEquals(planInviteRollback(ins, 42), { op: "delete", id: 42 });
 
-  const upd = planInvite(input, 8, { id: 8, role: "cleaner", email: "ancien@example.com", is_active: false }, 8);
+  const avant = {
+    id: 8,
+    name: "Ancien nom",
+    role: "cleaner",
+    email: "ancien@example.com",
+    is_active: false,
+    phone: null,
+    color: "#e94560",
+  };
+  const upd = planInvite(input, 8, avant, 8) as any;
+  // Le patch touche six colonnes, le restore en rend exactement six.
+  assertEquals(Object.keys(upd.patch).sort(), ["color", "email", "is_active", "name", "phone", "role"]);
   assertEquals(planInviteRollback(upd, 8), {
     op: "restore",
     id: 8,
-    patch: { email: "ancien@example.com", is_active: false },
+    patch: {
+      email: "ancien@example.com",
+      is_active: false,
+      name: "Ancien nom",
+      role: "cleaner",
+      phone: null,
+      color: "#e94560",
+    },
+  });
+});
+
+// Revue 8a constat 1 (suite) : une colonne que le patch ne touche pas ne doit pas
+// apparaitre dans le restore.
+Deno.test("planInviteRollback ne restaure que les colonnes reellement ecrites", () => {
+  const input = parseInviteInput({ email: "walter@example.com" }) as any;
+  const upd = planInvite(input, 8, {
+    id: 8, name: "Ancien nom", role: "cleaner", email: null, is_active: true, phone: "+9715", color: "#abc",
+  }, null) as any;
+  assertEquals(Object.keys(upd.patch).sort(), ["email", "is_active"]);
+  assertEquals(planInviteRollback(upd, 8), {
+    op: "restore",
+    id: 8,
+    patch: { email: null, is_active: true },
   });
 });
 
@@ -411,4 +447,188 @@ Deno.test("parseInviteInput refuse une adresse invalide et un role interdit", ()
   assertEquals(ok.email, "walter@example.com");
   assertEquals(ok.role, "cleaner");
   assertEquals(ok.roleProvided, false);
+});
+
+// ---------------------------------------------------------------------------
+// Correctifs de la revue de la tache 8a (constats 2, 3 et 4).
+// ---------------------------------------------------------------------------
+
+import { applyInvite, rollbackInvite, systemRowGuard } from "./auth.ts";
+
+// Faux client d'invitation : enregistre l'ordre reel des appels et sert des
+// resultats scriptes. Les ecritures cleaners consomment `writes` dans l'ordre.
+function fakeInviteSb(script: {
+  writes?: any[];
+  users?: any[];
+  deleteUser?: any;
+  authResult?: any;
+} = {}) {
+  const calls: string[] = [];
+  const payloads: any[] = [];
+  const writes = [...(script.writes ?? [])];
+  const sb: any = {
+    calls,
+    payloads,
+    from(_table: string) {
+      const q: any = {};
+      const finish = () => {
+        calls.push("cleaners." + q.op);
+        if (q.payload !== undefined) payloads.push({ op: q.op, payload: q.payload });
+        const r = writes.length ? writes.shift() : { data: { id: 42 }, error: null };
+        return Promise.resolve(r);
+      };
+      q.update = (p: any) => { q.op = "update"; q.payload = p; return q; };
+      q.insert = (p: any) => { q.op = "insert"; q.payload = p; return q; };
+      q.delete = () => { q.op = "delete"; return q; };
+      q.select = () => q;
+      q.eq = () => q;
+      q.single = () => finish();
+      q.maybeSingle = () => finish();
+      q.then = (res: any, rej: any) => finish().then(res, rej);
+      return q;
+    },
+    auth: {
+      resetPasswordForEmail: async () => {
+        calls.push("auth.reset");
+        return script.authResult ?? { error: null };
+      },
+      admin: {
+        listUsers: async () => {
+          calls.push("auth.listUsers");
+          return { data: { users: script.users ?? [] }, error: null };
+        },
+        deleteUser: async () => {
+          calls.push("auth.deleteUser");
+          return script.deleteUser ?? { error: null };
+        },
+        inviteUserByEmail: async () => {
+          calls.push("auth.invite");
+          return script.authResult ?? { error: null };
+        },
+      },
+    },
+  };
+  return sb;
+}
+
+function captureWarn(): { lines: string[]; restore: () => void } {
+  const lines: string[] = [];
+  const real = console.warn;
+  console.warn = (...args: any[]) => { lines.push(args.map(String).join(" ")); };
+  return { lines, restore: () => { console.warn = real; } };
+}
+
+const AVANT = {
+  id: 8, name: "Ancien nom", role: "cleaner",
+  email: "ancien@example.com", is_active: true, phone: null, color: "#e94560",
+};
+
+function planPourAvant() {
+  const input = parseInviteInput({ email: "walter@example.com", name: "Walter" }) as any;
+  return planInvite(input, 8, AVANT, 8);
+}
+
+// Revue 8a constat 2 : rollbackInvite ne destructurait pas l'erreur de postgrest,
+// un rollback refuse par la base ne laissait aucune trace.
+Deno.test("rollbackInvite journalise quand la base refuse le rollback", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({ writes: [{ error: { message: "row level security" } }] });
+    await rollbackInvite(sb, planPourAvant(), 8);
+    assertEquals(sb.calls, ["cleaners.update"]);
+    assertEquals(w.lines.length, 1);
+    assertEquals(w.lines[0].includes("rollback refuse"), true);
+    assertEquals(w.lines[0].includes("row level security"), true);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("rollbackInvite ne journalise rien quand il reussit", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({ writes: [{ error: null }] });
+    await rollbackInvite(sb, planPourAvant(), 8);
+    assertEquals(w.lines, []);
+  } finally {
+    w.restore();
+  }
+});
+
+// Revue 8a constat 3 : le 23505 tombait APRES la destruction de l'ancien compte
+// Auth, donc « This email is already used » mentait sur l'etat de Auth.
+Deno.test("applyInvite ecrit cleaners avant de toucher au compte Auth", async () => {
+  // L'ancienne adresse a bien un compte Auth, la nouvelle non : la sequence
+  // complete se deroule (destruction, puis invitation).
+  const sb = fakeInviteSb({ writes: [{ error: null }], users: [{ id: "u-1", email: "ancien@example.com" }] });
+  const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { status: "success", id: 8, mode: "invite" });
+  // L'ecriture cleaners passe en premier, la destruction de l'ancien compte
+  // ensuite, l'invitation (qui envoie l'email) en dernier.
+  assertEquals(sb.calls, [
+    "cleaners.update", "auth.listUsers", "auth.deleteUser", "auth.listUsers", "auth.invite",
+  ]);
+});
+
+Deno.test("applyInvite rend 409 sur un 23505 sans avoir touche au compte Auth", async () => {
+  const sb = fakeInviteSb({ writes: [{ error: { code: "23505" } }] });
+  const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+  assertEquals(r.status, 409);
+  assertEquals(r.body, { error: "This email is already used by another team member" });
+  assertEquals(sb.calls, ["cleaners.update"]);
+});
+
+Deno.test("applyInvite defait l'ecriture et rend 409 quand l'ancien compte resiste", async () => {
+  const sb = fakeInviteSb({
+    writes: [{ error: null }, { error: null }],
+    users: [{ id: "u-1", email: "ancien@example.com" }],
+    deleteUser: { error: { message: "auth down" } },
+  });
+  const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+  assertEquals(r.status, 409);
+  assertEquals(r.body, { error: "Could not replace the previous account" });
+  // Aucune invitation n'est partie, et la ligne a retrouve son etat d'avant.
+  assertEquals(sb.calls, ["cleaners.update", "auth.listUsers", "auth.deleteUser", "cleaners.update"]);
+  assertEquals(sb.payloads[1].payload, {
+    email: "ancien@example.com", is_active: true, name: "Ancien nom",
+  });
+});
+
+Deno.test("applyInvite defait l'insertion et rend 502 quand l'invitation echoue", async () => {
+  const input = parseInviteInput({ email: "walter@example.com", name: "Walter" }) as any;
+  const plan = planInvite(input, null, null, null);
+  const sb = fakeInviteSb({
+    writes: [{ data: { id: 77 }, error: null }, { error: null }],
+    authResult: { error: { message: "rate limit exceeded" } },
+  });
+  const r = await applyInvite(sb, plan, "walter@example.com", "https://app.test/");
+  assertEquals(r.status, 502);
+  assertEquals(r.body, { error: "Could not send the invitation" });
+  assertEquals(sb.calls, ["cleaners.insert", "auth.listUsers", "auth.invite", "cleaners.delete"]);
+});
+
+// Revue 8a constat 4 : la garde system s'ouvrait si sa lecture echouait.
+Deno.test("systemRowGuard echoue ferme quand la lecture du role echoue", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({ writes: [{ data: null, error: { message: "timeout" } }] });
+    assertEquals(await systemRowGuard(sb, 11, "manager"), {
+      status: 500,
+      error: "Could not verify the member",
+    });
+    assertEquals(w.lines.length, 1);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("systemRowGuard refuse la ligne system et laisse passer les autres", async () => {
+  const sys = fakeInviteSb({ writes: [{ data: { role: "system" }, error: null }] });
+  assertEquals(await systemRowGuard(sys, 11, "manager"), {
+    status: 400,
+    error: "this account cannot be modified",
+  });
+  const ok = fakeInviteSb({ writes: [{ data: { role: "cleaner" }, error: null }] });
+  assertEquals(await systemRowGuard(ok, 8, "manager"), null);
 });

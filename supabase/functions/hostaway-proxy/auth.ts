@@ -226,8 +226,11 @@ export type InvitePlan =
     // l'ancien titulaire garde un acces que le manager croit avoir coupe
     // (revue T5, constat 1).
     previousEmail: string | null;
-    // Etat d'avant, pour le rollback si l'appel Auth echoue.
-    restore: { email: string | null; is_active: boolean };
+    // Etat d'avant des colonnes que `patch` touche, pour le rollback si la suite
+    // echoue. Meme jeu de cles que `patch` : restaurer moins laisserait un
+    // changement de nom, de role, de telephone ou de couleur applique alors que
+    // l'appelant recoit une erreur (revue 8a, constat 1).
+    restore: Record<string, unknown>;
   };
 
 // `target` est la ligne cleaners resolue par l'appelant (par id, sinon par
@@ -254,18 +257,29 @@ export function planInvite(
   if (target) {
     // is_active : inviter une ligne desactivee la reactive, sinon le compte Auth
     // cree serait inutilisable (revue T5, constat 2).
-    const patch: Record<string, unknown> = { email: input.email, is_active: true };
-    if (input.name) patch.name = input.name;
-    if (input.roleProvided) patch.role = input.role;
-    if (input.phone !== undefined) patch.phone = input.phone;
-    if (input.color !== undefined) patch.color = input.color;
     const before = normalizeEmail(target.email);
+    const patch: Record<string, unknown> = { email: input.email, is_active: true };
+    const restore: Record<string, unknown> = {
+      email: before || null,
+      is_active: target.is_active !== false,
+    };
+    // Une colonne absente de la ligne lue (jamais le cas en production, ou le
+    // select les ramene toutes) ne serait pas restaurable : on ne l'inscrit pas
+    // dans le restore plutot que d'y ecrire undefined.
+    const touche = (col: string, valeur: unknown, avant: unknown) => {
+      patch[col] = valeur;
+      if (avant !== undefined) restore[col] = avant;
+    };
+    if (input.name) touche("name", input.name, target.name);
+    if (input.roleProvided) touche("role", input.role, target.role);
+    if (input.phone !== undefined) touche("phone", input.phone, target.phone);
+    if (input.color !== undefined) touche("color", input.color, target.color);
     return {
       kind: "update",
       id: Number(target.id),
       patch,
       previousEmail: before && before !== input.email ? before : null,
-      restore: { email: before || null, is_active: target.is_active !== false },
+      restore,
     };
   }
   if (!input.name) return { kind: "error", status: 400, error: "name required" };
@@ -282,9 +296,9 @@ export function planInvite(
   };
 }
 
-// Rollback de l'ecriture cleaners quand l'appel a l'Admin API echoue apres elle
-// (revue T5, constat 5). Une ligne creee dans cette requete est supprimee, une
-// ligne existante retrouve son adresse et son etat d'activation.
+// Rollback de l'ecriture cleaners quand la suite echoue (revue T5, constat 5).
+// Une ligne creee dans cette requete est supprimee, une ligne existante retrouve
+// l'etat d'avant de chacune des colonnes que l'ecriture avait touchees.
 export function planInviteRollback(
   plan: InvitePlan,
   cleanerId: number,
@@ -310,4 +324,133 @@ export function systemRowError(currentRole: unknown, nextRole: unknown): string 
   if (currentRole === "system") return "this account cannot be modified";
   if (nextRole === "system") return "invalid role";
   return null;
+}
+
+// ===========================================================================
+// Execution de l'invitation (sequence des ecritures)
+// ===========================================================================
+
+// L'admin API n'expose pas de recherche par email. L'equipe tient tres largement
+// sur une page, on liste et on filtre. Ne journalise jamais la liste.
+export async function findAuthUserByEmail(sb: any, email: string): Promise<any | null> {
+  const { data, error } = await sb.auth.admin.listUsers({ page: 1, perPage: 200 });
+  if (error) throw error;
+  const users = (data?.users ?? []) as any[];
+  return users.find((u) => String(u.email ?? "").toLowerCase() === email) ?? null;
+}
+
+// Defait l'ecriture cleaners. Ne leve jamais : l'appelant est deja sur un chemin
+// d'erreur. Observe en revanche l'erreur rendue par postgrest-js, qui ne leve pas
+// non plus : sans ca, un rollback refuse par la base ne laissait aucune trace
+// (revue 8a, constat 2).
+export async function rollbackInvite(sb: any, plan: InvitePlan, cleanerId: number): Promise<void> {
+  const undo = planInviteRollback(plan, cleanerId);
+  if (!undo) return;
+  try {
+    const { error } = undo.op === "delete"
+      ? await sb.from("cleaners").delete().eq("id", undo.id)
+      : await sb.from("cleaners").update(undo.patch).eq("id", undo.id);
+    if (error) {
+      console.warn("[inviteCleaner] rollback refuse: " + String((error as any).message ?? error));
+    }
+  } catch (e) {
+    console.warn("[inviteCleaner] rollback impossible: " + String(e));
+  }
+}
+
+export interface InviteResult {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+const EMAIL_CONFLICT: InviteResult = {
+  status: 409,
+  body: { error: "This email is already used by another team member" },
+};
+
+// Sequence des ecritures, et rollback qui en decoule :
+//   1. l'ecriture cleaners d'abord. C'est la seule qui peut lever un 23505, et un
+//      « This email is already used » doit vouloir dire que rien n'a bouge, ni
+//      ici ni cote Auth (revue 8a, constat 3) ;
+//   2. la destruction de l'ancien compte Auth ensuite, quand l'adresse de la
+//      ligne change : sans elle l'ancien titulaire garde un acces que le manager
+//      croit avoir coupe (revue T5, constat 1). Si elle echoue, on defait
+//      l'ecriture et on refuse en 409, donc rien ne bouge nulle part ;
+//   3. l'appel qui cree le compte et envoie l'email en dernier : le faire avant
+//      une ecriture faillible enverrait un lien vers un compte a detruire. S'il
+//      echoue, l'ecriture cleaners est defaite (revue T5, constat 5).
+// Le seul etat residuel assume : au point 3, si l'adresse avait change, l'ancien
+// compte Auth est deja detruit et ne revient pas.
+export async function applyInvite(
+  sb: any,
+  plan: InvitePlan,
+  email: string,
+  redirectTo: string,
+): Promise<InviteResult> {
+  if (plan.kind === "error") return { status: plan.status, body: { error: plan.error } };
+
+  let cleanerId: number;
+  if (plan.kind === "update") {
+    const { error } = await sb.from("cleaners").update(plan.patch).eq("id", plan.id);
+    if (isEmailUniqueViolation(error)) return EMAIL_CONFLICT;
+    if (error) throw error;
+    cleanerId = plan.id;
+  } else {
+    const { data: inserted, error } = await sb.from("cleaners").insert(plan.row).select("id").single();
+    if (isEmailUniqueViolation(error)) return EMAIL_CONFLICT;
+    if (error) throw error;
+    cleanerId = Number(inserted.id);
+  }
+
+  if (plan.kind === "update" && plan.previousEmail) {
+    try {
+      const previous = await findAuthUserByEmail(sb, plan.previousEmail);
+      if (previous) {
+        const { error } = await sb.auth.admin.deleteUser(previous.id);
+        if (error) throw error;
+      }
+    } catch (e) {
+      console.warn("[inviteCleaner] ancien compte Auth non supprime: " + String(e));
+      await rollbackInvite(sb, plan, cleanerId);
+      return { status: 409, body: { error: "Could not replace the previous account" } };
+    }
+  }
+
+  // Si un compte porte deja cette adresse, une seconde invitation echouerait : on
+  // envoie une reinitialisation, ce que le manager veut dans les deux cas
+  // (« renvoie-lui son lien »).
+  const existing = await findAuthUserByEmail(sb, email);
+  const authError = existing
+    ? (await sb.auth.resetPasswordForEmail(email, { redirectTo })).error
+    : (await sb.auth.admin.inviteUserByEmail(email, { redirectTo })).error;
+  if (authError) {
+    await rollbackInvite(sb, plan, cleanerId);
+    // Le libelle amont (limites de debit GoTrue et consorts) reste dans les
+    // journaux, le client ne recoit qu'un message stable.
+    console.warn("[inviteCleaner] echec de l'envoi Auth: " + String(authError.message ?? authError));
+    return {
+      status: 502,
+      body: { error: existing ? "Could not send the reset email" : "Could not send the invitation" },
+    };
+  }
+  console.log("[inviteCleaner] " + (existing ? "reset" : "invitation") +
+    " envoye pour cleaner " + String(cleanerId));
+  return { status: 200, body: { status: "success", id: cleanerId, mode: existing ? "reset" : "invite" } };
+}
+
+// Garde `system` de saveCleaner. Une garde de securite echoue FERMEE : si la
+// lecture du role ne repond pas, on refuse au lieu de laisser passer (revue 8a,
+// constat 4).
+export async function systemRowGuard(
+  sb: any,
+  id: unknown,
+  nextRole: unknown,
+): Promise<{ status: number; error: string } | null> {
+  const { data, error } = await sb.from("cleaners").select("role").eq("id", id).maybeSingle();
+  if (error) {
+    console.warn("[saveCleaner] lecture du role impossible: " + String((error as any).message ?? error));
+    return { status: 500, error: "Could not verify the member" };
+  }
+  const message = systemRowError(data?.role, nextRole);
+  return message ? { status: 400, error: message } : null;
 }
