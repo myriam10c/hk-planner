@@ -288,3 +288,14 @@ test('constat 7 : l ecran PIN est presente comme un deverrouillage rapide', asyn
   await expect(page.locator('.pin-screen')).not.toContainText('Cleaner Login');
   await expect(page.locator('[data-action="useEmailInstead"]')).toBeVisible();
 });
+
+test('un 401 sur cleanerMe garde le message de session terminee', async ({ page }) => {
+  // Sans le garde-fou d'adoptEmailSession, le message « pas de membre actif »
+  // ecrasait celui du 401 et disait faux au manager.
+  await bootWithFakeNetwork(page, [
+    { match: 'action=cleanerMe', status: 401, body: { error: 'unauthorized' } },
+    { match: '/auth/v1/logout', status: 200, body: {} },
+  ], { storage: storedSession() });
+  await expect(page.locator('.auth-error')).toHaveText('Your session ended. Sign in again.');
+  await expect(page.locator('#authEmail')).toBeVisible();
+});

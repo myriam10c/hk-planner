@@ -217,8 +217,18 @@ async function __inviteNewCleanerFromForm(){
     // ligne qu'elle vient de creer, avec l'id qu'elle renvoie, donc sans
     // doublon. saveCleaner recharge et repeint tout seul.
     if(pin){
-      if(r&&r.id){ await saveCleaner(r.id,name,phone,color,pin,role); return; }
-      toast('PIN not saved: the server did not return the member id','error');
+      if(r&&r.id){
+        // Le membre est deja cree a ce stade : un echec ici ne concerne que le
+        // PIN, et le message doit le dire au lieu de laisser deux toasts que le
+        // manager doit relier lui-meme.
+        let pinError='';
+        try{ pinError=(await saveCleaner(r.id,name,phone,color,pin,role,true))||''; }
+        catch(e){ pinError=(e&&e.message)||'Error'; }
+        if(!pinError) return;
+        toast('Member created, but PIN was not saved: '+pinError,'error');
+      }else{
+        toast('PIN not saved: the server did not return the member id','error');
+      }
     }
     fetchAll();
   }catch(e){ toast((e&&e.message)||'Error','error'); }
@@ -2309,13 +2319,18 @@ function exportSubCsv(){
   toast('CSV downloaded','success');
 }
 
-async function saveCleaner(id,name,phone,color,pin,role){
+// silentError : l'appelant prend en charge le message d'erreur (voir
+// __inviteNewCleanerFromForm, qui doit dire que le membre existe deja et que
+// seul le PIN a echoue). Retourne l'erreur serveur, ou '' en cas de succes.
+async function saveCleaner(id,name,phone,color,pin,role,silentError){
   const r=await api('saveCleaner',{body:{id:id||undefined,name,phone,color,pin:pin||null,role:role||'cleaner'}});
   if(r&&r.error){
+    if(silentError) return r.error;
     toast(r.error==='manager auth required'?'Login required — open Cleaner Login and enter your manager PIN':r.error,'error');
-    return;
+    return r.error;
   }
   const res=await api('getCleaners');cleaners=res.cleaners||[];render();toast('Saved ✓','success');
+  return '';
 }
 async function deleteCleaner(id){
   await api('deleteCleaner',{body:{id}});

@@ -190,3 +190,43 @@ test('la ligne system n a ni email ni bouton ni selecteur de role', async ({ pag
   // Les autres lignes gardent bien leur selecteur.
   await expect(page.locator('[data-action-change="__cleanerRoleChange"][data-arg0="4"]')).toHaveCount(1);
 });
+
+test('Add & invite dit que seul le PIN a echoue quand saveCleaner refuse', async ({ page }) => {
+  await openTeamScreen(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.api = async (action: string, opts: any) => {
+      w.__apiCalls.push({ action, body: opts && opts.body });
+      if (action === 'saveCleaner') return { error: 'manager auth required' };
+      if (action === 'getCleaners') return { status: 'success', cleaners: w.__seed.cleaners };
+      return { status: 'success' };
+    };
+  });
+  await page.fill('#newName', 'Pionah');
+  await page.fill('#newEmail', 'pionah@example.com');
+  await page.fill('#newPin', '4321');
+  await page.selectOption('#newRole', 'cleaner');
+  await page.click('[data-action="__inviteNewCleanerFromForm"]');
+  // Le membre a bien ete cree : l'invitation est partie, seul le PIN manque.
+  const invites = await page.evaluate(() => (window as any).__inviteCalls);
+  expect(invites).toHaveLength(1);
+  await expect(page.locator('#toastStack')).toContainText('Member created, but PIN was not saved: manager auth required');
+});
+
+test('Add & invite dit que seul le PIN a echoue quand le reseau tombe', async ({ page }) => {
+  await openTeamScreen(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.api = async (action: string, opts: any) => {
+      w.__apiCalls.push({ action, body: opts && opts.body });
+      if (action === 'saveCleaner') throw new Error('Network error');
+      if (action === 'getCleaners') return { status: 'success', cleaners: w.__seed.cleaners };
+      return { status: 'success' };
+    };
+  });
+  await page.fill('#newName', 'Pionah');
+  await page.fill('#newEmail', 'pionah@example.com');
+  await page.fill('#newPin', '4321');
+  await page.click('[data-action="__inviteNewCleanerFromForm"]');
+  await expect(page.locator('#toastStack')).toContainText('Member created, but PIN was not saved: Network error');
+});
