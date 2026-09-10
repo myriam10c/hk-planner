@@ -3129,6 +3129,9 @@ function renderLangSelector(){return '';}
 // Abonnement Web Push lié à la session PIN. iOS n'expose PushManager que dans une
 // PWA installée sur l'écran d'accueil (iOS 16.4+), d'où le mode d'emploi dédié.
 const PUSH_SUB_KEY='pushSubscribed';
+// Dernier endpoint effectivement enregistre cote proxy. Sert a ne pas reposter
+// le meme abonnement a chaque chargement de l'app.
+const PUSH_ENDPOINT_KEY='pushEndpointSynced';
 
 function pushSupported(){
   return typeof navigator!=='undefined' && 'serviceWorker' in navigator
@@ -3165,9 +3168,14 @@ function urlBase64ToUint8Array(base64){
 // Couture de test : les tests remplacent cette fonction par un faux registration.
 async function pushRegistration(){ return navigator.serviceWorker.ready; }
 
-async function subscribePush(){
+// `opts.onlyIfChanged` : ne reposte l'abonnement au proxy que si son endpoint a
+// bouge depuis le dernier enregistrement. Un abonnement fraichement cree est
+// toujours poste, quel que soit ce reglage.
+async function subscribePush(opts){
+  const onlyIfChanged=!!(opts&&opts.onlyIfChanged);
   const reg=await pushRegistration();
   let sub=await reg.pushManager.getSubscription();
+  let fresh=false;
   if(!sub){
     const res=await api('getVapidPublicKey');
     if(!res||!res.publicKey) throw new Error('Push is not configured on the server');
@@ -3175,14 +3183,18 @@ async function subscribePush(){
       userVisibleOnly:true,
       applicationServerKey:urlBase64ToUint8Array(res.publicKey)
     });
+    fresh=true;
   }
   const j=sub.toJSON();
+  let known=null;
+  try{ known=localStorage.getItem(PUSH_ENDPOINT_KEY); }catch(e){}
+  if(!fresh&&onlyIfChanged&&known===j.endpoint) return;
   await apiWrite('savePushSubscription',{body:{
     endpoint:j.endpoint,
     keys:{p256dh:j.keys.p256dh,auth:j.keys.auth},
     user_agent:(navigator.userAgent||'').slice(0,300)
   }});
-  try{ localStorage.setItem(PUSH_SUB_KEY,'1'); }catch(e){}
+  try{ localStorage.setItem(PUSH_SUB_KEY,'1'); localStorage.setItem(PUSH_ENDPOINT_KEY,j.endpoint); }catch(e){}
 }
 
 // Appelée depuis un geste utilisateur uniquement (exigence Safari et Chrome).
@@ -3213,7 +3225,7 @@ async function disablePushNotifications(){
       try{ await sub.unsubscribe(); }catch(e){}
     }
   }catch(e){}
-  try{ localStorage.removeItem(PUSH_SUB_KEY); }catch(e){}
+  try{ localStorage.removeItem(PUSH_SUB_KEY); localStorage.removeItem(PUSH_ENDPOINT_KEY); }catch(e){}
 }
 
 async function togglePushNotifications(){
@@ -3223,13 +3235,14 @@ async function togglePushNotifications(){
 }
 
 // Au démarrage : l'endpoint peut avoir tourné (réinstallation, rotation du push
-// service). On ré-enregistre silencieusement l'abonnement courant.
+// service). On ne repost l'abonnement que dans ce cas : sinon chaque chargement
+// de l'app écrivait une ligne identique en base pour rien.
 async function syncPushSubscription(){
   if(!pushSupported()) return;
   if(typeof Notification==='undefined'||Notification.permission!=='granted') return;
   if(localStorage.getItem(PUSH_SUB_KEY)!=='1') return;
   if(!cleanerToken) return;
-  try{ await subscribePush(); }
+  try{ await subscribePush({onlyIfChanged:true}); }
   catch(e){ console.warn('[push] resync failed',e); }
 }
 
@@ -3243,7 +3256,7 @@ async function sendPushTest(){
     const why=r&&r.skipped;
     toast(why==='quiet_hours'?'Quiet hours (22:00 to 08:30 Dubai): only urgent notifications are sent'
       :why==='vapid_not_configured'?'Push is not configured on the server yet'
-      :'No device subscribed yet','success');
+      :'No device subscribed yet','info');
   }catch(e){
     toast('Test failed: '+(e&&e.message?e.message:'unknown error'),'error');
   }

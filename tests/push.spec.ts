@@ -259,3 +259,73 @@ test('subscribePush reutilise un abonnement existant sans re-souscrire', async (
   expect(r.calls).toContain('savePushSubscription');
   expect(r.calls).not.toContain('getVapidPublicKey');
 });
+
+test('subscribePush ne reposte pas un endpoint deja enregistre en mode resync', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof (window as any).subscribePush === 'function', null, { timeout: 10_000 });
+  const r = await page.evaluate(async () => {
+    const w = window as any;
+    localStorage.setItem('pushEndpointSynced', 'https://push.example/same');
+    const calls: string[] = [];
+    w.api = async (action: string) => { calls.push(action); return { status: 'success', publicKey: 'BEd0' }; };
+    w.apiWrite = async (action: string) => { calls.push(action); return { status: 'success' }; };
+    w.pushRegistration = async () => ({
+      pushManager: {
+        getSubscription: async () => ({ toJSON: () => ({ endpoint: 'https://push.example/same', keys: { p256dh: 'P', auth: 'A' } }) }),
+        subscribe: async () => null,
+      },
+    });
+    await w.subscribePush({ onlyIfChanged: true });
+    return { calls };
+  });
+  expect(r.calls).toEqual([]);
+});
+
+test('subscribePush reposte quand l endpoint a change depuis le dernier enregistrement', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof (window as any).subscribePush === 'function', null, { timeout: 10_000 });
+  const r = await page.evaluate(async () => {
+    const w = window as any;
+    localStorage.setItem('pushEndpointSynced', 'https://push.example/old');
+    const calls: any[] = [];
+    w.api = async (action: string) => { calls.push({ action }); return { status: 'success', publicKey: 'BEd0' }; };
+    w.apiWrite = async (action: string, opts: any) => { calls.push({ action, body: opts.body }); return { status: 'success' }; };
+    w.pushRegistration = async () => ({
+      pushManager: {
+        getSubscription: async () => ({ toJSON: () => ({ endpoint: 'https://push.example/rotated', keys: { p256dh: 'P', auth: 'A' } }) }),
+        subscribe: async () => null,
+      },
+    });
+    await w.subscribePush({ onlyIfChanged: true });
+    return { calls, stored: localStorage.getItem('pushEndpointSynced') };
+  });
+  const save = r.calls.find((c: any) => c.action === 'savePushSubscription');
+  expect(save).toBeTruthy();
+  expect(save.body.endpoint).toBe('https://push.example/rotated');
+  expect(r.stored).toBe('https://push.example/rotated');
+});
+
+test('sendPushTest signale un non-envoi avec un toast info et un envoi avec un toast success', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof (window as any).sendPushTest === 'function', null, { timeout: 10_000 });
+  const r = await page.evaluate(async () => {
+    const w = window as any;
+    const toasts: any[] = [];
+    w.toast = (msg: string, type: string) => { toasts.push({ msg, type }); };
+    let reply: any = { status: 'success', sent: 0, pruned: 0, skipped: 'quiet_hours' };
+    w.apiWrite = async () => reply;
+    await w.sendPushTest();
+    reply = { status: 'success', sent: 0, pruned: 0, skipped: 'vapid_not_configured' };
+    await w.sendPushTest();
+    reply = { status: 'success', sent: 0, pruned: 0, skipped: 'no_subscription' };
+    await w.sendPushTest();
+    reply = { status: 'success', sent: 1, pruned: 0, skipped: null };
+    await w.sendPushTest();
+    return toasts;
+  });
+  expect(r).toHaveLength(4);
+  expect(r[0].type).toBe('info');
+  expect(r[1].type).toBe('info');
+  expect(r[2].type).toBe('info');
+  expect(r[3].type).toBe('success');
+});
