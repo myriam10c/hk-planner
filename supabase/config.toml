@@ -6,3 +6,10 @@ project_id = "dqjnqvbxfwtvrjwnnmns"
 # and takes the whole proxy down.
 [functions.hostaway-proxy]
 verify_jwt = false
+
+# Cible du hook « Send Email » de Supabase Auth : l'appelant est Supabase Auth,
+# qui signe en Standard Webhooks et n'envoie aucun JWT. La verification de JWT
+# de la plateforme doit rester OFF, sinon chaque envoi d'email 401 avant
+# d'atteindre la fonction.
+[functions.auth-mailer]
+verify_jwt = false
