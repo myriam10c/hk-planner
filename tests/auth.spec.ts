@@ -352,9 +352,14 @@ test('revue finale constat 4 : reason unlinked dit que le compte n est relie a p
     { match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: null, reason: 'unlinked' } },
     { match: '/auth/v1/logout', status: 200, body: {} },
   ], { storage: storedSession() });
-  await expect(page.locator('.auth-error')).toHaveText('This account is not linked to a team member. Ask a manager.');
+  // Hotfix du 12/09 : le message ne renvoie plus vers un manager, il dit le
+  // chemin que la personne peut prendre seule, et un bouton l y emmene.
+  await expect(page.locator('.auth-error')).toHaveText(
+    'This email is not linked to your profile yet. Sign in with your PIN, then add your email and password in your profile.');
   await expect(page.locator('#authEmail')).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('hkAuthSession'))).toBeNull();
+  await page.click('#authPinButton');
+  await expect(page.locator('#pinInput')).toBeVisible();
 });
 
 test('correctif 11/09 : un manager connecte par PIN a aussi un bouton Logout', async ({ page }) => {
@@ -376,4 +381,154 @@ test('correctif 11/09 : un manager connecte par PIN a aussi un bouton Logout', a
   }));
   expect(left.pin).toBeNull();
   expect(left.mode).toBeNull();
+});
+
+// ===== Hotfix du 12/09 : comptes en libre-service =====
+//
+// Parcours vise : un membre qui n'a qu'un PIN ouvre l'app, touche « First time
+// here? Create your account », entre son PIN, choisit une adresse et un mot de
+// passe, et repart avec une session email. Aucun manager dans la boucle.
+
+const SEMAX = { id: 7, name: 'Semax', color: '#7c3aed', role: 'maintenance' };
+
+// Reponses minimales de fetchAll : sans elles, le chargement des donnees jette
+// et repeint l'ecran au milieu du test.
+function dataRoutes(email: string | null): FakeRoute[] {
+  return [
+    { match: 'action=cleanerLogin', status: 200, body: { status: 'success', token: 'pin-test', cleaner: SEMAX } },
+    { match: 'action=getCleaners', status: 200, body: { status: 'success', cleaners: [{ ...SEMAX, email }] } },
+    { match: 'action=checkouts', status: 200, body: { status: 'success', reservations: [] } },
+    {
+      match: 'action=getAllData',
+      status: 200,
+      body: {
+        status: 'success', done: {}, assignments: {}, cleaners: [{ ...SEMAX, email }],
+        templates: [], listingPrices: {}, timers: {}, cancelled: {}, postponed: {},
+        extraCleanings: [], leaves: [], holidays: [],
+      },
+    },
+    { match: 'action=', status: 200, body: { status: 'success' } },
+  ];
+}
+
+// Login par PIN depuis le lien « First time here? » de l'ecran email.
+async function pinLoginFromCreateLink(page: any, routes: FakeRoute[]) {
+  await bootWithFakeNetwork(page, routes);
+  await page.click('[data-action="startAccountSetup"]');
+  await expect(page.locator('#pinInput')).toBeVisible();
+  await page.fill('#pinInput', '1234');
+}
+
+test('le login par email propose de creer son compte et mene a l ecran PIN', async ({ page }) => {
+  await bootWithFakeNetwork(page, []);
+  const lien = page.locator('[data-action="startAccountSetup"]');
+  await expect(lien).toContainText('First time here? Create your account');
+  await lien.click();
+  await expect(page.locator('#pinInput')).toBeVisible();
+  // La raison de l'ecran PIN est dite, sinon il ressemble a une impasse.
+  await expect(page.locator('.pin-screen')).toContainText('Enter your PIN');
+});
+
+test('apres un PIN sans adresse, l ecran Create your account s ouvre et se saute', async ({ page }) => {
+  await pinLoginFromCreateLink(page, dataRoutes(null));
+  await expect(page.locator('#linkEmail')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.auth-card')).toContainText('Create your account');
+  await expect(page.locator('#linkPassword')).toBeVisible();
+  await expect(page.locator('#linkPassword2')).toBeVisible();
+  // Rien ne bloque : « Skip for now » rend la main a l'app.
+  await page.click('[data-action="skipAccountSetup"]');
+  await expect(page.locator('#linkEmail')).toHaveCount(0);
+  // Et l'ecran reste atteignable depuis la zone profil (le bandeau ou vit Logout).
+  const profil = page.locator('.header [data-action="openAccountSetup"]').first();
+  await expect(profil).toBeVisible({ timeout: 10_000 });
+  await profil.click();
+  await expect(page.locator('#linkEmail')).toBeVisible();
+});
+
+test('un membre qui a deja une adresse n est pas invite a creer un compte', async ({ page }) => {
+  await pinLoginFromCreateLink(page, dataRoutes('semax@example.com'));
+  await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('#linkEmail')).toHaveCount(0);
+  await expect(page.locator('.header [data-action="openAccountSetup"]')).toHaveCount(0);
+});
+
+test('Create your account envoie linkEmail puis ouvre la session email', async ({ page }) => {
+  await pinLoginFromCreateLink(page, [
+    { match: 'action=linkEmail', status: 200, body: { status: 'success' } },
+    { match: '/auth/v1/token', status: 200, body: SESSION },
+    { match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: SEMAX } },
+    ...dataRoutes(null),
+  ]);
+  await expect(page.locator('#linkEmail')).toBeVisible({ timeout: 10_000 });
+  await page.fill('#linkEmail', '  Sserunkumavan@Example.COM ');
+  await page.fill('#linkPassword', 'motdepasse1');
+  await page.fill('#linkPassword2', 'motdepasse1');
+  await page.click('[data-action="submitLinkEmail"]');
+  await page.waitForFunction(() => !document.getElementById('linkEmail'), null, { timeout: 10_000 });
+  const envoi = await page.evaluate(() => {
+    const log = (window as any).__fetchLog as any[];
+    const call = log.filter((c) => c.url.indexOf('action=linkEmail') !== -1).pop();
+    return call ? JSON.parse(call.body) : null;
+  });
+  // L'adresse part normalisee, le corps ne porte aucun identifiant de membre :
+  // l'identite vient de la session PIN, cote proxy.
+  expect(envoi).toEqual({ email: 'sserunkumavan@example.com', password: 'motdepasse1' });
+  // Puis le Bearer prend le relais du jeton PIN.
+  const auth = await page.evaluate(() => {
+    const log = (window as any).__fetchLog as any[];
+    const call = log.filter((c) => c.url.indexOf('action=cleanerMe') !== -1).pop();
+    return call ? call.headers.Authorization : null;
+  });
+  expect(auth).toBe('Bearer jwt-test-token');
+});
+
+test('deux mots de passe differents ne partent jamais au proxy', async ({ page }) => {
+  await pinLoginFromCreateLink(page, dataRoutes(null));
+  await expect(page.locator('#linkEmail')).toBeVisible({ timeout: 10_000 });
+  await page.fill('#linkEmail', 'semax@example.com');
+  await page.fill('#linkPassword', 'motdepasse1');
+  await page.fill('#linkPassword2', 'motdepasse2');
+  await page.click('[data-action="submitLinkEmail"]');
+  await expect(page.locator('.auth-error')).toHaveText('The two passwords do not match.');
+  const appels = await page.evaluate(() =>
+    ((window as any).__fetchLog as any[]).filter((c) => c.url.indexOf('action=linkEmail') !== -1).length);
+  expect(appels).toBe(0);
+});
+
+test('un mot de passe trop court est refuse sans appel reseau', async ({ page }) => {
+  await pinLoginFromCreateLink(page, dataRoutes(null));
+  await expect(page.locator('#linkEmail')).toBeVisible({ timeout: 10_000 });
+  await page.fill('#linkEmail', 'semax@example.com');
+  await page.fill('#linkPassword', 'court');
+  await page.fill('#linkPassword2', 'court');
+  await page.click('[data-action="submitLinkEmail"]');
+  await expect(page.locator('.auth-error')).toHaveText('Password too short. Use at least 8 characters.');
+  const appels = await page.evaluate(() =>
+    ((window as any).__fetchLog as any[]).filter((c) => c.url.indexOf('action=linkEmail') !== -1).length);
+  expect(appels).toBe(0);
+});
+
+test('un refus du proxy est affiche tel quel et garde l ecran', async ({ page }) => {
+  await pinLoginFromCreateLink(page, [
+    {
+      match: 'action=linkEmail', status: 409,
+      body: { error: 'This email is already used by another team member.' },
+    },
+    ...dataRoutes(null),
+  ]);
+  await expect(page.locator('#linkEmail')).toBeVisible({ timeout: 10_000 });
+  await page.fill('#linkEmail', 'harlene@example.com');
+  await page.fill('#linkPassword', 'motdepasse1');
+  await page.fill('#linkPassword2', 'motdepasse1');
+  await page.click('[data-action="submitLinkEmail"]');
+  await expect(page.locator('.auth-error')).toHaveText('This email is already used by another team member.');
+  await expect(page.locator('#linkEmail')).toBeVisible();
+});
+
+test('l ecran Create your account tient dans 390 px sans defilement horizontal', async ({ page }) => {
+  await pinLoginFromCreateLink(page, dataRoutes(null));
+  await expect(page.locator('#linkEmail')).toBeVisible({ timeout: 10_000 });
+  const debord = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(debord).toBeLessThanOrEqual(0);
 });

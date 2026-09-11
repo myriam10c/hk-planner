@@ -92,6 +92,25 @@
   cursor: pointer;
 }
 
+/* Bouton secondaire : meme gabarit que .auth-primary, mais en contour. Sert au
+   chemin de secours « Sign in with my PIN » quand l'adresse n'est reliee a
+   aucun profil, et il ne doit pas rivaliser avec le bouton Sign in. */
+.auth-secondary {
+  width: 100%;
+  margin-top: 12px;
+  min-height: 48px;
+  border: 1px solid var(--primary, #7c3aed);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--primary, #7c3aed);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Rappel de la regle de mot de passe sous les champs, pas au-dessus. */
+.auth-help-bottom { margin: 2px 0 0; }
+
 .auth-error, .auth-notice {
   margin-top: 14px;
   padding: 10px 12px;

@@ -230,3 +230,32 @@ test('Add & invite dit que seul le PIN a echoue quand le reseau tombe', async ({
   await page.click('[data-action="__inviteNewCleanerFromForm"]');
   await expect(page.locator('#toastStack')).toContainText('Member created, but PIN was not saved: Network error');
 });
+
+// ===== Hotfix du 12/09 : le manager peut creer son compte depuis Settings =====
+
+test('Settings propose a un manager sans adresse de creer son compte', async ({ page }) => {
+  await openTeamScreen(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    // Walter (id 8) est le manager connecte par PIN, et sa ligne n'a pas
+    // d'adresse : c'est exactement l'etat de l'equipe au 11/09.
+    w.__seed.cleaners[0].email = null;
+    w.eval('sessionCleanerId = 8; cleaners = window.__seed.cleaners;');
+    w.renderSettings();
+  });
+  const bouton = page.locator('[data-action="openAccountSetup"]');
+  await expect(bouton).toContainText('Your account: add email and password');
+  await bouton.click();
+  await expect(page.locator('#linkEmail')).toBeVisible();
+  await expect(page.locator('#linkPassword2')).toBeVisible();
+});
+
+test('Settings ne propose rien au manager qui a deja une adresse', async ({ page }) => {
+  await openTeamScreen(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.eval('sessionCleanerId = 8; cleaners = window.__seed.cleaners;');
+    w.renderSettings();
+  });
+  await expect(page.locator('[data-action="openAccountSetup"]')).toHaveCount(0);
+});

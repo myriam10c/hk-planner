@@ -170,6 +170,7 @@ function isValidTeamEmail(email){
 
 // Invitation ou relance : le proxy tranche (invitation si le compte Auth
 // n'existe pas encore, email de reinitialisation sinon).
+const __inviteInFlight={};
 async function inviteCleaner(id){
   const c=(cleaners||[]).find(x=>String(x.id)===String(id));
   if(!c){ toast('Team member not found','error'); return; }
@@ -187,11 +188,23 @@ async function inviteCleaner(id){
     const ok=window.confirm('Change this member\'s sign-in email from '+previous+' to '+email+'? The old account will be removed.');
     if(!ok) return;
   }
+  // Deux envois simultanes sur la meme ligne, c'est l'incident du 11/09 : la
+  // requete perdante defaisait l'ecriture de la gagnante. Le serveur ne se
+  // laisse plus faire, et le bouton ne part plus deux fois non plus.
+  if(__inviteInFlight[c.id]) return;
+  __inviteInFlight[c.id]=true;
+  const btn=document.querySelector('.c-invite[data-arg0="'+c.id+'"]');
+  if(btn) btn.disabled=true;
   try{
     const r=await apiWrite('inviteCleaner',{body:{id:c.id,name:c.name,email:email,role:c.role||'cleaner'}});
     toast(r&&r.mode==='reset'?('Password reset email sent to '+email):('Invitation sent to '+email),'success');
     fetchAll();
   }catch(e){ toast((e&&e.message)||'Error','error'); }
+  finally{
+    delete __inviteInFlight[c.id];
+    const again=document.querySelector('.c-invite[data-arg0="'+c.id+'"]');
+    if(again) again.disabled=false;
+  }
 }
 
 async function __inviteNewCleanerFromForm(){
@@ -308,7 +321,7 @@ const BOOT_HASH=(typeof window!=='undefined'?(window.location.hash||''):'');
 const sbAuth=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{
   auth:{flowType:'implicit',persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'hkAuthSession'}
 });
-let authScreen=null;      // null | 'login' | 'setPassword'
+let authScreen=null;      // null | 'login' | 'setPassword' | 'createAccount'
 // Chaque render() reecrit #app.innerHTML : sans ce brouillon, l'email saisi
 // disparait a la premiere erreur et « Forgot password? » lit un champ vide.
 let authEmailDraft='';
@@ -316,6 +329,16 @@ let authError='';
 let authNotice='';
 let authBusy=false;
 let authAccessToken=null; // jeton courant, renvoye au proxy en Bearer
+// Comptes en libre-service (hotfix du 12/09). Un membre prouve son identite par
+// son PIN, puis pose lui-meme une adresse et un mot de passe.
+let sessionCleanerId=null;   // qui est connecte, PIN ou email, pour lire sa ligne
+let accountSetupBusy=false;
+let accountSetupError='';
+let accountSetupEmailDraft='';
+let authPinPrompt=false;     // le login email propose-t-il le chemin PIN en gros
+let pinNotice='';            // pourquoi l'ecran PIN est ouvert
+const SESSION_CLEANER_KEY='hkSessionCleanerId';
+try{ sessionCleanerId=localStorage.getItem(SESSION_CLEANER_KEY); }catch(e){ sessionCleanerId=null; }
 sbAuth.auth.onAuthStateChange(function(_evt,session){
   authAccessToken=session?session.access_token:null;
 });
@@ -1153,6 +1176,10 @@ en:{
   quickUnlock:'Quick unlock',enterPin:'Enter your 4-digit PIN',
   signIn:'Sign in',signingIn:'Signing in...',signingYouIn:'Signing you in...',email:'Email',password:'Password',
   forgotPassword:'Forgot password?',usePinInstead:'Use my PIN instead',useEmailInstead:'Sign in with email',
+  firstTimeHere:'First time here? Create your account',createAccount:'Create your account',
+  creatingAccount:'Creating account...',skipForNow:'Skip for now',signInWithMyPin:'Sign in with my PIN',
+  yourAccountAdd:'Your account: add email and password',
+  createAccountHelp:'Add your email address and a password. You will then sign in with them instead of your PIN.',
   setNewPassword:'Set a new password',newPassword:'New password',confirmPassword:'Confirm password',
   savePassword:'Save password',saving:'Saving...',passwordRule:'At least 8 characters.',
   welcome:'Welcome',logout:'Logout',refresh:'Refresh',
@@ -3190,6 +3217,13 @@ async function cleanerLogin(){
   if(res.status==='success'){
     cleanerToken=res.token||null;
     if(cleanerToken) localStorage.setItem('cleanerToken',cleanerToken);
+    // Qui vient d'entrer : sert a lire sa ligne (a-t-elle une adresse ?) et a
+    // ouvrir « Create your account » depuis sa zone profil plus tard.
+    sessionCleanerId=res.cleaner?res.cleaner.id:null;
+    try{
+      if(sessionCleanerId!=null) localStorage.setItem(SESSION_CLEANER_KEY,String(sessionCleanerId));
+    }catch(e){}
+    pinNotice='';
     if(res.cleaner.role==='manager'){
       // Login manager : garder le token (saveCleaner exige une session role=manager
       // côté proxy) mais rester sur la vue manager, pas la vue cleaner.
@@ -3198,6 +3232,9 @@ async function cleanerLogin(){
       if(window.location.hash==='#cleaner') window.location.hash='';
       toast('Welcome '+res.cleaner.name+'!','success');
       haptic('heavy');
+      // L'ecran de creation de compte prime sur le rendu de fetchAll : render()
+      // le teste en premier, le chargement continue derriere.
+      await maybeOfferAccountSetup();
       fetchAll();
       return;
     }
@@ -3210,6 +3247,7 @@ async function cleanerLogin(){
     if(!hasSeenOnboarding){
       setTimeout(openOnboarding, 500);
     }
+    await maybeOfferAccountSetup();
     fetchAll();
   } else {
     const errEl=document.getElementById('pinError');
@@ -3224,9 +3262,10 @@ async function cleanerLogout(){
   // sinon l'appareil continuerait de recevoir les tâches de l'utilisateur précédent.
   try{ await disablePushForLogout(); }catch(e){}
   try{ await api('cleanerLogout',{body:{}}); }catch(e){}
-  cleanerMode=null; cleanerToken=null;
+  cleanerMode=null; cleanerToken=null; sessionCleanerId=null;
   localStorage.removeItem('cleanerMode');
   localStorage.removeItem('cleanerToken');
+  localStorage.removeItem(SESSION_CLEANER_KEY);
   // Meme raison que dans emailLogout : le cache planner contient des donnees
   // voyageurs, il repart avec la session.
   localStorage.removeItem(PLANNER_CACHE_KEY);
@@ -4147,7 +4186,9 @@ function renderAuthLogin(){
       (authError?'<div class="auth-error" role="alert">'+esc(authError)+'</div>':'')+
       (authNotice?'<div class="auth-notice" role="status">'+esc(authNotice)+'</div>':'')+
       '<button class="auth-primary" data-action="emailLogin"'+(authBusy?' disabled':'')+'>'+(authBusy?t('signingIn'):t('signIn'))+'</button>'+
+      (authPinPrompt?'<button id="authPinButton" class="auth-secondary" data-action="usePinInstead">'+t('signInWithMyPin')+'</button>':'')+
       '<button class="auth-link" data-action="forgotPassword">'+t('forgotPassword')+'</button>'+
+      '<button class="auth-link" data-action="startAccountSetup">'+t('firstTimeHere')+'</button>'+
       '<button class="auth-link" data-action="usePinInstead">'+t('usePinInstead')+'</button>'+
     '</div></div>';
   const f=document.getElementById('authEmail');
@@ -4182,11 +4223,145 @@ function renderAuthSetPassword(){
     '</div></div>';
 }
 
+// Ecran « Create your account ». Il s'ouvre apres un login PIN quand la ligne du
+// membre n'a aucune adresse, et depuis sa zone profil ensuite. Toujours sautable :
+// un membre sans boite mail ne doit jamais se retrouver coince ici.
+function renderAuthCreateAccount(){
+  document.getElementById('app').innerHTML=
+    '<div class="auth-screen"><div class="auth-card">'+
+      '<div class="auth-brand">HK Planner</div>'+
+      '<h2 class="auth-title">'+t('createAccount')+'</h2>'+
+      '<p class="auth-help">'+t('createAccountHelp')+'</p>'+
+      '<label class="auth-label" for="linkEmail">'+t('email')+'</label>'+
+      '<input id="linkEmail" class="auth-input" type="email" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="you@example.com" value="'+esc(accountSetupEmailDraft)+'" data-action-input="__linkEmailInput"/>'+
+      '<label class="auth-label" for="linkPassword">'+t('password')+'</label>'+
+      '<input id="linkPassword" class="auth-input" type="password" autocomplete="new-password"/>'+
+      '<label class="auth-label" for="linkPassword2">'+t('confirmPassword')+'</label>'+
+      '<input id="linkPassword2" class="auth-input" type="password" autocomplete="new-password" data-action-keydown="__authEnterLinkEmail"/>'+
+      '<p class="auth-help auth-help-bottom">'+t('passwordRule')+'</p>'+
+      (accountSetupError?'<div class="auth-error" role="alert">'+esc(accountSetupError)+'</div>':'')+
+      '<button class="auth-primary" data-action="submitLinkEmail"'+(accountSetupBusy?' disabled':'')+'>'+(accountSetupBusy?t('creatingAccount'):t('createAccount'))+'</button>'+
+      '<button class="auth-link" data-action="skipAccountSetup"'+(accountSetupBusy?' disabled':'')+'>'+t('skipForNow')+'</button>'+
+    '</div></div>';
+  const f=document.getElementById('linkEmail');
+  if(f&&!f.value)f.focus();
+}
+
+function __linkEmailInput(e){ accountSetupEmailDraft=(e&&e.target&&e.target.value)||''; }
+function __authEnterLinkEmail(e){ if(e.key==='Enter') submitLinkEmail(); }
+
+// Qui est connecte sur cet appareil, cote cleaners. cleanerMode porte l'id pour
+// les non-managers ; un manager connecte par PIN ne l'a pas, d'ou le repli sur
+// l'id memorise au login.
+function currentCleanerId(){
+  if(cleanerMode&&cleanerMode.id!=null) return cleanerMode.id;
+  return sessionCleanerId;
+}
+
+// Ma ligne dans la liste deja chargee, ou null si on ne sait pas encore.
+function currentCleanerRow(){
+  const id=currentCleanerId();
+  if(id==null) return null;
+  return (Array.isArray(cleaners)?cleaners:[]).find(function(c){return String(c.id)===String(id);})||null;
+}
+
+// Le point d'entree « Your account » ne s'affiche que s'il sert a quelque chose :
+// pas de session email ouverte, et une ligne connue qui n'a pas encore d'adresse.
+function needsAccountSetup(){
+  if(authAccessToken) return false;
+  const row=currentCleanerRow();
+  if(!row||row.role==='system') return false;
+  return !((row.email||'')+'').trim();
+}
+
+// Depuis l'ecran de connexion par email : on passe par le PIN, seule preuve
+// d'identite dont tout le monde dispose.
+function startAccountSetup(){
+  pinNotice='Enter your PIN, then create your account.';
+  usePinInstead();
+}
+
+function openAccountSetup(){
+  authScreen='createAccount';
+  accountSetupError=''; accountSetupBusy=false;
+  authError=''; authNotice='';
+  const row=currentCleanerRow();
+  accountSetupEmailDraft=((row&&row.email)||'')+'';
+  render();
+}
+
+function skipAccountSetup(){
+  if(accountSetupBusy) return;
+  authScreen=null; accountSetupError='';
+  render();
+}
+
+// Apres un login PIN : la ligne a-t-elle deja une adresse ? getCleaners fait foi,
+// les donnees du planner ne sont pas encore chargees a ce moment.
+async function maybeOfferAccountSetup(){
+  if(authAccessToken) return false;
+  const id=currentCleanerId();
+  if(id==null) return false;
+  let row=null;
+  try{
+    const r=await api('getCleaners');
+    row=((r&&r.cleaners)||[]).find(function(c){return String(c.id)===String(id);})||null;
+  }catch(e){ return false; }
+  if(!row||row.role==='system') return false;
+  if(((row.email||'')+'').trim()) return false;
+  openAccountSetup();
+  return true;
+}
+
+// Cree le compte cote proxy (action linkEmail), puis ouvre tout de suite la
+// session email : le Bearer remplace le jeton PIN sans que la personne ait a
+// retaper quoi que ce soit. Le mot de passe n'est ni journalise ni conserve.
+async function submitLinkEmail(){
+  if(accountSetupBusy) return;
+  const e1=document.getElementById('linkEmail');
+  const a=document.getElementById('linkPassword'), b=document.getElementById('linkPassword2');
+  accountSetupEmailDraft=(e1&&e1.value)||'';
+  const email=accountSetupEmailDraft.trim().toLowerCase();
+  const p1=(a&&a.value)||'', p2=(b&&b.value)||'';
+  accountSetupError='';
+  if(!isValidTeamEmail(email)){ accountSetupError='Enter a valid email address.'; render(); return; }
+  if(p1.length<8){ accountSetupError='Password too short. Use at least 8 characters.'; render(); return; }
+  if(p1!==p2){ accountSetupError='The two passwords do not match.'; render(); return; }
+  accountSetupBusy=true; render();
+  try{
+    await apiWrite('linkEmail',{body:{email:email,password:p1}});
+  }catch(err){
+    accountSetupBusy=false;
+    accountSetupError=(err&&err.message)||'Something went wrong. Try again.';
+    render();
+    return;
+  }
+  try{
+    const r=await sbAuth.auth.signInWithPassword({email:email,password:p1});
+    if(r.error){
+      accountSetupBusy=false;
+      accountSetupError=authErrorMessage(r.error);
+      render();
+      return;
+    }
+    authAccessToken=r.data&&r.data.session?r.data.session.access_token:null;
+    const ok=await adoptEmailSession();
+    accountSetupBusy=false;
+    if(ok&&authScreen==='createAccount') authScreen=null;
+    render();
+    if(ok){ toast('Account created. You can sign in with your email now.','success'); fetchAll(); }
+  }catch(err2){
+    accountSetupBusy=false;
+    accountSetupError=authErrorMessage(err2);
+    render();
+  }
+}
+
 function __authEmailInput(e){ authEmailDraft=(e&&e.target&&e.target.value)||''; }
 function __authEnterLogin(e){ if(e.key==='Enter') emailLogin(); }
 function __authEnterSetPassword(e){ if(e.key==='Enter') submitNewPassword(); }
-function usePinInstead(){ authScreen=null; authError=''; authNotice=''; window.location.hash='#cleaner'; render(); }
-function useEmailInstead(){ authScreen='login'; authError=''; authNotice=''; if(window.location.hash==='#cleaner')window.location.hash=''; render(); }
+function usePinInstead(){ authScreen=null; authError=''; authNotice=''; authPinPrompt=false; window.location.hash='#cleaner'; render(); }
+function useEmailInstead(){ authScreen='login'; authError=''; authNotice=''; pinNotice=''; if(window.location.hash==='#cleaner')window.location.hash=''; render(); }
 
 // Pourquoi cleanerMe n'a pas rendu de membre. Un jeton refuse, un compte
 // desactive et un compte jamais rattache appellent trois messages differents :
@@ -4194,7 +4369,9 @@ function useEmailInstead(){ authScreen='login'; authError=''; authNotice=''; if(
 const AUTH_REASON_MESSAGES={
   invalid_token:'Your session ended. Sign in again.',
   inactive:'This account is deactivated. Ask a manager.',
-  unlinked:'This account is not linked to a team member. Ask a manager.'
+  // Personne a qui demander : le chemin est le PIN, puis « Create your account »
+  // dans son profil. L'ecran de connexion ajoute un bouton qui y mene.
+  unlinked:'This email is not linked to your profile yet. Sign in with your PIN, then add your email and password in your profile.'
 };
 
 // Traduit une session Supabase en session applicative : qui suis-je cote
@@ -4213,8 +4390,14 @@ async function adoptEmailSession(){
     // ce deploiement), on garde le message attrape-tout, qui couvre les 4 cas.
     authError=(me&&AUTH_REASON_MESSAGES[me.reason])
       ||'This account is not linked to an active team member. Ask a manager.';
+    // Un compte qui n'est relie a aucune ligne se repare tout seul par le PIN :
+    // on met le chemin en evidence au lieu de laisser une impasse.
+    authPinPrompt=!me||!me.reason||me.reason==='unlinked';
     return false;
   }
+  sessionCleanerId=me.cleaner.id;
+  try{ localStorage.setItem(SESSION_CLEANER_KEY,String(sessionCleanerId)); }catch(e){}
+  authPinPrompt=false;
   if(me.cleaner.role==='manager'){
     cleanerMode=null;
     localStorage.removeItem('cleanerMode');
@@ -4303,12 +4486,14 @@ async function emailLogout(){
     cleanerToken=null;
     localStorage.removeItem('cleanerToken');
   }
-  cleanerMode=null;
+  cleanerMode=null; sessionCleanerId=null;
   localStorage.removeItem('cleanerMode');
+  localStorage.removeItem(SESSION_CLEANER_KEY);
   // Le cache planner porte les noms et telephones des voyageurs de la derniere
   // semaine consultee : il ne doit pas survivre a un changement de compte.
   localStorage.removeItem(PLANNER_CACHE_KEY);
   authScreen='login'; authError=''; authNotice=''; authEmailDraft='';
+  accountSetupError=''; accountSetupEmailDraft=''; authPinPrompt=false; pinNotice='';
   render();
 }
 
@@ -4371,6 +4556,7 @@ async function hkAuthBoot(){
 
 // ============ RENDER ============
 function render(){
+  if(authScreen==='createAccount'){renderAuthCreateAccount();return;}
   if(authScreen==='setPassword'){renderAuthSetPassword();return;}
   if(authScreen==='login'){renderAuthLogin();return;}
   // #6 PIN screen
@@ -4437,6 +4623,7 @@ function renderPinScreen(){
     '<div class="pin-screen"><div style="margin-bottom:20px">'+renderLangSelector()+'</div><h2>🔑 '+t('quickUnlock')+'</h2><p>'+t('enterPin')+'</p>'+
     '<input type="tel" id="pinInput" class="pin-input" maxlength="4" aria-label="4-digit PIN" data-action-input="__pinInput" autofocus/>'+
     '<div id="pinError" class="pin-error"></div>'+
+    (pinNotice?'<div class="auth-notice" role="status">'+esc(pinNotice)+'</div>':'')+
     '<button class="auth-link" data-action="useEmailInstead">'+t('useEmailInstead')+'</button></div>';
 }
 
@@ -4481,6 +4668,9 @@ function renderPlanner(){
   // authAccessToken : un manager connecte par email n'a pas de cleanerMode
   // (adoptEmailSession le met a null), il n'avait donc aucun moyen de sortir
   // de sa session (revue finale, constat 1). cleanerLogout delegue a emailLogout.
+  // Zone profil : « Your account » n'apparait que pour un membre encore sans
+  // adresse, a cote du Logout, pour qu'il puisse creer son compte plus tard.
+  if(needsAccountSetup()) h+='<button class="icon-btn" data-action="openAccountSetup" title="'+t('yourAccountAdd')+'" aria-label="'+t('yourAccountAdd')+'">'+icon('user',18)+'</button>';
   if(cleanerMode||authAccessToken||cleanerToken) h+='<button class="icon-btn" data-action="cleanerLogout" title="Logout" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='<button class="cmdk-trigger" data-action="openCmdk" title="Global search (⌘K)" aria-label="Open global search">⌘K</button>';
   h+='<button class="icon-btn" data-action="toggleSearch" title="Search" aria-label="Search">'+icon('search',18)+'</button>';
@@ -5739,6 +5929,14 @@ function renderSettings(){
   // #8 Send all daily WhatsApp
   if(cleaners.length>0) h+='<button class="wa-btn" style="margin-top:10px" data-action="__sendDailyToAllCleaners">'+icon('phone',14)+' Send daily recap to all</button>';
   h+='<div style="margin-top:10px"><a href="#cleaner" data-action="render" style="color:var(--primary);font-size:12px;font-weight:600">🔑 Open Cleaner Login View</a></div></div>';
+
+  // Mon propre compte. N'apparait que si ma ligne n'a pas encore d'adresse :
+  // sinon le bouton ne ferait rien d'utile.
+  if(needsAccountSetup()){
+    h+='<div class="settings-panel"><h3>🔐 Your account</h3>'+
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:12px">Sign in with an email and a password instead of your PIN.</div>'+
+      '<button data-action="openAccountSetup">'+t('yourAccountAdd')+'</button></div>';
+  }
 
   // WhatsApp preference removed — not needed in ops tool
 
