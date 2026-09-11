@@ -13,7 +13,7 @@ import {
 } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
 import { startJob, tickItem } from "./v3_write.ts";
-import { checkTicket, reportProblem, uploadPhoto } from "./v3_tickets.ts";
+import { checkTicket, reportProblem, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES } from "./v3_tickets.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -1175,6 +1175,14 @@ Deno.serve(async (req: Request) => {
       if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
       // multipart : le fichier ne passe jamais par une data URL en JSON, qui
       // gonfle de 33 % et sature la memoire de l'isolat sur une photo d'iPhone.
+      // Garde de taille AVANT la lecture : req.formData() bufferise tout le corps,
+      // donc le plafond de 6 Mo d'uploadPhoto arrive trop tard pour la memoire de
+      // l'isolat. fetch renseigne Content-Length quand le corps est un FormData ;
+      // s'il manque (corps chunke), on retombe sur la verification de file.size.
+      const corpsAnnonce = Number(req.headers.get("content-length") ?? "");
+      if (Number.isFinite(corpsAnnonce) && corpsAnnonce > V3_MAX_UPLOAD_BODY_BYTES) {
+        return jsonResp({ error: "photo is too large" }, 413);
+      }
       let form: FormData;
       try {
         form = await req.formData();

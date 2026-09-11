@@ -110,8 +110,13 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
   // Faux Storage : upload et URL signee, sans reseau. Les octets sont gardes
   // pour que les tests puissent verifier ce qui est parti dans le bucket.
   const uploads: Array<{ bucket: string; path: string; bytes: number; contentType: string }> = [];
+  // Historique des retraits. `uploads` reste l'image du bucket (un retrait en
+  // sort l'objet), `removals` garde la trace de l'appel pour qu'un test puisse
+  // affirmer que le nettoyage a bien vise le bon chemin.
+  const removals: Array<{ bucket: string; paths: string[] }> = [];
   const storage = {
     uploads,
+    removals,
     from(bucket: string) {
       return {
         async upload(path: string, body: any, opts: any) {
@@ -121,6 +126,15 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
             : (body && typeof body.size === "number" ? body.size : 0);
           uploads.push({ bucket, path, bytes, contentType: opts?.contentType ?? "" });
           return { data: { path }, error: null };
+        },
+        async remove(paths: string[]) {
+          if (fail["storage.remove"]) return { data: null, error: fail["storage.remove"] };
+          removals.push({ bucket, paths: [...paths] });
+          for (const chemin of paths) {
+            const i = uploads.findIndex((u) => u.bucket === bucket && u.path === chemin);
+            if (i >= 0) uploads.splice(i, 1);
+          }
+          return { data: paths.map((chemin) => ({ name: chemin })), error: null };
         },
         async createSignedUrl(path: string, seconds: number) {
           if (fail["storage.sign"]) return { data: null, error: fail["storage.sign"] };

@@ -100,6 +100,81 @@ Deno.test("uploadPhoto libere la cle si le depot echoue, et n'insere rien", asyn
   assertEquals(sb.tables.job_events.length, 0);
 });
 
+// Revue tache 5, constatation 1 : le depot et l'insert ne sont pas atomiques.
+// L'ordre choisi (fichier d'abord, ligne ensuite) garantit qu'aucune ligne photos
+// ne pointe sur du vide ; ce test verrouille l'autre moitie, l'objet depose est
+// retire quand la ligne ne suit pas, sinon le rejeu en deposerait un second.
+Deno.test("uploadPhoto retire du bucket l'objet depose quand l'insert photos echoue", async () => {
+  const sb = fakeDb({ job_events: [], photos: [] });
+  sb.fail["photos.insert"] = { message: "db down" };
+  let leve = false;
+  try {
+    await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0008", jobId: JOB }));
+  } catch (_e) {
+    leve = true;
+  }
+  assertEquals(leve, true);
+  assertEquals(sb.storage.removals.length, 1);
+  assertEquals(sb.storage.removals[0].bucket, "cleaning-photos");
+  assertEquals(sb.storage.removals[0].paths.length, 1);
+  assertEquals(sb.storage.removals[0].paths[0].startsWith("v3/"), true);
+  // Le bucket est revenu a l'etat d'avant, la cle est libre, rien en base.
+  assertEquals(sb.storage.uploads.length, 0);
+  assertEquals(sb.tables.photos.length, 0);
+  assertEquals(sb.tables.job_events.length, 0);
+});
+
+// Un nettoyage impossible ne doit jamais masquer l'erreur d'origine : l'action
+// leve quand meme, et la cle reste liberee pour que le telephone rejoue.
+Deno.test("un nettoyage de bucket rate ne masque pas l'erreur d'origine", async () => {
+  const sb = fakeDb({ job_events: [], photos: [] });
+  sb.fail["photos.insert"] = { message: "db down" };
+  sb.fail["storage.remove"] = { message: "storage down" };
+  let leve = false;
+  try {
+    await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0010", jobId: JOB }));
+  } catch (_e) {
+    leve = true;
+  }
+  assertEquals(leve, true);
+  assertEquals(sb.tables.job_events.length, 0);
+});
+
+// Revue tache 5, constatation 4 : un ticketId illisible partait en NaN, que
+// supabase-js serialise en null, donc le lien vers le ticket sautait en silence.
+Deno.test("uploadPhoto refuse un ticketId qui n'est pas un entier positif", async () => {
+  const sb = fakeDb({ job_events: [], photos: [] });
+  for (const mauvais of ["abc", "12.5", "-3", "0"]) {
+    const r = await uploadPhoto(sb, FAIZA as any,
+      formulaire({ idem: "idem-photo-0011", jobId: JOB, ticketId: mauvais }));
+    assertEquals(r.status, 400);
+    assertEquals((r.body as any).error, "ticketId must be a number");
+  }
+  // Refus avant la pose de la cle : le telephone peut rejouer la meme cle corrigee.
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(sb.storage.uploads.length, 0);
+  // Un ticketId valide passe, et il est ecrit tel quel.
+  const ok = await uploadPhoto(sb, FAIZA as any,
+    formulaire({ idem: "idem-photo-0012", jobId: JOB, ticketId: "71" }));
+  assertEquals(ok.status, 200);
+  assertEquals(sb.tables.photos[0].ticket_id, 71);
+});
+
+// jobId est la reservation_key, donc du texte : la symetrie avec ticketId porte
+// sur le type attendu, pas sur la forme. Une partie qui n'est pas du texte ne
+// doit pas finir stringifiee en « [object File] » dans photos.job_id.
+Deno.test("uploadPhoto refuse un jobId qui n'est pas du texte", async () => {
+  const sb = fakeDb({ job_events: [], photos: [] });
+  const form = new FormData();
+  form.set("idem", "idem-photo-0013");
+  form.set("jobId", new Blob([new Uint8Array(8)], { type: "image/jpeg" }), "jobid.jpg");
+  form.set("file", new Blob([new Uint8Array(64)], { type: "image/jpeg" }), "photo.jpg");
+  const r = await uploadPhoto(sb, FAIZA as any, form);
+  assertEquals(r.status, 400);
+  assertEquals((r.body as any).error, "jobId must be text");
+  assertEquals(sb.tables.job_events.length, 0);
+});
+
 // ===========================================================================
 // Tache 6 : v3.reportProblem et v3.checkTicket
 // ===========================================================================
