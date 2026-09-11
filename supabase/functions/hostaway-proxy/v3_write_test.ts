@@ -1,6 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { startJob, tickItem } from "./v3_write.ts";
+import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
+import { V3_LINEN_FIELDS } from "./v3.ts";
 
 const FAIZA = { cleaner_id: 3, name: "Faiza", role: "cleaner", color: "#e94560" };
 const JOB = "2026-09-12_Marc Lefevre";
@@ -205,4 +206,326 @@ Deno.test("tickItem refuse un corps incomplet", async () => {
   assertEquals((await tickItem(sb, FAIZA as any, { jobId: JOB, itemId: "X", idem: "idem-tick-0007" })).status, 400);
   assertEquals((await tickItem(sb, FAIZA as any, { jobId: JOB, itemId: "X", checked: "oui", idem: "idem-tick-0008" })).status, 400);
   assertEquals(sb.tables.job_events.length, 0);
+});
+
+// ===========================================================================
+// Tache 7 · finishJob et loadFinishContext
+// ===========================================================================
+
+const ELITE = { cleaner_id: 9, name: "Elite Cleaning", role: "subcontractor", color: "#000000" };
+
+function lingePlein(): Record<string, number> {
+  const l: Record<string, number> = {};
+  for (const f of V3_LINEN_FIELDS) l[f] = 2;
+  return l;
+}
+
+function espionPushFin() {
+  const envois: Array<{ cleanerId: number; payload: any }> = [];
+  return {
+    envois,
+    push: (_sb: any, cleanerId: number, payload: any) => {
+      envois.push({ cleanerId, payload });
+      return Promise.resolve({ sent: 1, pruned: 0, skipped: null });
+    },
+  };
+}
+
+function baseFin() {
+  return fakeDb({
+    job_events: [],
+    cleaning_timer: [{
+      reservation_key: JOB, cleaner_id: 3,
+      started_at: new Date(Date.now() - 92 * 60_000).toISOString(),
+      finished_at: null, total_pause_seconds: 0, pause_count: 0,
+    }],
+    checklist_progress: [],
+    menage_done: [],
+    laundry_counts: [],
+    cleaning_notes: [],
+    cleaning_log: [],
+    photos: [{ id: 55, storage_path: "v3/2026-09-12/abc.jpg", job_id: null, cleaner_id: 3 }],
+    cleaners: [{ id: 1, name: "Walter", role: "manager", is_active: true }],
+  });
+}
+
+// Client dont une table precise fait tomber l'appel, pour verifier qu'une lecture
+// de confort ne peut jamais empecher une cleaner de finir son menage.
+function dbQuiTombe(sb: any, table: string) {
+  return {
+    ...sb,
+    from: (t: string) => {
+      if (t === table) throw new Error("lecture indisponible");
+      return sb.from(t);
+    },
+  };
+}
+
+const CONTEXTE = { sameDay: false, listingName: "623 Samana Park View", managerIds: [1] };
+
+Deno.test("finishJob clot le chrono, marque fait, ecrit la checklist et le linge", async () => {
+  const sb = baseFin();
+  const spy = espionPushFin();
+  const r = await finishJob(sb, FAIZA as any, {
+    jobId: JOB,
+    checklist: { "Master Bed & Linens": true, "Bathroom": true, "Final Check": true },
+    photos: [55],
+    linen: lingePlein(),
+    idem: "idem-finish-0001",
+  }, CONTEXTE, { push: spy.push });
+  assertEquals(r.status, 200);
+  const corps = r.body as any;
+  assertEquals(corps.unchecked, 0);
+  assertEquals(corps.durationMinutes >= 91 && corps.durationMinutes <= 93, true);
+  assertEquals(sb.tables.cleaning_timer[0].finished_at !== null, true);
+  assertEquals(sb.tables.cleaning_timer[0].duration_minutes, corps.durationMinutes);
+  assertEquals(sb.tables.menage_done[0].done, true);
+  assertEquals(sb.tables.checklist_progress.length, 3);
+  assertEquals(sb.tables.laundry_counts.length, 1);
+  assertEquals(sb.tables.laundry_counts[0].bed_sheets, 2);
+  assertEquals(sb.tables.laundry_counts[0].counted_on, "2026-09-12");
+  assertEquals(sb.tables.laundry_counts[0].author, "Faiza");
+  assertEquals(sb.tables.photos[0].job_id, JOB);
+  assertEquals(spy.envois.length, 0); // pas un same-day
+});
+
+Deno.test("finishJob previent les managers sur un same-day", async () => {
+  const sb = baseFin();
+  const spy = espionPushFin();
+  await finishJob(sb, FAIZA as any, {
+    jobId: JOB, checklist: { "Bathroom": true }, photos: [], linen: lingePlein(),
+    idem: "idem-finish-0002",
+  }, { ...CONTEXTE, sameDay: true }, { push: spy.push });
+  assertEquals(spy.envois.map((e) => e.cleanerId), [1]);
+  assertEquals(spy.envois[0].payload.title, "Same-day cleaning finished");
+  assertEquals(spy.envois[0].payload.body.includes("623 Samana Park View"), true);
+  // Aucun nom de guest dans la notification.
+  assertEquals(spy.envois[0].payload.body.includes("Marc"), false);
+});
+
+Deno.test("finishJob compte les lignes non cochees sans refuser la fin", async () => {
+  const sb = baseFin();
+  const r = await finishJob(sb, FAIZA as any, {
+    jobId: JOB,
+    checklist: { "Master Bed & Linens": true, "Bathroom": false, "Final Check": false },
+    photos: [], linen: lingePlein(), idem: "idem-finish-0003",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).unchecked, 2);
+  assertEquals(sb.tables.menage_done[0].done, true);
+});
+
+Deno.test("finishJob exige le linge d'une cleaner interne, jamais d'un sous-traitant", async () => {
+  const sb = baseFin();
+  const sans = await finishJob(sb, FAIZA as any, {
+    jobId: JOB, checklist: {}, photos: [], idem: "idem-finish-0004",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(sans.status, 400);
+  assertEquals(sb.tables.menage_done.length, 0);
+  assertEquals(sb.tables.job_events.length, 0);
+
+  const sb2 = baseFin();
+  const elite = await finishJob(sb2, ELITE as any, {
+    jobId: JOB, checklist: {}, photos: [], idem: "idem-finish-0005",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(elite.status, 200);
+  assertEquals(sb2.tables.laundry_counts.length, 0);
+  assertEquals(sb2.tables.menage_done[0].done, true);
+});
+
+Deno.test("finishJob refuse un comptage de linge negatif ou non entier", async () => {
+  const sb = baseFin();
+  const negatif = await finishJob(sb, FAIZA as any, {
+    jobId: JOB, checklist: {}, photos: [],
+    linen: { ...lingePlein(), bath_mats: -1 }, idem: "idem-finish-0020",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(negatif.status, 400);
+  const flottant = await finishJob(sb, FAIZA as any, {
+    jobId: JOB, checklist: {}, photos: [],
+    linen: { ...lingePlein(), bed_sheets: 1.5 }, idem: "idem-finish-0021",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(flottant.status, 400);
+  // Un corps invalide ne brule aucune cle et n'ecrit rien.
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(sb.tables.laundry_counts.length, 0);
+  assertEquals(sb.tables.menage_done.length, 0);
+});
+
+Deno.test("finishJob refuse un jobId absent ou une cle d'idempotence malformee", async () => {
+  const sb = baseFin();
+  assertEquals((await finishJob(sb, FAIZA as any, {
+    checklist: {}, photos: [], linen: lingePlein(), idem: "idem-finish-0022",
+  }, CONTEXTE, { push: espionPushFin().push })).status, 400);
+  assertEquals((await finishJob(sb, FAIZA as any, {
+    jobId: JOB, checklist: {}, photos: [], linen: lingePlein(), idem: "court",
+  }, CONTEXTE, { push: espionPushFin().push })).status, 400);
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(sb.tables.menage_done.length, 0);
+});
+
+Deno.test("finishJob refuse un identifiant de photo qui n'est pas un entier positif", async () => {
+  const sb = baseFin();
+  for (const mauvais of ["abc", true, 1.5, 0, -3, {}]) {
+    const r = await finishJob(sb, FAIZA as any, {
+      jobId: JOB, checklist: {}, photos: [55, mauvais], linen: lingePlein(),
+      idem: "idem-finish-0023",
+    }, CONTEXTE, { push: espionPushFin().push });
+    assertEquals(r.status, 400);
+    assertEquals((r.body as any).error, "Invalid photo id.");
+  }
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(sb.tables.photos[0].job_id, null);
+});
+
+Deno.test("finishJob ne rattache pas la photo d'une autre cleaner", async () => {
+  const sb = baseFin();
+  sb.tables.photos.push({
+    id: 77, storage_path: "v3/2026-09-12/autre.jpg", job_id: "2026-09-12_Autre", cleaner_id: 4,
+  });
+  const r = await finishJob(sb, FAIZA as any, {
+    jobId: JOB, checklist: {}, photos: [55, 77], linen: lingePlein(), idem: "idem-finish-0024",
+  }, CONTEXTE, { push: espionPushFin().push });
+  // La fin aboutit : c'est le fait principal. Seul le rattachement est refuse.
+  assertEquals(r.status, 200);
+  assertEquals(sb.tables.photos[0].job_id, JOB);
+  assertEquals(sb.tables.photos[1].job_id, "2026-09-12_Autre");
+});
+
+Deno.test("finishJob est idempotent : rejouer ne double ni le linge ni le chrono", async () => {
+  const sb = baseFin();
+  const corps = {
+    jobId: JOB, checklist: { "Bathroom": true }, photos: [], linen: lingePlein(),
+    idem: "idem-finish-0006",
+  };
+  const un = await finishJob(sb, FAIZA as any, corps, CONTEXTE, { push: espionPushFin().push });
+  const deux = await finishJob(sb, FAIZA as any, corps, CONTEXTE, { push: espionPushFin().push });
+  assertEquals((deux.body as any).durationMinutes, (un.body as any).durationMinutes);
+  assertEquals(sb.tables.laundry_counts.length, 1);
+  assertEquals(sb.writes.filter((w) => w.table === "laundry_counts").length, 1);
+  assertEquals(sb.tables.job_events.length, 1);
+});
+
+// Ruling du controleur : jamais de succes fabrique sur un rejeu dont l'ecriture
+// metier n'a pas abouti. Le telephone garde son entree hors ligne.
+Deno.test("finishJob rend 409 quand la cle est posee sans resultat", async () => {
+  const sb = baseFin();
+  sb.tables.job_events.push({
+    id: 1, idem_key: "idem-finish-0009", event_type: "finish_job", job_id: JOB,
+    cleaner_id: 3, payload: {}, result: null, created_at: "2026-09-12T06:00:00Z",
+  });
+  const r = await finishJob(sb, FAIZA as any, {
+    jobId: JOB, checklist: {}, photos: [], linen: lingePlein(), idem: "idem-finish-0009",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r.status, 409);
+  assertEquals((r.body as any).error, "Still processing. Retry.");
+  assertEquals(sb.tables.menage_done.length, 0);
+  assertEquals(sb.tables.laundry_counts.length, 0);
+});
+
+// Meme regle que startJob apres la revue de la tache 4 : une lecture ratee leve,
+// la cle est liberee, et rien n'est marque fait sur une duree inventee.
+Deno.test("finishJob ne marque pas fait quand la lecture du chrono echoue", async () => {
+  const sb = baseFin();
+  sb.fail["cleaning_timer.select"] = { message: "lecture indisponible" };
+  let leve = false;
+  try {
+    await finishJob(sb, FAIZA as any, {
+      jobId: JOB, checklist: {}, photos: [], linen: lingePlein(), idem: "idem-finish-0010",
+    }, CONTEXTE, { push: espionPushFin().push });
+  } catch (_e) {
+    leve = true;
+  }
+  assertEquals(leve, true);
+  assertEquals(sb.tables.menage_done.length, 0);
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(sb.tables.cleaning_timer[0].finished_at, null);
+});
+
+// Un chrono deja clos n'est jamais recalcule : une deuxieme fin (deux telephones,
+// ou une cle differente apres reinstallation) gonflerait la duree du menage, qui
+// alimente les statistiques de l'equipe.
+Deno.test("finishJob ne recalcule pas la duree d'un chrono deja clos", async () => {
+  const sb = baseFin();
+  sb.tables.cleaning_timer[0].finished_at = "2026-09-12T09:00:00.000Z";
+  sb.tables.cleaning_timer[0].duration_minutes = 77;
+  const r = await finishJob(sb, FAIZA as any, {
+    jobId: JOB, checklist: {}, photos: [], linen: lingePlein(), idem: "idem-finish-0011",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).durationMinutes, 77);
+  assertEquals(sb.tables.cleaning_timer[0].finished_at, "2026-09-12T09:00:00.000Z");
+  assertEquals(sb.writes.filter((w) => w.table === "cleaning_timer").length, 0);
+  assertEquals(sb.tables.cleaning_log.some((l: any) => l.action === "timer_stopped"), false);
+  // Le menage est bien marque fait : la fin n'est pas perdue pour autant.
+  assertEquals(sb.tables.menage_done[0].done, true);
+});
+
+Deno.test("finishJob ecrit la note libre quand il y en a une", async () => {
+  const sb = baseFin();
+  await finishJob(sb, FAIZA as any, {
+    jobId: JOB, checklist: {}, photos: [], linen: lingePlein(),
+    notes: "Balcony door handle is loose", idem: "idem-finish-0007",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(sb.tables.cleaning_notes.length, 1);
+  assertEquals(sb.tables.cleaning_notes[0].note_text, "Balcony door handle is loose");
+  assertEquals(sb.tables.cleaning_notes[0].author, "Faiza");
+});
+
+Deno.test("loadFinishContext lit le same-day dans le cache, sans appeler Hostaway", async () => {
+  const sb = fakeDb({
+    proxy_cache: [{
+      // Cle de l'app actuelle : sept jours a partir du jour ouvert.
+      key: "checkouts:2026-09-12_2026-09-18",
+      updated_at: new Date().toISOString(),
+      payload: {
+        reservations: [{
+          checkOut: "2026-09-12", guest: "Marc Lefevre", listing: "623 Samana Park View",
+          nextGuest: { guest: "Anna Weber", date: "2026-09-12", checkInTime: 15, sameDay: true },
+        }],
+      },
+    }],
+    cleaners: [{ id: 1, name: "Walter", role: "manager", is_active: true }],
+  });
+  const ctx = await loadFinishContext(sb, JOB);
+  assertEquals(ctx.sameDay, true);
+  assertEquals(ctx.listingName, "623 Samana Park View");
+  assertEquals(ctx.managerIds, [1]);
+});
+
+// Le nom montre par la v3 est celui de listing_config (« Apt + Immeuble »), pas le
+// titre commercial Hostaway. La notification manager dit donc la meme chose que
+// l'ecran Today.
+Deno.test("loadFinishContext prefere le nom interne du logement", async () => {
+  const sb = fakeDb({
+    proxy_cache: [{
+      key: "checkouts:2026-09-12_2026-09-18",
+      updated_at: new Date().toISOString(),
+      payload: {
+        reservations: [{
+          checkOut: "2026-09-12", guest: "Marc Lefevre", listingId: "102",
+          listing: "Stunning 1BR with Marina View",
+          nextGuest: { guest: "Anna Weber", date: "2026-09-12", checkInTime: 15, sameDay: true },
+        }],
+      },
+    }],
+    listing_config: [{ listing_id: "102", listing_name: "Apt 623 Samana Park Views" }],
+    cleaners: [],
+  });
+  const ctx = await loadFinishContext(sb, JOB);
+  assertEquals(ctx.listingName, "Apt 623 Samana Park Views");
+});
+
+Deno.test("loadFinishContext ne bloque jamais une fin quand le cache est vide", async () => {
+  const sb = fakeDb({ proxy_cache: [], cleaners: [] });
+  const ctx = await loadFinishContext(sb, JOB);
+  assertEquals(ctx.sameDay, false);
+  assertEquals(ctx.listingName, "");
+  assertEquals(ctx.managerIds, []);
+});
+
+Deno.test("loadFinishContext ne bloque jamais une fin quand la liste des managers tombe", async () => {
+  const sb = baseFin();
+  const ctx = await loadFinishContext(dbQuiTombe(sb, "cleaners"), JOB);
+  assertEquals(ctx.managerIds, []);
+  assertEquals(ctx.sameDay, false);
 });

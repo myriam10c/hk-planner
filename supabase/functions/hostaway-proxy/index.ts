@@ -12,7 +12,7 @@ import {
   V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
 } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
-import { startJob, tickItem } from "./v3_write.ts";
+import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
 import { checkTicket, reportProblem, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES } from "./v3_tickets.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
@@ -1210,6 +1210,19 @@ Deno.serve(async (req: Request) => {
       const body = await req.json().catch(() => null);
       if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
       const r = await checkTicket(sb, me, body);
+      return jsonResp(r.body, r.status);
+    }
+
+    if (action === "v3.finishJob" && req.method === "POST") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      // Le same-day est lu dans les instantanes deja en cache, jamais par un appel
+      // Hostaway : une fin de menage ne doit pas attendre la pagination.
+      const ctx = await loadFinishContext(sb, String(body.jobId ?? ""));
+      const r = await finishJob(sb, me, body, ctx);
       return jsonResp(r.body, r.status);
     }
 
