@@ -32,10 +32,10 @@ export default defineConfig({
   // c'est le prix d'une configuration qui reste lisible.
   webServer: {
     command: 'python3 -m http.server 8890',
-    // On attend index.html a la racine, pas /v3/ : au premier test de la tache 8
-    // le dossier v3 n'existe pas encore, et Playwright refuserait de demarrer.
-    // La tache 9 repointe cette ligne sur /v3/index.html.
-    url: 'http://localhost:8890/index.html',
+    // On attend /v3/index.html, pas la racine : avec `reuseExistingServer`, un
+    // serveur tiers deja en ecoute sur 8890 passerait la porte sur index.html et
+    // les tests v3 tourneraient contre le mauvais arbre sans rien dire.
+    url: 'http://localhost:8890/v3/index.html',
     reuseExistingServer: true,
     timeout: 30_000,
   },
