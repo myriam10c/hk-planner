@@ -590,7 +590,11 @@ Deno.test("applyInvite defait l'insertion et rend 502 quand l'invitation echoue"
   const r = await applyInvite(sb, plan, "walter@example.com", "https://app.test/");
   assertEquals(r.status, 502);
   assertEquals(r.body, { error: "Could not send the invitation." });
-  assertEquals(sb.calls, ["cleaners.insert", "auth.listUsers", "auth.invite", "cleaners.delete"]);
+  // Le second listUsers verifie qu'aucune requete jumelle n'a cree le compte
+  // entre-temps ; sans compte, le rollback part comme avant (hotfix du 12/09).
+  assertEquals(sb.calls, [
+    "cleaners.insert", "auth.listUsers", "auth.invite", "auth.listUsers", "cleaners.delete",
+  ]);
 });
 
 // Revue 8a constat 4 : la garde system s'ouvrait si sa lecture echouait.
@@ -747,4 +751,309 @@ Deno.test("les libelles d'erreur d'invitation sont en anglais de produit", () =>
     "This email is already used by another team member.",
   );
   assertEquals(systemRowError("system", "manager"), "This account cannot be modified.");
+});
+
+// ---------------------------------------------------------------------------
+// Hotfix du 12/09 : comptes en libre-service (linkEmail) et cause du deliage.
+// ---------------------------------------------------------------------------
+
+import {
+  applyLinkEmail,
+  parseLinkEmailInput,
+  saveCleanerUpdatePatch,
+} from "./auth.ts";
+
+// --- Cause du deliage : saveCleaner ne doit JAMAIS porter la colonne email ---
+
+Deno.test("saveCleanerUpdatePatch ne touche jamais a l'email", () => {
+  const patch = saveCleanerUpdatePatch({
+    name: "Semax", phone: "+256 775 939075", color: "#7c3aed",
+    role: "maintenance", telegramChatId: "5079913932",
+  });
+  assertEquals(Object.hasOwn(patch, "email"), false);
+  assertEquals(patch, {
+    name: "Semax", phone: "+256 775 939075", color: "#7c3aed",
+    role: "maintenance", telegram_chat_id: "5079913932",
+  });
+  // Meme sans role ni telegram : toujours aucune colonne email, et les valeurs
+  // vides retombent sur les defauts historiques.
+  const mini = saveCleanerUpdatePatch({ name: "Faiza" });
+  assertEquals(Object.hasOwn(mini, "email"), false);
+  assertEquals(mini, { name: "Faiza", phone: null, color: "#e94560" });
+  // Un email glisse dans le corps de la requete n'atteint pas le patch.
+  const pirate = saveCleanerUpdatePatch({ name: "Faiza", ...({ email: "x@y.com" } as any) } as any);
+  assertEquals(Object.hasOwn(pirate, "email"), false);
+});
+
+// --- Cause reelle du deliage : le rollback d'une invitation jumelle ---
+
+// Faux client qui joue la course du 11/09 : la premiere requete a deja cree le
+// compte Auth quand la seconde appelle inviteUserByEmail. GoTrue rend alors
+// « Database error saving new user ».
+function fakeRaceSb() {
+  const calls: string[] = [];
+  const payloads: any[] = [];
+  let users: any[] = [];
+  const sb: any = {
+    calls,
+    payloads,
+    from(_t: string) {
+      const q: any = {};
+      const finish = () => {
+        calls.push("cleaners." + q.op);
+        if (q.payload !== undefined) payloads.push({ op: q.op, payload: q.payload });
+        return Promise.resolve({ data: { id: 7 }, error: null });
+      };
+      q.update = (p: any) => { q.op = "update"; q.payload = p; return q; };
+      q.insert = (p: any) => { q.op = "insert"; q.payload = p; return q; };
+      q.delete = () => { q.op = "delete"; return q; };
+      q.select = () => q;
+      q.eq = () => q;
+      q.single = () => finish();
+      q.maybeSingle = () => finish();
+      q.then = (res: any, rej: any) => finish().then(res, rej);
+      return q;
+    },
+    auth: {
+      resetPasswordForEmail: async () => { calls.push("auth.reset"); return { error: null }; },
+      admin: {
+        listUsers: async () => {
+          calls.push("auth.listUsers");
+          return { data: { users: [...users] }, error: null };
+        },
+        deleteUser: async () => { calls.push("auth.deleteUser"); return { error: null }; },
+        inviteUserByEmail: async () => {
+          calls.push("auth.invite");
+          // La requete jumelle a gagne la course entre notre listUsers et ici.
+          users = [{ id: "u-race", email: "sserunkumavan@example.com" }];
+          return { error: { message: "Database error saving new user" } };
+        },
+      },
+    },
+  };
+  return sb;
+}
+
+Deno.test("applyInvite ne defait plus l'ecriture quand une requete jumelle a cree le compte", async () => {
+  const input = parseInviteInput({
+    email: "sserunkumavan@example.com", name: "Semax", role: "maintenance",
+  }) as any;
+  const cible = {
+    id: 7, name: "Semax", role: "maintenance",
+    email: null, is_active: true, phone: null, color: "#7c3aed",
+  };
+  const plan = planInvite(input, 7, cible, null);
+  const sb = fakeRaceSb();
+  const r = await applyInvite(sb, plan, "sserunkumavan@example.com", "https://app.test/");
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { status: "success", id: 7, mode: "invite" });
+  // Une seule ecriture cleaners : celle qui pose l'adresse. Aucun rollback.
+  assertEquals(sb.calls.filter((c: string) => c.startsWith("cleaners.")), ["cleaners.update"]);
+  assertEquals(sb.payloads.length, 1);
+  assertEquals((sb.payloads[0].payload as any).email, "sserunkumavan@example.com");
+});
+
+// --- linkEmail : validation du corps ---
+
+Deno.test("parseLinkEmailInput refuse une adresse invalide et un mot de passe court", () => {
+  assertEquals((parseLinkEmailInput(null) as any).status, 400);
+  assertEquals(
+    (parseLinkEmailInput({ email: "pas-une-adresse", password: "motdepasse" }) as any).error,
+    "A valid email address is required.",
+  );
+  assertEquals(
+    (parseLinkEmailInput({ email: "semax@example.com", password: "court" }) as any).error,
+    "Password too short. Use at least 8 characters.",
+  );
+  assertEquals(
+    (parseLinkEmailInput({ email: "semax@example.com" }) as any).error,
+    "Password too short. Use at least 8 characters.",
+  );
+  const ok = parseLinkEmailInput({ email: "  Semax@Example.COM ", password: "12345678" }) as any;
+  assertEquals(ok.kind, "ok");
+  assertEquals(ok.email, "semax@example.com");
+  assertEquals(ok.password, "12345678");
+});
+
+// --- linkEmail : la sequence ---
+
+// Faux client dedie : lignes cleaners scriptees par filtre, comptes Auth
+// scriptes, et journal de l'ordre reel des appels.
+function fakeLinkSb(script: {
+  mine?: any;
+  holder?: any;
+  users?: any[];
+  updateUser?: any;
+  createUser?: any;
+  linkWrite?: any;
+} = {}) {
+  const calls: string[] = [];
+  const payloads: any[] = [];
+  const sb: any = {
+    calls,
+    payloads,
+    from(_t: string) {
+      const q: any = { filters: {} };
+      const finish = (kind: string) => {
+        calls.push("cleaners." + kind);
+        if (kind === "update") {
+          payloads.push(q.payload);
+          return Promise.resolve(script.linkWrite ?? { error: null });
+        }
+        // Lecture : « ma ligne » quand on filtre sur id, « le porteur » sur email.
+        const data = Object.hasOwn(q.filters, "email")
+          ? (script.holder ?? null)
+          : (script.mine ?? null);
+        return Promise.resolve({ data, error: null });
+      };
+      q.select = () => q;
+      q.update = (p: any) => { q.op = "update"; q.payload = p; return q; };
+      q.eq = (col: string, val: any) => { q.filters[col] = val; return q; };
+      q.maybeSingle = () => finish(Object.hasOwn(q.filters, "email") ? "select.email" : "select.id");
+      q.then = (res: any, rej: any) => finish("update").then(res, rej);
+      return q;
+    },
+    auth: {
+      admin: {
+        listUsers: async () => {
+          calls.push("auth.listUsers");
+          return { data: { users: script.users ?? [] }, error: null };
+        },
+        updateUserById: async (_id: string, attrs: any) => {
+          calls.push("auth.updateUserById");
+          payloads.push({ emailConfirm: attrs.email_confirm, hasPassword: !!attrs.password });
+          return script.updateUser ?? { error: null };
+        },
+        createUser: async (attrs: any) => {
+          calls.push("auth.createUser");
+          payloads.push({ email: attrs.email, emailConfirm: attrs.email_confirm, hasPassword: !!attrs.password });
+          return script.createUser ?? { error: null, data: { user: { id: "u-new" } } };
+        },
+      },
+    },
+  };
+  return sb;
+}
+
+const SESSION_SEMAX = { cleaner_id: 7, name: "Semax", role: "maintenance", color: "#7c3aed" };
+const INPUT_SEMAX = parseLinkEmailInput({
+  email: "sserunkumavan@example.com", password: "motdepasse1",
+}) as any;
+
+Deno.test("linkEmail cree le compte et relie la ligne quand rien n'existe", async () => {
+  const sb = fakeLinkSb({ mine: { id: 7, email: null }, holder: null, users: [] });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { status: "success" });
+  // Le compte Auth est cree AVANT l'ecriture cleaners : un echec en aval ne
+  // peut donc plus effacer une adresse deja posee (incident du 11/09).
+  assertEquals(sb.calls, [
+    "cleaners.select.id", "cleaners.select.email",
+    "auth.listUsers", "auth.createUser", "cleaners.update",
+  ]);
+  assertEquals(sb.payloads[0], {
+    email: "sserunkumavan@example.com", emailConfirm: true, hasPassword: true,
+  });
+  assertEquals(sb.payloads[1], { email: "sserunkumavan@example.com" });
+});
+
+Deno.test("linkEmail reprend un compte Auth existant que personne ne porte", async () => {
+  // Le cas reel : l'invitation du 11/09 a cree le compte, le rollback jumeau a
+  // efface l'adresse de la ligne. La personne repart de son PIN et reprend la
+  // main sur ce compte avec un nouveau mot de passe.
+  const sb = fakeLinkSb({
+    mine: { id: 7, email: null },
+    holder: null,
+    users: [{ id: "u-existant", email: "sserunkumavan@example.com" }],
+  });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { status: "success" });
+  assertEquals(sb.calls, [
+    "cleaners.select.id", "cleaners.select.email",
+    "auth.listUsers", "auth.updateUserById", "cleaners.update",
+  ]);
+  assertEquals(sb.payloads[0], { emailConfirm: true, hasPassword: true });
+});
+
+Deno.test("linkEmail rend 409 quand l'adresse appartient a un autre membre", async () => {
+  const sb = fakeLinkSb({ mine: { id: 7, email: null }, holder: { id: 9 } });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 409);
+  assertEquals(r.body, { error: "This email is already used by another team member." });
+  // Rien n'a ete tente cote Auth : le mot de passe d'un compte tiers n'est
+  // jamais repose.
+  assertEquals(sb.calls, ["cleaners.select.id", "cleaners.select.email"]);
+});
+
+Deno.test("linkEmail rend 409 sur un 23505 (course entre deux membres)", async () => {
+  const sb = fakeLinkSb({
+    mine: { id: 7, email: null },
+    holder: null,
+    users: [],
+    linkWrite: { error: { code: "23505" } },
+  });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 409);
+  assertEquals(r.body, { error: "This email is already used by another team member." });
+  // Le compte Auth cree reste en place : aucun rollback, le rejeu le reliera.
+  assertEquals(sb.calls.includes("cleaners.delete"), false);
+});
+
+Deno.test("linkEmail est idempotent : rejouer la meme adresse rend success", async () => {
+  const sb = fakeLinkSb({
+    mine: { id: 7, email: "sserunkumavan@example.com" },
+    holder: { id: 7 },
+    users: [{ id: "u-existant", email: "sserunkumavan@example.com" }],
+  });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { status: "success" });
+  assertEquals(sb.calls, [
+    "cleaners.select.id", "cleaners.select.email",
+    "auth.listUsers", "auth.updateUserById", "cleaners.update",
+  ]);
+});
+
+Deno.test("linkEmail refuse une seconde adresse sur une ligne deja reliee", async () => {
+  const sb = fakeLinkSb({ mine: { id: 7, email: "ancien@example.com" } });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 409);
+  assertEquals(r.body, {
+    error: "Your profile already uses another email address. Ask a manager to change it.",
+  });
+  assertEquals(sb.calls, ["cleaners.select.id"]);
+});
+
+Deno.test("linkEmail refuse la ligne system", async () => {
+  const sb = fakeLinkSb({ mine: { id: 11, email: null } });
+  const r = await applyLinkEmail(
+    sb,
+    { cleaner_id: 11, name: "Medini CEO Agent", role: "system", color: "#7c3aed" },
+    INPUT_SEMAX,
+  );
+  assertEquals(r.status, 403);
+  assertEquals(r.body, { error: "This account cannot have a password." });
+  assertEquals(sb.calls, []);
+});
+
+Deno.test("linkEmail n'ecrit rien dans cleaners quand la creation du compte echoue", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeLinkSb({
+      mine: { id: 7, email: null },
+      holder: null,
+      users: [],
+      createUser: { error: { message: "Database error saving new user" } },
+    });
+    const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+    assertEquals(r.status, 502);
+    assertEquals(r.body, { error: "Could not create your account." });
+    assertEquals(sb.calls.includes("cleaners.update"), false);
+    // Le libelle amont part dans les journaux, jamais le mot de passe.
+    assertEquals(w.lines.length, 1);
+    assertEquals(w.lines[0].includes("motdepasse1"), false);
+  } finally {
+    w.restore();
+  }
 });

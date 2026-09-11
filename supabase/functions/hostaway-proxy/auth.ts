@@ -492,10 +492,29 @@ export async function applyInvite(
     ? (await sb.auth.resetPasswordForEmail(email, { redirectTo })).error
     : (await sb.auth.admin.inviteUserByEmail(email, { redirectTo })).error;
   if (authError) {
-    await rollbackInvite(sb, plan, cleanerId);
     // Le libelle amont (limites de debit GoTrue et consorts) reste dans les
     // journaux, le client ne recoit qu'un message stable.
     console.warn("[inviteCleaner] echec de l'envoi Auth: " + String(authError.message ?? authError));
+    // Incident du 11/09 : deux POST inviteCleaner a 241 ms d'ecart sur la meme
+    // ligne. Le premier a cree le compte Auth, le second a trouve l'adresse
+    // libre a sa lecture puis s'est heurte a l'unicite de auth.users
+    // (« Database error saving new user ») et a ROLLBACK la colonne email, donc
+    // efface le lien que le gagnant venait de poser. On relit donc les comptes
+    // avant de defaire quoi que ce soit : si le compte existe maintenant, la
+    // ligne est correctement reliee et le rollback ferait le degat.
+    if (!existing) {
+      let cree: any = null;
+      try {
+        cree = await findAuthUserByEmail(sb, email);
+      } catch (_e) {
+        cree = null;
+      }
+      if (cree) {
+        console.warn("[inviteCleaner] compte deja cree par une requete concurrente, rien n'est defait");
+        return { status: 200, body: { status: "success", id: cleanerId, mode: "invite" } };
+      }
+    }
+    await rollbackInvite(sb, plan, cleanerId);
     return {
       status: 502,
       body: { error: existing ? "Could not send the reset email." : "Could not send the invitation." },
@@ -521,4 +540,141 @@ export async function systemRowGuard(
   }
   const message = systemRowError(data?.role, nextRole);
   return message ? { status: 400, error: message } : null;
+}
+
+// ===========================================================================
+// saveCleaner : le patch de mise a jour
+// ===========================================================================
+
+// Fonction pure, exportee pour une seule raison : verrouiller par un test que la
+// colonne `email` n'entre JAMAIS dans ce patch. saveCleaner sert l'ecran Team
+// (nom, telephone, couleur, role, chat Telegram, PIN) ; l'adresse de connexion
+// ne se pose que par inviteCleaner ou linkEmail. Un patch qui la porterait
+// effacerait le compte d'un membre des qu'un manager corrige son nom.
+export function saveCleanerUpdatePatch(input: {
+  name: string;
+  phone?: unknown;
+  color?: unknown;
+  role?: unknown;
+  telegramChatId?: string | null | undefined;
+}): Record<string, unknown> {
+  const patch: Record<string, unknown> = {
+    name: input.name,
+    phone: input.phone || null,
+    color: input.color || "#e94560",
+  };
+  if (input.role !== undefined) patch.role = input.role;
+  if (input.telegramChatId !== undefined) patch.telegram_chat_id = input.telegramChatId;
+  return patch;
+}
+
+// ===========================================================================
+// linkEmail : un membre cree lui-meme son compte, prouve par son PIN
+// ===========================================================================
+
+// Libelles rendus TELS QUELS par le front, en anglais de produit.
+export const LINK_EMAIL_ROLE_ERROR = "This account cannot have a password.";
+export const LINK_EMAIL_OTHER_ADDRESS =
+  "Your profile already uses another email address. Ask a manager to change it.";
+export const LINK_PASSWORD_TOO_SHORT = "Password too short. Use at least 8 characters.";
+
+export interface LinkEmailInput {
+  kind: "ok";
+  email: string;
+  password: string;
+}
+export type LinkEmailParse = LinkEmailInput | InviteError;
+
+// Le corps ne porte QUE l'adresse et le mot de passe : l'identite vient de la
+// session, jamais du client, sinon n'importe quel PIN relierait n'importe qui.
+// Le mot de passe n'est ni journalise ni renvoye, ici comme ailleurs.
+export function parseLinkEmailInput(body: any): LinkEmailParse {
+  if (!body || typeof body !== "object") {
+    return { kind: "error", status: 400, error: "invalid json body" };
+  }
+  const email = normalizeEmail(body.email);
+  if (!isValidEmail(email)) {
+    return { kind: "error", status: 400, error: "A valid email address is required." };
+  }
+  const password = typeof body.password === "string" ? body.password : "";
+  if (password.length < 8) {
+    return { kind: "error", status: 400, error: LINK_PASSWORD_TOO_SHORT };
+  }
+  return { kind: "ok", email, password };
+}
+
+// Sequence des ecritures, et pourquoi il n'y a AUCUN rollback :
+//   1. ma ligne doit etre libre, ou porter deja exactement cette adresse (rejeu) ;
+//   2. personne d'autre ne doit porter cette adresse, active ou non : l'index
+//      unique cleaners_email_unique_idx ne filtre pas sur is_active, et reposer
+//      le mot de passe d'un compte encore attache a quelqu'un serait une prise
+//      de controle ;
+//   3. le compte Auth, cree ou repris, AVANT l'ecriture cleaners ;
+//   4. le lien en dernier. Un echec laisse au pire un compte Auth pret et non
+//      relie, que le rejeu relie : l'action est idempotente. Defaire l'ecriture
+//      cleaners sur un echec en aval est exactement ce qui a delie un membre le
+//      11/09 (voir applyInvite), on ne le refait pas ici.
+export async function applyLinkEmail(
+  sb: any,
+  me: SessionUser,
+  input: LinkEmailInput,
+): Promise<InviteResult> {
+  // La ligne machine (le compte du CEO Agent) ne se connecte jamais.
+  if (!INVITE_ROLES.has(me.role)) {
+    return { status: 403, body: { error: LINK_EMAIL_ROLE_ERROR } };
+  }
+
+  const { data: mine, error: mineErr } = await sb.from("cleaners")
+    .select("id, email").eq("id", me.cleaner_id).maybeSingle();
+  if (mineErr) throw mineErr;
+  const current = normalizeEmail(mine?.email);
+  if (current && current !== input.email) {
+    return { status: 409, body: { error: LINK_EMAIL_OTHER_ADDRESS } };
+  }
+
+  const { data: holder, error: holderErr } = await sb.from("cleaners")
+    .select("id").eq("email", input.email).maybeSingle();
+  if (holderErr) throw holderErr;
+  if (holder && Number(holder.id) !== Number(me.cleaner_id)) {
+    return { status: 409, body: { error: EMAIL_CONFLICT_MESSAGE } };
+  }
+
+  let existing: any = null;
+  try {
+    existing = await findAuthUserByEmail(sb, input.email);
+  } catch (e) {
+    console.warn("[linkEmail] lecture des comptes Auth impossible: " + String(e));
+    return { status: 502, body: { error: "Could not reach the accounts service." } };
+  }
+  if (existing) {
+    // Cas d'une invitation restee en plan : le compte existe deja, la personne
+    // en reprend la main avec le mot de passe qu'elle vient de choisir.
+    const { error } = await sb.auth.admin.updateUserById(existing.id, {
+      password: input.password,
+      email_confirm: true,
+    });
+    if (error) {
+      console.warn("[linkEmail] mot de passe non pose: " + String((error as any).message ?? error));
+      return { status: 502, body: { error: "Could not set your password." } };
+    }
+  } else {
+    const { error } = await sb.auth.admin.createUser({
+      email: input.email,
+      password: input.password,
+      email_confirm: true,
+    });
+    if (error) {
+      console.warn("[linkEmail] compte non cree: " + String((error as any).message ?? error));
+      return { status: 502, body: { error: "Could not create your account." } };
+    }
+  }
+
+  const { error: linkErr } = await sb.from("cleaners")
+    .update({ email: input.email }).eq("id", me.cleaner_id);
+  if (isEmailUniqueViolation(linkErr)) {
+    return { status: 409, body: { error: EMAIL_CONFLICT_MESSAGE } };
+  }
+  if (linkErr) throw linkErr;
+  console.log("[linkEmail] compte relie au membre " + String(me.cleaner_id));
+  return { status: 200, body: { status: "success" } };
 }

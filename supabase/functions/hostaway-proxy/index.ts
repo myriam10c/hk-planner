@@ -3,8 +3,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
 import {
-  applyInvite, currentUser, currentUserDetailed, findAuthUserByEmail, normalizeEmail,
-  parseInviteInput, planInvite, systemRowGuard,
+  applyInvite, applyLinkEmail, currentUser, currentUserDetailed, findAuthUserByEmail,
+  normalizeEmail, parseInviteInput, parseLinkEmailInput, planInvite, saveCleanerUpdatePatch,
+  systemRowGuard,
 } from "./auth.ts";
 import {
   pickSnapshot, plusDays, roleAllowed, todayDubai,
@@ -829,6 +830,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["saveCleaner", "POST"],
   ["deleteCleaner", "POST"],
   ["inviteCleaner", "POST"],
+  ["linkEmail", "POST"],
   ["cleanerLogin", "POST"],
   ["cleanerLogout", "POST"],
   ["cleanerMe", "GET"],
@@ -1480,9 +1482,13 @@ Deno.serve(async (req: Request) => {
         // echoue FERMEE si la lecture du role ne repond pas (revue 8a, constat 4).
         const guard = await systemRowGuard(sb, id, role);
         if (guard) return jsonResp({ error: guard.error }, guard.status);
-        const upd: any = { name, phone: phone || null, color: color || "#e94560" };
-        if (role !== undefined) upd.role = role;
-        if (normalizedTgChat !== undefined) upd.telegram_chat_id = normalizedTgChat;
+        // Le patch est construit par une fonction pure (auth.ts) pour qu'un test
+        // Deno verrouille l'invariant : `email` n'entre JAMAIS dans une ecriture
+        // de saveCleaner. L'adresse de connexion ne se pose que par
+        // inviteCleaner ou linkEmail.
+        const upd: any = saveCleanerUpdatePatch({
+          name, phone, color, role, telegramChatId: normalizedTgChat,
+        });
         const { error } = await sb.from("cleaners").update(upd).eq("id", id);
         if (error) throw error;
         cleanerId = Number(id);
@@ -1578,6 +1584,21 @@ Deno.serve(async (req: Request) => {
 
       const plan = planInvite(input, body.id ?? null, target, holder ? Number(holder.id) : null);
       const result = await applyInvite(sb, plan, email, APP_ORIGIN + "/");
+      return jsonResp(result.body, result.status);
+    }
+    // linkEmail : un membre cree lui-meme son compte email, sans manager. Son
+    // PIN (ou la session email deja ouverte sur l'appareil) prouve son
+    // identite ; le corps ne porte que l'adresse et le mot de passe, jamais un
+    // identifiant de membre, sinon un PIN quelconque relierait n'importe qui.
+    // La sequence des ecritures et ses garde-fous vivent dans applyLinkEmail
+    // (auth.ts), avec le commentaire qui les justifie.
+    if (action === "linkEmail" && req.method === "POST") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      const body = await req.json().catch(() => null);
+      const input = parseLinkEmailInput(body);
+      if (input.kind === "error") return jsonResp({ error: input.error }, input.status);
+      const result = await applyLinkEmail(sb, me, input);
       return jsonResp(result.body, result.status);
     }
     if (action === "cleanerLogin" && req.method === "POST") {
