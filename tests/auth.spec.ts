@@ -356,3 +356,24 @@ test('revue finale constat 4 : reason unlinked dit que le compte n est relie a p
   await expect(page.locator('#authEmail')).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('hkAuthSession'))).toBeNull();
 });
+
+test('correctif 11/09 : un manager connecte par PIN a aussi un bouton Logout', async ({ page }) => {
+  // Un login PIN de role manager laisse cleanerMode a null (vue manager) et n a
+  // pas de JWT : la condition cleanerMode||authAccessToken cachait le bouton.
+  await bootWithFakeNetwork(page, [
+    { match: 'action=cleanerLogout', status: 200, body: { status: 'success' } },
+    { match: 'action=', status: 200, body: { status: 'success', reservations: [], done: {}, assignments: {}, cleaners: [], templates: [] } },
+  ], { pinToken: 'pin-manager-test' });
+  await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
+  const logout = page.locator('.header [data-action="cleanerLogout"]').first();
+  await expect(logout).toBeVisible();
+  await logout.click();
+  // Un logout PIN ramene sur l ecran PIN (Quick unlock), pas sur le login email.
+  await expect(page.locator('#pinInput')).toBeVisible({ timeout: 10_000 });
+  const left = await page.evaluate(() => ({
+    pin: localStorage.getItem('cleanerToken'),
+    mode: localStorage.getItem('cleanerMode'),
+  }));
+  expect(left.pin).toBeNull();
+  expect(left.mode).toBeNull();
+});

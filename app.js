@@ -4481,7 +4481,7 @@ function renderPlanner(){
   // authAccessToken : un manager connecte par email n'a pas de cleanerMode
   // (adoptEmailSession le met a null), il n'avait donc aucun moyen de sortir
   // de sa session (revue finale, constat 1). cleanerLogout delegue a emailLogout.
-  if(cleanerMode||authAccessToken) h+='<button class="icon-btn" data-action="cleanerLogout" title="Logout" aria-label="Logout">'+icon('logout',18)+'</button>';
+  if(cleanerMode||authAccessToken||cleanerToken) h+='<button class="icon-btn" data-action="cleanerLogout" title="Logout" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='<button class="cmdk-trigger" data-action="openCmdk" title="Global search (⌘K)" aria-label="Open global search">⌘K</button>';
   h+='<button class="icon-btn" data-action="toggleSearch" title="Search" aria-label="Search">'+icon('search',18)+'</button>';
   if(!cleanerMode){ h+='<button class="icon-btn" data-action="openExtraModal" title="Add extra cleaning" aria-label="Add extra cleaning" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">'+icon('plus',18)+'</button>'; }
@@ -6376,7 +6376,7 @@ function renderMaintenance(){
   if(isManager) h+='<button class="icon-btn" data-action="showMtMoreMenu" data-pass-event="1" data-stop-propagation="1" title="More actions" aria-label="More">'+icon('bell',18)+'</button>';
   // Meme raison qu'en tete du Planner : un manager en session email doit
   // pouvoir se deconnecter d'ici aussi (revue finale, constat 1).
-  if(cleanerMode||authAccessToken) h+='<button class="icon-btn" data-action="cleanerLogout" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>';
+  if(cleanerMode||authAccessToken||cleanerToken) h+='<button class="icon-btn" data-action="cleanerLogout" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='</div></div>';
   h+='<div class="mt-page-subtitle">'+_openCount+' ticket'+(_openCount===1?'':'s')+'</div>';
   h+='</div>';
