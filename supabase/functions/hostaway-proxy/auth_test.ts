@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@1";
+import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { exportJWK, SignJWT } from "npm:jose@6.2.12";
 import { bearerToken, resetJwksCache, verifyUserJwt } from "./auth.ts";
 
@@ -463,14 +463,19 @@ function fakeInviteSb(script: {
       const finish = () => {
         calls.push("cleaners." + q.op);
         if (q.payload !== undefined) payloads.push({ op: q.op, payload: q.payload });
-        if (q.op === "update") writeFilters.push({ ...q.filters });
+        // Les suppressions sont verrouillees comme les mises a jour depuis la
+        // revue de verification (constat 2) : leurs filtres comptent aussi.
+        if (q.op === "update" || q.op === "delete") writeFilters.push({ ...q.filters });
         const r = writes.length ? writes.shift() : { data: { id: 42 }, error: null };
         return Promise.resolve(r);
       };
       q.update = (p: any) => { q.op = "update"; q.payload = p; return q; };
       q.insert = (p: any) => { q.op = "insert"; q.payload = p; return q; };
       q.delete = () => { q.op = "delete"; return q; };
-      q.select = () => q;
+      // .select() apres une ecriture demande la representation ; seule, c'est une
+      // lecture (la relecture de controle du constat 6).
+      q.select = () => { if (q.op === undefined) q.op = "select"; return q; };
+      q.limit = () => q;
       q.eq = (col: string, val: any) => { if (col !== undefined) q.filters[col] = val; return q; };
       q.is = (col: string, val: any) => { q.filters[col] = val; return q; };
       q.single = () => finish();
@@ -538,7 +543,7 @@ Deno.test("rollbackInvite journalise quand la base refuse le rollback", async ()
 Deno.test("rollbackInvite ne journalise rien quand il reussit", async () => {
   const w = captureWarn();
   try {
-    const sb = fakeInviteSb({ writes: [{ error: null }] });
+    const sb = fakeInviteSb({ writes: [{ data: [{ id: 8 }], error: null }] });
     await rollbackInvite(sb, planPourAvant(), 8);
     assertEquals(w.lines, []);
   } finally {
@@ -575,7 +580,7 @@ Deno.test("applyInvite rend 409 sur un 23505 sans avoir touche au compte Auth", 
 
 Deno.test("applyInvite defait l'ecriture et rend 409 quand l'ancien compte resiste", async () => {
   const sb = fakeInviteSb({
-    writes: [{ data: [{ id: 8 }], error: null }, { error: null }],
+    writes: [{ data: [{ id: 8 }], error: null }, { data: [{ id: 8 }], error: null }],
     users: [{ id: "u-1", email: "ancien@example.com" }],
     deleteUser: { error: { message: "auth down" } },
   });
@@ -593,7 +598,7 @@ Deno.test("applyInvite defait l'insertion et rend 502 quand l'invitation echoue"
   const input = parseInviteInput({ email: "walter@example.com", name: "Walter" }) as any;
   const plan = planInvite(input, null, null, null);
   const sb = fakeInviteSb({
-    writes: [{ data: { id: 77 }, error: null }, { error: null }],
+    writes: [{ data: { id: 77 }, error: null }, { data: [{ id: 77 }], error: null }],
     authResult: { error: { message: "rate limit exceeded" } },
   });
   const r = await applyInvite(sb, plan, "walter@example.com", "https://app.test/");
@@ -891,6 +896,10 @@ Deno.test("parseLinkEmailInput refuse une adresse invalide et un mot de passe co
 // scriptes, et journal de l'ordre reel des appels.
 function fakeLinkSb(script: {
   mine?: any;
+  // Etat de ma ligne a la RELECTURE de controle, quand l'ecriture conditionnelle
+  // n'a touche aucune ligne (revue de verification, constat 6). Par defaut la
+  // ligne n'a pas bouge.
+  mineApres?: any;
   holder?: any;
   users?: any[];
   updateUser?: any;
@@ -902,6 +911,7 @@ function fakeLinkSb(script: {
   // Filtres reellement poses sur l'ecriture finale : c'est la que se lit le
   // verrou optimiste du hotfix du 2026-09-12.
   const writeFilters: any[] = [];
+  let lectures = 0;
   const sb: any = {
     calls,
     payloads,
@@ -917,10 +927,16 @@ function fakeLinkSb(script: {
       q.update = (p: any) => { q.op = "update"; q.payload = p; return q; };
       q.eq = (col: string, val: any) => { q.filters[col] = val; return q; };
       q.is = (col: string, val: any) => { q.filters[col] = val; return q; };
-      // Lecture de « ma ligne », filtree sur id.
+      q.limit = () => q;
+      // Lecture de « ma ligne », filtree sur id. La seconde est la relecture de
+      // controle qui suit une ecriture sans effet.
       q.maybeSingle = () => {
+        lectures += 1;
         calls.push("cleaners.select.id");
-        return Promise.resolve({ data: script.mine ?? null, error: null });
+        const row = lectures === 1
+          ? (script.mine ?? null)
+          : (script.mineApres !== undefined ? script.mineApres : (script.mine ?? null));
+        return Promise.resolve({ data: row, error: null });
       };
       q.then = (res: any, rej: any) => {
         if (q.op === "update") {
@@ -971,16 +987,18 @@ Deno.test("linkEmail cree le compte et relie la ligne quand rien n'existe", asyn
   const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
   assertEquals(r.status, 200);
   assertEquals(r.body, { status: "success" });
-  // Le compte Auth est cree AVANT l'ecriture cleaners : un echec en aval ne
-  // peut donc plus effacer une adresse deja posee (incident du 11/09).
+  // La ligne est revendiquee AVANT tout appel Auth (revue de verification,
+  // constat 3). Une perdante de course ne peut donc plus poser son mot de passe
+  // sur le compte d'une gagnante : l'index unique tranche avant. Et on ne defait
+  // toujours rien en aval, donc l'incident du 11/09 reste ferme.
   assertEquals(sb.calls, [
     "cleaners.select.id", "cleaners.select.email",
-    "auth.listUsers", "auth.createUser", "cleaners.update",
+    "cleaners.update", "auth.listUsers", "auth.createUser",
   ]);
-  assertEquals(sb.payloads[0], {
+  assertEquals(sb.payloads[0], { email: "sserunkumavan@example.com" });
+  assertEquals(sb.payloads[1], {
     email: "sserunkumavan@example.com", emailConfirm: true, hasPassword: true,
   });
-  assertEquals(sb.payloads[1], { email: "sserunkumavan@example.com" });
 });
 
 Deno.test("linkEmail reprend un compte Auth existant que personne ne porte", async () => {
@@ -997,9 +1015,10 @@ Deno.test("linkEmail reprend un compte Auth existant que personne ne porte", asy
   assertEquals(r.body, { status: "success" });
   assertEquals(sb.calls, [
     "cleaners.select.id", "cleaners.select.email",
-    "auth.listUsers", "auth.updateUserById", "cleaners.update",
+    "cleaners.update", "auth.listUsers", "auth.updateUserById",
   ]);
-  assertEquals(sb.payloads[0], { emailConfirm: true, hasPassword: true });
+  assertEquals(sb.payloads[0], { email: "sserunkumavan@example.com" });
+  assertEquals(sb.payloads[1], { emailConfirm: true, hasPassword: true });
 });
 
 Deno.test("linkEmail rend 409 quand l'adresse appartient a un autre membre", async () => {
@@ -1025,7 +1044,10 @@ Deno.test("linkEmail rend 409 sur un 23505 (course entre deux membres)", async (
   const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
   assertEquals(r.status, 409);
   assertEquals(r.body, { error: "This email is already used by another team member." });
-  // Le compte Auth cree reste en place : aucun rollback, le rejeu le reliera.
+  // Le 23505 tombe maintenant AVANT le moindre appel Auth : la perdante n'a pas
+  // touche au compte de la gagnante, et elle n'a laisse aucun compte orphelin
+  // derriere elle (revue de verification, constats 3 et 5).
+  assertEquals(sb.calls, ["cleaners.select.id", "cleaners.select.email", "cleaners.update"]);
   assertEquals(sb.calls.includes("cleaners.delete"), false);
 });
 
@@ -1040,7 +1062,7 @@ Deno.test("linkEmail est idempotent : rejouer la meme adresse rend success", asy
   assertEquals(r.body, { status: "success" });
   assertEquals(sb.calls, [
     "cleaners.select.id", "cleaners.select.email",
-    "auth.listUsers", "auth.updateUserById", "cleaners.update",
+    "cleaners.update", "auth.listUsers", "auth.updateUserById",
   ]);
 });
 
@@ -1066,7 +1088,7 @@ Deno.test("linkEmail refuse la ligne system", async () => {
   assertEquals(sb.calls, []);
 });
 
-Deno.test("linkEmail n'ecrit rien dans cleaners quand la creation du compte echoue", async () => {
+Deno.test("linkEmail ne defait pas la ligne quand la creation du compte echoue", async () => {
   const w = captureWarn();
   try {
     const sb = fakeLinkSb({
@@ -1078,7 +1100,11 @@ Deno.test("linkEmail n'ecrit rien dans cleaners quand la creation du compte echo
     const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
     assertEquals(r.status, 502);
     assertEquals(r.body, { error: "Could not create your account." });
-    assertEquals(sb.calls.includes("cleaners.update"), false);
+    // Depuis l'inversion de sequence, la ligne porte deja l'adresse quand Auth
+    // tombe. On ne la defait PAS : defaire est exactement ce qui a delie un
+    // membre le 11/09. Le rejeu creera le compte manquant, l'action reste
+    // idempotente. Une seule ecriture, donc, et aucun rollback.
+    assertEquals(sb.calls.filter((c: string) => c === "cleaners.update").length, 1);
     // Le libelle amont part dans les journaux, jamais le mot de passe.
     assertEquals(w.lines.length, 1);
     assertEquals(w.lines[0].includes("motdepasse1"), false);
@@ -1160,6 +1186,7 @@ function fakeListeSb(rows: any[]) {
     from(table: string) {
       const q: any = {};
       q.select = (cols: string) => { calls.push(table + ".select:" + cols); return q; };
+      q.limit = (n: number) => { calls.push(table + ".limit:" + String(n)); return q; };
       q.then = (res: any, rej: any) => Promise.resolve({ data: rows, error: null }).then(res, rej);
       return q;
     },
@@ -1294,5 +1321,207 @@ Deno.test("applyInvite rend 409 quand la ligne a change sous la requete", async 
   assertEquals(r.status, 409);
   assertEquals(r.body, { error: "This email is already used by another team member." });
   // Rien n'est tente cote Auth et rien n'est defait : la gagnante garde la main.
-  assertEquals(sb.calls, ["cleaners.update"]);
+  // La relecture de controle (constat 6) a vu une AUTRE adresse sur la ligne,
+  // donc le 409 est merite.
+  assertEquals(sb.calls, ["cleaners.update", "cleaners.select"]);
+});
+
+// ===========================================================================
+// Revue de verification du 2026-09-12 (review-securite-urgente-verif.md)
+// Constats 2, 3, 4 et 6 : les deux courses restees ouvertes apres le hotfix.
+// ===========================================================================
+
+import { CLEANERS_READ_LIMIT } from "./auth.ts";
+
+// --- Constat 2 : le rollback ecrivait sans condition, sur une lecture perimee ---
+//
+// Scenario exact du 11/09, deplace de l'aller vers le retour. A invite a@y sur la
+// ligne 8 et gagne l'ecriture. B invite b@z juste apres et gagne la sienne. L'appel
+// Auth de A echoue, A part en rollback : sans filtre, il repose l'ancienne adresse
+// et efface celle que B vient de poser, dont le compte Auth devient orphelin.
+
+Deno.test("rollbackInvite n'efface pas l'adresse qu'une requete concurrente vient de poser", async () => {
+  const w = captureWarn();
+  try {
+    // Zero ligne touchee : la ligne ne porte plus l'adresse que cette requete
+    // avait posee, quelqu'un d'autre est passe entre-temps.
+    const sb = fakeInviteSb({ writes: [{ data: [], error: null }] });
+    await rollbackInvite(sb, planPourAvant(), 8);
+    // Le rollback est conditionne sur ce que l'aller avait POSE, pas sur l'id seul.
+    assertEquals(sb.writeFilters, [{ id: 8, email: "walter@example.com" }]);
+    assertEquals(w.lines.length, 1);
+    assertEquals(w.lines[0].includes("rollback sans effet"), true);
+    // Journal sans PII : ni adresse, ni identifiant de membre.
+    assertEquals(w.lines[0].includes("@"), false);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("rollbackInvite verrouille aussi la suppression sur l'adresse inseree", async () => {
+  const input = parseInviteInput({ email: "walter@example.com", name: "Walter" }) as any;
+  const plan = planInvite(input, null, null, null);
+  const sb = fakeInviteSb({ writes: [{ data: [{ id: 77 }], error: null }] });
+  await rollbackInvite(sb, plan, 77);
+  assertEquals(sb.calls, ["cleaners.delete"]);
+  // Une ligne creee par cette requete porte forcement l'adresse demandee. Si
+  // elle ne la porte plus, ce n'est plus notre ligne : on ne la supprime pas.
+  assertEquals(sb.writeFilters, [{ id: 77, email: "walter@example.com" }]);
+});
+
+Deno.test("applyInvite : le rollback de l'invitation perdante n'ecrase pas la gagnante", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({
+      writes: [
+        // 1. L'ecriture d'aller passe : la ligne 8 porte walter@example.com.
+        { data: [{ id: 8 }], error: null },
+        // 2. Une seconde invitation a pose une autre adresse entre-temps, donc le
+        //    rollback ne touche plus rien.
+        { data: [], error: null },
+      ],
+      users: [],
+      // 3. L'envoi Auth echoue (limite de debit GoTrue), on part en rollback.
+      authResult: { error: { message: "rate limit exceeded" } },
+    });
+    const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+    assertEquals(r.status, 502);
+    // L'aller est verrouille sur l'adresse lue, le retour sur l'adresse posee.
+    assertEquals(sb.writeFilters, [
+      { id: 8, email: "ancien@example.com" },
+      { id: 8, email: "walter@example.com" },
+    ]);
+    // Et le rollback sans effet laisse une trace, sans PII.
+    const sansEffet = w.lines.filter((l: string) => l.includes("rollback sans effet"));
+    assertEquals(sansEffet.length, 1);
+  } finally {
+    w.restore();
+  }
+});
+
+// --- Constat 6 : un vrai double-clic rendait un 409 mensonger ---
+
+Deno.test("applyInvite : un double-clic rend success au lieu d'un 409 mensonger", async () => {
+  const sb = fakeInviteSb({
+    writes: [
+      // La jumelle a gagne l'ecriture, celle-ci ne touche aucune ligne.
+      { data: [], error: null },
+      // Relecture de controle : la ligne porte deja exactement l'adresse voulue.
+      { data: { id: 8, email: "walter@example.com" }, error: null },
+    ],
+    users: [],
+  });
+  const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { status: "success", id: 8, mode: "invite" });
+  // Aucune seconde invitation n'est partie, aucun rollback : la jumelle a tout fait.
+  assertEquals(sb.calls, ["cleaners.update", "cleaners.select"]);
+});
+
+// --- Constat 3 : applyLinkEmail posait le mot de passe AVANT sa revendication ---
+//
+// Deux linkEmail simultanes sur la meme adresse, depuis deux lignes differentes.
+// Dans l'ancien ordre, la perdante trouvait le compte Auth que la gagnante venait
+// de creer et y posait SON mot de passe, avant de se faire refuser l'ecriture :
+// la donnee restait intacte mais le compte avait change de mains.
+
+Deno.test("linkEmail : deux lignes sur la meme adresse, une seule gagne", async () => {
+  const gagnante = fakeLinkSb({ mine: { id: 7, email: null }, holder: null, users: [] });
+  const perdante = fakeLinkSb({
+    mine: { id: 9, email: null },
+    // A sa lecture, personne ne portait encore l'adresse.
+    holder: null,
+    // Le compte Auth de la gagnante existe deja quand la perdante ecrit.
+    users: [{ id: "u-gagnante", email: "sserunkumavan@example.com" }],
+    // cleaners_email_unique_idx tranche la course.
+    linkWrite: { error: { code: "23505" } },
+  });
+  const a = await applyLinkEmail(gagnante, SESSION_SEMAX, INPUT_SEMAX);
+  const b = await applyLinkEmail(perdante, { ...SESSION_SEMAX, cleaner_id: 9 }, INPUT_SEMAX);
+
+  assertEquals([a.status, b.status], [200, 409]);
+  assertEquals(b.body, { error: "This email is already used by another team member." });
+  // La gagnante revendique sa ligne, PUIS cree son compte.
+  assertEquals(gagnante.calls, [
+    "cleaners.select.id", "cleaners.select.email",
+    "cleaners.update", "auth.listUsers", "auth.createUser",
+  ]);
+  // La perdante n'a touche AUCUN appel Auth : ni le mot de passe de la gagnante,
+  // ni un compte orphelin de plus (constat 5, ferme par construction).
+  assertEquals(perdante.calls.some((c: string) => c.startsWith("auth.")), false);
+  assertEquals(perdante.calls, [
+    "cleaners.select.id", "cleaners.select.email", "cleaners.update",
+  ]);
+});
+
+Deno.test("linkEmail : la perdante d'une course sans 23505 ne touche pas Auth non plus", async () => {
+  const w = captureWarn();
+  try {
+    // Meme ligne, deux adresses differentes : la jumelle a gagne, notre filtre ne
+    // matche plus, zero ligne touchee. La relecture voit une AUTRE adresse.
+    const sb = fakeLinkSb({
+      mine: { id: 7, email: null },
+      mineApres: { id: 7, email: "autre@example.com" },
+      holder: null,
+      users: [{ id: "u-tiers", email: "sserunkumavan@example.com" }],
+      linkWrite: { data: [], error: null },
+    });
+    const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+    assertEquals(r.status, 409);
+    assertEquals(r.body, {
+      error: "Your profile already uses another email address. Ask a manager to change it.",
+    });
+    assertEquals(sb.calls.some((c: string) => c.startsWith("auth.")), false);
+    assertEquals(w.lines.length, 1);
+    assertEquals(w.lines[0].includes("@"), false);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("linkEmail : un double-clic rend success au lieu d'un 409 mensonger", async () => {
+  // Les deux requetes jumelles lisent email = null, la gagnante ecrit, la perdante
+  // touche zero ligne. La ligne porte pourtant exactement l'adresse demandee :
+  // l'etat voulu est atteint, un 409 enverrait la personne chercher un manager
+  // pour rien (constat 6).
+  const sb = fakeLinkSb({
+    mine: { id: 7, email: null },
+    mineApres: { id: 7, email: "sserunkumavan@example.com" },
+    holder: null,
+    users: [{ id: "u-jumelle", email: "sserunkumavan@example.com" }],
+    linkWrite: { data: [], error: null },
+  });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { status: "success" });
+  // La ligne etant deja la sienne, on va quand meme poser le mot de passe : c'est
+  // ce que ferait un rejeu sequentiel, et ca rattrape une gagnante dont l'appel
+  // Auth aurait echoue.
+  assertEquals(sb.calls, [
+    "cleaners.select.id", "cleaners.select.email", "cleaners.update",
+    "cleaners.select.id", "auth.listUsers", "auth.updateUserById",
+  ]);
+});
+
+// --- Constat 4 : la lecture du porteur n'avait aucune borne ---
+
+Deno.test("findCleanerByEmail borne explicitement sa lecture", async () => {
+  const sb = fakeListeSb([{ id: 8, email: "w@example.com" }]);
+  const r = await findCleanerByEmail(sb, "w@example.com");
+  assertEquals(r?.id, 8);
+  assertEquals(sb.calls[1], "cleaners.limit:" + String(CLEANERS_READ_LIMIT));
+});
+
+Deno.test("findCleanerByEmail echoue FERMEE quand la page de lecture est pleine", async () => {
+  // PostgREST tronque silencieusement au-dela de son max-rows. Une page pleine
+  // veut dire qu'on ne peut plus affirmer que personne ne porte l'adresse : on
+  // refuse au lieu de le supposer, sinon la garde echoue OUVERTE.
+  const pleine = Array.from(
+    { length: CLEANERS_READ_LIMIT },
+    (_, i) => ({ id: i + 1, email: "x" + String(i) + "@example.com" }),
+  );
+  await assertRejects(() => findCleanerByEmail(fakeListeSb(pleine), "foo@bar.com"));
+  // Une page non pleine reste nominale.
+  const presque = pleine.slice(0, CLEANERS_READ_LIMIT - 1);
+  assertEquals(await findCleanerByEmail(fakeListeSb(presque), "foo@bar.com"), null);
 });

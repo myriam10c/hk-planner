@@ -168,6 +168,13 @@ export function publicCleanerRows(rows: any): any[] {
 // personne, et seule l'ecriture finale aurait ete arretee par l'index unique.
 // Une prise de controle silencieuse, donc, sur une garde qui echoue OUVERTE.
 //
+// Nuance etablie par la revue de verification (constat 1) : la base porte deja
+// cleaners_email_lowercase_chk, `CHECK (email IS NULL OR email = lower(email))`,
+// donc aucune ligne ne peut porter Foo@Bar.com aujourd'hui. Cette comparaison
+// insensible a la casse est une defense en profondeur contre la disparition de
+// cette contrainte, pas le correctif d'un trou ouvert : le cas nominal est
+// ferme par le schema, pas par une convention applicative.
+//
 // Pourquoi pas .ilike : PostgREST traduit `*` en `%`, et Postgres lit `_` et
 // `%` comme des jokers. EMAIL_RE les accepte tous les trois dans la partie
 // locale, l'adresse soumise resoudrait donc une autre ligne que la sienne.
@@ -176,17 +183,56 @@ export function publicCleanerRows(rows: any): any[] {
 // TypeScript, exactement comme findAuthUserByEmail le fait deja cote Auth.
 // La table tient a neuf lignes et n'a de toute facon aucun index sur `email`
 // brut : la lecture coute la meme chose qu'un .eq().
+//
+// Borne de lecture (revue de verification, constat 4). Sans .limit(), PostgREST
+// tronque a son max-rows (1000 chez Supabase) sans rien dire : au-dela du seuil,
+// le porteur reel peut se trouver hors de la page, findCleanerByEmail rend null
+// et la garde « personne d'autre ne porte cette adresse » echoue OUVERTE. La
+// lecture n'etant pas filtree (la comparaison de casse se fait en TypeScript),
+// la borne doit rester tres au-dessus de la taille reelle de l'equipe, neuf
+// lignes aujourd'hui : une borne a 5 refuserait toutes les invitations des
+// demain. Une page pleine n'est donc pas un cas nominal, c'est une table devenue
+// trop grande pour cette strategie de lecture.
+export const CLEANERS_READ_LIMIT = 200;
+
 export async function findCleanerByEmail(
   sb: any,
   email: string,
   columns = "id, email",
 ): Promise<any | null> {
   const cols = /(^|,)\s*email\s*(,|$)/.test(columns) ? columns : columns + ", email";
-  const { data, error } = await sb.from("cleaners").select(cols);
+  const { data, error } = await sb.from("cleaners").select(cols).limit(CLEANERS_READ_LIMIT);
   if (error) throw error;
+  const rows = (data ?? []) as any[];
+  // Echec FERME : page pleine, donc lecture possiblement tronquee, donc on ne
+  // peut plus affirmer que personne ne porte cette adresse. On ne l'affirme pas.
+  // L'appelant remonte en 500, ce qui refuse l'invitation au lieu de l'accorder.
+  if (rows.length >= CLEANERS_READ_LIMIT) {
+    throw new Error("cleaners: lecture tronquee a la borne, controle du porteur impossible");
+  }
   const cible = normalizeEmail(email);
   if (!cible) return null;
-  return ((data ?? []) as any[]).find((r) => normalizeEmail(r?.email) === cible) ?? null;
+  return rows.find((r) => normalizeEmail(r?.email) === cible) ?? null;
+}
+
+// Relecture de controle apres une ecriture conditionnelle qui n'a touche aucune
+// ligne (revue de verification, constat 6). Un vrai double-clic n'est pas un
+// conflit : la requete jumelle a deja pose exactement ce qu'on demandait, l'etat
+// voulu est atteint, et un 409 « demande a un manager » enverrait la personne
+// chercher de l'aide pour rien. Toute anomalie de lecture rend false, donc le
+// 409 : la relecture ne peut qu'ouvrir un cas franchement idempotent, jamais
+// masquer un vrai conflit.
+export async function rowCarriesEmail(sb: any, id: unknown, email: string): Promise<boolean> {
+  const cible = normalizeEmail(email);
+  if (!cible) return false;
+  try {
+    const { data, error } = await sb.from("cleaners")
+      .select("id, email").eq("id", id).maybeSingle();
+    if (error) return false;
+    return normalizeEmail((data as any)?.email) === cible;
+  } catch (_e) {
+    return false;
+  }
 }
 
 // Nombre de lignes reellement touchees par une ecriture. PostgREST rend un
@@ -497,15 +543,47 @@ export async function findAuthUserByEmail(sb: any, email: string): Promise<any |
 // d'erreur. Observe en revanche l'erreur rendue par postgrest-js, qui ne leve pas
 // non plus : sans ca, un rollback refuse par la base ne laissait aucune trace
 // (revue 8a, constat 2).
+//
+// Verrou optimiste sur le RETOUR aussi (revue de verification, constat 2). Le
+// hotfix du 12/09 n'avait verrouille que l'aller : le rollback restait une
+// ecriture inconditionnelle calculee sur une lecture perimee, c'est-a-dire le
+// mode de panne du 11/09 deplace d'un cran. Une seconde invitation qui atterrit
+// entre l'ecriture d'aller et son rollback voyait son adresse effacee, et son
+// compte Auth devenir orphelin ; le restore emporte aussi name, role, phone et
+// color, donc un renommage concurrent partait avec.
+// Le filtre porte sur l'adresse que l'aller a POSEE : si la ligne ne la porte
+// plus, elle n'est plus la notre, zero ligne bouge, et le changement du voisin
+// survit. C'est Postgres qui tranche, sous le verrou de ligne, comme a l'aller.
 export async function rollbackInvite(sb: any, plan: InvitePlan, cleanerId: number): Promise<void> {
   const undo = planInviteRollback(plan, cleanerId);
   if (!undo) return;
+  // Adresse posee par l'ecriture d'aller, seule preuve que la ligne est encore
+  // celle qu'on a ecrite. planInvite la renseigne toujours, sur les deux
+  // branches ; si elle manquait, on prefere ne rien defaire plutot que d'ecraser
+  // une ligne dont on ne sait plus rien (echec FERME).
+  const posee = plan.kind === "insert"
+    ? normalizeEmail(plan.row.email)
+    : plan.kind === "update"
+    ? normalizeEmail(plan.patch.email)
+    : "";
+  if (!posee) {
+    console.warn("[inviteCleaner] rollback sans adresse de reference, rien n'est defait");
+    return;
+  }
   try {
-    const { error } = undo.op === "delete"
-      ? await sb.from("cleaners").delete().eq("id", undo.id)
-      : await sb.from("cleaners").update(undo.patch).eq("id", undo.id);
+    const q = undo.op === "delete"
+      ? sb.from("cleaners").delete().eq("id", undo.id)
+      : sb.from("cleaners").update(undo.patch).eq("id", undo.id);
+    const { data, error } = await q.eq("email", posee).select("id");
     if (error) {
       console.warn("[inviteCleaner] rollback refuse: " + String((error as any).message ?? error));
+      return;
+    }
+    if (rowsTouched(data) === 0) {
+      // Pas une panne : la ligne a ete reprise par une autre requete, et le
+      // rollback a correctement choisi de ne rien ecraser. Message fixe, sans
+      // adresse ni identifiant.
+      console.warn("[inviteCleaner] rollback sans effet: ligne reprise par une requete concurrente, rien n'est defait");
     }
   } catch (e) {
     console.warn("[inviteCleaner] rollback impossible: " + String(e));
@@ -555,10 +633,12 @@ export async function applyInvite(
     // Supabase part en HTTP vers PostgREST, qui ouvre sa propre transaction et
     // la commite avant de repondre. Le verrou serait relache avant l'appel
     // suivant, et un verrou de session fuirait sur une connexion du pool.
-    // `restore.email` est deja la version minuscule de l'adresse lue. Toutes les
-    // ecritures de la table passent par normalizeEmail, la valeur en base est
-    // donc identique ; si elle ne l'etait pas, le filtre ne trouverait rien et
-    // la requete repartirait en 409 sans rien ecraser, c'est-a-dire FERMEE.
+    // `restore.email` est deja la version minuscule de l'adresse lue, et la base
+    // impose la meme forme : cleaners_email_lowercase_chk refuse toute ligne dont
+    // `email` differe de `lower(email)`. Ce n'est donc pas une convention
+    // applicative, c'est le schema qui le garantit. Si la contrainte sautait un
+    // jour, le filtre ne trouverait rien et la requete repartirait en 409 sans
+    // rien ecraser, c'est-a-dire FERMEE.
     const avant = normalizeEmail((plan.restore as any)?.email);
     const write = sb.from("cleaners").update(plan.patch).eq("id", plan.id);
     const verrouille = avant ? write.eq("email", avant) : write.is("email", null);
@@ -566,6 +646,15 @@ export async function applyInvite(
     if (isEmailUniqueViolation(error)) return EMAIL_CONFLICT;
     if (error) throw error;
     if (rowsTouched(touchees) === 0) {
+      // Un vrai double-clic n'est pas un conflit (revue de verification,
+      // constat 6) : si la ligne porte deja exactement l'adresse demandee, la
+      // jumelle a fait le travail, invitation comprise. On rend le succes plutot
+      // qu'un « This email is already used by another team member » qui designe
+      // le membre lui-meme, et on n'envoie pas un second email.
+      if (await rowCarriesEmail(sb, plan.id, String(plan.patch.email ?? ""))) {
+        console.warn("[inviteCleaner] adresse deja posee par une requete jumelle, rien de plus a ecrire");
+        return { status: 200, body: { status: "success", id: plan.id, mode: "invite" } };
+      }
       console.warn("[inviteCleaner] ligne modifiee par une requete concurrente, rien n'est ecrit");
       return EMAIL_CONFLICT;
     }
@@ -716,11 +805,25 @@ export function parseLinkEmailInput(body: any): LinkEmailParse {
 //      unique cleaners_email_unique_idx ne filtre pas sur is_active, et reposer
 //      le mot de passe d'un compte encore attache a quelqu'un serait une prise
 //      de controle ;
-//   3. le compte Auth, cree ou repris, AVANT l'ecriture cleaners ;
-//   4. le lien en dernier. Un echec laisse au pire un compte Auth pret et non
-//      relie, que le rejeu relie : l'action est idempotente. Defaire l'ecriture
-//      cleaners sur un echec en aval est exactement ce qui a delie un membre le
-//      11/09 (voir applyInvite), on ne le refait pas ici.
+//   3. la REVENDICATION de ma ligne, ecriture conditionnelle verrouillee sur
+//      l'etat lu au point 1 ;
+//   4. le compte Auth, cree ou repris, seulement une fois la ligne revendiquee.
+//      Un echec laisse au pire une ligne reliee sans compte, que le rejeu
+//      complete : l'action reste idempotente. Defaire l'ecriture cleaners sur un
+//      echec en aval est exactement ce qui a delie un membre le 11/09 (voir
+//      applyInvite), on ne le refait pas ici.
+//
+// L'ordre 3 puis 4 est celui d'applyInvite, et il vient de la revue de
+// verification (constat 3). Dans l'ordre inverse, le verrou optimiste protegeait
+// la colonne email mais pas la pose du mot de passe, faite avant lui et sans
+// aucune exclusion : sur deux linkEmail simultanes pour la meme adresse depuis
+// deux lignes differentes, la perdante trouvait le compte Auth que la gagnante
+// venait de creer, y posait SON mot de passe, et ne se faisait refuser QUE
+// l'ecriture cleaners. La donnee restait intacte, le compte avait change de
+// mains. En revendiquant d'abord, c'est cleaners_email_unique_idx qui tranche la
+// course AVANT qu'un mot de passe ne soit ecrit, et la perdante ne touche jamais
+// Auth. Effet de bord : elle ne cree plus non plus de compte Auth orphelin
+// (constat 5), puisqu'elle n'en cree plus du tout.
 export async function applyLinkEmail(
   sb: any,
   me: SessionUser,
@@ -747,36 +850,7 @@ export async function applyLinkEmail(
     return { status: 409, body: { error: EMAIL_CONFLICT_MESSAGE } };
   }
 
-  let existing: any = null;
-  try {
-    existing = await findAuthUserByEmail(sb, input.email);
-  } catch (e) {
-    console.warn("[linkEmail] lecture des comptes Auth impossible: " + String(e));
-    return { status: 502, body: { error: "Could not reach the accounts service." } };
-  }
-  if (existing) {
-    // Cas d'une invitation restee en plan : le compte existe deja, la personne
-    // en reprend la main avec le mot de passe qu'elle vient de choisir.
-    const { error } = await sb.auth.admin.updateUserById(existing.id, {
-      password: input.password,
-      email_confirm: true,
-    });
-    if (error) {
-      console.warn("[linkEmail] mot de passe non pose: " + String((error as any).message ?? error));
-      return { status: 502, body: { error: "Could not set your password." } };
-    }
-  } else {
-    const { error } = await sb.auth.admin.createUser({
-      email: input.email,
-      password: input.password,
-      email_confirm: true,
-    });
-    if (error) {
-      console.warn("[linkEmail] compte non cree: " + String((error as any).message ?? error));
-      return { status: 502, body: { error: "Could not create your account." } };
-    }
-  }
-
+  // 3. Revendication de la ligne, AVANT le moindre appel Auth.
   // Verrou optimiste sur la ligne (hotfix du 2026-09-12, constat 2 de la
   // revue) : on ne pose l'adresse que si la colonne est encore dans l'etat lu
   // au point 1. Deux requetes jumelles ne peuvent donc plus se recouvrir, et la
@@ -795,13 +869,62 @@ export async function applyLinkEmail(
     : write.is("email", null);
   const { data: touchees, error: linkErr } = await verrouille.select("id");
   if (isEmailUniqueViolation(linkErr)) {
+    // Quelqu'un d'autre a pose cette adresse en premier. Aucun compte Auth n'a
+    // ete touche, et il n'y a rien a defaire.
     return { status: 409, body: { error: EMAIL_CONFLICT_MESSAGE } };
   }
   if (linkErr) throw linkErr;
   if (rowsTouched(touchees) === 0) {
-    console.warn("[linkEmail] ligne modifiee par une requete concurrente, rien n'est ecrit");
-    return { status: 409, body: { error: LINK_EMAIL_OTHER_ADDRESS } };
+    // Un vrai double-clic n'est pas un conflit (revue de verification,
+    // constat 6) : si la ligne porte deja exactement l'adresse demandee, l'etat
+    // voulu est atteint et la revendication est acquise. On poursuit alors comme
+    // un rejeu sequentiel, ce qui rattrape au passage une jumelle dont l'appel
+    // Auth aurait echoue, au lieu de rendre un 409 qui envoie la personne
+    // chercher un manager pour rien.
+    if (!(await rowCarriesEmail(sb, me.cleaner_id, input.email))) {
+      console.warn("[linkEmail] ligne modifiee par une requete concurrente, rien n'est ecrit");
+      return { status: 409, body: { error: LINK_EMAIL_OTHER_ADDRESS } };
+    }
+    console.warn("[linkEmail] adresse deja posee par une requete jumelle, on poursuit");
   }
+
+  // 4. Le compte Auth, une fois la ligne acquise. Une perdante de course n'est
+  // jamais arrivee jusqu'ici : elle n'a ni repose le mot de passe de la
+  // gagnante, ni laisse un compte orphelin derriere elle.
+  let existing: any = null;
+  try {
+    existing = await findAuthUserByEmail(sb, input.email);
+  } catch (e) {
+    console.warn("[linkEmail] lecture des comptes Auth impossible: " + String(e));
+    return { status: 502, body: { error: "Could not reach the accounts service." } };
+  }
+  if (existing) {
+    // Cas d'une invitation restee en plan : le compte existe deja, la personne
+    // en reprend la main avec le mot de passe qu'elle vient de choisir. La ligne
+    // porte deja son adresse a ce stade, donc ce compte est bien le sien.
+    const { error } = await sb.auth.admin.updateUserById(existing.id, {
+      password: input.password,
+      email_confirm: true,
+    });
+    if (error) {
+      console.warn("[linkEmail] mot de passe non pose: " + String((error as any).message ?? error));
+      return { status: 502, body: { error: "Could not set your password." } };
+    }
+  } else {
+    const { error } = await sb.auth.admin.createUser({
+      email: input.email,
+      password: input.password,
+      email_confirm: true,
+    });
+    if (error) {
+      console.warn("[linkEmail] compte non cree: " + String((error as any).message ?? error));
+      // On ne defait PAS la revendication : c'est exactement ce qui a delie un
+      // membre le 11/09. La ligne porte l'adresse, le rejeu creera le compte
+      // manquant, et la session PIN continue de fonctionner entre-temps.
+      return { status: 502, body: { error: "Could not create your account." } };
+    }
+  }
+
   console.log("[linkEmail] compte relie au membre " + String(me.cleaner_id));
   return { status: 200, body: { status: "success" } };
 }
