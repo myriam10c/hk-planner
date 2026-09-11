@@ -128,6 +128,20 @@ Auth emails do not go through Supabase's built-in SMTP (2 messages per hour).
 The "Send Email" auth hook posts to the `auth-mailer` edge function, which sends
 through the Gmail API with the OAuth refresh token also used by the agent harness.
 
+Two ways in, both ending on the same `cleaners.email` link:
+
+- `inviteCleaner` (manager only): creates or reuses the Auth account and sends
+  the invitation or reset email.
+- `linkEmail` (any signed-in member, PIN session included): the member sends
+  `{email, password}` and the proxy takes the identity from the session, never
+  from the body. It creates the Auth account with `email_confirm: true`, or
+  reuses one that already exists for that address and sets the chosen password,
+  then writes `cleaners.email`. The Auth write comes first and there is no
+  rollback, so a replay is a success and a failure never unlinks a row. Refusals:
+  403 on the `system` row, 409 when the address belongs to another member or when
+  the profile already uses a different one, 400 on a bad address or a password
+  under 8 characters, 401 without a session.
+
 Give `docs/accounts-team.md` to anyone getting an account.
 
 **Rotate the hook secret** (only if it leaked: rotating it breaks every auth email
