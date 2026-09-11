@@ -1,0 +1,16 @@
+{
+  "name": "HK Planner v3",
+  "short_name": "HK v3",
+  "description": "Housekeeping day, cleaning checklist and problem reports",
+  "start_url": "/v3/",
+  "scope": "/v3/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F3ECE2",
+  "theme_color": "#A85432",
+  "lang": "en",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,55 @@
+/* Jetons de la direction 3 (specification, ruling 8). Polices auto-hebergees :
+   la v3 doit s'afficher correctement hors ligne, un appel a fonts.googleapis.com
+   laisserait un texte sans police dans un appartement sans reseau. */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("/v3/fonts/bricolage-grotesque-latin.woff2") format("woff2");
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("/v3/fonts/instrument-sans-latin.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --ink: #15120F;
+  --bone: #F3ECE2;
+  --bone-hi: #FDF7F0;
+  --terra: #A85432;
+  --terra-ink: #8E4426;
+  --clay: #E0B89F;
+  --moss: #4F6B4F;
+  --moss-ink: #3F5A3F;
+  --ember: #D9714E;
+  --ember-ink: #9B3F22;
+  --amber-ink: #8A5B14;
+  --mute: #5E574E;
+  --mute-d: #A9A096;
+  --line: #E0D6C8;
+  --sand: #E9DFD2;
+  --card: #FBF6EE;
+  --ff: "Instrument Sans", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --disp: "Bricolage Grotesque", "Avenir Next Condensed", "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--bone);
+  color: var(--ink);
+  font-family: var(--ff);
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  min-height: 100dvh;
+}
+button, input, select, textarea { font-family: inherit; font-size: inherit; }
+:focus-visible { outline: 3px solid var(--terra); outline-offset: 2px; }
+svg { display: block; }

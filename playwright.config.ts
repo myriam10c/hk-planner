@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const PROD_URL = 'https://stunning-kleicha-f61101.netlify.app';
+const V3_URL = process.env.HK_PLANNER_V3_URL || 'http://localhost:8890';
 
 export default defineConfig({
   testDir: './tests',
@@ -24,14 +25,41 @@ export default defineConfig({
     serviceWorkers: 'block',
   },
 
+  // Un serveur statique local sert la v3 : les projets `desktop` et `mobile`
+  // continuent de taper la prod Netlify, les projets v3 tapent l'arbre de travail.
+  // `webServer` est global : il demarre aussi pour `desktop` et `mobile`, qui
+  // tapent la prod et n'en ont pas besoin. Le cout est de quelques secondes, et
+  // c'est le prix d'une configuration qui reste lisible.
+  webServer: {
+    command: 'python3 -m http.server 8890',
+    // On attend index.html a la racine, pas /v3/ : au premier test de la tache 8
+    // le dossier v3 n'existe pas encore, et Playwright refuserait de demarrer.
+    // La tache 9 repointe cette ligne sur /v3/index.html.
+    url: 'http://localhost:8890/index.html',
+    reuseExistingServer: true,
+    timeout: 30_000,
+  },
+
   projects: [
     {
       name: 'desktop',
+      testIgnore: /v3\//,
       use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
     },
     {
       name: 'mobile',
+      testIgnore: /v3\//,
       use: { ...devices['iPhone 13'] },
+    },
+    {
+      name: 'v3-mobile',
+      testMatch: /v3\/.*\.spec\.ts/,
+      use: { ...devices['iPhone 13'], baseURL: V3_URL },
+    },
+    {
+      name: 'v3-desktop',
+      testMatch: /v3\/.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 }, baseURL: V3_URL },
     },
   ],
 });
