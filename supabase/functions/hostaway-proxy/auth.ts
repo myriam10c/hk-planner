@@ -104,11 +104,97 @@ export interface CleanerRow {
 export async function lookupCleanerByEmail(sb: any, email: string): Promise<CleanerRow | null> {
   // cleaners_email_unique_idx garantit au plus une ligne par adresse :
   // maybeSingle ne peut pas tomber sur un doublon.
+  // Comparaison sensible a la casse, contrairement aux controles de propriete
+  // plus bas : ici l'asymetrie echoue FERMEE (une ligne en Foo@Bar.com refuse
+  // la session au lieu de l'ouvrir), et toutes les ecritures passent par
+  // normalizeEmail. Voir findCleanerByEmail pour les chemins ou elle
+  // echouerait ouverte.
   const { data } = await sb.from("cleaners")
     .select("id, name, role, color, is_active")
     .eq("email", email)
     .maybeSingle();
   return data ?? null;
+}
+
+// ===========================================================================
+// Colonnes de `cleaners` qui ont le droit de sortir du proxy
+// ===========================================================================
+
+// Hotfix du 2026-09-12. getCleaners et le chargement initial faisaient
+// select("*"), donc rendaient `pin_hash` a tout porteur du X-App-Secret, qui
+// voyage dans le bundle JS public servi par Netlify. Les PIN font 3 a 8
+// chiffres et vivent dans un espace global (verify_cleaner_pin ne prend pas
+// d'identifiant de membre) : un bcrypt de PIN a 4 chiffres se casse hors ligne
+// en quelques secondes, et linkEmail transformait ensuite cette session PIN en
+// compte email permanent sur la ligne d'un manager.
+// `telegram_chat_id` part avec : c'est une adresse de notification, et aucun
+// client ne la lit (verifie sur app.js, hr.js, integrations/team_tasks.py et
+// scheduled/maintenance_digest.py).
+export const CLEANER_SENSITIVE_COLUMNS = ["pin_hash", "telegram_chat_id"] as const;
+
+// Tout le reste de la table, dans l'ordre du schema. Retirer une colonne d'ici
+// casse un client ; en ajouter une nouvelle sans la peser est le retour du
+// meme trou, d'ou la liste explicite plutot qu'une soustraction.
+// Litteral et non un join() : supabase-js type le resultat en analysant la
+// chaine passee a .select(), une chaine de type `string` lui rend un
+// GenericStringError et fait echouer `deno check`.
+export const CLEANER_PUBLIC_SELECT =
+  "id, name, phone, color, is_active, created_at, role, is_owner, email" as const;
+
+export const CLEANER_PUBLIC_COLUMNS: readonly string[] = CLEANER_PUBLIC_SELECT.split(", ");
+
+// Defense en profondeur : la projection ci-dessus est la vraie garde, celle-ci
+// rattrape un select("*") qui reviendrait un jour dans la route. Elle est aussi
+// ce qui rend l'invariant testable sans faire tourner index.ts, qui appelle
+// Deno.serve au chargement.
+export function publicCleanerRows(rows: any): any[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row: any) => {
+    if (!row || typeof row !== "object") return row;
+    const propre: Record<string, unknown> = { ...row };
+    for (const col of CLEANER_SENSITIVE_COLUMNS) delete propre[col];
+    return propre;
+  });
+}
+
+// Recherche du porteur d'une adresse, insensible a la casse.
+//
+// Hotfix du 2026-09-12. Les controles de propriete comparaient avec
+// .eq("email", ...), sensible a la casse, alors que findAuthUserByEmail
+// compare en minuscules et que cleaners_email_unique_idx porte sur
+// lower(email). Une ligne en Foo@Bar.com aurait donc laisse passer foo@bar.com :
+// le controle « personne d'autre ne porte cette adresse » n'aurait rien vu, le
+// mot de passe du demandeur aurait ete pose sur le compte Auth de l'autre
+// personne, et seule l'ecriture finale aurait ete arretee par l'index unique.
+// Une prise de controle silencieuse, donc, sur une garde qui echoue OUVERTE.
+//
+// Pourquoi pas .ilike : PostgREST traduit `*` en `%`, et Postgres lit `_` et
+// `%` comme des jokers. EMAIL_RE les accepte tous les trois dans la partie
+// locale, l'adresse soumise resoudrait donc une autre ligne que la sienne.
+// PostgREST ne sait pas non plus filtrer sur lower(email), et la colonne est du
+// text simple, pas du citext. On lit donc les lignes et on compare en
+// TypeScript, exactement comme findAuthUserByEmail le fait deja cote Auth.
+// La table tient a neuf lignes et n'a de toute facon aucun index sur `email`
+// brut : la lecture coute la meme chose qu'un .eq().
+export async function findCleanerByEmail(
+  sb: any,
+  email: string,
+  columns = "id, email",
+): Promise<any | null> {
+  const cols = /(^|,)\s*email\s*(,|$)/.test(columns) ? columns : columns + ", email";
+  const { data, error } = await sb.from("cleaners").select(cols);
+  if (error) throw error;
+  const cible = normalizeEmail(email);
+  if (!cible) return null;
+  return ((data ?? []) as any[]).find((r) => normalizeEmail(r?.email) === cible) ?? null;
+}
+
+// Nombre de lignes reellement touchees par une ecriture. PostgREST rend un
+// tableau quand .select() suit un .update() ; les faux clients historiques
+// rendent un objet, on l'accepte aussi.
+export function rowsTouched(data: unknown): number {
+  if (Array.isArray(data)) return data.length;
+  return data ? 1 : 0;
 }
 
 // Roles auxquels on peut attacher un compte email. `system` (le compte du CEO
@@ -459,9 +545,30 @@ export async function applyInvite(
 
   let cleanerId: number;
   if (plan.kind === "update") {
-    const { error } = await sb.from("cleaners").update(plan.patch).eq("id", plan.id);
+    // Verrou optimiste sur la ligne (hotfix du 2026-09-12, constat 2 de la
+    // revue). L'ecriture ne s'applique que si la colonne email est encore dans
+    // l'etat lu par planInvite. Deux invitations jumelles ne peuvent donc plus
+    // se recouvrir : Postgres evalue ce filtre sous le verrou de ligne, la
+    // perdante touche zero ligne et repart en 409 sans rien ecraser, au lieu de
+    // recalculer un rollback sur une lecture perimee.
+    // Un pg_advisory_xact_lock ne tiendrait pas ici : chaque appel du client
+    // Supabase part en HTTP vers PostgREST, qui ouvre sa propre transaction et
+    // la commite avant de repondre. Le verrou serait relache avant l'appel
+    // suivant, et un verrou de session fuirait sur une connexion du pool.
+    // `restore.email` est deja la version minuscule de l'adresse lue. Toutes les
+    // ecritures de la table passent par normalizeEmail, la valeur en base est
+    // donc identique ; si elle ne l'etait pas, le filtre ne trouverait rien et
+    // la requete repartirait en 409 sans rien ecraser, c'est-a-dire FERMEE.
+    const avant = normalizeEmail((plan.restore as any)?.email);
+    const write = sb.from("cleaners").update(plan.patch).eq("id", plan.id);
+    const verrouille = avant ? write.eq("email", avant) : write.is("email", null);
+    const { data: touchees, error } = await verrouille.select("id");
     if (isEmailUniqueViolation(error)) return EMAIL_CONFLICT;
     if (error) throw error;
+    if (rowsTouched(touchees) === 0) {
+      console.warn("[inviteCleaner] ligne modifiee par une requete concurrente, rien n'est ecrit");
+      return EMAIL_CONFLICT;
+    }
     cleanerId = plan.id;
   } else {
     const { data: inserted, error } = await sb.from("cleaners").insert(plan.row).select("id").single();
@@ -632,9 +739,10 @@ export async function applyLinkEmail(
     return { status: 409, body: { error: LINK_EMAIL_OTHER_ADDRESS } };
   }
 
-  const { data: holder, error: holderErr } = await sb.from("cleaners")
-    .select("id").eq("email", input.email).maybeSingle();
-  if (holderErr) throw holderErr;
+  // Insensible a la casse : cette garde echoue OUVERTE si elle rate un porteur
+  // (le mot de passe du demandeur serait pose sur le compte Auth d'un tiers
+  // avant que l'index unique n'arrete l'ecriture). Voir findCleanerByEmail.
+  const holder = await findCleanerByEmail(sb, input.email);
   if (holder && Number(holder.id) !== Number(me.cleaner_id)) {
     return { status: 409, body: { error: EMAIL_CONFLICT_MESSAGE } };
   }
@@ -669,12 +777,31 @@ export async function applyLinkEmail(
     }
   }
 
-  const { error: linkErr } = await sb.from("cleaners")
-    .update({ email: input.email }).eq("id", me.cleaner_id);
+  // Verrou optimiste sur la ligne (hotfix du 2026-09-12, constat 2 de la
+  // revue) : on ne pose l'adresse que si la colonne est encore dans l'etat lu
+  // au point 1. Deux requetes jumelles ne peuvent donc plus se recouvrir, et la
+  // perdante repart en 409 sans rien ecraser. Le rejeu, lui, repasse (la ligne
+  // porte deja exactement cette adresse), l'action reste idempotente.
+  // Un pg_advisory_xact_lock ne tiendrait pas : chaque appel du client Supabase
+  // est une transaction PostgREST distincte, le verrou serait relache avant
+  // l'ecriture suivante.
+  // Le filtre porte sur la valeur EXACTE lue en base, pas sur sa version
+  // minuscule : une ligne qui porterait une casse mixte doit quand meme se
+  // reconnaitre, et l'ecriture la normalise au passage.
+  const verrouActuel = current ? String(mine?.email) : null;
+  const write = sb.from("cleaners").update({ email: input.email }).eq("id", me.cleaner_id);
+  const verrouille = verrouActuel !== null
+    ? write.eq("email", verrouActuel)
+    : write.is("email", null);
+  const { data: touchees, error: linkErr } = await verrouille.select("id");
   if (isEmailUniqueViolation(linkErr)) {
     return { status: 409, body: { error: EMAIL_CONFLICT_MESSAGE } };
   }
   if (linkErr) throw linkErr;
+  if (rowsTouched(touchees) === 0) {
+    console.warn("[linkEmail] ligne modifiee par une requete concurrente, rien n'est ecrit");
+    return { status: 409, body: { error: LINK_EMAIL_OTHER_ADDRESS } };
+  }
   console.log("[linkEmail] compte relie au membre " + String(me.cleaner_id));
   return { status: 200, body: { status: "success" } };
 }

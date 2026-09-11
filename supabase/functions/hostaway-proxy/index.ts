@@ -3,8 +3,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
 import {
-  applyInvite, applyLinkEmail, currentUser, currentUserDetailed, findAuthUserByEmail,
-  normalizeEmail, parseInviteInput, parseLinkEmailInput, planInvite, saveCleanerUpdatePatch,
+  applyInvite, applyLinkEmail, CLEANER_PUBLIC_SELECT, currentUser, currentUserDetailed,
+  findAuthUserByEmail, findCleanerByEmail, normalizeEmail, parseInviteInput,
+  parseLinkEmailInput, planInvite, publicCleanerRows, saveCleanerUpdatePatch,
   systemRowGuard,
 } from "./auth.ts";
 import {
@@ -1480,10 +1481,16 @@ Deno.serve(async (req: Request) => {
     }
 
     // ==================== CLEANERS ====================
+    // Projection explicite, jamais select("*") : cette route n'a que la porte
+    // X-App-Secret, qui voyage dans le bundle JS public. Un select("*") y
+    // rendait `pin_hash` (hotfix du 2026-09-12). CLEANER_PUBLIC_SELECT et
+    // publicCleanerRows vivent dans auth.ts, avec le detail de l'enchainement
+    // PIN casse hors ligne puis linkEmail.
     if (action === "getCleaners") {
-      const { data, error } = await sb.from("cleaners").select("*").eq("is_active", true).order("name");
+      const { data, error } = await sb.from("cleaners")
+        .select(CLEANER_PUBLIC_SELECT).eq("is_active", true).order("name");
       if (error) throw error;
-      return jsonResp({ status: "success", cleaners: data });
+      return jsonResp({ status: "success", cleaners: publicCleanerRows(data) });
     }
     if (action === "saveCleaner" && req.method === "POST") {
       // X-App-Secret est embarqué dans le bundle JS public : insuffisant pour
@@ -1611,17 +1618,19 @@ Deno.serve(async (req: Request) => {
       // 1) La ligne cleaners : celle designee par id, sinon celle qui porte deja
       //    cet email, sinon une nouvelle. Toutes les colonnes que le patch peut
       //    toucher sont lues, sinon le rollback ne saurait pas quoi restaurer.
+      //    Les resolutions par adresse passent par findCleanerByEmail, qui
+      //    compare en minuscules comme findAuthUserByEmail et comme
+      //    cleaners_email_unique_idx (hotfix du 2026-09-12).
       const COLS = "id, name, role, email, is_active, phone, color";
       let target: any = null;
       if (body.id) {
         const { data } = await sb.from("cleaners").select(COLS).eq("id", body.id).maybeSingle();
         target = data ?? null;
       } else {
-        const { data } = await sb.from("cleaners").select(COLS).eq("email", email).maybeSingle();
-        target = data ?? null;
+        target = await findCleanerByEmail(sb, email, COLS);
       }
       // 2) L'email ne peut pas etre vole a un autre membre.
-      const { data: holder } = await sb.from("cleaners").select("id").eq("email", email).maybeSingle();
+      const holder = await findCleanerByEmail(sb, email);
 
       const plan = planInvite(input, body.id ?? null, target, holder ? Number(holder.id) : null);
       const result = await applyInvite(sb, plan, email, APP_ORIGIN + "/");
@@ -2610,7 +2619,10 @@ Deno.serve(async (req: Request) => {
         existingMap[r.reservation_key].push(r.cleaner_id);
       });
 
-      const { data: cleanerData } = await sb.from("cleaners").select("*").eq("is_active", true).eq("role", "cleaner").order("name");
+      // Projection explicite : cette route renvoie des noms et des telephones
+      // dans `notified`, jamais de colonne secrete (hotfix du 2026-09-12).
+      const { data: cleanerData } = await sb.from("cleaners")
+        .select(CLEANER_PUBLIC_SELECT).eq("is_active", true).eq("role", "cleaner").order("name");
       const cls = cleanerData || [];
 
       // 5. Auto-assign cleanings that have NO cleaner attached yet
@@ -2771,7 +2783,9 @@ Deno.serve(async (req: Request) => {
         fetchAllRows<any>((from, to) => sb.from("cleaning_timer").select("*").order("reservation_key").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_cancelled").select("reservation_key, reason, cancelled_by, cancelled_at").order("reservation_key").range(from, to)),
         fetchAllRows<any>((from, to) => sb.from("cleaning_postponed").select("reservation_key, original_date, new_date, postponed_by, postponed_at").order("reservation_key").range(from, to)),
-        sb.from("cleaners").select("*").eq("is_active", true).order("name"),
+        // Meme projection que getCleaners : ce chargement initial rendait lui
+        // aussi `pin_hash` a chaque ouverture de l'app (hotfix du 2026-09-12).
+        sb.from("cleaners").select(CLEANER_PUBLIC_SELECT).eq("is_active", true).order("name"),
         sb.from("checklist_templates").select("*").order("name"),
         sb.from("listing_config").select("listing_id, listing_name, bedrooms, price, custom_price, unit_type, apt_number, internal_name"),
         // Active tickets only (anything not closed). The dedicated /refreshMaintenance flow
@@ -2815,7 +2829,7 @@ Deno.serve(async (req: Request) => {
       timerRows.forEach((t: any) => { timerMap[t.reservation_key] = t; });
       return jsonResp({
         status: "success", done: doneMap, assignments: assignMap, assignmentMeta: assignMeta,
-        cleaners: cleanerRes.data || [], templates: templateRes.data || [],
+        cleaners: publicCleanerRows(cleanerRes.data), templates: templateRes.data || [],
         listingPrices, timers: timerMap,
         maintenanceTickets: ticketRes.data || [], vendors: vendorRes.data || [],
         equipment: equipRes.data || [], preventiveMaintenance: prevRes.data || [],

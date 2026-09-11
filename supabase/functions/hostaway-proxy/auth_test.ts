@@ -450,15 +450,20 @@ function fakeInviteSb(script: {
 } = {}) {
   const calls: string[] = [];
   const payloads: any[] = [];
+  // Filtres poses sur chaque ecriture : c'est la que se lit le verrou optimiste
+  // du hotfix du 2026-09-12.
+  const writeFilters: any[] = [];
   const writes = [...(script.writes ?? [])];
   const sb: any = {
     calls,
     payloads,
+    writeFilters,
     from(_table: string) {
-      const q: any = {};
+      const q: any = { filters: {} };
       const finish = () => {
         calls.push("cleaners." + q.op);
         if (q.payload !== undefined) payloads.push({ op: q.op, payload: q.payload });
+        if (q.op === "update") writeFilters.push({ ...q.filters });
         const r = writes.length ? writes.shift() : { data: { id: 42 }, error: null };
         return Promise.resolve(r);
       };
@@ -466,7 +471,8 @@ function fakeInviteSb(script: {
       q.insert = (p: any) => { q.op = "insert"; q.payload = p; return q; };
       q.delete = () => { q.op = "delete"; return q; };
       q.select = () => q;
-      q.eq = () => q;
+      q.eq = (col: string, val: any) => { if (col !== undefined) q.filters[col] = val; return q; };
+      q.is = (col: string, val: any) => { q.filters[col] = val; return q; };
       q.single = () => finish();
       q.maybeSingle = () => finish();
       q.then = (res: any, rej: any) => finish().then(res, rej);
@@ -545,7 +551,10 @@ Deno.test("rollbackInvite ne journalise rien quand il reussit", async () => {
 Deno.test("applyInvite ecrit cleaners avant de toucher au compte Auth", async () => {
   // L'ancienne adresse a bien un compte Auth, la nouvelle non : la sequence
   // complete se deroule (destruction, puis invitation).
-  const sb = fakeInviteSb({ writes: [{ error: null }], users: [{ id: "u-1", email: "ancien@example.com" }] });
+  const sb = fakeInviteSb({
+    writes: [{ data: [{ id: 8 }], error: null }],
+    users: [{ id: "u-1", email: "ancien@example.com" }],
+  });
   const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
   assertEquals(r.status, 200);
   assertEquals(r.body, { status: "success", id: 8, mode: "invite" });
@@ -566,7 +575,7 @@ Deno.test("applyInvite rend 409 sur un 23505 sans avoir touche au compte Auth", 
 
 Deno.test("applyInvite defait l'ecriture et rend 409 quand l'ancien compte resiste", async () => {
   const sb = fakeInviteSb({
-    writes: [{ error: null }, { error: null }],
+    writes: [{ data: [{ id: 8 }], error: null }, { error: null }],
     users: [{ id: "u-1", email: "ancien@example.com" }],
     deleteUser: { error: { message: "auth down" } },
   });
@@ -809,6 +818,7 @@ function fakeRaceSb() {
       q.delete = () => { q.op = "delete"; return q; };
       q.select = () => q;
       q.eq = () => q;
+      q.is = () => q;
       q.single = () => finish();
       q.maybeSingle = () => finish();
       q.then = (res: any, rej: any) => finish().then(res, rej);
@@ -889,28 +899,44 @@ function fakeLinkSb(script: {
 } = {}) {
   const calls: string[] = [];
   const payloads: any[] = [];
+  // Filtres reellement poses sur l'ecriture finale : c'est la que se lit le
+  // verrou optimiste du hotfix du 2026-09-12.
+  const writeFilters: any[] = [];
   const sb: any = {
     calls,
     payloads,
+    writeFilters,
     from(_t: string) {
       const q: any = { filters: {} };
-      const finish = (kind: string) => {
-        calls.push("cleaners." + kind);
-        if (kind === "update") {
-          payloads.push(q.payload);
-          return Promise.resolve(script.linkWrite ?? { error: null });
-        }
-        // Lecture : « ma ligne » quand on filtre sur id, « le porteur » sur email.
-        const data = Object.hasOwn(q.filters, "email")
-          ? (script.holder ?? null)
-          : (script.mine ?? null);
-        return Promise.resolve({ data, error: null });
+      q.select = (cols: string) => {
+        // .select() apres .update() demande la representation, il ne change pas
+        // la nature de la requete.
+        if (q.op !== "update") { q.op = "select"; q.cols = cols; }
+        return q;
       };
-      q.select = () => q;
       q.update = (p: any) => { q.op = "update"; q.payload = p; return q; };
       q.eq = (col: string, val: any) => { q.filters[col] = val; return q; };
-      q.maybeSingle = () => finish(Object.hasOwn(q.filters, "email") ? "select.email" : "select.id");
-      q.then = (res: any, rej: any) => finish("update").then(res, rej);
+      q.is = (col: string, val: any) => { q.filters[col] = val; return q; };
+      // Lecture de « ma ligne », filtree sur id.
+      q.maybeSingle = () => {
+        calls.push("cleaners.select.id");
+        return Promise.resolve({ data: script.mine ?? null, error: null });
+      };
+      q.then = (res: any, rej: any) => {
+        if (q.op === "update") {
+          calls.push("cleaners.update");
+          payloads.push(q.payload);
+          writeFilters.push({ ...q.filters });
+          // PostgREST rend les lignes touchees quand .select() suit l'update.
+          return Promise.resolve(script.linkWrite ?? { data: [{ id: 7 }], error: null })
+            .then(res, rej);
+        }
+        // Recherche du porteur de l'adresse : une lecture de la table entiere,
+        // la comparaison de casse se fait en TypeScript (constat 3).
+        const rows = script.holder ? [script.holder] : [];
+        calls.push("cleaners.select.email");
+        return Promise.resolve({ data: rows, error: null }).then(res, rej);
+      };
       return q;
     },
     auth: {
@@ -977,7 +1003,10 @@ Deno.test("linkEmail reprend un compte Auth existant que personne ne porte", asy
 });
 
 Deno.test("linkEmail rend 409 quand l'adresse appartient a un autre membre", async () => {
-  const sb = fakeLinkSb({ mine: { id: 7, email: null }, holder: { id: 9 } });
+  const sb = fakeLinkSb({
+    mine: { id: 7, email: null },
+    holder: { id: 9, email: "sserunkumavan@example.com" },
+  });
   const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
   assertEquals(r.status, 409);
   assertEquals(r.body, { error: "This email is already used by another team member." });
@@ -1003,7 +1032,7 @@ Deno.test("linkEmail rend 409 sur un 23505 (course entre deux membres)", async (
 Deno.test("linkEmail est idempotent : rejouer la meme adresse rend success", async () => {
   const sb = fakeLinkSb({
     mine: { id: 7, email: "sserunkumavan@example.com" },
-    holder: { id: 7 },
+    holder: { id: 7, email: "sserunkumavan@example.com" },
     users: [{ id: "u-existant", email: "sserunkumavan@example.com" }],
   });
   const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
@@ -1056,4 +1085,214 @@ Deno.test("linkEmail n'ecrit rien dans cleaners quand la creation du compte echo
   } finally {
     w.restore();
   }
+});
+
+// ===========================================================================
+// Hotfix securite du 2026-09-12 (revue review-hotfix.md, constats 1, 2 et 3)
+// ===========================================================================
+
+import {
+  CLEANER_PUBLIC_COLUMNS, CLEANER_PUBLIC_SELECT, CLEANER_SENSITIVE_COLUMNS,
+  findCleanerByEmail, publicCleanerRows, rowsTouched,
+} from "./auth.ts";
+
+// Ligne cleaners complete, telle que select("*") la ramenait. Aucune valeur
+// n'est un vrai secret ici : le hash est un marqueur, pas un bcrypt.
+const LIGNE_COMPLETE = {
+  id: 8, name: "Walter", phone: "+971500000000", color: "#e94560",
+  is_active: true, created_at: "2026-01-01T00:00:00Z", role: "manager",
+  pin_hash: "MARQUEUR-NE-DOIT-PAS-SORTIR", telegram_chat_id: "123456",
+  is_owner: false, email: null,
+};
+
+// Constat 1 : getCleaners rendait pin_hash a tout porteur du X-App-Secret, qui
+// voyage dans le bundle JS public. Un bcrypt de PIN a 4 chiffres se casse hors
+// ligne en quelques secondes, et linkEmail transformait ce PIN en compte
+// permanent. La projection explicite est la garde de base.
+Deno.test("la projection cleaners ne porte jamais pin_hash ni telegram_chat_id", () => {
+  for (const col of CLEANER_SENSITIVE_COLUMNS) {
+    assertEquals(CLEANER_PUBLIC_COLUMNS.includes(col as any), false);
+    assertEquals(CLEANER_PUBLIC_SELECT.includes(col), false);
+  }
+  assertEquals(CLEANER_SENSITIVE_COLUMNS.includes("pin_hash" as any), true);
+  assertEquals(CLEANER_SENSITIVE_COLUMNS.includes("telegram_chat_id" as any), true);
+});
+
+// Contrepartie du constat 1 : la projection doit rester complete pour le front.
+// Chaque colonne listee ici est reellement lue par app.js ou par les jobs du
+// VPS (integrations/team_tasks.py et scheduled/maintenance_digest.py).
+Deno.test("la projection cleaners porte toutes les colonnes que les clients lisent", () => {
+  for (const col of ["id", "name", "phone", "color", "is_active", "role", "email"]) {
+    assertEquals(CLEANER_PUBLIC_COLUMNS.includes(col as any), true);
+    assertEquals(CLEANER_PUBLIC_SELECT.includes(col), true);
+  }
+});
+
+// Defense en profondeur : meme si un select("*") revenait un jour, la reponse
+// est filtree avant de partir. C'est l'invariant au niveau de la route, celui
+// que la revue reprochait de ne tenir que par lecture (constat 4).
+Deno.test("publicCleanerRows retire les colonnes secretes d'une ligne complete", () => {
+  const [row] = publicCleanerRows([LIGNE_COMPLETE]);
+  assertEquals(Object.hasOwn(row, "pin_hash"), false);
+  assertEquals(Object.hasOwn(row, "telegram_chat_id"), false);
+  assertEquals(JSON.stringify(row).includes("MARQUEUR-NE-DOIT-PAS-SORTIR"), false);
+  assertEquals(row.id, 8);
+  assertEquals(row.name, "Walter");
+  assertEquals(row.phone, "+971500000000");
+  assertEquals(row.color, "#e94560");
+  assertEquals(row.role, "manager");
+  assertEquals(row.is_active, true);
+  assertEquals(row.email, null);
+});
+
+Deno.test("publicCleanerRows garde chaque ligne et tolere une entree vide", () => {
+  assertEquals(publicCleanerRows([LIGNE_COMPLETE, LIGNE_COMPLETE]).length, 2);
+  assertEquals(publicCleanerRows([]), []);
+  assertEquals(publicCleanerRows(null), []);
+  assertEquals(publicCleanerRows(undefined), []);
+});
+
+// Faux client minimal pour findCleanerByEmail : une seule lecture, sans filtre.
+function fakeListeSb(rows: any[]) {
+  const calls: string[] = [];
+  return {
+    calls,
+    from(table: string) {
+      const q: any = {};
+      q.select = (cols: string) => { calls.push(table + ".select:" + cols); return q; };
+      q.then = (res: any, rej: any) => Promise.resolve({ data: rows, error: null }).then(res, rej);
+      return q;
+    },
+  } as any;
+}
+
+// Constat 3 : le controle « porteur » comparait avec .eq("email", ...), donc
+// sensible a la casse, alors que findAuthUserByEmail et l'index unique
+// cleaners_email_unique_idx travaillent sur lower(email). Une ligne en
+// Foo@Bar.com aurait laisse passer foo@bar.com, le temps de poser le mot de
+// passe de l'attaquant sur le compte Auth de l'autre personne.
+Deno.test("findCleanerByEmail trouve la ligne quelle que soit la casse", async () => {
+  const sb = fakeListeSb([
+    { id: 4, email: null },
+    { id: 8, email: "Foo@Bar.com" },
+  ]);
+  const r = await findCleanerByEmail(sb, "foo@bar.com");
+  assertEquals(r?.id, 8);
+});
+
+Deno.test("findCleanerByEmail ne rend rien quand personne ne porte l'adresse", async () => {
+  const sb = fakeListeSb([{ id: 4, email: null }, { id: 8, email: "autre@example.com" }]);
+  assertEquals(await findCleanerByEmail(sb, "foo@bar.com"), null);
+});
+
+// Pourquoi pas .ilike : PostgREST traduit `*` en `%` et Postgres lit `_` et `%`
+// comme des jokers. Une adresse qui en porte aurait resolu la MAUVAISE ligne.
+// La comparaison se fait donc en TypeScript, comme findAuthUserByEmail le fait
+// deja cote Auth.
+Deno.test("findCleanerByEmail ne traite ni _ ni % ni * comme un joker", async () => {
+  const sb = fakeListeSb([{ id: 8, email: "aXb@example.com" }, { id: 9, email: "zz@example.com" }]);
+  assertEquals(await findCleanerByEmail(sb, "a_b@example.com"), null);
+  assertEquals(await findCleanerByEmail(sb, "%@example.com"), null);
+  assertEquals(await findCleanerByEmail(sb, "*@example.com"), null);
+});
+
+// Les colonnes demandees sont respectees, et email est toujours ramene puisque
+// c'est sur elle que porte la comparaison.
+Deno.test("findCleanerByEmail ramene toujours la colonne email", async () => {
+  const sb = fakeListeSb([{ id: 8, name: "Walter", email: "w@example.com" }]);
+  const r = await findCleanerByEmail(sb, "w@example.com", "id, name, role");
+  assertEquals(r?.name, "Walter");
+  assertEquals(sb.calls[0], "cleaners.select:id, name, role, email");
+  const sb2 = fakeListeSb([{ id: 8, email: "w@example.com" }]);
+  await findCleanerByEmail(sb2, "w@example.com", "id, email");
+  assertEquals(sb2.calls[0], "cleaners.select:id, email");
+});
+
+// rowsTouched lit ce que PostgREST rend apres un update().select() : un
+// tableau. Les faux clients historiques rendent un objet, on l'accepte aussi.
+Deno.test("rowsTouched compte les lignes reellement touchees", () => {
+  assertEquals(rowsTouched([]), 0);
+  assertEquals(rowsTouched([{ id: 7 }]), 1);
+  assertEquals(rowsTouched([{ id: 7 }, { id: 8 }]), 2);
+  assertEquals(rowsTouched({ id: 7 }), 1);
+  assertEquals(rowsTouched(null), 0);
+  assertEquals(rowsTouched(undefined), 0);
+});
+
+// --- Constat 2 : la course n'etait fermee que par une relecture applicative ---
+//
+// Un pg_advisory_xact_lock n'est pas jouable ici : chaque appel du client
+// Supabase part en HTTP vers PostgREST, qui ouvre SA transaction et la commite
+// avant de repondre. Un verrou de transaction serait donc relache avant
+// l'ecriture suivante, et un verrou de session fuirait sur une connexion du
+// pool. Le verrou pose est donc optimiste, et il vit dans la meme requete que
+// l'ecriture : la mise a jour ne s'applique que si la colonne email est encore
+// dans l'etat lu au moment de la decision. Postgres evalue ce filtre sous le
+// verrou de ligne, c'est donc bien la base qui tranche la course, pas le code.
+
+Deno.test("linkEmail verrouille son ecriture sur l'etat lu de la colonne email", async () => {
+  const sb = fakeLinkSb({ mine: { id: 7, email: null }, holder: null, users: [] });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 200);
+  // Premiere pose : la ligne doit encore etre sans adresse.
+  assertEquals(sb.writeFilters, [{ id: 7, email: null }]);
+});
+
+Deno.test("linkEmail verrouille le rejeu sur l'adresse deja posee", async () => {
+  const sb = fakeLinkSb({
+    mine: { id: 7, email: "sserunkumavan@example.com" },
+    holder: { id: 7, email: "sserunkumavan@example.com" },
+    users: [{ id: "u-existant", email: "sserunkumavan@example.com" }],
+  });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 200);
+  assertEquals(sb.writeFilters, [{ id: 7, email: "sserunkumavan@example.com" }]);
+});
+
+Deno.test("linkEmail rend 409 quand une requete jumelle a pose une autre adresse", async () => {
+  // La ligne etait libre a la lecture, une jumelle l'a reliee entre-temps : le
+  // filtre ne trouve plus rien, zero ligne touchee, et rien n'est ecrase.
+  const sb = fakeLinkSb({
+    mine: { id: 7, email: null },
+    holder: null,
+    users: [],
+    linkWrite: { data: [], error: null },
+  });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 409);
+  assertEquals(r.body, {
+    error: "Your profile already uses another email address. Ask a manager to change it.",
+  });
+});
+
+Deno.test("applyInvite verrouille son ecriture sur l'adresse lue de la ligne", async () => {
+  const sb = fakeInviteSb({ users: [] });
+  const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+  assertEquals(r.status, 200);
+  // AVANT porte ancien@example.com : l'ecriture ne s'applique que si la ligne
+  // porte toujours cette adresse.
+  assertEquals(sb.writeFilters[0], { id: 8, email: "ancien@example.com" });
+});
+
+Deno.test("applyInvite verrouille sur email null quand la ligne n'a pas d'adresse", async () => {
+  const vierge = { id: 5, name: "Ismael", role: "manager", email: null, is_active: true, phone: null, color: "#e94560" };
+  const input = parseInviteInput({ email: "ismael@example.com", name: "Ismael" }) as any;
+  const plan = planInvite(input, 5, vierge, null);
+  const sb = fakeInviteSb({ users: [] });
+  const r = await applyInvite(sb, plan, "ismael@example.com", "https://app.test/");
+  assertEquals(r.status, 200);
+  assertEquals(sb.writeFilters[0], { id: 5, email: null });
+});
+
+Deno.test("applyInvite rend 409 quand la ligne a change sous la requete", async () => {
+  const sb = fakeInviteSb({
+    // L'ecriture ne touche aucune ligne : la course est perdue.
+    writes: [{ data: [], error: null }],
+    users: [],
+  });
+  const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+  assertEquals(r.status, 409);
+  assertEquals(r.body, { error: "This email is already used by another team member." });
+  // Rien n'est tente cote Auth et rien n'est defait : la gagnante garde la main.
+  assertEquals(sb.calls, ["cleaners.update"]);
 });
