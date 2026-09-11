@@ -1,10 +1,10 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import {
-  claimEvent, estimatedMinutes, formatHour, normalizeUnitType, onDutyTechnician,
-  pickSnapshot, plusDays, readLinen, recordResult, releaseEvent, roleAllowed,
-  shortGuest, templateItems, todayDubai, validIdem, V3_CACHE_STALE_MS,
-  V3_LINEN_FIELDS, V3_ROLES, weekKeyFor,
+  estimatedMinutes, formatHour, managerIds, normalizeUnitType, onDutyTechnician,
+  pickSnapshot, plusDays, readLinen, roleAllowed, shortGuest, templateItems,
+  todayDubai, v3Log, validIdem, V3_CACHE_STALE_MS, V3_CATEGORIES,
+  V3_LINEN_FIELDS, V3_PHOTO_BUCKET, V3_ROLES, V3_TEMPLATE_NAME, weekKeyFor,
 } from "./v3.ts";
 import { buildMyDay, orderStops } from "./v3_myday.ts";
 
@@ -13,6 +13,10 @@ Deno.test("normalizeUnitType lit le tag Hostaway puis retombe sur les chambres",
   assertEquals(normalizeUnitType("1 BHK", 1), "1 BHK");
   assertEquals(normalizeUnitType("2 BHK", 2), "2 BHK");
   assertEquals(normalizeUnitType("3 BHK", 3), "2 BHK");
+  // Tag Hostaway mal saisi, sans espace : meme type que « 1 BHK », donc 118 min
+  // et non 165 (revue tache 2, constat 5).
+  assertEquals(normalizeUnitType("1BHK", 1), "1 BHK");
+  assertEquals(normalizeUnitType(" studio ", 0), "Studio");
   assertEquals(normalizeUnitType(null, 0), "Studio");
   assertEquals(normalizeUnitType(null, 1), "1 BHK");
   assertEquals(normalizeUnitType(null, 4), "2 BHK");
@@ -33,6 +37,14 @@ Deno.test("formatHour rend une heure lisible ou null", () => {
   assertEquals(formatHour(null), null);
   assertEquals(formatHour("abc"), null);
   assertEquals(formatHour(30), null);
+  assertEquals(formatHour("15"), "15:00");
+  // Number(false) valait 0 et inventait « 00:00 » (revue tache 2, constat 6).
+  assertEquals(formatHour(false), null);
+  assertEquals(formatHour(true), null);
+  assertEquals(formatHour([]), null);
+  assertEquals(formatHour({}), null);
+  assertEquals(formatHour(""), null);
+  assertEquals(formatHour(NaN), null);
 });
 
 Deno.test("shortGuest ne rend jamais un nom complet", () => {
@@ -41,6 +53,12 @@ Deno.test("shortGuest ne rend jamais un nom complet", () => {
   assertEquals(shortGuest("Ana"), "Ana");
   assertEquals(shortGuest(""), "Guest");
   assertEquals(shortGuest(null), "Guest");
+  // Revue tache 2, constat 2 : la virgule restait collee au jeton, et l'initiale
+  // d'un prenom d'un seul caractere est le prenom entier.
+  assertEquals(shortGuest("Dupont, Marie"), "Dupont M.");
+  assertEquals(shortGuest("\u674e \u660e"), "\u674e");
+  assertEquals(shortGuest("Jos\u00e9 Garc\u00eda"), "Jos\u00e9 G.");
+  assertEquals(shortGuest("Jean-Pierre Dupont"), "Jean-Pierre D.");
 });
 
 Deno.test("templateItems accepte le JSON en colonne texte et le tableau", () => {
@@ -80,31 +98,13 @@ Deno.test("readLinen valide les sept champs de linge", () => {
   assertEquals((readLinen(sansFace) as any).values.face_towels, 0);
 });
 
-Deno.test("claimEvent laisse passer la premiere cle et rejoue les suivantes", async () => {
-  const sb = fakeDb({ job_events: [] });
-  const first = await claimEvent(sb, "cle-idempotente-1", "start_job", "k1", 7, { jobId: "k1" });
-  assertEquals(first.fresh, true);
-  await recordResult(sb, "cle-idempotente-1", { status: "success", jobId: "k1" });
-  const second = await claimEvent(sb, "cle-idempotente-1", "start_job", "k1", 7, { jobId: "k1" });
-  assertEquals(second.fresh, false);
-  assertEquals(second.result, { status: "success", jobId: "k1" });
-  assertEquals(sb.tables.job_events.length, 1);
-});
-
-Deno.test("releaseEvent rend la cle reutilisable quand l'ecriture metier a echoue", async () => {
-  const sb = fakeDb({ job_events: [] });
-  assertEquals((await claimEvent(sb, "cle-idempotente-2", "tick", "k1", 7, {})).fresh, true);
-  await releaseEvent(sb, "cle-idempotente-2");
-  assertEquals(sb.tables.job_events.length, 0);
-  assertEquals((await claimEvent(sb, "cle-idempotente-2", "tick", "k1", 7, {})).fresh, true);
-});
-
 Deno.test("onDutyTechnician : la ligne du jour gagne sur la regle par defaut", async () => {
   const sb = fakeDb({
     on_duty: [{ duty_date: "2026-09-12", technician_id: 42 }],
     cleaners: [
       { id: 5, name: "Semax", role: "maintenance", is_active: true },
       { id: 6, name: "Ismael", role: "maintenance", is_active: true },
+      { id: 42, name: "Technicien de garde", role: "maintenance", is_active: true },
     ],
   });
   assertEquals(await onDutyTechnician(sb, "2026-09-12"), 42);
@@ -359,4 +359,81 @@ Deno.test("orderStops range un arret sans heure apres ceux qui en ont une", () =
   ] as any);
   assertEquals(out.map((x: any) => x.listingName),
     ["same-day", "arrivee 14", "checkout 10", "sans heure"]);
+});
+
+// ---------------------------------------------------------------------------
+// Correctifs de la revue de la tache 2. L'idempotence a son propre fichier,
+// v3_idem_test.ts, comme le module v3_idem.ts qu'elle couvre.
+// ---------------------------------------------------------------------------
+
+Deno.test("onDutyTechnician ignore une ligne du jour qui pointe un compte eteint", async () => {
+  const sb = fakeDb({
+    on_duty: [{ duty_date: "2026-09-12", technician_id: 99 }],
+    cleaners: [
+      { id: 99, name: "Parti de l'equipe", role: "maintenance", is_active: false },
+      { id: 5, name: "Semax", role: "maintenance", is_active: true },
+    ],
+  });
+  assertEquals(await onDutyTechnician(sb, "2026-09-12"), 5);
+});
+
+Deno.test("managerIds ne rend que les managers actifs", async () => {
+  const sb = fakeDb({
+    cleaners: [
+      { id: 1, name: "Walter", role: "manager", is_active: true },
+      { id: 2, name: "Ancien manager", role: "manager", is_active: false },
+      { id: 3, name: "Harlene", role: "cleaner", is_active: true },
+      { id: 4, name: "Hillal", role: "manager", is_active: true },
+      { id: 5, name: "Robot", role: "system", is_active: true },
+    ],
+  });
+  assertEquals(await managerIds(sb), [1, 4]);
+  assertEquals(await managerIds(fakeDb({ cleaners: [] })), []);
+});
+
+Deno.test("v3Log ecrit la ligne et n'explose pas quand l'insert echoue", async () => {
+  const sb = fakeDb({ cleaning_log: [] });
+  await v3Log(sb, "k1", "v3_start_job", "Harlene", { minutes: 94 });
+  assertEquals(sb.tables.cleaning_log.length, 1);
+  assertEquals(sb.tables.cleaning_log[0].reservation_key, "k1");
+  assertEquals(sb.tables.cleaning_log[0].action, "v3_start_job");
+  assertEquals(sb.tables.cleaning_log[0].actor, "Harlene");
+  // Acteur absent : null, jamais une chaine vide.
+  await v3Log(sb, "k2", "v3_tick", null);
+  assertEquals(sb.tables.cleaning_log[1].actor, null);
+  assertEquals(sb.tables.cleaning_log[1].details, {});
+  // Un log rate ne doit jamais casser l'action qu'il enregistre.
+  const casse = fakeDb({ cleaning_log: [] });
+  casse.fail["cleaning_log.insert"] = { message: "permission denied" };
+  await v3Log(casse, "k3", "v3_finish_job", "Harlene");
+  assertEquals(casse.tables.cleaning_log.length, 0);
+});
+
+Deno.test("les tables de correspondance exposees aux taches 5 a 7 sont figees", () => {
+  assertEquals(V3_PHOTO_BUCKET, "cleaning-photos");
+  assertEquals(V3_TEMPLATE_NAME, { "Studio": "Studio", "1 BHK": "1 Bedroom", "2 BHK": "2 Bedrooms" });
+  assertEquals(Object.keys(V3_CATEGORIES),
+    ["ac", "plumbing", "electrical", "appliance", "pest", "other"]);
+  // « other » est la seule categorie dont le nom change en base.
+  assertEquals(V3_CATEGORIES.other, { label: "Other", ticketCategory: "general" });
+  assertEquals(V3_CATEGORIES.ac, { label: "AC", ticketCategory: "ac" });
+  for (const [cle, v] of Object.entries(V3_CATEGORIES)) {
+    assertEquals(typeof v.label, "string");
+    assertEquals(v.label.length > 0, true);
+    assertEquals(typeof v.ticketCategory, "string");
+    assertEquals(cle === cle.toLowerCase(), true);
+  }
+});
+
+Deno.test("V3_LINEN_FIELDS est mot pour mot LAUNDRY_FIELDS d'index.ts", async () => {
+  // Les deux listes sont des jumelles volontaires : v3.ts ne peut pas importer
+  // index.ts, qui appelle Deno.serve au chargement. On lit donc le fichier comme
+  // du texte. Verifie dans la suite et non par une commande a la main, pour qu'une
+  // divergence casse les tests au lieu de passer inapercue.
+  const src = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  const bloc = src.match(/const\s+LAUNDRY_FIELDS\s*=\s*\[([\s\S]*?)\]/);
+  assertEquals(bloc !== null, true);
+  const champs = [...bloc![1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  assertEquals(champs.length, 7);
+  assertEquals(champs, [...V3_LINEN_FIELDS]);
 });

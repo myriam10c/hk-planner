@@ -135,11 +135,16 @@ export async function managerIds(sb: any): Promise<number[]> {
   return (data ?? []).map((c: any) => Number(c.id));
 }
 
-// Hostaway rend checkInTime / checkOutTime en heures entieres.
+// Hostaway rend checkInTime / checkOutTime en heures entieres. Seuls un nombre
+// fini et une chaine purement numerique sont acceptes : un Number(false) valait 0
+// et affichait « 00:00 » au-dessus du compte a rebours du Job, une heure inventee
+// a partir d'une valeur mal typee (revue tache 2, constat 6).
 export function formatHour(h: unknown): string | null {
-  const n = Number(h);
-  if (h === null || h === undefined || h === "" || !Number.isFinite(n)) return null;
-  if (n < 0 || n > 23) return null;
+  let n: number;
+  if (typeof h === "number") n = h;
+  else if (typeof h === "string" && /^\s*\d{1,2}\s*$/.test(h)) n = Number(h);
+  else return null;
+  if (!Number.isFinite(n) || n < 0 || n > 23) return null;
   return String(Math.floor(n)).padStart(2, "0") + ":00";
 }
 
@@ -148,9 +153,12 @@ export function formatHour(h: unknown): string | null {
 // et plus sont traitees comme « 2 BHK » : la specification ne donne que trois
 // ponderations.
 export function normalizeUnitType(unitType: unknown, bedrooms: unknown): string {
-  const raw = typeof unitType === "string" ? unitType.toLowerCase().trim() : "";
+  // Sans les espaces : le tag est du texte libre cote Hostaway, « 1BHK » et
+  // « 1 BHK » doivent donner le meme type (revue tache 2, constat 5). Sinon
+  // « 1BHK » tombait dans le cas generique et comptait 165 min au lieu de 118.
+  const raw = typeof unitType === "string" ? unitType.toLowerCase().replace(/\s+/g, "") : "";
   if (raw === "studio") return "Studio";
-  if (raw === "1 bhk") return "1 BHK";
+  if (raw === "1bhk") return "1 BHK";
   if (raw.endsWith("bhk")) return "2 BHK";
   const b = Number(bedrooms);
   if (!Number.isFinite(b) || b <= 0) return "Studio";
@@ -164,10 +172,15 @@ export function estimatedMinutes(unitType: string): number {
 }
 
 // Ruling 9 : prenom et initiale, jamais le nom complet, jamais de telephone.
+// La virgule coupe au meme titre que l'espace : « Dupont, Marie » laissait la
+// virgule collee au jeton (revue tache 2, constat 2).
 export function shortGuest(full: unknown): string {
-  const parts = String(full ?? "").trim().split(/\s+/).filter(Boolean);
+  const parts = String(full ?? "").trim().split(/[\s,]+/).filter(Boolean);
   if (parts.length === 0) return "Guest";
   if (parts.length === 1) return parts[0];
+  // Un deuxieme jeton d'un seul caractere est deja le mot entier (ideogrammes) :
+  // en rendre « l'initiale » afficherait le nom complet. On ne rend que le premier.
+  if (Array.from(parts[1]).length === 1) return parts[0];
   return parts[0] + " " + parts[1].charAt(0).toUpperCase() + ".";
 }
 
@@ -217,50 +230,14 @@ export function readLinen(
 // Idempotence
 // ===========================================================================
 
-// Pose la cle AVANT l'ecriture metier. Si elle existe deja, le geste a deja ete
-// traite : on rend le resultat memorise sans rien reecrire. C'est ce qui rend le
-// rejeu de la file hors ligne sans effet de bord (ruling 7).
-export async function claimEvent(
-  sb: any,
-  idem: string,
-  eventType: string,
-  jobId: string | null,
-  cleanerId: number,
-  payload: Record<string, unknown>,
-): Promise<{ fresh: boolean; result: any }> {
-  const { error } = await sb.from("job_events").insert({
-    idem_key: idem, event_type: eventType, job_id: jobId,
-    cleaner_id: cleanerId, payload,
-  });
-  if (!error) return { fresh: true, result: null };
-  if (String((error as any).code ?? "") !== "23505") throw error;
-  const { data } = await sb.from("job_events")
-    .select("result").eq("idem_key", idem).maybeSingle();
-  return { fresh: false, result: data?.result ?? null };
-}
-
-// Memorise la reponse rendue pour que le rejeu rende exactement la meme chose.
-// Un echec ici est journalise et non propage : l'ecriture metier, elle, a abouti.
-export async function recordResult(
-  sb: any, idem: string, result: Record<string, unknown>,
-): Promise<void> {
-  const { error } = await sb.from("job_events").update({ result }).eq("idem_key", idem);
-  if (error) {
-    console.warn("[v3] resultat non memorise pour " + idem + ": " +
-      String((error as any).message ?? error));
-  }
-}
-
-// Ecriture metier ratee : on rend la cle reutilisable, sinon le rejeu croirait que
-// le geste est passe et la cleaner perdrait son action en silence.
-export async function releaseEvent(sb: any, idem: string): Promise<void> {
-  try {
-    const { error } = await sb.from("job_events").delete().eq("idem_key", idem);
-    if (error) console.warn("[v3] cle non liberee: " + String((error as any).message ?? error));
-  } catch (e) {
-    console.warn("[v3] cle non liberee: " + String(e));
-  }
-}
+// Le bloc vit dans v3_idem.ts depuis la revue de la tache 2 (il a grossi et v3.ts
+// approchait le plafond de 400 lignes). Il est re-exporte ici pour que les imports
+// existants `from "./v3.ts"` des taches 4 a 7 continuent de fonctionner.
+export {
+  claimEvent, purgeStaleClaims, recordResult, releaseEvent, replayResponse,
+  staleClaimIds, V3_CLAIM_TTL_MS, V3_EVENT_TYPES,
+} from "./v3_idem.ts";
+export type { V3EventType } from "./v3_idem.ts";
 
 // Jumeau d'addLog (index.ts) : meme table, memes colonnes. Un log rate ne casse
 // jamais l'action qu'il enregistre, mais l'erreur est lue et journalisee.
@@ -279,12 +256,19 @@ export async function v3Log(
 // Ligne du jour si elle existe, sinon la regle par defaut : Semax, puis Ismael,
 // puis le premier technicien actif. Aucun identifiant en dur.
 export async function onDutyTechnician(sb: any, date: string): Promise<number | null> {
-  const { data: row } = await sb.from("on_duty")
-    .select("technician_id").eq("duty_date", date).maybeSingle();
-  if (row && row.technician_id) return Number(row.technician_id);
   const { data: techs } = await sb.from("cleaners")
     .select("id, name, role, is_active").eq("is_active", true).eq("role", "maintenance").order("id");
   const list: any[] = techs ?? [];
+  const { data: row } = await sb.from("on_duty")
+    .select("technician_id").eq("duty_date", date).maybeSingle();
+  // La ligne administree ne gagne que si son technicien est toujours actif. Une
+  // desactivation (le cas reel quand quelqu'un quitte l'equipe) ne supprime pas la
+  // ligne on_duty : sans ce recoupement, le ticket partait vers un compte eteint
+  // avec un push qui ne touche personne (revue tache 2, constat 3).
+  if (row && row.technician_id) {
+    const id = Number(row.technician_id);
+    if (list.some((c) => Number(c.id) === id)) return id;
+  }
   for (const wanted of V3_DUTY_FALLBACK) {
     const hit = list.find((c) =>
       String(c.name ?? "").toLowerCase().startsWith(wanted.toLowerCase()));
