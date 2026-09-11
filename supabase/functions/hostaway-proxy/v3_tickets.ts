@@ -184,6 +184,17 @@ async function ownedPhoto(
   return data as { storage_path: string };
 }
 
+// Enveloppe une ecriture accessoire : journalisee si elle rate, jamais propagee.
+// A n'utiliser qu'APRES l'ecriture decisive d'une action : passe ce point,
+// liberer la cle ferait recreer le ticket au rejeu (revue tache 6, constat 4).
+async function sansEchec(quoi: string, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (e) {
+    console.warn("[v3] " + quoi + ": " + String((e as any)?.message ?? e));
+  }
+}
+
 export async function reportProblem(
   sb: any, me: SessionUser, body: any,
   deps: { push?: PushFn } = {},
@@ -194,7 +205,14 @@ export async function reportProblem(
   const category = String(body?.category ?? "").toLowerCase();
   const idem = body?.idem;
   if (!listingId) return { status: 400, body: { error: "listingId required" } };
-  if (!V3_CATEGORIES[category]) return { status: 400, body: { error: "unknown category" } };
+  // hasOwnProperty et non une simple lecture : « constructor » ou « toString »
+  // sont heritees d'Object.prototype, donc verite pour `!V3_CATEGORIES[category]`,
+  // et le technicien lisait « undefined problem reported » (revue tache 6,
+  // constat 3).
+  const meta = Object.prototype.hasOwnProperty.call(V3_CATEGORIES, category)
+    ? V3_CATEGORIES[category]
+    : null;
+  if (!meta) return { status: 400, body: { error: "unknown category" } };
   if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
   // Photo obligatoire : un signalement sans image repart en aller-retour WhatsApp,
   // c'est exactement ce que cette action supprime. Resolue AVANT la pose de la cle
@@ -221,14 +239,17 @@ export async function reportProblem(
       return { status: 400, body: { error: "photo not found" } };
     }
 
-    const cat = V3_CATEGORIES[category].ticketCategory;
+    const cat = meta.ticketCategory;
     const priority = V3_REPORT_PRIORITY;
     const { data: sla } = await sb.from("maintenance_sla")
       .select("max_hours").eq("category", cat).eq("priority", priority).maybeSingle();
     const slaHours = sla && sla.max_hours ? Number(sla.max_hours) : 72;
     const technicianId = await onDutyTechnician(sb, todayDubai());
 
-    const title = V3_CATEGORIES[category].label + " problem reported during a cleaning";
+    // Ecriture decisive du signalement. Tout ce qui precede peut encore liberer
+    // la cle et rejouer ; plus rien apres, sinon le rejeu creerait un second
+    // ticket et un second push (revue tache 6, constat 4).
+    const title = meta.label + " problem reported during a cleaning";
     const { data: ticket, error } = await sb.from("maintenance_tickets").insert({
       listing_id: listingId,
       title,
@@ -244,19 +265,26 @@ export async function reportProblem(
       status: technicianId ? "assigned" : "open",
     }).select("id").single();
     if (error) throw error;
-
-    const ticketId = Number(ticket.id);
-    const { error: pErr } = await sb.from("photos").update({ ticket_id: ticketId }).eq("id", photoId);
-    if (pErr) throw pErr;
-    await v3Log(sb, "ticket_" + String(ticketId), "ticket_created", me.name, {
-      category: cat, via: "v3", job_id: jobId,
-    });
-    result = { status: "success", ticketId, technicianId: technicianId ?? null };
-    await recordResult(sb, String(idem), result);
+    result = { status: "success", ticketId: Number(ticket.id), technicianId: technicianId ?? null };
   } catch (e) {
     await releaseEvent(sb, String(idem));
     throw e;
   }
+
+  // Le ticket existe : la cle n'est plus jamais liberee et rien ne leve.
+  const ticketId = Number(result.ticketId);
+  await sansEchec("resultat non memorise pour " + String(idem),
+    () => recordResult(sb, String(idem), result));
+  // Le ticket porte deja photo_path : ce retro-lien est un confort de lecture
+  // cote table photos, pas une donnee dont le ticket depend.
+  await sansEchec("retro-lien photo absent sur le ticket " + String(ticketId), async () => {
+    const { error } = await sb.from("photos").update({ ticket_id: ticketId }).eq("id", photoId);
+    if (error) throw error;
+  });
+  await sansEchec("journal du ticket " + String(ticketId), () =>
+    v3Log(sb, "ticket_" + String(ticketId), "ticket_created", me.name, {
+      category: meta.ticketCategory, via: "v3", job_id: jobId,
+    }));
 
   // Notification apres l'ecriture : un push rate ne doit jamais annuler un ticket
   // deja cree. sendPush ne leve pas, la garde est doublee par le try.
@@ -267,7 +295,7 @@ export async function reportProblem(
   // Le titre porte la categorie : sur l'ecran verrouille d'un telephone, c'est la
   // seule ligne lue. Aucun nom de guest, aucun numero (ruling 9).
   const payload = {
-    title: V3_CATEGORIES[category].label + " problem reported",
+    title: meta.label + " problem reported",
     body: "Reported by " + me.name + ". Open HK Planner to see the photo.",
     url: "https://stunning-kleicha-f61101.netlify.app/",
     tag: "v3-ticket-" + String(result.ticketId),
@@ -291,23 +319,32 @@ export async function checkTicket(sb: any, me: SessionUser, body: any): Promise<
   // peut rien confirmer.
   const photoId = await resolvePhotoId(sb, body);
   if (!photoId) return { status: 400, body: { error: "photoId required" } };
-  // Le ticket doit exister et ne pas etre clos. Une cleaner ne clot pas un ticket
-  // (ruling 3) et elle ne rouvre pas davantage celui qu'un technicien vient de
-  // clore : un rejeu tardif de la file hors ligne ramenerait sinon un ticket
-  // resolu en to_confirm. Lu AVANT la pose de la cle, comme les autres refus.
-  const { data: ticket } = await sb.from("maintenance_tickets")
-    .select("id, status").eq("id", ticketId).maybeSingle();
-  if (!ticket) return { status: 400, body: { error: "ticket not found" } };
-  if (V3_TICKET_CLOSED.indexOf(String(ticket.status ?? "")) !== -1) {
-    return { status: 400, body: { error: "ticket is already closed" } };
-  }
 
   const claim = await claimEvent(sb, String(idem), "check_ticket", body?.jobId ? String(body.jobId) : null,
     me.cleaner_id, { ticketId, photoId });
+  // Le rejeu passe AVANT l'etat du ticket : un geste deja abouti rend son
+  // resultat memorise meme si le technicien a clos le ticket entre-temps. La file
+  // hors ligne (tache 9) traite tout 4xx autre que 409 comme definitif : elle
+  // envoyait au magasin mort un geste passe (revue tache 6, constat 1).
   const rejeu = replayResponse(claim);
   if (rejeu) return rejeu;
 
+  let result: Record<string, unknown>;
   try {
+    // Le ticket doit exister et ne pas etre clos : une cleaner ne clot pas un
+    // ticket (ruling 3) et ne rouvre pas celui qu'un technicien vient de clore.
+    // La cle est posee, on la libere avant de refuser, comme pour la photo.
+    const { data: ticket } = await sb.from("maintenance_tickets")
+      .select("id, status").eq("id", ticketId).maybeSingle();
+    if (!ticket) {
+      await releaseEvent(sb, String(idem));
+      return { status: 400, body: { error: "ticket not found" } };
+    }
+    if (V3_TICKET_CLOSED.indexOf(String(ticket.status ?? "")) !== -1) {
+      await releaseEvent(sb, String(idem));
+      return { status: 400, body: { error: "ticket is already closed" } };
+    }
+
     const photo = await ownedPhoto(sb, photoId, me);
     // Meme regle que reportProblem : on ne garde jamais une cle posee sur un refus.
     if (!photo) {
@@ -315,32 +352,43 @@ export async function checkTicket(sb: any, me: SessionUser, body: any): Promise<
       return { status: 400, body: { error: "photo not found" } };
     }
 
-    const { error: pErr } = await sb.from("photos").update({ ticket_id: ticketId }).eq("id", photoId);
-    if (pErr) throw pErr;
-    // Le commentaire passe par ticket_comments : ecrire « [horodatage] texte »
-    // dans resolution_notes d'un ticket non resolu est intercepte par le trigger
-    // trg_redirect_resolution_notes, qui restaure la colonne.
-    const { error: cErr } = await sb.from("ticket_comments").insert({
-      ticket_id: ticketId,
-      author: me.name,
-      comment: "Checked during the cleaning, photo attached.",
+    // Retro-lien d'abord, et non fatal : il est rejouable a l'identique et le
+    // ticket n'en depend pas.
+    await sansEchec("retro-lien photo absent sur le ticket " + String(ticketId), async () => {
+      const { error } = await sb.from("photos").update({ ticket_id: ticketId }).eq("id", photoId);
+      if (error) throw error;
     });
-    if (cErr) throw cErr;
-    // Seules ces deux colonnes bougent. La colonne booleenne to_confirm (flux
-    // Gemini a relire, anterieure au chantier) n'a rien a voir avec cette valeur
-    // de statut et n'est jamais ecrite ici.
+    // Ecriture decisive. Seules ces deux colonnes bougent : la colonne booleenne
+    // to_confirm (flux Gemini a relire, anterieure au chantier) n'a rien a voir
+    // avec cette valeur de statut et n'est jamais ecrite ici.
     const { error: tErr } = await sb.from("maintenance_tickets").update({
       status: "to_confirm",
       resolution_photo_path: photo.storage_path,
     }).eq("id", ticketId);
     if (tErr) throw tErr;
-    await v3Log(sb, "ticket_" + String(ticketId), "ticket_checked", me.name, { via: "v3" });
-
-    const result = { status: "success", ticketId, status_value: "to_confirm" };
-    await recordResult(sb, String(idem), result);
-    return { status: 200, body: result };
+    result = { status: "success", ticketId, status_value: "to_confirm" };
   } catch (e) {
     await releaseEvent(sb, String(idem));
     throw e;
   }
+
+  // Le ticket est passe en to_confirm : la cle n'est plus liberee. Le commentaire
+  // et le journal sont accessoires, rejouer pour eux doublerait ticket_comments.
+  await sansEchec("resultat non memorise pour " + String(idem),
+    () => recordResult(sb, String(idem), result));
+  // Le commentaire passe par ticket_comments : ecrire « [horodatage] texte »
+  // dans resolution_notes d'un ticket non resolu est intercepte par le trigger
+  // trg_redirect_resolution_notes, qui restaure la colonne.
+  await sansEchec("commentaire absent sur le ticket " + String(ticketId), async () => {
+    const { error } = await sb.from("ticket_comments").insert({
+      ticket_id: ticketId,
+      author: me.name,
+      comment: "Checked during the cleaning, photo attached.",
+    });
+    if (error) throw error;
+  });
+  await sansEchec("journal du ticket " + String(ticketId), () =>
+    v3Log(sb, "ticket_" + String(ticketId), "ticket_checked", me.name, { via: "v3" }));
+
+  return { status: 200, body: result };
 }

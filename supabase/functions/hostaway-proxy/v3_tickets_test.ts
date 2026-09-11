@@ -459,3 +459,81 @@ Deno.test("une photo qui n'appartient pas a la cleaner est refusee", async () =>
   assertEquals(sb.tables.photos[1].ticket_id, null);
   assertEquals(spy.envois.length, 0);
 });
+
+// ===========================================================================
+// Tache 6 · fix round 1 (revue, constats 1, 3 et 4)
+// ===========================================================================
+
+// Constat 1 : la garde « ticket clos » etait posee avant le rejeu, donc un geste
+// deja abouti se faisait refuser en 400 si le technicien avait clos le ticket
+// entre-temps. La file hors ligne de la tache 9 traite tout 4xx autre que 409
+// comme definitif : elle envoyait au magasin mort un geste qui etait passe.
+Deno.test("checkTicket rejoue son succes meme si le ticket a ete clos entre-temps", async () => {
+  const sb = baseTickets();
+  sb.tables.maintenance_tickets.push({ id: 71, listing_id: "102", title: "X", status: "open" });
+  const corps = { ticketId: 71, photoId: 55, idem: "idem-check-0013" };
+  const un = await checkTicket(sb, FAIZA as any, corps);
+  assertEquals(un.status, 200);
+  // Le technicien confirme et clot pendant que le telephone est hors reseau.
+  sb.tables.maintenance_tickets[0].status = "resolved";
+  const deux = await checkTicket(sb, FAIZA as any, corps);
+  assertEquals(deux.status, 200);
+  assertEquals((deux.body as any).status_value, "to_confirm");
+  // Le rejeu ne reecrit rien : le ticket reste clos, le commentaire reste unique.
+  assertEquals(sb.tables.maintenance_tickets[0].status, "resolved");
+  assertEquals(sb.tables.ticket_comments.length, 1);
+});
+
+// Constat 3 : `if (!V3_CATEGORIES[cat])` est verite pour toute propriete heritee
+// d'Object.prototype, et le ticket partait avec « undefined problem reported ».
+Deno.test("reportProblem refuse une categorie heritee d'Object.prototype", async () => {
+  const sb = baseTickets();
+  const spy = espionPush();
+  for (const cat of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
+    const r = await reportProblem(sb, FAIZA as any, {
+      jobId: JOB, listingId: "102", category: cat, photoId: 55, idem: "idem-proto-" + cat,
+    }, { push: spy.push });
+    assertEquals(r.status, 400);
+    assertEquals((r.body as any).error, "unknown category");
+  }
+  assertEquals(sb.tables.maintenance_tickets.length, 0);
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(spy.envois.length, 0);
+});
+
+// Constat 4 : le retro-lien photo echouait en levant, la cle etait liberee et le
+// rejeu creait un second ticket. L'ecriture decisive est l'insert du ticket ;
+// tout ce qui vient apres est accessoire et ne fait plus rejouer le signalement.
+Deno.test("reportProblem ne duplique pas le ticket quand le retro-lien photo echoue", async () => {
+  const sb = baseTickets();
+  sb.fail["photos.update"] = { message: "photos down" };
+  const spy = espionPush();
+  const corps = { jobId: JOB, listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0011" };
+  const un = await reportProblem(sb, FAIZA as any, corps, { push: spy.push });
+  assertEquals(un.status, 200);
+  assertEquals(sb.tables.maintenance_tickets.length, 1);
+  // Le retro-lien manque, assume : le ticket porte deja photo_path.
+  assertEquals(sb.tables.photos[0].ticket_id, null);
+  assertEquals(sb.tables.maintenance_tickets[0].photo_path, "v3/2026-09-12/abc.jpg");
+  const deux = await reportProblem(sb, FAIZA as any, corps, { push: spy.push });
+  assertEquals(deux.status, 200);
+  assertEquals((deux.body as any).ticketId, (un.body as any).ticketId);
+  assertEquals(sb.tables.maintenance_tickets.length, 1);
+  assertEquals(spy.envois.length, 2);
+});
+
+// Meme classe cote checkTicket : l'ecriture decisive est le passage en
+// to_confirm, le commentaire vient apres et ne doit pas pouvoir faire rejouer.
+Deno.test("checkTicket ne double pas le commentaire quand une ecriture accessoire echoue", async () => {
+  const sb = baseTickets();
+  sb.tables.maintenance_tickets.push({ id: 71, listing_id: "102", title: "X", status: "open" });
+  sb.fail["ticket_comments.insert"] = { message: "comments down" };
+  const corps = { ticketId: 71, photoId: 55, idem: "idem-check-0014" };
+  const un = await checkTicket(sb, FAIZA as any, corps);
+  assertEquals(un.status, 200);
+  assertEquals(sb.tables.maintenance_tickets[0].status, "to_confirm");
+  assertEquals(sb.tables.ticket_comments.length, 0);
+  const deux = await checkTicket(sb, FAIZA as any, corps);
+  assertEquals(deux.status, 200);
+  assertEquals(sb.tables.ticket_comments.length, 0);
+});

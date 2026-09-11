@@ -2248,7 +2248,12 @@ Deno.serve(async (req: Request) => {
       const listingId = url.searchParams.get("listingId");
       const techId = url.searchParams.get("technicianId");
       let query = sb.from("maintenance_tickets").select("*").order("created_at", { ascending: false }).limit(200);
-      if (status_filter === "open") query = query.in("status", ["open", "assigned", "in_progress", "waiting_parts"]);
+      // `to_confirm` est la sortie de v3.checkTicket : une cleaner a verifie le
+      // ticket pendant un menage, photo a l'appui, et attend qu'un technicien ou
+      // un manager le clote. Sans cette entree il ne serait dans aucune des deux
+      // listes de l'ecran Maintenance (l'autre appel ne ramene que `resolved`) et
+      // personne ne viendrait le clore (revue tache 6, constat 2).
+      if (status_filter === "open") query = query.in("status", ["open", "assigned", "in_progress", "waiting_parts", "to_confirm"]);
       else if (status_filter !== "all") query = query.eq("status", status_filter);
       if (listingId) query = query.eq("listing_id", listingId);
       if (techId) query = query.eq("assigned_technician_id", Number(techId));
