@@ -2326,7 +2326,7 @@ async function saveCleaner(id,name,phone,color,pin,role,silentError){
   const r=await api('saveCleaner',{body:{id:id||undefined,name,phone,color,pin:pin||null,role:role||'cleaner'}});
   if(r&&r.error){
     if(silentError) return r.error;
-    toast(r.error==='manager auth required'?'Login required — open Cleaner Login and enter your manager PIN':r.error,'error');
+    toast(r.error==='Manager access required.'?'Manager access required. Open Quick unlock and enter your manager PIN.':r.error,'error');
     return r.error;
   }
   const res=await api('getCleaners');cleaners=res.cleaners||[];render();toast('Saved ✓','success');
@@ -3222,7 +3222,7 @@ async function cleanerLogout(){
   if(authAccessToken){ await emailLogout(); return; }
   // Avant d'invalider le token : deletePushSubscription exige la session courante,
   // sinon l'appareil continuerait de recevoir les tâches de l'utilisateur précédent.
-  try{ await disablePushNotifications(); }catch(e){}
+  try{ await disablePushForLogout(); }catch(e){}
   try{ await api('cleanerLogout',{body:{}}); }catch(e){}
   cleanerMode=null; cleanerToken=null;
   localStorage.removeItem('cleanerMode');
@@ -3359,6 +3359,19 @@ async function disablePushNotifications(){
     }
   }catch(e){}
   try{ localStorage.removeItem(PUSH_SUB_KEY); localStorage.removeItem(PUSH_ENDPOINT_KEY); }catch(e){}
+}
+
+// navigator.serviceWorker.ready ne se resout JAMAIS quand l'enregistrement du
+// service worker a echoue (navigateur qui le bloque, fenetre privee). Sans
+// borne, un clic sur Logout partait dans disablePushNotifications et n'en
+// revenait pas : la session restait ouverte, sans le moindre retour a l'ecran.
+// Le desabonnement push n'est pas une raison de retenir une deconnexion.
+const LOGOUT_PUSH_TIMEOUT_MS=3000;
+function disablePushForLogout(){
+  return Promise.race([
+    disablePushNotifications(),
+    new Promise(function(resolve){ setTimeout(resolve,LOGOUT_PUSH_TIMEOUT_MS); })
+  ]);
 }
 
 async function togglePushNotifications(){
@@ -4175,6 +4188,15 @@ function __authEnterSetPassword(e){ if(e.key==='Enter') submitNewPassword(); }
 function usePinInstead(){ authScreen=null; authError=''; authNotice=''; window.location.hash='#cleaner'; render(); }
 function useEmailInstead(){ authScreen='login'; authError=''; authNotice=''; if(window.location.hash==='#cleaner')window.location.hash=''; render(); }
 
+// Pourquoi cleanerMe n'a pas rendu de membre. Un jeton refuse, un compte
+// desactive et un compte jamais rattache appellent trois messages differents :
+// les deux derniers demandent un manager, le premier demande une reconnexion.
+const AUTH_REASON_MESSAGES={
+  invalid_token:'Your session ended. Sign in again.',
+  inactive:'This account is deactivated. Ask a manager.',
+  unlinked:'This account is not linked to a team member. Ask a manager.'
+};
+
 // Traduit une session Supabase en session applicative : qui suis-je cote
 // cleaners, et quelle vue. Retourne false et prepare l'ecran de login si le
 // compte n'est relie a aucun membre actif.
@@ -4187,7 +4209,10 @@ async function adoptEmailSession(){
     try{ await sbAuth.auth.signOut(); }catch(e){}
     authAccessToken=null;
     authScreen='login';
-    authError='This account is not linked to an active team member. Ask a manager.';
+    // `reason` vient du proxy (revue finale, constat 4). Sans lui (proxy d'avant
+    // ce deploiement), on garde le message attrape-tout, qui couvre les 4 cas.
+    authError=(me&&AUTH_REASON_MESSAGES[me.reason])
+      ||'This account is not linked to an active team member. Ask a manager.';
     return false;
   }
   if(me.cleaner.role==='manager'){
@@ -4265,7 +4290,7 @@ async function submitNewPassword(){
 async function emailLogout(){
   // Avant d'invalider quoi que ce soit : deletePushSubscription exige la session
   // courante, sinon l'appareil continuerait de recevoir les taches du precedent.
-  try{ await disablePushNotifications(); }catch(e){}
+  try{ await disablePushForLogout(); }catch(e){}
   try{ await sbAuth.auth.signOut(); }catch(e){}
   authAccessToken=null;
   // Une session PIN peut cohabiter sur le meme appareil. La laisser vivante
@@ -4453,7 +4478,10 @@ function renderPlanner(){
   h+='<div style="flex:1"></div>';
   h+='<div class="header-actions">';
   if(plannerRefreshing) h+='<span class="sync-indicator" title="Refreshing from Hostaway">'+icon('refresh',13)+' Updating…</span>';
-  if(cleanerMode) h+='<button class="icon-btn" data-action="cleanerLogout" title="Logout" aria-label="Logout">'+icon('logout',18)+'</button>';
+  // authAccessToken : un manager connecte par email n'a pas de cleanerMode
+  // (adoptEmailSession le met a null), il n'avait donc aucun moyen de sortir
+  // de sa session (revue finale, constat 1). cleanerLogout delegue a emailLogout.
+  if(cleanerMode||authAccessToken) h+='<button class="icon-btn" data-action="cleanerLogout" title="Logout" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='<button class="cmdk-trigger" data-action="openCmdk" title="Global search (⌘K)" aria-label="Open global search">⌘K</button>';
   h+='<button class="icon-btn" data-action="toggleSearch" title="Search" aria-label="Search">'+icon('search',18)+'</button>';
   if(!cleanerMode){ h+='<button class="icon-btn" data-action="openExtraModal" title="Add extra cleaning" aria-label="Add extra cleaning" style="background:var(--primary-light,rgba(124,58,237,0.1));color:var(--primary,#7c3aed);border-color:var(--primary,#7c3aed)">'+icon('plus',18)+'</button>'; }
@@ -6346,7 +6374,9 @@ function renderMaintenance(){
   h+='<div class="header-actions">';
   if(mtRefreshing) h+='<span class="sync-indicator" title="Refreshing tickets">'+icon('refresh',13)+' Updating…</span>';
   if(isManager) h+='<button class="icon-btn" data-action="showMtMoreMenu" data-pass-event="1" data-stop-propagation="1" title="More actions" aria-label="More">'+icon('bell',18)+'</button>';
-  if(cleanerMode) h+='<button class="icon-btn" data-action="cleanerLogout" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>';
+  // Meme raison qu'en tete du Planner : un manager en session email doit
+  // pouvoir se deconnecter d'ici aussi (revue finale, constat 1).
+  if(cleanerMode||authAccessToken) h+='<button class="icon-btn" data-action="cleanerLogout" title="'+t('logout')+'" aria-label="Logout">'+icon('logout',18)+'</button>';
   h+='</div></div>';
   h+='<div class="mt-page-subtitle">'+_openCount+' ticket'+(_openCount===1?'':'s')+'</div>';
   h+='</div>';

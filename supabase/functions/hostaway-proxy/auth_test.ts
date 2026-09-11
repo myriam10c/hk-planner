@@ -111,10 +111,8 @@ Deno.test("verifyUserJwt rend null quand le fetch du JWKS echoue", async () => {
   resetJwksCache();
 });
 
-import { resolveCleanerByEmail } from "./auth.ts";
-
-// Faux client Supabase : enregistre les filtres appliques pour verifier que la
-// resolution ne rend jamais un membre desactive.
+// Faux client Supabase : enregistre les filtres appliques, pour verifier quelles
+// colonnes la resolution filtre reellement.
 function fakeSb(row: any) {
   const calls: any[] = [];
   return {
@@ -130,19 +128,6 @@ function fakeSb(row: any) {
     },
   };
 }
-
-Deno.test("resolveCleanerByEmail rend le membre actif qui porte cet email", async () => {
-  const sb = fakeSb({ id: 8, name: "Walter", role: "manager", color: "#e94560" });
-  const me = await resolveCleanerByEmail(sb, "walter@example.com");
-  assertEquals(me, { cleaner_id: 8, name: "Walter", role: "manager", color: "#e94560" });
-  assertEquals(sb.calls.some((c: any) => c.col === "email" && c.val === "walter@example.com"), true);
-  assertEquals(sb.calls.some((c: any) => c.col === "is_active" && c.val === true), true);
-});
-
-Deno.test("resolveCleanerByEmail rend null quand aucun membre actif ne porte cet email", async () => {
-  const sb = fakeSb(null);
-  assertEquals(await resolveCleanerByEmail(sb, "inconnu@example.com"), null);
-});
 
 // ---------------------------------------------------------------------------
 // Correctifs issus de la revue de la tache 2 (findings 1 a 5).
@@ -364,10 +349,10 @@ Deno.test("planInvite reactive la ligne visee (is_active = true)", () => {
 Deno.test("planInvite refuse la ligne system quelle que soit la branche", () => {
   const input = parseInviteInput(OK_INPUT) as any;
   const parId = planInvite(input, 11, { id: 11, role: "system", email: null, is_active: true }, null);
-  assertEquals(parId, { kind: "error", status: 400, error: "this account cannot be invited" });
+  assertEquals(parId, { kind: "error", status: 400, error: "This account cannot be invited." });
   // Branche par email : aucun id demande, la ligne est trouvee par son adresse.
   const parEmail = planInvite(input, null, { id: 11, role: "system", email: "walter@example.com", is_active: true }, 11);
-  assertEquals(parEmail, { kind: "error", status: 400, error: "this account cannot be invited" });
+  assertEquals(parEmail, { kind: "error", status: 400, error: "This account cannot be invited." });
 });
 
 // T5 constat 4 : la course entre deux invitations rendait un 500 opaque.
@@ -432,8 +417,8 @@ Deno.test("planInviteRollback ne restaure que les colonnes reellement ecrites", 
 // T7 constat 5 : saveCleaner validait le role demande sans regarder le role
 // actuel, deux clics suffisaient a sortir la ligne system de sa reserve.
 Deno.test("systemRowError verrouille la ligne system dans les deux sens", () => {
-  assertEquals(systemRowError("system", "manager"), "this account cannot be modified");
-  assertEquals(systemRowError("system", undefined), "this account cannot be modified");
+  assertEquals(systemRowError("system", "manager"), "This account cannot be modified.");
+  assertEquals(systemRowError("system", undefined), "This account cannot be modified.");
   assertEquals(systemRowError("cleaner", "system"), "invalid role");
   assertEquals(systemRowError("cleaner", "manager"), null);
   assertEquals(systemRowError("manager", undefined), null);
@@ -575,7 +560,7 @@ Deno.test("applyInvite rend 409 sur un 23505 sans avoir touche au compte Auth", 
   const sb = fakeInviteSb({ writes: [{ error: { code: "23505" } }] });
   const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
   assertEquals(r.status, 409);
-  assertEquals(r.body, { error: "This email is already used by another team member" });
+  assertEquals(r.body, { error: "This email is already used by another team member." });
   assertEquals(sb.calls, ["cleaners.update"]);
 });
 
@@ -587,7 +572,7 @@ Deno.test("applyInvite defait l'ecriture et rend 409 quand l'ancien compte resis
   });
   const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
   assertEquals(r.status, 409);
-  assertEquals(r.body, { error: "Could not replace the previous account" });
+  assertEquals(r.body, { error: "Could not replace the previous account." });
   // Aucune invitation n'est partie, et la ligne a retrouve son etat d'avant.
   assertEquals(sb.calls, ["cleaners.update", "auth.listUsers", "auth.deleteUser", "cleaners.update"]);
   assertEquals(sb.payloads[1].payload, {
@@ -604,7 +589,7 @@ Deno.test("applyInvite defait l'insertion et rend 502 quand l'invitation echoue"
   });
   const r = await applyInvite(sb, plan, "walter@example.com", "https://app.test/");
   assertEquals(r.status, 502);
-  assertEquals(r.body, { error: "Could not send the invitation" });
+  assertEquals(r.body, { error: "Could not send the invitation." });
   assertEquals(sb.calls, ["cleaners.insert", "auth.listUsers", "auth.invite", "cleaners.delete"]);
 });
 
@@ -615,7 +600,7 @@ Deno.test("systemRowGuard echoue ferme quand la lecture du role echoue", async (
     const sb = fakeInviteSb({ writes: [{ data: null, error: { message: "timeout" } }] });
     assertEquals(await systemRowGuard(sb, 11, "manager"), {
       status: 500,
-      error: "Could not verify the member",
+      error: "Could not verify the member.",
     });
     assertEquals(w.lines.length, 1);
   } finally {
@@ -627,8 +612,139 @@ Deno.test("systemRowGuard refuse la ligne system et laisse passer les autres", a
   const sys = fakeInviteSb({ writes: [{ data: { role: "system" }, error: null }] });
   assertEquals(await systemRowGuard(sys, 11, "manager"), {
     status: 400,
-    error: "this account cannot be modified",
+    error: "This account cannot be modified.",
   });
   const ok = fakeInviteSb({ writes: [{ data: { role: "cleaner" }, error: null }] });
   assertEquals(await systemRowGuard(ok, 8, "manager"), null);
+});
+
+// ---------------------------------------------------------------------------
+// Fix round final de la revue de branche (constats 2 et 4).
+// ---------------------------------------------------------------------------
+
+import { cleanerMeReason, currentUserDetailed, lookupCleanerByEmail } from "./auth.ts";
+
+// Constat 4 : cleanerMe rendait {cleaner:null} pour quatre causes distinctes, et
+// le front en deduisait toujours « compte non rattache ». La decision est
+// desormais une fonction pure, testable sans Supabase.
+Deno.test("cleanerMeReason nomme les quatre causes d'une session absente", () => {
+  assertEquals(
+    cleanerMeReason({ hasCredential: false, credentialValid: false, memberFound: false, memberActive: false }),
+    "no_session",
+  );
+  assertEquals(
+    cleanerMeReason({ hasCredential: true, credentialValid: false, memberFound: false, memberActive: false }),
+    "invalid_token",
+  );
+  assertEquals(
+    cleanerMeReason({ hasCredential: true, credentialValid: true, memberFound: false, memberActive: false }),
+    "unlinked",
+  );
+  assertEquals(
+    cleanerMeReason({ hasCredential: true, credentialValid: true, memberFound: true, memberActive: false }),
+    "inactive",
+  );
+  assertEquals(
+    cleanerMeReason({ hasCredential: true, credentialValid: true, memberFound: true, memberActive: true }),
+    null,
+  );
+});
+
+Deno.test("currentUserDetailed : aucun identifiant rend no_session", async () => {
+  await setupKeys();
+  const sb = fakeSbAuth({});
+  const r = await currentUserDetailed(sb, reqWith({}));
+  assertEquals(r.user, null);
+  assertEquals(r.reason, "no_session");
+  assertEquals(sb.state.rpcCalls, 0);
+});
+
+Deno.test("currentUserDetailed : un Bearer refuse rend invalid_token", async () => {
+  await setupKeys();
+  const sb = fakeSbAuth({ cleanerRow: { id: 8, name: "Walter", role: "manager", color: "#e94560" } });
+  const r = await currentUserDetailed(sb, reqWith({ authorization: "Bearer pas.un.jwt" }));
+  assertEquals(r.user, null);
+  assertEquals(r.reason, "invalid_token");
+});
+
+Deno.test("currentUserDetailed : un JWT valide sans ligne cleaners rend unlinked", async () => {
+  const kp = await setupKeys();
+  const sb = fakeSbAuth({ cleanerRow: null });
+  const r = await currentUserDetailed(sb, reqWith({ authorization: "Bearer " + (await signWith(kp)) }));
+  assertEquals(r.user, null);
+  assertEquals(r.reason, "unlinked");
+});
+
+Deno.test("currentUserDetailed : un membre desactive rend inactive", async () => {
+  const kp = await setupKeys();
+  const sb = fakeSbAuth({
+    cleanerRow: { id: 8, name: "Walter", role: "manager", color: "#e94560", is_active: false },
+  });
+  const r = await currentUserDetailed(sb, reqWith({ authorization: "Bearer " + (await signWith(kp)) }));
+  assertEquals(r.user, null);
+  assertEquals(r.reason, "inactive");
+});
+
+Deno.test("currentUserDetailed : un jeton PIN revoque rend invalid_token", async () => {
+  await setupKeys();
+  const sb = fakeSbAuth({ pinRows: [] });
+  const r = await currentUserDetailed(sb, reqWith({ "x-cleaner-token": "jeton-revoque" }));
+  assertEquals(r.user, null);
+  assertEquals(r.reason, "invalid_token");
+  assertEquals(sb.state.rpcCalls, 1);
+});
+
+Deno.test("currentUserDetailed : une session valide n'a pas de raison", async () => {
+  const kp = await setupKeys();
+  const sb = fakeSbAuth({
+    cleanerRow: { id: 8, name: "Walter", role: "manager", color: "#e94560", is_active: true },
+  });
+  const r = await currentUserDetailed(sb, reqWith({ authorization: "Bearer " + (await signWith(kp)) }));
+  assertEquals(r.user, { cleaner_id: 8, name: "Walter", role: "manager", color: "#e94560" });
+  assertEquals(r.reason, null);
+});
+
+// lookupCleanerByEmail remplace resolveCleanerByEmail : il ne filtre plus sur
+// is_active, c'est cleanerMeReason qui tranche, sinon « desactive » et
+// « inconnu » resteraient indistinguables.
+Deno.test("lookupCleanerByEmail rend la ligne meme desactivee, sans filtrer", async () => {
+  const sb = fakeSb({ id: 8, name: "Walter", role: "manager", color: "#e94560", is_active: false });
+  const row = await lookupCleanerByEmail(sb, "walter@example.com");
+  assertEquals(row?.id, 8);
+  assertEquals(row?.is_active, false);
+  assertEquals(sb.calls.some((c: any) => c.col === "email" && c.val === "walter@example.com"), true);
+  assertEquals(sb.calls.some((c: any) => c.col === "is_active"), false);
+});
+
+Deno.test("lookupCleanerByEmail rend null quand personne ne porte cet email", async () => {
+  const sb = fakeSb(null);
+  assertEquals(await lookupCleanerByEmail(sb, "inconnu@example.com"), null);
+});
+
+// Constat 2 : les libelles d'erreur du serveur sont affiches tels quels par le
+// front. Une seule chaine par cas, en casse de phrase.
+Deno.test("les libelles d'erreur d'invitation sont en anglais de produit", () => {
+  assertEquals(
+    (parseInviteInput({ email: "pas-une-adresse" }) as any).error,
+    "A valid email address is required.",
+  );
+  assertEquals(
+    (parseInviteInput({ email: "walter@example.com", role: "admin" }) as any).error,
+    "Role must be cleaner, manager, maintenance or subcontractor.",
+  );
+  const input = parseInviteInput({ email: "walter@example.com", name: "Walter" }) as any;
+  assertEquals(
+    (planInvite(input, 42, null, null) as any).error,
+    "Team member not found.",
+  );
+  assertEquals(
+    (planInvite(input, 11, { id: 11, role: "system" }, null) as any).error,
+    "This account cannot be invited.",
+  );
+  // Les deux chemins du 409 rendent desormais la meme phrase.
+  assertEquals(
+    (planInvite(input, null, null, 9) as any).error,
+    "This email is already used by another team member.",
+  );
+  assertEquals(systemRowError("system", "manager"), "This account cannot be modified.");
 });

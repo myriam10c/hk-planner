@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
 import {
-  applyInvite, currentUser, findAuthUserByEmail, normalizeEmail,
+  applyInvite, currentUser, currentUserDetailed, findAuthUserByEmail, normalizeEmail,
   parseInviteInput, planInvite, systemRowGuard,
 } from "./auth.ts";
 
@@ -389,7 +389,7 @@ async function hrAuth(sb: any, req: Request, level: "staff" | "manager" | "owner
   const { data } = await sb.from("cleaners").select("is_owner").eq("id", me.cleaner_id).maybeSingle();
   const isOwner = !!(data && data.is_owner);
   if (level !== "staff" && me.role !== "manager") {
-    return { me: null, isOwner, err: jsonResp({ error: "manager auth required" }, 403) };
+    return { me: null, isOwner, err: jsonResp({ error: "Manager access required." }, 403) };
   }
   if (level === "owner" && !isOwner) {
     return { me: null, isOwner, err: jsonResp({ error: "owner auth required" }, 403) };
@@ -1274,7 +1274,7 @@ Deno.serve(async (req: Request) => {
       // une session valide (X-Cleaner-Token) appartenant à un cleaner role=manager.
       const me = await currentUser(sb, req);
       if (!me || me.role !== 'manager') {
-        return jsonResp({ error: "manager auth required" }, 403);
+        return jsonResp({ error: "Manager access required." }, 403);
       }
       const body = await req.json();
       const { id, name, phone, color, pin, role, telegram_chat_id } = body;
@@ -1380,7 +1380,7 @@ Deno.serve(async (req: Request) => {
       // Meme porte que saveCleaner : X-App-Secret voyage dans le bundle public,
       // seule une session manager (JWT ou PIN) autorise la creation de comptes.
       const me = await currentUser(sb, req);
-      if (!me || me.role !== "manager") return jsonResp({ error: "manager auth required" }, 403);
+      if (!me || me.role !== "manager") return jsonResp({ error: "Manager access required." }, 403);
 
       const body = await req.json().catch(() => null);
       const input = parseInviteInput(body);
@@ -1468,9 +1468,11 @@ Deno.serve(async (req: Request) => {
     if (action === "cleanerMe") {
       // Point d'entree du boot front : il renvoie qui je suis pour le credential
       // presente, sans jamais 401 (le front distingue "pas de session" de "session
-      // sans membre actif" par la valeur de cleaner).
-      const cleaner = await currentUser(sb, req);
-      if (!cleaner) return jsonResp({ status: "success", cleaner: null });
+      // sans membre actif" par la valeur de cleaner). `reason` dit laquelle des
+      // quatre causes a produit cleaner:null, pour que le front ne dise pas
+      // « compte non rattache » a un jeton expire (revue finale, constat 4).
+      const { user: cleaner, reason } = await currentUserDetailed(sb, req);
+      if (!cleaner) return jsonResp({ status: "success", cleaner: null, reason });
       return jsonResp({
         status: "success",
         cleaner: { id: cleaner.cleaner_id, name: cleaner.name, color: cleaner.color, role: cleaner.role },
@@ -1546,7 +1548,7 @@ Deno.serve(async (req: Request) => {
       const isServer = SERVER_SHARED_SECRET !== "" && serverSecret === SERVER_SHARED_SECRET;
       const me = isServer ? null : await currentUser(sb, req);
       if (!isServer && (!me || me.role !== "manager")) {
-        return jsonResp({ error: "manager auth required" }, 403);
+        return jsonResp({ error: "Manager access required." }, 403);
       }
       const body = await req.json().catch(() => ({}));
       const targetId = body?.cleaner_id !== undefined && body?.cleaner_id !== null
@@ -2658,7 +2660,7 @@ Deno.serve(async (req: Request) => {
       const target = Number(body.cleaner_id) || g.me!.cleaner_id;
       // Deposer une demande pour quelqu'un d'autre est une action de manager.
       if (target !== g.me!.cleaner_id && g.me!.role !== "manager") {
-        return jsonResp({ error: "manager auth required" }, 403);
+        return jsonResp({ error: "Manager access required." }, 403);
       }
       const selfSubmit = target === g.me!.cleaner_id;
       const employeeSignature = hrValidSignature(body.employee_signature);

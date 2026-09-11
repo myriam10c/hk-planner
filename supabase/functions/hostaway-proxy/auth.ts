@@ -87,26 +87,42 @@ export async function verifyUserJwt(token: string | null): Promise<AuthUser | nu
   }
 }
 
-// Un JWT valide ne donne acces qu'a un membre d'equipe ACTIF portant exactement
-// cet email. Un compte Auth orphelin (membre desactive, email retire) n'est
-// personne : le proxy repondra 401 comme pour un jeton PIN revoque.
-export async function resolveCleanerByEmail(
-  sb: any,
-  email: string,
-): Promise<{ cleaner_id: number; name: string; role: string; color: string } | null> {
+// Ligne cleaners portant exactement cet email, ACTIVE OU NON. Le filtre
+// is_active vivait ici ; il est remonte dans cleanerMeReason, sinon « membre
+// desactive » et « aucun membre » restent indistinguables et le front envoie
+// l'utilisateur vers un manager qui ne peut rien faire (revue finale, constat 4).
+// Un JWT valide ne donne toujours acces qu'a un membre ACTIF : c'est
+// currentUserDetailed qui refuse, exactement comme avant.
+export interface CleanerRow {
+  id: number;
+  name: string;
+  role: string;
+  color: string;
+  is_active?: boolean;
+}
+
+export async function lookupCleanerByEmail(sb: any, email: string): Promise<CleanerRow | null> {
+  // cleaners_email_unique_idx garantit au plus une ligne par adresse :
+  // maybeSingle ne peut pas tomber sur un doublon.
   const { data } = await sb.from("cleaners")
-    .select("id, name, role, color")
+    .select("id, name, role, color, is_active")
     .eq("email", email)
-    .eq("is_active", true)
     .maybeSingle();
-  if (!data) return null;
-  return { cleaner_id: data.id, name: data.name, role: data.role, color: data.color };
+  return data ?? null;
 }
 
 // Roles auxquels on peut attacher un compte email. `system` (le compte du CEO
 // Agent) en est exclu volontairement : c'est un acteur machine, il ne se
 // connecte jamais et ne doit jamais recevoir d'invitation.
 export const INVITE_ROLES = new Set(["cleaner", "manager", "maintenance", "subcontractor"]);
+
+// Libelles d'erreur rendus au client. Le front les affiche TELS QUELS dans un
+// toast : une seule chaine par cas, en anglais de produit, en casse de phrase
+// (revue finale, constat 2). A garder aligne sur INVITE_ROLES ci-dessus.
+export const INVITE_ROLE_ERROR = "Role must be cleaner, manager, maintenance or subcontractor.";
+// Les deux chemins du 409 (pre-controle en SELECT et index unique) disent la
+// meme chose a l'equipe.
+export const EMAIL_CONFLICT_MESSAGE = "This email is already used by another team member.";
 
 export function normalizeEmail(raw: unknown): string {
   return typeof raw === "string" ? raw.trim().toLowerCase() : "";
@@ -157,19 +173,71 @@ export async function validateCleanerToken(
 // Vit ici et non dans index.ts pour etre testable : index.ts appelle Deno.serve
 // au chargement (revue T3, constats 4 et 5).
 export async function currentUser(sb: any, req: Request): Promise<SessionUser | null> {
+  return (await currentUserDetailed(sb, req)).user;
+}
+
+// Pourquoi il n'y a pas de session. Rendu par l'action cleanerMe pour que le
+// front sache quoi dire : une session expiree, un compte desactive et un compte
+// jamais rattache appellent trois messages differents (revue finale, constat 4).
+export type CleanerMeReason = "no_session" | "invalid_token" | "inactive" | "unlinked";
+
+export interface SessionLookup {
+  user: SessionUser | null;
+  reason: CleanerMeReason | null;
+}
+
+// Logique pure, testable sans Supabase : elle ne fait que nommer l'echec.
+//   hasCredential   : un Bearer ou un X-Cleaner-Token a ete presente
+//   credentialValid : ce credential a ete accepte (JWT verifie, session PIN vivante)
+//   memberFound     : une ligne cleaners porte cette identite
+//   memberActive    : cette ligne est active
+export function cleanerMeReason(state: {
+  hasCredential: boolean;
+  credentialValid: boolean;
+  memberFound: boolean;
+  memberActive: boolean;
+}): CleanerMeReason | null {
+  if (!state.hasCredential) return "no_session";
+  if (!state.credentialValid) return "invalid_token";
+  if (!state.memberFound) return "unlinked";
+  if (!state.memberActive) return "inactive";
+  return null;
+}
+
+// Meme decision que currentUser, avec la raison de l'echec en plus. Toute la
+// logique vit ici ; currentUser n'en garde que l'utilisateur.
+export async function currentUserDetailed(sb: any, req: Request): Promise<SessionLookup> {
   const token = bearerToken(req);
   if (token) {
     const user = await verifyUserJwt(token);
     if (!user) {
       console.log("[hostaway-proxy] Bearer invalide ou expire");
-      return null;
+      return { user: null, reason: "invalid_token" };
     }
-    const me = await resolveCleanerByEmail(sb, user.email);
-    if (!me) console.log("[hostaway-proxy] JWT valide sans membre actif correspondant");
-    return me;
+    const row = await lookupCleanerByEmail(sb, user.email);
+    // is_active absent de la ligne (colonne non lue) = actif : on ne ferme
+    // jamais un acces sur une colonne manquante, seulement sur un false explicite.
+    const reason = cleanerMeReason({
+      hasCredential: true,
+      credentialValid: true,
+      memberFound: !!row,
+      memberActive: !!row && row.is_active !== false,
+    });
+    if (reason || !row) {
+      console.log("[hostaway-proxy] JWT valide sans membre actif correspondant (" + reason + ")");
+      return { user: null, reason };
+    }
+    return {
+      user: { cleaner_id: row.id, name: row.name, role: row.role, color: row.color },
+      reason: null,
+    };
   }
   const pinToken = req.headers.get("x-cleaner-token");
-  return await validateCleanerToken(sb, pinToken);
+  if (!pinToken) return { user: null, reason: "no_session" };
+  const me = await validateCleanerToken(sb, pinToken);
+  // Un jeton PIN inconnu ou revoque est un identifiant presente et refuse :
+  // meme raison qu'un Bearer refuse, le front y repond « Sign in again ».
+  return me ? { user: me, reason: null } : { user: null, reason: "invalid_token" };
 }
 
 // ===========================================================================
@@ -201,13 +269,13 @@ export function parseInviteInput(body: any): InviteParse {
   }
   const email = normalizeEmail(body.email);
   if (!isValidEmail(email)) {
-    return { kind: "error", status: 400, error: "a valid email is required" };
+    return { kind: "error", status: 400, error: "A valid email address is required." };
   }
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const roleProvided = body.role !== undefined && body.role !== null;
   const role = roleProvided ? body.role : "cleaner";
   if (!inviteRoleAllowed(role)) {
-    return { kind: "error", status: 400, error: "role must be one of " + [...INVITE_ROLES].join(", ") };
+    return { kind: "error", status: 400, error: INVITE_ROLE_ERROR };
   }
   const phone = typeof body.phone === "string" ? (body.phone.trim() || null) : undefined;
   const color = typeof body.color === "string" && body.color ? body.color : undefined;
@@ -243,16 +311,16 @@ export function planInvite(
   holderId: number | null,
 ): InvitePlan {
   if (requestedId && !target) {
-    return { kind: "error", status: 404, error: "team member not found" };
+    return { kind: "error", status: 404, error: "Team member not found." };
   }
   // La ligne machine (le compte du CEO Agent) ne se connecte jamais. Le controle
   // est pose apres la resolution, donc il couvre aussi la branche par email
   // (revue T5, constat 3).
   if (target && target.role === "system") {
-    return { kind: "error", status: 400, error: "this account cannot be invited" };
+    return { kind: "error", status: 400, error: "This account cannot be invited." };
   }
   if (holderId !== null && (!target || Number(holderId) !== Number(target.id))) {
-    return { kind: "error", status: 409, error: "another team member already uses this email" };
+    return { kind: "error", status: 409, error: EMAIL_CONFLICT_MESSAGE };
   }
   if (target) {
     // is_active : inviter une ligne desactivee la reactive, sinon le compte Auth
@@ -321,7 +389,7 @@ export function isEmailUniqueViolation(error: unknown): boolean {
 // vers ou depuis `system` : sans ce garde, deux clics de manager suffisent a
 // passer cette ligne en `manager` puis a l'inviter (revue T7, constat 5).
 export function systemRowError(currentRole: unknown, nextRole: unknown): string | null {
-  if (currentRole === "system") return "this account cannot be modified";
+  if (currentRole === "system") return "This account cannot be modified.";
   if (nextRole === "system") return "invalid role";
   return null;
 }
@@ -365,7 +433,7 @@ export interface InviteResult {
 
 const EMAIL_CONFLICT: InviteResult = {
   status: 409,
-  body: { error: "This email is already used by another team member" },
+  body: { error: EMAIL_CONFLICT_MESSAGE },
 };
 
 // Sequence des ecritures, et rollback qui en decoule :
@@ -412,7 +480,7 @@ export async function applyInvite(
     } catch (e) {
       console.warn("[inviteCleaner] ancien compte Auth non supprime: " + String(e));
       await rollbackInvite(sb, plan, cleanerId);
-      return { status: 409, body: { error: "Could not replace the previous account" } };
+      return { status: 409, body: { error: "Could not replace the previous account." } };
     }
   }
 
@@ -430,7 +498,7 @@ export async function applyInvite(
     console.warn("[inviteCleaner] echec de l'envoi Auth: " + String(authError.message ?? authError));
     return {
       status: 502,
-      body: { error: existing ? "Could not send the reset email" : "Could not send the invitation" },
+      body: { error: existing ? "Could not send the reset email." : "Could not send the invitation." },
     };
   }
   console.log("[inviteCleaner] " + (existing ? "reset" : "invitation") +
@@ -449,7 +517,7 @@ export async function systemRowGuard(
   const { data, error } = await sb.from("cleaners").select("role").eq("id", id).maybeSingle();
   if (error) {
     console.warn("[saveCleaner] lecture du role impossible: " + String((error as any).message ?? error));
-    return { status: 500, error: "Could not verify the member" };
+    return { status: 500, error: "Could not verify the member." };
   }
   const message = systemRowError(data?.role, nextRole);
   return message ? { status: 400, error: message } : null;

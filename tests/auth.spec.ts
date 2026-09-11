@@ -299,3 +299,60 @@ test('un 401 sur cleanerMe garde le message de session terminee', async ({ page 
   await expect(page.locator('.auth-error')).toHaveText('Your session ended. Sign in again.');
   await expect(page.locator('#authEmail')).toBeVisible();
 });
+
+// ---------------------------------------------------------------------------
+// Fix round final de la revue de branche (constats 1 et 4).
+// ---------------------------------------------------------------------------
+
+test('revue finale constat 1 : un manager connecte par email peut se deconnecter', async ({ page }) => {
+  // adoptEmailSession met cleanerMode a null pour un manager, et les trois
+  // boutons Logout etaient gates sur cleanerMode : aucun moyen de sortir.
+  await bootWithFakeNetwork(page, [
+    { match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: { id: 8, name: 'Walter', color: '#e94560', role: 'manager' } } },
+    { match: '/auth/v1/logout', status: 200, body: {} },
+    { match: 'action=', status: 200, body: { status: 'success', reservations: [], done: {}, assignments: {}, cleaners: [], templates: [] } },
+  ], { storage: storedSession() });
+  await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
+  const logout = page.locator('.header [data-action="cleanerLogout"]').first();
+  await expect(logout).toBeVisible();
+  await logout.click();
+  await expect(page.locator('#authEmail')).toBeVisible({ timeout: 10_000 });
+  const left = await page.evaluate(() => ({
+    session: localStorage.getItem('hkAuthSession'),
+    pin: localStorage.getItem('cleanerToken'),
+    mode: localStorage.getItem('cleanerMode'),
+  }));
+  expect(left.session).toBeNull();
+  expect(left.pin).toBeNull();
+  expect(left.mode).toBeNull();
+});
+
+test('revue finale constat 4 : reason invalid_token dit que la session est terminee', async ({ page }) => {
+  await bootWithFakeNetwork(page, [
+    { match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: null, reason: 'invalid_token' } },
+    { match: '/auth/v1/logout', status: 200, body: {} },
+  ], { storage: storedSession() });
+  await expect(page.locator('.auth-error')).toHaveText('Your session ended. Sign in again.');
+  await expect(page.locator('#authEmail')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('hkAuthSession'))).toBeNull();
+});
+
+test('revue finale constat 4 : reason inactive dit que le compte est desactive', async ({ page }) => {
+  await bootWithFakeNetwork(page, [
+    { match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: null, reason: 'inactive' } },
+    { match: '/auth/v1/logout', status: 200, body: {} },
+  ], { storage: storedSession() });
+  await expect(page.locator('.auth-error')).toHaveText('This account is deactivated. Ask a manager.');
+  await expect(page.locator('#authEmail')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('hkAuthSession'))).toBeNull();
+});
+
+test('revue finale constat 4 : reason unlinked dit que le compte n est relie a personne', async ({ page }) => {
+  await bootWithFakeNetwork(page, [
+    { match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: null, reason: 'unlinked' } },
+    { match: '/auth/v1/logout', status: 200, body: {} },
+  ], { storage: storedSession() });
+  await expect(page.locator('.auth-error')).toHaveText('This account is not linked to a team member. Ask a manager.');
+  await expect(page.locator('#authEmail')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('hkAuthSession'))).toBeNull();
+});

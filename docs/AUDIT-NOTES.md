@@ -30,7 +30,7 @@ Audit réalisé le 21-22 Avril 2026.
 ## Phase 4 · Comptes utilisateurs (2026-09-10)
 - Supabase Auth comme identité : email + mot de passe, `cleaners.email` en jointure
 - `disable_signup = true` (seule l'invitation admin crée un compte), `password_min_length = 8` ; protection des mots de passe fuités indisponible (plan Pro)
-- Proxy : `currentUser()` accepte `Authorization: Bearer <JWT>` (vérifié contre le JWKS ES256) ou `X-Cleaner-Token`
+- Proxy : `currentUser()` accepte `Authorization: Bearer <JWT>` (vérifié contre le JWKS, ES256 et RS256 acceptés) ou `X-Cleaner-Token`
 - Emails d'authentification : hook Send Email vers la fonction edge `auth-mailer`, envoi par l'API Gmail
 - `deleteCleaner` supprime aussi le compte Auth du membre (session manager requise)
 - Le login PIN reste en place (déverrouillage rapide, membres sans adresse email)
