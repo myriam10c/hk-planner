@@ -6,6 +6,11 @@ import {
   applyInvite, currentUser, currentUserDetailed, findAuthUserByEmail, normalizeEmail,
   parseInviteInput, planInvite, systemRowGuard,
 } from "./auth.ts";
+import {
+  pickSnapshot, plusDays, roleAllowed, todayDubai,
+  V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
+} from "./v3.ts";
+import { buildMyDay } from "./v3_myday.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -957,6 +962,14 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["hrDeleteDocument", "POST"],
   ["hrCheckExpiries", "POST"],
   ["hrGetCompensation", "GET"],
+  // ===== v3 (ecrans cleaner, phase A) =====
+  ["v3.myDay", "GET"],
+  ["v3.startJob", "POST"],
+  ["v3.tick", "POST"],
+  ["v3.uploadPhoto", "POST"],
+  ["v3.finishJob", "POST"],
+  ["v3.reportProblem", "POST"],
+  ["v3.checkTicket", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -1007,6 +1020,127 @@ Deno.serve(async (req: Request) => {
         console.log(`[hostaway-proxy] missing/invalid X-Server-Secret for "${action}" from origin=${origin}`);
         return jsonResp({ error: "server auth required" }, 403);
       }
+    }
+
+    // ==================== V3 · ECRANS CLEANER ====================
+    // Toutes les actions v3 exigent une session et prennent l'identite dedans,
+    // jamais dans le corps (specification 2026-09-11, ruling 6).
+
+    // Lecture des checkouts. Exactement la meme strategie que l'action checkouts,
+    // sur exactement le meme cache : l'app actuelle demande des plages de sept
+    // jours a partir du jour ou elle est ouverte, la v3 lit donc ces plages-la et
+    // ecrit sous la meme cle. Consequence voulue : quand un manager a ouvert son
+    // ecran dans la journee, la cleaner ne paie jamais la pagination Hostaway.
+    //   - instantane de moins de deux minutes : servi tel quel ;
+    //   - entre deux et dix minutes : servi tel quel, revalide en arriere-plan ;
+    //   - au-dela, ou aucun instantane : une pagination, une seule, puis ecriture
+    //     du cache pour les suivants.
+    const v3CheckoutsForDay = async (date: string) => {
+      const cacheKey = weekKeyFor(date);
+      const ecrire = (payload: any) =>
+        sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() });
+      let rows: any[] = [];
+      try {
+        const { data } = await sb.from("proxy_cache")
+          .select("key, payload, updated_at").like("key", "checkouts:%");
+        rows = data ?? [];
+      } catch (e) {
+        console.error("[v3] proxy_cache read failed:", e);
+      }
+      const snap = pickSnapshot(rows, date);
+      if (snap && snap.ageMs < V3_CACHE_STALE_MS) {
+        if (snap.ageMs > V3_CACHE_FRESH_MS) {
+          // Revalidation hors du chemin de reponse : l'ecran de la cleaner n'attend
+          // jamais Hostaway. Meme mecanique que l'action checkouts.
+          const revalidate = buildCheckoutsPayload(sb, date, plusDays(date, 6))
+            .then(ecrire)
+            .catch((e) => console.error("[v3] checkouts revalidate failed:", e));
+          try { (globalThis as any).EdgeRuntime?.waitUntil?.(revalidate); } catch (_e) { /* best effort */ }
+        }
+        return snap.payload;
+      }
+      const payload = await buildCheckoutsPayload(sb, date, plusDays(date, 6));
+      try {
+        await ecrire(payload);
+      } catch (e) {
+        console.error("[v3] proxy_cache write failed:", e);
+      }
+      return payload;
+    };
+
+    if (action === "v3.myDay") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      // Role : le tableau des actions de la specification (section 4) dit qui a
+      // le droit d'appeler quoi. Une session valide ne suffit pas.
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const date = url.searchParams.get("date") || todayDubai();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return jsonResp({ error: "date must be YYYY-MM-DD" }, 400);
+      }
+      const [payload, extraRes, listingRes, templateRes, ticketRes] = await Promise.all([
+        v3CheckoutsForDay(date),
+        sb.from("extra_cleanings").select("*").eq("cleaning_date", date),
+        sb.from("listing_config").select("listing_id, listing_name, bedrooms, unit_type, apt_number, internal_name"),
+        sb.from("checklist_templates").select("*"),
+        sb.from("maintenance_tickets")
+          .select("id, listing_id, title, category, priority, status")
+          .not("status", "in", "(resolved,cancelled,to_confirm)").limit(500),
+      ]);
+      const reservations = (payload && payload.reservations) || [];
+      const keys = [
+        ...reservations.map((r: any) => String(r.checkOut) + "_" + (r.guest || "Guest")),
+        ...((extraRes.data || []).map((e: any) => String(e.reservation_key))),
+      ].filter((k) => !!k);
+      // Toutes les lectures par cle sont bornees aux cles de la semaine lue : ces
+      // tables grossissent a chaque menage, un select non filtre finirait tronque.
+      // Decoupage par paquets de 100 comme loadPostponedDates : une semaine porte
+      // environ deux cents cles, un seul .in() fabriquerait une URL PostgREST
+      // demesuree. Une lecture ratee leve : une journee vide par erreur de lecture
+      // ferait croire a la cleaner qu'elle n'a rien a faire.
+      const parCle = async (table: string, cols: string, filtre?: (q: any) => any) => {
+        const out: any[] = [];
+        for (let i = 0; i < keys.length; i += 100) {
+          let q = sb.from(table).select(cols).in("reservation_key", keys.slice(i, i + 100));
+          if (filtre) q = filtre(q);
+          const { data, error } = await q;
+          if (error) throw error;
+          out.push(...(data ?? []));
+        }
+        return { data: out, error: null };
+      };
+      const [assignRes, doneRes, timerRes, cancelRes, progressRes, postponed] = await Promise.all([
+        parCle("cleaning_assignments", "reservation_key, cleaner_id",
+          (q: any) => q.eq("cleaner_id", me.cleaner_id)),
+        parCle("menage_done", "reservation_key, done"),
+        parCle("cleaning_timer", "reservation_key, started_at, finished_at, duration_minutes"),
+        parCle("cleaning_cancelled", "reservation_key"),
+        parCle("checklist_progress", "reservation_key, item_name, is_done"),
+        loadPostponedDates(sb, keys),
+      ]);
+      const listings: Record<string, any> = {};
+      (listingRes.data || []).forEach((l: any) => { listings[String(l.listing_id)] = l; });
+      const timers: Record<string, any> = {};
+      (timerRes.data || []).forEach((t: any) => { timers[t.reservation_key] = t; });
+      const progress: Record<string, Record<string, boolean>> = {};
+      (progressRes.data || []).forEach((p: any) => {
+        (progress[p.reservation_key] ||= {})[p.item_name] = !!p.is_done;
+      });
+      const body = buildMyDay({
+        date, me,
+        reservations,
+        extras: extraRes.data || [],
+        listings,
+        templates: templateRes.data || [],
+        assignedKeys: (assignRes.data || []).map((a: any) => String(a.reservation_key)),
+        postponed,
+        cancelled: (cancelRes.data || []).map((c: any) => String(c.reservation_key)),
+        done: (doneRes.data || []).filter((d: any) => d.done).map((d: any) => String(d.reservation_key)),
+        timers,
+        tickets: ticketRes.data || [],
+        progress,
+      });
+      return jsonResp(body);
     }
 
     // ==================== CHECKOUTS ====================
