@@ -11,6 +11,7 @@ import {
   V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
 } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
+import { startJob, tickItem } from "./v3_write.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -1141,6 +1142,28 @@ Deno.serve(async (req: Request) => {
         progress,
       });
       return jsonResp(body);
+    }
+
+    // Ecritures d'un menage. Meme forme que v3.myDay : session d'abord, role
+    // ensuite, et l'identite ne sort jamais du corps de la requete.
+    if (action === "v3.startJob" && req.method === "POST") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await startJob(sb, me, body);
+      return jsonResp(r.body, r.status);
+    }
+
+    if (action === "v3.tick" && req.method === "POST") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await tickItem(sb, me, body);
+      return jsonResp(r.body, r.status);
     }
 
     // ==================== CHECKOUTS ====================
