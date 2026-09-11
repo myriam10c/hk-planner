@@ -1,132 +1,19 @@
-// Photos et tickets v3 : televersement d'un cliche, signalement d'une panne
-// pendant un menage, verification d'un ticket existant.
-// Le bucket est prive : rien n'en sort sans URL signee, et aucune de ces actions
-// ne rend d'URL publique.
+// Tickets v3 : signalement d'une panne pendant un menage, verification d'un
+// ticket existant. Le televersement d'un cliche vit dans v3_photos.ts depuis la
+// revue de la tache 3 (le module depassait 400 lignes) et est re-exporte ici :
+// index.ts et les tests importent toujours `from "./v3_tickets.ts"`.
+//
+// Deux identifiants cohabitent, comme dans v3_write.ts : `jobId` est l'id oppose
+// rendu par v3.myDay, le seul que le telephone connait ; `reservationKey` est la
+// cle interne « <date>_<guest> », qui ne quitte jamais le proxy.
 import type { SessionUser } from "./auth.ts";
 import {
   ActionResult, claimEvent, managerIds, onDutyTechnician, recordResult, releaseEvent,
-  replayResponse, todayDubai, V3_CATEGORIES, V3_PHOTO_BUCKET, v3Log, validIdem,
+  replayResponse, resolveJob, todayDubai, V3_CATEGORIES, v3Log, validIdem,
 } from "./v3.ts";
 import { sendPush } from "./push.ts";
 
-// 6 Mo : une photo d'iPhone en pleine resolution passe largement, un fichier
-// aberrant est refuse avant de toucher au bucket.
-export const V3_MAX_PHOTO_BYTES = 6 * 1024 * 1024;
-
-// Plafond du corps multipart complet, lu sur Content-Length avant de bufferiser.
-// Volontairement plus large que le fichier : une enveloppe multipart porte des
-// bornes, des en-tetes de partie et les champs texte. Au-dela, le corps est
-// refuse sans etre lu (revue tache 5, constatation 3).
-export const V3_MAX_UPLOAD_BODY_BYTES = 8 * 1024 * 1024;
-
-// Types acceptes, et extension du fichier depose. iOS convertit generalement en
-// JPEG a l'envoi, mais un HEIC peut arriver d'un partage direct.
-export const V3_PHOTO_MIME: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/jpg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "image/heic": "heic",
-  "image/heif": "heic",
-};
-
-// ticketId optionnel : absent, null ou vide veut dire « photo rattachee au seul
-// menage ». Present, il doit etre un entier positif. Meme regle que readPhotoId
-// de v3_write.ts : une chaine non numerique partait jusqu'ici en NaN, que
-// supabase-js serialise en null, donc le lien vers le ticket sautait en silence.
-function readTicketId(v: unknown): number | null | "invalid" {
-  if (v === undefined || v === null || v === "") return null;
-  if (typeof v !== "string" && typeof v !== "number") return "invalid";
-  const n = Number(v);
-  if (!Number.isInteger(n) || n <= 0) return "invalid";
-  return n;
-}
-
-export async function uploadPhoto(
-  sb: any, me: SessionUser, form: FormData,
-): Promise<ActionResult> {
-  const idem = form.get("idem");
-  if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
-  const file = form.get("file") as any;
-  if (!file || typeof file.arrayBuffer !== "function") {
-    return { status: 400, body: { error: "file required" } };
-  }
-  const mime = String(file.type ?? "").toLowerCase();
-  const ext = V3_PHOTO_MIME[mime];
-  if (!ext) return { status: 400, body: { error: "unsupported image type" } };
-  const size = Number(file.size ?? 0);
-  if (!(size > 0)) return { status: 400, body: { error: "empty file" } };
-  if (size > V3_MAX_PHOTO_BYTES) return { status: 413, body: { error: "photo is too large" } };
-
-  // jobId est la reservation_key, donc du texte (colonne photos.job_id en TEXT),
-  // pas un entier : la symetrie avec ticketId porte sur le type attendu, pas sur
-  // la forme. Une partie multipart qui n'est pas du texte est refusee plutot que
-  // stringifiee en « [object File] ».
-  const jobRaw = form.get("jobId");
-  if (jobRaw !== null && typeof jobRaw !== "string") {
-    return { status: 400, body: { error: "jobId must be text" } };
-  }
-  const jobId = jobRaw ? String(jobRaw) : null;
-  const ticketId = readTicketId(form.get("ticketId"));
-  if (ticketId === "invalid") {
-    return { status: 400, body: { error: "ticketId must be a number" } };
-  }
-  const itemName = form.get("itemName") ? String(form.get("itemName")) : null;
-  if (!jobId && !ticketId) return { status: 400, body: { error: "jobId or ticketId required" } };
-
-  const claim = await claimEvent(sb, String(idem), "upload_photo", jobId, me.cleaner_id, {
-    mime, size, ticketId, itemName,
-  });
-  // Rejeu : 200 avec le photoId memorise, ou 409 si la cle a ete posee sans que
-  // le depot aboutisse. Jamais de succes fabrique, sinon le telephone effacerait
-  // de sa file hors ligne une photo qui n'est jamais arrivee dans le bucket.
-  const rejeu = replayResponse(claim);
-  if (rejeu) return rejeu;
-  // Le chemin ne porte que la date et un identifiant aleatoire : la cle du
-  // menage contient le nom du guest, elle ne doit jamais se retrouver dans un
-  // chemin de stockage (ruling 9). Le rattachement vit dans la table photos.
-  // Il est calcule hors du try pour que le rattrapage puisse retirer du bucket un
-  // objet deja depose.
-  const path = "v3/" + todayDubai() + "/" + crypto.randomUUID() + "." + ext;
-  let depose = false;
-  try {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const { error: upErr } = await sb.storage.from(V3_PHOTO_BUCKET)
-      .upload(path, bytes, { contentType: mime, upsert: false });
-    if (upErr) throw upErr;
-    depose = true;
-    const { data: row, error } = await sb.from("photos").insert({
-      storage_path: path, job_id: jobId, ticket_id: ticketId,
-      item_name: itemName, cleaner_id: me.cleaner_id,
-    }).select("id").single();
-    if (error) throw error;
-    const result = { status: "success", photoId: Number(row.id), path };
-    await recordResult(sb, String(idem), result);
-    return { status: 200, body: result };
-  } catch (e) {
-    await releaseEvent(sb, String(idem));
-    // Depot reussi mais ligne photos manquante : sans ce retrait, l'objet reste
-    // dans le bucket sans que rien ne le reference, et le rejeu de la file en
-    // depose un second (revue tache 5, constatation 1). Au mieux : un nettoyage
-    // rate est journalise, jamais propage, pour ne pas masquer l'erreur d'origine.
-    if (depose) await removeQuietly(sb, path);
-    throw e;
-  }
-}
-
-// Retrait best-effort d'un objet du bucket. Ne leve jamais : l'appelant est deja
-// dans un chemin d'erreur et c'est l'erreur d'origine qui doit remonter.
-async function removeQuietly(sb: any, path: string): Promise<void> {
-  try {
-    const { error } = await sb.storage.from(V3_PHOTO_BUCKET).remove([path]);
-    if (error) {
-      console.warn("[v3] objet orphelin non retire " + path + ": " +
-        String((error as any).message ?? error));
-    }
-  } catch (e) {
-    console.warn("[v3] objet orphelin non retire " + path + ": " + String(e));
-  }
-}
+export { uploadPhoto, V3_MAX_PHOTO_BYTES, V3_MAX_UPLOAD_BODY_BYTES, V3_PHOTO_MIME } from "./v3_photos.ts";
 
 // ===========================================================================
 // Signalement d'une panne et verification d'un ticket pendant un menage
@@ -214,6 +101,17 @@ export async function reportProblem(
     : null;
   if (!meta) return { status: 400, body: { error: "unknown category" } };
   if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
+  // Un signalement pendant un menage porte un jobId, un signalement depuis l'ecran
+  // d'un logement n'en porte pas. Quand il y en a un, il doit designer un menage
+  // reel : resolu AVANT la pose de la cle d'idempotence, comme partout ailleurs.
+  // La cle resolue sert ensuite a `source_ref`, la seule colonne qui rend le ticket
+  // rattachable au menage pour un manager ou un technicien cote desktop. Le
+  // journal d'idempotence, lui, garde l'id oppose.
+  let reservationKey: string | null = null;
+  if (jobId) {
+    reservationKey = await resolveJob(sb, jobId);
+    if (!reservationKey) return { status: 404, body: { error: "Job not found." } };
+  }
   // Photo obligatoire : un signalement sans image repart en aller-retour WhatsApp,
   // c'est exactement ce que cette action supprime. Resolue AVANT la pose de la cle
   // d'idempotence, pour qu'un refus ne brule pas la cle.
@@ -259,7 +157,7 @@ export async function reportProblem(
       assigned_technician_id: technicianId,
       reported_by: me.name,
       source: "hk_planner_v3",
-      source_ref: jobId,
+      source_ref: reservationKey,
       photo_path: photo.storage_path,
       sla_deadline: new Date(Date.now() + slaHours * 3600_000).toISOString(),
       status: technicianId ? "assigned" : "open",

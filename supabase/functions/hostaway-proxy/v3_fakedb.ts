@@ -10,6 +10,7 @@ const UNIQUE: Record<string, string[]> = {
   laundry_counts: ["reservation_key"],
   photos: ["storage_path"],
   on_duty: ["duty_date"],
+  v3_job_keys: ["job_id"],
 };
 
 export function fakeDb(seed: Record<string, any[]> = {}) {

@@ -6,10 +6,13 @@
 // Aucune dependance a index.ts : ce module reste testable sans Deno.serve.
 //
 // Regles de la specification 2026-09-11 implementees ici :
-//   - jamais de nom de guest complet cote cleaner (ruling 9) ;
+//   - jamais de nom de guest complet cote cleaner (ruling 9), y compris dans
+//     l'identifiant de menage : le jobId rendu est l'id oppose de v3_job_keys,
+//     jamais la reservation_key qui porte le nom du guest (revue tache 3,
+//     constat 5) ;
 //   - le nom montre est « Apt + Immeuble », jamais un identifiant de listing.
 import {
-  estimatedMinutes, formatHour, normalizeUnitType, shortGuest,
+  ensureJobKeys, estimatedMinutes, formatHour, normalizeUnitType, shortGuest,
   templateItems, V3_TEMPLATE_NAME,
 } from "./v3.ts";
 import type { SessionUser } from "./v3.ts";
@@ -22,7 +25,7 @@ export interface V3Ticket {
 }
 
 export interface V3Stop {
-  jobId: string;              // reservation_key, jamais affichee telle quelle
+  jobId: string;              // id oppose « job_<20 hex> », aucune donnee guest
   listingId: string;
   listingName: string;        // « Apt + Immeuble », le seul nom montre
   aptNumber: string | null;
@@ -45,6 +48,7 @@ export interface V3Stop {
 }
 
 export interface MyDayInput {
+  sb: any;                                  // client Supabase, pour v3_job_keys
   date: string;
   me: SessionUser;
   reservations: any[];                      // sortie de buildCheckoutsPayload
@@ -69,15 +73,23 @@ export interface MyDayPayload {
   stops: V3Stop[];
 }
 
-// Ordre des arrets (specification, section 3) : same-day d'abord, puis heure
-// d'arrivee du prochain guest, puis heure de checkout. Un arret sans heure passe
-// apres ceux qui en ont une : une heure limite connue commande la journee. Le nom
-// du logement ne sert que de depart d'egalite, pour un ordre stable.
+// Ordre des arrets (specification, section 3) : same-day d'abord, puis arrivee du
+// prochain guest, puis heure de checkout. Un arret sans heure passe apres ceux qui
+// en ont une : une heure limite connue commande la journee. Le nom du logement ne
+// sert que de depart d'egalite, pour un ordre stable.
+//
+// L'arrivee est comparee AVEC sa date : sur la seule heure, une arrivee le 20 a
+// 09:00 sortait avant une arrivee le 13 a 15:00, alors qu'elle est une semaine
+// moins urgente (revue tache 3, constat 7).
 export function orderStops(stops: V3Stop[]): V3Stop[] {
   const heure = (v: string | null) => (v && /^\d{2}:\d{2}$/.test(v) ? v : "99:99");
+  const arrivee = (s: V3Stop) =>
+    (s.nextArrivalDate && /^\d{4}-\d{2}-\d{2}$/.test(s.nextArrivalDate)
+      ? s.nextArrivalDate
+      : "9999-99-99") + " " + heure(s.nextArrivalTime);
   return [...stops].sort((a, b) =>
     (a.sameDay ? 0 : 1) - (b.sameDay ? 0 : 1) ||
-    heure(a.nextArrivalTime).localeCompare(heure(b.nextArrivalTime)) ||
+    arrivee(a).localeCompare(arrivee(b)) ||
     heure(a.checkOutTime).localeCompare(heure(b.checkOutTime)) ||
     String(a.listingName).localeCompare(String(b.listingName))
   );
@@ -87,15 +99,19 @@ export function orderStops(stops: V3Stop[]): V3Stop[] {
 // to_confirm en est exclu : il attend le technicien, pas la cleaner (ruling 3).
 const TICKETS_A_VERIFIER = new Set(["open", "assigned", "in_progress", "waiting_parts"]);
 
-export function buildMyDay(input: MyDayInput): MyDayPayload {
+export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
   const mine = new Set((input.assignedKeys ?? []).map(String));
   const cancelled = new Set((input.cancelled ?? []).map(String));
   const done = new Set((input.done ?? []).map(String));
   const templatesByName: Record<string, any> = {};
   for (const t of input.templates ?? []) templatesByName[String(t?.name ?? "")] = t;
 
+  // `reservationKey` est la cle interne, celle qui porte le nom du guest : elle
+  // sert aux recoupements en memoire (assignations, chrono, avancement) et ne
+  // quitte jamais cette fonction. Le `jobId` du V3Stop est pose a la fin, en une
+  // seule ecriture pour toute la journee.
   const construire = (base: {
-    jobId: string; listingId: string; guest: unknown; nextGuestName: unknown;
+    reservationKey: string; listingId: string; guest: unknown; nextGuestName: unknown;
     checkOutTime: string | null; nextArrivalDate: string | null;
     nextArrivalTime: string | null; sameDay: boolean; label: string | null;
   }): V3Stop => {
@@ -103,12 +119,13 @@ export function buildMyDay(input: MyDayInput): MyDayPayload {
     const unitType = normalizeUnitType(listing.unit_type, listing.bedrooms);
     const templateName = V3_TEMPLATE_NAME[unitType] ?? "Studio";
     const { items, photoRequired } = templateItems(templatesByName[templateName]);
-    const timer = input.timers[base.jobId] ?? null;
-    const state: "todo" | "running" | "done" = done.has(base.jobId) || (timer && timer.finished_at)
-      ? "done"
-      : (timer && timer.started_at ? "running" : "todo");
+    const timer = input.timers[base.reservationKey] ?? null;
+    const state: "todo" | "running" | "done" =
+      done.has(base.reservationKey) || (timer && timer.finished_at)
+        ? "done"
+        : (timer && timer.started_at ? "running" : "todo");
     return {
-      jobId: base.jobId,
+      jobId: "",
       listingId: base.listingId,
       listingName: String(listing.listing_name ?? listing.internal_name ?? "Apartment"),
       aptNumber: listing.apt_number ? String(listing.apt_number) : null,
@@ -125,7 +142,7 @@ export function buildMyDay(input: MyDayInput): MyDayPayload {
       startedAt: timer && timer.started_at ? String(timer.started_at) : null,
       checklist: items,
       photoRequired,
-      progress: input.progress[base.jobId] ?? {},
+      progress: input.progress[base.reservationKey] ?? {},
       openTickets: (input.tickets ?? [])
         .filter((t) => String(t?.listing_id ?? "") === base.listingId &&
           TICKETS_A_VERIFIER.has(String(t?.status ?? "")))
@@ -139,16 +156,18 @@ export function buildMyDay(input: MyDayInput): MyDayPayload {
     };
   };
 
-  const stops: V3Stop[] = [];
+  // Chaque entree garde sa cle interne a cote de l'arret, le temps de la
+  // construction. Les deux se separent juste avant le retour.
+  const brut: Array<{ cle: string; stop: V3Stop }> = [];
   for (const r of input.reservations ?? []) {
-    const jobId = String(r?.checkOut ?? "") + "_" + (r?.guest || "Guest");
-    if (!mine.has(jobId) || cancelled.has(jobId)) continue;
+    const cle = String(r?.checkOut ?? "") + "_" + (r?.guest || "Guest");
+    if (!mine.has(cle) || cancelled.has(cle)) continue;
     // Un menage reporte garde sa cle figee sur la date d'origine : sa vraie date
     // vit dans cleaning_postponed (voir applyPostponements cote app.js).
-    const effective = input.postponed[jobId] ?? String(r?.checkOut ?? "");
+    const effective = input.postponed[cle] ?? String(r?.checkOut ?? "");
     if (effective !== input.date) continue;
-    stops.push(construire({
-      jobId,
+    brut.push({ cle, stop: construire({
+      reservationKey: cle,
       listingId: String(r?.listingId ?? ""),
       guest: r?.guest,
       nextGuestName: r?.nextGuest ? r.nextGuest.guest : null,
@@ -157,14 +176,21 @@ export function buildMyDay(input: MyDayInput): MyDayPayload {
       nextArrivalTime: r?.nextGuest ? formatHour(r.nextGuest.checkInTime) : null,
       sameDay: !!(r?.nextGuest && r.nextGuest.sameDay),
       label: null,
-    }));
+    }) });
   }
   for (const e of input.extras ?? []) {
-    const jobId = String(e?.reservation_key ?? "");
-    if (!jobId || !mine.has(jobId) || cancelled.has(jobId)) continue;
-    if (String(e?.cleaning_date ?? "") !== input.date) continue;
-    stops.push(construire({
-      jobId,
+    const cle = String(e?.reservation_key ?? "");
+    if (!cle || !mine.has(cle) || cancelled.has(cle)) continue;
+    // Memes deux regles que l'app actuelle sur un extra (app.js,
+    // __applyPlannerData) : un extra annule par un manager sort de la journee, et
+    // la fenetre porte sur la date EFFECTIVE, celle du report quand il y en a un.
+    // Sans cela, une cleaner allait nettoyer un appartement annule ou ratait un
+    // menage deplace vers son jour (revue tache 3, constat 4).
+    if (String(e?.status ?? "") === "cancelled") continue;
+    const effective = input.postponed[cle] ?? String(e?.cleaning_date ?? "");
+    if (effective !== input.date) continue;
+    brut.push({ cle, stop: construire({
+      reservationKey: cle,
       listingId: String(e?.listing_id ?? ""),
       guest: e?.guest_name,
       nextGuestName: null,
@@ -173,10 +199,16 @@ export function buildMyDay(input: MyDayInput): MyDayPayload {
       nextArrivalTime: null,
       sameDay: false,
       label: e?.label ? String(e.label) : null,
-    }));
+    }) });
   }
 
-  const ordered = orderStops(stops);
+  // Pose des identifiants opposes : une seule ecriture pour toute la journee. Elle
+  // leve si elle echoue, et c'est voulu : un id sans sa correspondance serait un
+  // arret sur lequel aucune action d'ecriture ne fonctionnerait ensuite.
+  const ids = await ensureJobKeys(input.sb, brut.map((b) => b.cle));
+  for (const b of brut) b.stop.jobId = ids[b.cle];
+
+  const ordered = orderStops(brut.map((b) => b.stop));
   return {
     status: "success",
     date: input.date,

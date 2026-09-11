@@ -6,6 +6,14 @@ import {
 
 const FAIZA = { cleaner_id: 3, name: "Faiza", role: "cleaner", color: "#e94560" };
 const JOB = "2026-09-12_Marc Lefevre";
+// Identifiant oppose rendu par v3.myDay : c'est lui, et jamais la
+// reservation_key, que le telephone envoie (revue tache 3, constat 5).
+const JOB_ID = "job_1a2b3c4d5e6f70819a2b";
+const LIEN = { job_id: JOB_ID, reservation_key: JOB };
+
+function base(seed: Record<string, any[]> = {}) {
+  return fakeDb({ v3_job_keys: [LIEN], ...seed });
+}
 
 function formulaire(champs: Record<string, string>, octets = 64, type = "image/jpeg") {
   const form = new FormData();
@@ -15,8 +23,8 @@ function formulaire(champs: Record<string, string>, octets = 64, type = "image/j
 }
 
 Deno.test("uploadPhoto depose dans le bucket prive et insere la ligne photos", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
-  const r = await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0001", jobId: JOB }));
+  const sb = base({ job_events: [], photos: [] });
+  const r = await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0001", jobId: JOB_ID }));
   assertEquals(r.status, 200);
   const corps = r.body as any;
   assertEquals(typeof corps.photoId, "number");
@@ -24,13 +32,13 @@ Deno.test("uploadPhoto depose dans le bucket prive et insere la ligne photos", a
   assertEquals(sb.storage.uploads[0].bucket, "cleaning-photos");
   assertEquals(sb.storage.uploads[0].contentType, "image/jpeg");
   assertEquals(sb.tables.photos.length, 1);
-  assertEquals(sb.tables.photos[0].job_id, JOB);
+  assertEquals(sb.tables.photos[0].job_id, JOB_ID);
   assertEquals(sb.tables.photos[0].cleaner_id, 3);
 });
 
 Deno.test("le chemin de stockage ne contient jamais le nom du guest", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
-  const r = await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0002", jobId: JOB }));
+  const sb = base({ job_events: [], photos: [] });
+  const r = await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0002", jobId: JOB_ID }));
   const chemin = (r.body as any).path as string;
   assertEquals(chemin.startsWith("v3/"), true);
   assertEquals(chemin.includes("Marc"), false);
@@ -39,9 +47,9 @@ Deno.test("le chemin de stockage ne contient jamais le nom du guest", async () =
 });
 
 Deno.test("uploadPhoto est idempotent : meme cle, meme photoId, un seul depot", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
-  const form1 = formulaire({ idem: "idem-photo-0003", jobId: JOB });
-  const form2 = formulaire({ idem: "idem-photo-0003", jobId: JOB });
+  const sb = base({ job_events: [], photos: [] });
+  const form1 = formulaire({ idem: "idem-photo-0003", jobId: JOB_ID });
+  const form2 = formulaire({ idem: "idem-photo-0003", jobId: JOB_ID });
   const un = await uploadPhoto(sb, FAIZA as any, form1);
   const deux = await uploadPhoto(sb, FAIZA as any, form2);
   assertEquals((deux.body as any).photoId, (un.body as any).photoId);
@@ -53,14 +61,14 @@ Deno.test("uploadPhoto est idempotent : meme cle, meme photoId, un seul depot", 
 // dont l'ecriture metier n'a jamais abouti ne rend JAMAIS un succes fabrique.
 // Sans ce 409 le telephone effacerait de sa file une photo jamais deposee.
 Deno.test("uploadPhoto rend 409 quand la cle est posee sans resultat", async () => {
-  const sb = fakeDb({
+  const sb = base({
     job_events: [{
-      id: 1, idem_key: "idem-photo-0009", event_type: "upload_photo", job_id: JOB,
+      id: 1, idem_key: "idem-photo-0009", event_type: "upload_photo", job_id: JOB_ID,
       cleaner_id: 3, payload: {}, result: null, created_at: "2026-09-12T06:00:00Z",
     }],
     photos: [],
   });
-  const r = await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0009", jobId: JOB }));
+  const r = await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0009", jobId: JOB_ID }));
   assertEquals(r.status, 409);
   assertEquals((r.body as any).error, "Still processing. Retry.");
   assertEquals(sb.storage.uploads.length, 0);
@@ -69,29 +77,29 @@ Deno.test("uploadPhoto rend 409 quand la cle est posee sans resultat", async () 
 });
 
 Deno.test("uploadPhoto refuse un type non image et un fichier trop gros", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
+  const sb = base({ job_events: [], photos: [] });
   const pdf = await uploadPhoto(sb, FAIZA as any,
-    formulaire({ idem: "idem-photo-0004", jobId: JOB }, 64, "application/pdf"));
+    formulaire({ idem: "idem-photo-0004", jobId: JOB_ID }, 64, "application/pdf"));
   assertEquals(pdf.status, 400);
   const gros = await uploadPhoto(sb, FAIZA as any,
-    formulaire({ idem: "idem-photo-0005", jobId: JOB }, V3_MAX_PHOTO_BYTES + 1));
+    formulaire({ idem: "idem-photo-0005", jobId: JOB_ID }, V3_MAX_PHOTO_BYTES + 1));
   assertEquals(gros.status, 413);
   assertEquals(sb.storage.uploads.length, 0);
   assertEquals(sb.tables.job_events.length, 0);
 });
 
 Deno.test("uploadPhoto exige une cle d'idempotence et une cible", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
-  assertEquals((await uploadPhoto(sb, FAIZA as any, formulaire({ jobId: JOB }))).status, 400);
+  const sb = base({ job_events: [], photos: [] });
+  assertEquals((await uploadPhoto(sb, FAIZA as any, formulaire({ jobId: JOB_ID }))).status, 400);
   assertEquals((await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0006" }))).status, 400);
 });
 
 Deno.test("uploadPhoto libere la cle si le depot echoue, et n'insere rien", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
+  const sb = base({ job_events: [], photos: [] });
   sb.fail["storage.upload"] = { message: "bucket down" };
   let leve = false;
   try {
-    await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0007", jobId: JOB }));
+    await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0007", jobId: JOB_ID }));
   } catch (_e) {
     leve = true;
   }
@@ -105,11 +113,11 @@ Deno.test("uploadPhoto libere la cle si le depot echoue, et n'insere rien", asyn
 // ne pointe sur du vide ; ce test verrouille l'autre moitie, l'objet depose est
 // retire quand la ligne ne suit pas, sinon le rejeu en deposerait un second.
 Deno.test("uploadPhoto retire du bucket l'objet depose quand l'insert photos echoue", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
+  const sb = base({ job_events: [], photos: [] });
   sb.fail["photos.insert"] = { message: "db down" };
   let leve = false;
   try {
-    await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0008", jobId: JOB }));
+    await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0008", jobId: JOB_ID }));
   } catch (_e) {
     leve = true;
   }
@@ -127,12 +135,12 @@ Deno.test("uploadPhoto retire du bucket l'objet depose quand l'insert photos ech
 // Un nettoyage impossible ne doit jamais masquer l'erreur d'origine : l'action
 // leve quand meme, et la cle reste liberee pour que le telephone rejoue.
 Deno.test("un nettoyage de bucket rate ne masque pas l'erreur d'origine", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
+  const sb = base({ job_events: [], photos: [] });
   sb.fail["photos.insert"] = { message: "db down" };
   sb.fail["storage.remove"] = { message: "storage down" };
   let leve = false;
   try {
-    await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0010", jobId: JOB }));
+    await uploadPhoto(sb, FAIZA as any, formulaire({ idem: "idem-photo-0010", jobId: JOB_ID }));
   } catch (_e) {
     leve = true;
   }
@@ -143,10 +151,10 @@ Deno.test("un nettoyage de bucket rate ne masque pas l'erreur d'origine", async 
 // Revue tache 5, constatation 4 : un ticketId illisible partait en NaN, que
 // supabase-js serialise en null, donc le lien vers le ticket sautait en silence.
 Deno.test("uploadPhoto refuse un ticketId qui n'est pas un entier positif", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
+  const sb = base({ job_events: [], photos: [] });
   for (const mauvais of ["abc", "12.5", "-3", "0"]) {
     const r = await uploadPhoto(sb, FAIZA as any,
-      formulaire({ idem: "idem-photo-0011", jobId: JOB, ticketId: mauvais }));
+      formulaire({ idem: "idem-photo-0011", jobId: JOB_ID, ticketId: mauvais }));
     assertEquals(r.status, 400);
     assertEquals((r.body as any).error, "ticketId must be a number");
   }
@@ -155,16 +163,16 @@ Deno.test("uploadPhoto refuse un ticketId qui n'est pas un entier positif", asyn
   assertEquals(sb.storage.uploads.length, 0);
   // Un ticketId valide passe, et il est ecrit tel quel.
   const ok = await uploadPhoto(sb, FAIZA as any,
-    formulaire({ idem: "idem-photo-0012", jobId: JOB, ticketId: "71" }));
+    formulaire({ idem: "idem-photo-0012", jobId: JOB_ID, ticketId: "71" }));
   assertEquals(ok.status, 200);
   assertEquals(sb.tables.photos[0].ticket_id, 71);
 });
 
-// jobId est la reservation_key, donc du texte : la symetrie avec ticketId porte
+// jobId est un identifiant oppose, donc du texte : la symetrie avec ticketId porte
 // sur le type attendu, pas sur la forme. Une partie qui n'est pas du texte ne
 // doit pas finir stringifiee en « [object File] » dans photos.job_id.
 Deno.test("uploadPhoto refuse un jobId qui n'est pas du texte", async () => {
-  const sb = fakeDb({ job_events: [], photos: [] });
+  const sb = base({ job_events: [], photos: [] });
   const form = new FormData();
   form.set("idem", "idem-photo-0013");
   form.set("jobId", new Blob([new Uint8Array(8)], { type: "image/jpeg" }), "jobid.jpg");
@@ -191,7 +199,7 @@ function espionPush() {
 }
 
 function baseTickets() {
-  return fakeDb({
+  return base({
     job_events: [],
     photos: [{ id: 55, storage_path: "v3/2026-09-12/abc.jpg", job_id: null, ticket_id: null, cleaner_id: 3 }],
     maintenance_tickets: [],
@@ -211,7 +219,7 @@ Deno.test("reportProblem cree le ticket, l'assigne a la permanence et pousse", a
   const sb = baseTickets();
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB, listingId: "102", category: "ac", photoId: 55,
+    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55,
     note: "Bedroom unit stops after 10 minutes", idem: "idem-report-0001",
   }, { push: spy.push });
   assertEquals(r.status, 200);
@@ -222,6 +230,10 @@ Deno.test("reportProblem cree le ticket, l'assigne a la permanence et pousse", a
   assertEquals(ticket.status, "assigned");
   assertEquals(ticket.assigned_technician_id, 5);
   assertEquals(ticket.source, "hk_planner_v3");
+  // source_ref garde la CLE interne : c'est la seule colonne qui rend le ticket
+  // rattachable au menage pour un manager ou un technicien, cote desktop. Rien de
+  // maintenance_tickets n'est jamais renvoye a une cleaner hormis id, titre,
+  // categorie et priorite (voir la lecture de v3.myDay).
   assertEquals(ticket.source_ref, JOB);
   assertEquals(ticket.photo_path, "v3/2026-09-12/abc.jpg");
   assertEquals(sb.tables.photos[0].ticket_id, ticket.id);
@@ -238,7 +250,7 @@ Deno.test("reportProblem ne fabrique jamais une priorite urgente", async () => {
   const sb = baseTickets();
   const spy = espionPush();
   await reportProblem(sb, FAIZA as any, {
-    jobId: JOB, listingId: "102", category: "ac", photoId: 55,
+    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55,
     priority: "urgent", idem: "idem-report-0100",
   }, { push: spy.push });
   assertEquals(sb.tables.maintenance_tickets[0].priority, "medium");
@@ -249,13 +261,13 @@ Deno.test("reportProblem exige une photo, une categorie connue et un logement", 
   const sb = baseTickets();
   const spy = espionPush();
   const sansPhoto = await reportProblem(sb, FAIZA as any,
-    { jobId: JOB, listingId: "102", category: "ac", idem: "idem-report-0002" }, { push: spy.push });
+    { jobId: JOB_ID, listingId: "102", category: "ac", idem: "idem-report-0002" }, { push: spy.push });
   assertEquals(sansPhoto.status, 400);
   const mauvaiseCat = await reportProblem(sb, FAIZA as any,
-    { jobId: JOB, listingId: "102", category: "volcan", photoId: 55, idem: "idem-report-0003" }, { push: spy.push });
+    { jobId: JOB_ID, listingId: "102", category: "volcan", photoId: 55, idem: "idem-report-0003" }, { push: spy.push });
   assertEquals(mauvaiseCat.status, 400);
   const sansLogement = await reportProblem(sb, FAIZA as any,
-    { jobId: JOB, category: "ac", photoId: 55, idem: "idem-report-0004" }, { push: spy.push });
+    { jobId: JOB_ID, category: "ac", photoId: 55, idem: "idem-report-0004" }, { push: spy.push });
   assertEquals(sansLogement.status, 400);
   assertEquals(sb.tables.maintenance_tickets.length, 0);
   assertEquals(spy.envois.length, 0);
@@ -265,7 +277,7 @@ Deno.test("reportProblem rejoue sans creer un second ticket", async () => {
   const sb = baseTickets();
   const spy = espionPush();
   const corps = {
-    jobId: JOB, listingId: "102", category: "plumbing", photoId: 55, idem: "idem-report-0005",
+    jobId: JOB_ID, listingId: "102", category: "plumbing", photoId: 55, idem: "idem-report-0005",
   };
   const un = await reportProblem(sb, FAIZA as any, corps, { push: spy.push });
   const deux = await reportProblem(sb, FAIZA as any, corps, { push: spy.push });
@@ -280,12 +292,12 @@ Deno.test("reportProblem rejoue sans creer un second ticket", async () => {
 Deno.test("reportProblem rend 409 quand la cle est posee sans resultat", async () => {
   const sb = baseTickets();
   sb.tables.job_events.push({
-    id: 1, idem_key: "idem-report-0409", event_type: "report_problem", job_id: JOB,
+    id: 1, idem_key: "idem-report-0409", event_type: "report_problem", job_id: JOB_ID,
     cleaner_id: 3, payload: {}, result: null, created_at: "2026-09-12T06:00:00Z",
   });
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB, listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0409",
+    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0409",
   }, { push: spy.push });
   assertEquals(r.status, 409);
   assertEquals((r.body as any).error, "Still processing. Retry.");
@@ -294,14 +306,14 @@ Deno.test("reportProblem rend 409 quand la cle est posee sans resultat", async (
 });
 
 Deno.test("reportProblem reste ouvert quand aucun technicien n'est disponible", async () => {
-  const sb = fakeDb({
+  const sb = base({
     job_events: [], maintenance_tickets: [], maintenance_sla: [], ticket_comments: [], cleaning_log: [],
     on_duty: [], cleaners: [{ id: 1, name: "Walter", role: "manager", is_active: true }],
     photos: [{ id: 55, storage_path: "v3/2026-09-12/abc.jpg", job_id: null, ticket_id: null, cleaner_id: 3 }],
   });
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB, listingId: "102", category: "other", photoId: 55, idem: "idem-report-0006",
+    jobId: JOB_ID, listingId: "102", category: "other", photoId: 55, idem: "idem-report-0006",
   }, { push: spy.push });
   assertEquals(r.status, 200);
   assertEquals(sb.tables.maintenance_tickets[0].status, "open");
@@ -345,7 +357,7 @@ Deno.test("reportProblem retrouve la photo par la cle de son televersement", asy
   });
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB, listingId: "102", category: "pest", photoIdem: "idem-photo-9000",
+    jobId: JOB_ID, listingId: "102", category: "pest", photoIdem: "idem-photo-9000",
     idem: "idem-report-0007",
   }, { push: spy.push });
   assertEquals(r.status, 200);
@@ -356,7 +368,7 @@ Deno.test("un signalement dont la photo n'est pas retrouvee ne brule pas sa cle"
   const sb = baseTickets();
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB, listingId: "102", category: "pest", photoIdem: "idem-photo-9999",
+    jobId: JOB_ID, listingId: "102", category: "pest", photoIdem: "idem-photo-9999",
     idem: "idem-report-0008",
   }, { push: spy.push });
   assertEquals(r.status, 400);
@@ -372,7 +384,7 @@ Deno.test("reportProblem libere sa cle quand la photo designee n'existe plus", a
   const sb = baseTickets();
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB, listingId: "102", category: "ac", photoId: 4242, idem: "idem-report-0009",
+    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 4242, idem: "idem-report-0009",
   }, { push: spy.push });
   assertEquals(r.status, 400);
   assertEquals(sb.tables.job_events.length, 0);
@@ -380,7 +392,7 @@ Deno.test("reportProblem libere sa cle quand la photo designee n'existe plus", a
   // Et le rejeu repart pour de vrai, au lieu de rendre un faux succes.
   sb.tables.photos.push({ id: 4242, storage_path: "v3/2026-09-12/def.jpg", job_id: null, ticket_id: null, cleaner_id: 3 });
   const deux = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB, listingId: "102", category: "ac", photoId: 4242, idem: "idem-report-0009",
+    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 4242, idem: "idem-report-0009",
   }, { push: spy.push });
   assertEquals(deux.status, 200);
   assertEquals(sb.tables.maintenance_tickets.length, 1);
@@ -400,7 +412,7 @@ Deno.test("checkTicket rend 409 quand la cle est posee sans resultat", async () 
   const sb = baseTickets();
   sb.tables.maintenance_tickets.push({ id: 71, listing_id: "102", title: "X", status: "open" });
   sb.tables.job_events.push({
-    id: 1, idem_key: "idem-check-0409", event_type: "check_ticket", job_id: JOB,
+    id: 1, idem_key: "idem-check-0409", event_type: "check_ticket", job_id: JOB_ID,
     cleaner_id: 3, payload: {}, result: null, created_at: "2026-09-12T06:00:00Z",
   });
   const r = await checkTicket(sb, FAIZA as any, { ticketId: 71, photoId: 55, idem: "idem-check-0409" });
@@ -447,7 +459,7 @@ Deno.test("une photo qui n'appartient pas a la cleaner est refusee", async () =>
   sb.tables.maintenance_tickets.push({ id: 71, listing_id: "102", title: "X", status: "open" });
   const spy = espionPush();
   const signalement = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB, listingId: "102", category: "ac", photoId: 56, idem: "idem-report-0010",
+    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 56, idem: "idem-report-0010",
   }, { push: spy.push });
   assertEquals(signalement.status, 400);
   const verif = await checkTicket(sb, FAIZA as any, { ticketId: 71, photoId: 56, idem: "idem-check-0010" });
@@ -491,7 +503,7 @@ Deno.test("reportProblem refuse une categorie heritee d'Object.prototype", async
   const spy = espionPush();
   for (const cat of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
     const r = await reportProblem(sb, FAIZA as any, {
-      jobId: JOB, listingId: "102", category: cat, photoId: 55, idem: "idem-proto-" + cat,
+      jobId: JOB_ID, listingId: "102", category: cat, photoId: 55, idem: "idem-proto-" + cat,
     }, { push: spy.push });
     assertEquals(r.status, 400);
     assertEquals((r.body as any).error, "unknown category");
@@ -508,7 +520,7 @@ Deno.test("reportProblem ne duplique pas le ticket quand le retro-lien photo ech
   const sb = baseTickets();
   sb.fail["photos.update"] = { message: "photos down" };
   const spy = espionPush();
-  const corps = { jobId: JOB, listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0011" };
+  const corps = { jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0011" };
   const un = await reportProblem(sb, FAIZA as any, corps, { push: spy.push });
   assertEquals(un.status, 200);
   assertEquals(sb.tables.maintenance_tickets.length, 1);
@@ -536,4 +548,61 @@ Deno.test("checkTicket ne double pas le commentaire quand une ecriture accessoir
   const deux = await checkTicket(sb, FAIZA as any, corps);
   assertEquals(deux.status, 200);
   assertEquals(sb.tables.ticket_comments.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Identifiant oppose (revue tache 3, constat 5)
+// ---------------------------------------------------------------------------
+
+Deno.test("uploadPhoto rend 404 sur un jobId inconnu et ne depose rien", async () => {
+  const sb = base({ job_events: [], photos: [] });
+  const r = await uploadPhoto(sb, FAIZA as any,
+    formulaire({ idem: "idem-photo-0404", jobId: "job_ffffffffffffffffffff" }));
+  assertEquals(r.status, 404);
+  assertEquals((r.body as any).error, "Job not found.");
+  assertEquals(sb.storage.uploads.length, 0);
+  assertEquals(sb.tables.photos.length, 0);
+  assertEquals(sb.tables.job_events.length, 0);
+});
+
+Deno.test("uploadPhoto sans jobId reste possible quand un ticketId est fourni", async () => {
+  const sb = base({ job_events: [], photos: [] });
+  const r = await uploadPhoto(sb, FAIZA as any,
+    formulaire({ idem: "idem-photo-0405", ticketId: "71" }));
+  assertEquals(r.status, 200);
+  assertEquals(sb.tables.photos[0].job_id, null);
+  assertEquals(sb.tables.photos[0].ticket_id, 71);
+});
+
+Deno.test("reportProblem rend 404 sur un jobId inconnu, sans creer de ticket", async () => {
+  const sb = baseTickets();
+  const spy = espionPush();
+  const r = await reportProblem(sb, FAIZA as any, {
+    jobId: "job_ffffffffffffffffffff", listingId: "102", category: "ac",
+    photoId: 55, idem: "idem-report-0404",
+  }, { push: spy.push });
+  assertEquals(r.status, 404);
+  assertEquals(sb.tables.maintenance_tickets.length, 0);
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(spy.envois.length, 0);
+});
+
+Deno.test("reportProblem sans jobId ouvre quand meme un ticket, sans source_ref", async () => {
+  // Le signalement depuis l'ecran d'un logement, hors menage : il n'y a pas de
+  // jobId a resoudre et il n'en faut pas.
+  const sb = baseTickets();
+  const r = await reportProblem(sb, FAIZA as any, {
+    listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0405",
+  }, { push: espionPush().push });
+  assertEquals(r.status, 200);
+  assertEquals(sb.tables.maintenance_tickets[0].source_ref, null);
+});
+
+Deno.test("reportProblem ne laisse aucun nom de guest dans le journal d'idempotence", async () => {
+  const sb = baseTickets();
+  await reportProblem(sb, FAIZA as any, {
+    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0406",
+  }, { push: espionPush().push });
+  assertEquals(sb.tables.job_events[0].job_id, JOB_ID);
+  assertEquals(JSON.stringify(sb.tables.job_events[0]).includes("Lefevre"), false);
 });

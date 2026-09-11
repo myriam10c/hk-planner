@@ -2,10 +2,19 @@
 // Meme regle pour les trois : la cle d'idempotence est posee avant l'ecriture
 // metier, et liberee si cette ecriture echoue, pour que le rejeu de la file hors
 // ligne ne perde ni ne double jamais un geste.
+//
+// Deux identifiants cohabitent, et ne doivent jamais etre confondus :
+//   - `jobId` : l'id oppose « job_<20 hex> » rendu par v3.myDay. C'est le seul
+//     que le telephone connait. Il part dans job_events.job_id, dans photos.job_id,
+//     dans les resultats memorises et dans les etiquettes de notification.
+//   - `reservationKey` : la cle interne « <date>_<guest> », resolue ici par
+//     resolveJob. Elle seule indexe cleaning_timer, checklist_progress,
+//     laundry_counts, menage_done, cleaning_notes et cleaning_log, et elle ne
+//     quitte jamais le proxy (revue tache 3, constat 5).
 import type { SessionUser } from "./auth.ts";
 import {
   ActionResult, claimEvent, managerIds, pickSnapshot, readLinen, recordResult,
-  releaseEvent, replayResponse, v3Log, validIdem,
+  releaseEvent, replayResponse, resolveJob, v3Log, validIdem,
 } from "./v3.ts";
 import { sendPush } from "./push.ts";
 import type { PushFn } from "./v3_tickets.ts";
@@ -15,6 +24,11 @@ export async function startJob(sb: any, me: SessionUser, body: any): Promise<Act
   const idem = body?.idem;
   if (!jobId) return { status: 400, body: { error: "jobId required" } };
   if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
+  // Resolu AVANT claimEvent : un id inconnu ne doit pas bruler la cle
+  // d'idempotence du telephone, sinon le rejeu du meme geste rendrait 409 pour
+  // toujours une fois l'id repare.
+  const reservationKey = await resolveJob(sb, jobId);
+  if (!reservationKey) return { status: 404, body: { error: "Job not found." } };
 
   const claim = await claimEvent(sb, idem, "start_job", jobId, me.cleaner_id, { jobId });
   // Rejeu : 200 avec le resultat memorise, ou 409 si la cle a ete posee sans que
@@ -31,13 +45,13 @@ export async function startJob(sb: any, me: SessionUser, body: any): Promise<Act
     // `dejaOuvert` a faux, et l'action ecraserait le chrono ouvert d'une collegue
     // avec une fausse heure de depart. Meme regle que les lectures de v3.myDay.
     const { data: existant, error: lecture } = await sb.from("cleaning_timer")
-      .select("started_at, finished_at").eq("reservation_key", jobId).maybeSingle();
+      .select("started_at, finished_at").eq("reservation_key", reservationKey).maybeSingle();
     if (lecture) throw lecture;
     const dejaOuvert = !!(existant && existant.started_at && !existant.finished_at);
     const startedAt = dejaOuvert ? String(existant.started_at) : new Date().toISOString();
     if (!dejaOuvert) {
       const { error } = await sb.from("cleaning_timer").upsert({
-        reservation_key: jobId,
+        reservation_key: reservationKey,
         cleaner_id: me.cleaner_id,
         started_at: startedAt,
         finished_at: null,
@@ -47,7 +61,7 @@ export async function startJob(sb: any, me: SessionUser, body: any): Promise<Act
         pause_count: 0,
       }, { onConflict: "reservation_key" });
       if (error) throw error;
-      await v3Log(sb, jobId, "timer_started", me.name, { cleaner_id: me.cleaner_id, via: "v3" });
+      await v3Log(sb, reservationKey, "timer_started", me.name, { cleaner_id: me.cleaner_id, via: "v3" });
     }
     const result = { status: "success", jobId, startedAt };
     await recordResult(sb, idem, result);
@@ -82,6 +96,8 @@ export async function tickItem(sb: any, me: SessionUser, body: any): Promise<Act
   if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
   const photoId = readPhotoId(body?.photoId);
   if (photoId === "invalid") return { status: 400, body: { error: "Invalid photo id." } };
+  const reservationKey = await resolveJob(sb, jobId);
+  if (!reservationKey) return { status: 404, body: { error: "Job not found." } };
 
   const claim = await claimEvent(sb, idem, "tick", jobId, me.cleaner_id, {
     itemId, checked, photoId,
@@ -90,7 +106,7 @@ export async function tickItem(sb: any, me: SessionUser, body: any): Promise<Act
   if (rejeu) return rejeu;
   try {
     const { error } = await sb.from("checklist_progress").upsert({
-      reservation_key: jobId, item_name: itemId, is_done: checked,
+      reservation_key: reservationKey, item_name: itemId, is_done: checked,
       updated_at: new Date().toISOString(),
     }, { onConflict: "reservation_key,item_name" });
     if (error) throw error;
@@ -132,17 +148,21 @@ function dateDeLaCle(jobId: string): string | null {
   return m ? m[1] : null;
 }
 
+// Prend la reservation_key, et non l'id oppose : les instantanes de proxy_cache
+// sont indexes sur « <checkOut>_<guest> ». C'est l'appelant (le bloc de dispatch
+// d'index.ts) qui resout l'id avant d'appeler ici.
+//
 // Contexte lu sans jamais appeler Hostaway : uniquement les instantanes deja poses
 // dans proxy_cache (par l'app actuelle ou par v3.myDay), choisis par le meme
 // `pickSnapshot` que la lecture de la journee. Aucun instantane utilisable = on
 // finit quand meme, sans notification, et on le journalise. Rien ici ne leve :
 // une notification est un confort, elle ne doit jamais empecher une cleaner de
 // finir son menage.
-export async function loadFinishContext(sb: any, jobId: string): Promise<FinishContext> {
+export async function loadFinishContext(sb: any, reservationKey: string): Promise<FinishContext> {
   let sameDay = false;
   let listingName = "";
   let listingId = "";
-  const date = dateDeLaCle(jobId);
+  const date = dateDeLaCle(reservationKey);
   if (date) {
     try {
       const { data } = await sb.from("proxy_cache")
@@ -150,7 +170,7 @@ export async function loadFinishContext(sb: any, jobId: string): Promise<FinishC
       const snap = pickSnapshot(data ?? [], date);
       const reservations = (snap && snap.payload && snap.payload.reservations) || [];
       const hit = reservations.find((r: any) =>
-        String(r.checkOut) + "_" + (r.guest || "Guest") === jobId);
+        String(r.checkOut) + "_" + (r.guest || "Guest") === reservationKey);
       if (hit) {
         sameDay = !!(hit.nextGuest && hit.nextGuest.sameDay);
         listingName = String(hit.listing ?? "");
@@ -193,6 +213,8 @@ export async function finishJob(
   const idem = body?.idem;
   if (!jobId) return { status: 400, body: { error: "jobId required" } };
   if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
+  const reservationKey = await resolveJob(sb, jobId);
+  if (!reservationKey) return { status: 404, body: { error: "Job not found." } };
   const checklist: Record<string, boolean> = (body?.checklist && typeof body.checklist === "object")
     ? body.checklist
     : {};
@@ -231,7 +253,7 @@ export async function finishJob(
     const items = Object.keys(checklist);
     if (items.length > 0) {
       const rows = items.map((name) => ({
-        reservation_key: jobId, item_name: name, is_done: checklist[name] === true,
+        reservation_key: reservationKey, item_name: name, is_done: checklist[name] === true,
         updated_at: new Date().toISOString(),
       }));
       const { error } = await sb.from("checklist_progress")
@@ -249,21 +271,21 @@ export async function finishJob(
       // counted_on vient du prefixe date de la cle, pas de l'heure de saisie : un
       // menage du 12 valide a 1h du matin le 13 reste impute au 12 (meme regle que
       // l'action saveLaundryCount).
-      const countedOn = dateDeLaCle(jobId) ?? new Date().toISOString().slice(0, 10);
+      const countedOn = dateDeLaCle(reservationKey) ?? new Date().toISOString().slice(0, 10);
       const { error } = await sb.from("laundry_counts").upsert({
-        reservation_key: jobId, ...linen, counted_on: countedOn,
+        reservation_key: reservationKey, ...linen, counted_on: countedOn,
         author: me.name, updated_at: new Date().toISOString(),
       }, { onConflict: "reservation_key" });
       if (error) throw error;
-      await v3Log(sb, jobId, "laundry_counted", me.name, linen);
+      await v3Log(sb, reservationKey, "laundry_counted", me.name, linen);
     }
     if (body?.notes && String(body.notes).trim()) {
       const noteText = String(body.notes).trim().slice(0, 2000);
       const { error } = await sb.from("cleaning_notes").insert({
-        reservation_key: jobId, note_text: noteText, author: me.name,
+        reservation_key: reservationKey, note_text: noteText, author: me.name,
       });
       if (error) throw error;
-      await v3Log(sb, jobId, "note_added", me.name, { text: noteText });
+      await v3Log(sb, reservationKey, "note_added", me.name, { text: noteText });
     }
 
     // Chrono : meme calcul que l'action stopTimer, pauses comprises (un menage
@@ -272,7 +294,7 @@ export async function finishJob(
     // duree nulle memorisee, et le rejeu rendrait cette meme duree nulle.
     const { data: timer, error: lecture } = await sb.from("cleaning_timer")
       .select("started_at, finished_at, duration_minutes, total_pause_seconds, pause_count, paused_at")
-      .eq("reservation_key", jobId).maybeSingle();
+      .eq("reservation_key", reservationKey).maybeSingle();
     if (lecture) throw lecture;
     let durationMinutes: number | null = null;
     if (timer && timer.finished_at) {
@@ -298,16 +320,16 @@ export async function finishJob(
         paused_at: null,
         total_pause_seconds: pauseSec,
         pause_count: pauseCount,
-      }).eq("reservation_key", jobId);
+      }).eq("reservation_key", reservationKey);
       if (error) throw error;
-      await v3Log(sb, jobId, "timer_stopped", me.name, { duration_minutes: durationMinutes, via: "v3" });
+      await v3Log(sb, reservationKey, "timer_stopped", me.name, { duration_minutes: durationMinutes, via: "v3" });
     }
 
     const { error: dErr } = await sb.from("menage_done").upsert({
-      reservation_key: jobId, done: true, updated_at: new Date().toISOString(),
+      reservation_key: reservationKey, done: true, updated_at: new Date().toISOString(),
     }, { onConflict: "reservation_key" });
     if (dErr) throw dErr;
-    await v3Log(sb, jobId, "marked_done", me.name, { via: "v3", unchecked });
+    await v3Log(sb, reservationKey, "marked_done", me.name, { via: "v3", unchecked });
 
     result = { status: "success", jobId, durationMinutes, unchecked };
     await recordResult(sb, idem, result);

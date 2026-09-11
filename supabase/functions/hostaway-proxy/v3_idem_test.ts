@@ -7,8 +7,8 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import {
-  claimEvent, purgeStaleClaims, recordResult, releaseEvent, replayResponse,
-  staleClaimIds, V3_CLAIM_TTL_MS, V3_EVENT_TYPES,
+  claimEvent, ensureJobKey, ensureJobKeys, jobKeyFor, purgeStaleClaims, recordResult,
+  releaseEvent, replayResponse, resolveJob, staleClaimIds, V3_CLAIM_TTL_MS, V3_EVENT_TYPES,
 } from "./v3.ts";
 
 Deno.test("claimEvent laisse passer la premiere cle et rejoue les suivantes", async () => {
@@ -98,4 +98,82 @@ Deno.test("purgeStaleClaims supprime les cles bloquees et laisse les autres", as
   // Deuxieme passage : plus rien a purger, et aucune suppression a vide.
   assertEquals(await purgeStaleClaims(sb), 0);
   assertEquals(sb.tables.job_events.length, 2);
+});
+
+// ===========================================================================
+// Identifiant de menage oppose (revue tache 3, constat 5)
+// ===========================================================================
+
+Deno.test("jobKeyFor est deterministe et ne laisse rien filtrer de la cle", async () => {
+  const a = await jobKeyFor("2026-09-12_Marc Lefevre");
+  const b = await jobKeyFor("2026-09-12_Marc Lefevre");
+  const c = await jobKeyFor("2026-09-12_Anna Weber");
+  assertEquals(a, b);
+  assertEquals(a === c, false);
+  // Forme figee : le front (taches 10 a 13) met cet id dans le hash de l'URL.
+  assertEquals(/^job_[0-9a-f]{20}$/.test(a), true);
+  assertEquals(a.includes("Marc"), false);
+  assertEquals(a.includes("Lefevre"), false);
+  assertEquals(a.includes("2026"), false);
+  // Une cle d'extra passe par le meme chemin.
+  const extra = await jobKeyFor("extra_2026-09-12_ab12cd34");
+  assertEquals(/^job_[0-9a-f]{20}$/.test(extra), true);
+  assertEquals(extra === a, false);
+});
+
+Deno.test("ensureJobKey n'ecrit qu'une ligne, meme appele deux fois", async () => {
+  const sb = fakeDb({ v3_job_keys: [] });
+  const un = await ensureJobKey(sb, "2026-09-12_Marc Lefevre");
+  const deux = await ensureJobKey(sb, "2026-09-12_Marc Lefevre");
+  assertEquals(un, deux);
+  assertEquals(un, await jobKeyFor("2026-09-12_Marc Lefevre"));
+  assertEquals(sb.tables.v3_job_keys.length, 1);
+  assertEquals(sb.tables.v3_job_keys[0].reservation_key, "2026-09-12_Marc Lefevre");
+  // Une deuxieme reservation ajoute sa propre ligne.
+  await ensureJobKey(sb, "2026-09-12_Anna Weber");
+  assertEquals(sb.tables.v3_job_keys.length, 2);
+});
+
+Deno.test("ensureJobKey leve quand l'ecriture de la correspondance echoue", async () => {
+  const sb = fakeDb({ v3_job_keys: [] });
+  sb.fail["v3_job_keys.upsert"] = { message: "permission denied" };
+  // Une correspondance non ecrite rendrait un id que plus aucune ecriture ne
+  // saurait resoudre : mieux vaut un 500 qu'une journee dont rien n'est cliquable.
+  await assertRejects(() => ensureJobKey(sb, "2026-09-12_Marc Lefevre"));
+});
+
+Deno.test("ensureJobKeys pose tout le lot en une ecriture et dedoublonne", async () => {
+  const sb = fakeDb({ v3_job_keys: [] });
+  const map = await ensureJobKeys(sb, [
+    "2026-09-12_Marc Lefevre",
+    "2026-09-12_Anna Weber",
+    "2026-09-12_Marc Lefevre",
+    "",
+  ]);
+  assertEquals(Object.keys(map).sort(), ["2026-09-12_Anna Weber", "2026-09-12_Marc Lefevre"]);
+  assertEquals(map["2026-09-12_Marc Lefevre"], await jobKeyFor("2026-09-12_Marc Lefevre"));
+  assertEquals(sb.tables.v3_job_keys.length, 2);
+  // Une seule ecriture pour tout le lot : l'ecran Today ne paie pas un
+  // aller-retour PostgREST par arret.
+  assertEquals(sb.writes.filter((w: any) => w.table === "v3_job_keys").length, 1);
+  // Lot vide : aucune ecriture du tout.
+  assertEquals(Object.keys(await ensureJobKeys(sb, [])).length, 0);
+  assertEquals(sb.writes.filter((w: any) => w.table === "v3_job_keys").length, 1);
+});
+
+Deno.test("resolveJob rend la cle d'un id connu et null d'un id inconnu", async () => {
+  const sb = fakeDb({ v3_job_keys: [] });
+  const id = await ensureJobKey(sb, "2026-09-12_Marc Lefevre");
+  assertEquals(await resolveJob(sb, id), "2026-09-12_Marc Lefevre");
+  assertEquals(await resolveJob(sb, "job_0000000000000000dead"), null);
+  assertEquals(await resolveJob(sb, ""), null);
+});
+
+Deno.test("resolveJob leve quand la lecture echoue, sans rendre null", async () => {
+  const sb = fakeDb({ v3_job_keys: [] });
+  const id = await ensureJobKey(sb, "2026-09-12_Marc Lefevre");
+  sb.fail["v3_job_keys.select"] = { message: "lecture indisponible" };
+  // Un null avale en silence deviendrait un 404 « Job not found » sur un menage
+  // qui existe : la cleaner croirait son geste refuse alors que la base a toussote.
+  await assertRejects(() => resolveJob(sb, id));
 });

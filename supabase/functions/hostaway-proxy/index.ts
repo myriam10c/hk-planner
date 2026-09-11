@@ -9,8 +9,8 @@ import {
   systemRowGuard,
 } from "./auth.ts";
 import {
-  pickSnapshot, plusDays, roleAllowed, todayDubai,
-  V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
+  donneesOuLeve, pickSnapshot, plusDays, resolveJob, roleAllowed, todayDubai,
+  validMyDayDate, V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
 } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
 import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
@@ -1046,8 +1046,15 @@ Deno.serve(async (req: Request) => {
         sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() });
       let rows: any[] = [];
       try {
+        // Borne d'age obligatoire : pickSnapshot ne peut de toute facon servir
+        // qu'un instantane de moins de V3_CACHE_STALE_MS (le test juste en
+        // dessous), et la table porte aujourd'hui 129 lignes « checkouts:% » pour
+        // 3 483 ko de JSON. Sans ce filtre, chaque ouverture de l'ecran Today,
+        // pour chaque cleaner, rapatriait et deserialisait les 3 469 ko qu'elle
+        // allait jeter, sur un plan Supabase gratuit (revue tache 3, constat 1).
         const { data } = await sb.from("proxy_cache")
-          .select("key, payload, updated_at").like("key", "checkouts:%");
+          .select("key, payload, updated_at").like("key", "checkouts:%")
+          .gte("updated_at", new Date(Date.now() - V3_CACHE_STALE_MS).toISOString());
         rows = data ?? [];
       } catch (e) {
         console.error("[v3] proxy_cache read failed:", e);
@@ -1064,7 +1071,15 @@ Deno.serve(async (req: Request) => {
         }
         return snap.payload;
       }
+      // Chemin froid : la seule pagination Hostaway de l'action. Chronometree et
+      // journalisee pour que la tache 14 lise un chiffre reel dans les logs de la
+      // fonction edge pendant le pilote, au lieu de l'estimation non mesuree du
+      // rapport de la tache 3 (revue tache 3, constat 10). Aucun changement de
+      // comportement, seulement de l'observabilite.
+      const debutFroid = Date.now();
       const payload = await buildCheckoutsPayload(sb, date, plusDays(date, 6));
+      console.log("[v3.myDay] cache froid " + date + ": pagination Hostaway en " +
+        String(Date.now() - debutFroid) + " ms");
       try {
         await ecrire(payload);
       } catch (e) {
@@ -1080,29 +1095,60 @@ Deno.serve(async (req: Request) => {
       // le droit d'appeler quoi. Une session valide ne suffit pas.
       if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
       const date = url.searchParams.get("date") || todayDubai();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        return jsonResp({ error: "date must be YYYY-MM-DD" }, 400);
-      }
-      const [payload, extraRes, listingRes, templateRes, ticketRes] = await Promise.all([
+      // Forme, validite reelle et fenetre. Sans la validite, « 2026-13-45 »
+      // ressortait en 500 ; sans la fenetre, n'importe quelle session valide
+      // declenchait une pagination Hostaway et une ligne de cache par date
+      // arbitraire (revue tache 3, constat 3).
+      const dateErreur = validMyDayDate(date, todayDubai());
+      if (dateErreur) return jsonResp({ error: dateErreur }, 400);
+      // Les extras reportes VERS ce jour ont une cleaning_date differente : sans
+      // cette liste, un menage hors Hostaway deplace vers aujourd'hui n'etait
+      // jamais lu, donc jamais affiche (revue tache 3, constat 4). Le sens inverse
+      // (extra reporte hors du jour) est filtre par buildMyDay.
+      const reportesVersLeJour = donneesOuLeve<any>(
+        await sb.from("cleaning_postponed").select("reservation_key").eq("new_date", date),
+        "cleaning_postponed",
+      ).map((p: any) => String(p.reservation_key)).filter((k: string) => !!k);
+      const [payload, extraRes, extraReportesRes, listingRes, templateRes, ticketRes] = await Promise.all([
         v3CheckoutsForDay(date),
         sb.from("extra_cleanings").select("*").eq("cleaning_date", date),
+        reportesVersLeJour.length > 0
+          ? sb.from("extra_cleanings").select("*").in("reservation_key", reportesVersLeJour.slice(0, 100))
+          : Promise.resolve({ data: [], error: null }),
         sb.from("listing_config").select("listing_id, listing_name, bedrooms, unit_type, apt_number, internal_name"),
         sb.from("checklist_templates").select("*"),
         sb.from("maintenance_tickets")
           .select("id, listing_id, title, category, priority, status")
           .not("status", "in", "(resolved,cancelled,to_confirm)").limit(500),
       ]);
+      // Ces quatre lectures levent maintenant au lieu d'etre consommees en
+      // « X.data || [] » : une panne de listing_config rendait une journee qui
+      // s'affiche parfaitement et ne dit ou aller nulle part, une panne de
+      // checklist_templates ouvrait la porte du Finish sur une checklist vide
+      // (revue tache 3, constat 2). Le catch global rend 500 avec un error_id.
+      const extras = [
+        ...donneesOuLeve<any>(extraRes, "extra_cleanings"),
+        ...donneesOuLeve<any>(extraReportesRes, "extra_cleanings (reportes)"),
+      ].filter((e: any, i: number, tous: any[]) =>
+        tous.findIndex((a: any) => String(a.reservation_key) === String(e.reservation_key)) === i);
+      const listingRows = donneesOuLeve<any>(listingRes, "listing_config");
+      const templateRows = donneesOuLeve<any>(templateRes, "checklist_templates");
+      const ticketRows = donneesOuLeve<any>(ticketRes, "maintenance_tickets");
       const reservations = (payload && payload.reservations) || [];
       const keys = [
         ...reservations.map((r: any) => String(r.checkOut) + "_" + (r.guest || "Guest")),
-        ...((extraRes.data || []).map((e: any) => String(e.reservation_key))),
+        ...extras.map((e: any) => String(e.reservation_key)),
       ].filter((k) => !!k);
       // Toutes les lectures par cle sont bornees aux cles de la semaine lue : ces
       // tables grossissent a chaque menage, un select non filtre finirait tronque.
-      // Decoupage par paquets de 100 comme loadPostponedDates : une semaine porte
-      // environ deux cents cles, un seul .in() fabriquerait une URL PostgREST
-      // demesuree. Une lecture ratee leve : une journee vide par erreur de lecture
-      // ferait croire a la cleaner qu'elle n'a rien a faire.
+      // Decoupage par paquets de 100 comme loadPostponedDates, pour ne pas
+      // fabriquer une URL PostgREST demesuree. Une semaine ordinaire ne porte
+      // qu'une quarantaine de cles et tient donc dans un seul paquet ; le
+      // decoupage sert quand pickSnapshot retient un instantane qui n'est pas une
+      // semaine (proxy_cache en porte de mensuels, jusqu'a 440 reservations), ce
+      // qu'il a parfaitement le droit de faire (revue tache 3, constat 9).
+      // Une lecture ratee leve : une journee vide par erreur de lecture ferait
+      // croire a la cleaner qu'elle n'a rien a faire.
       const parCle = async (table: string, cols: string, filtre?: (q: any) => any) => {
         const out: any[] = [];
         for (let i = 0; i < keys.length; i += 100) {
@@ -1124,25 +1170,25 @@ Deno.serve(async (req: Request) => {
         loadPostponedDates(sb, keys),
       ]);
       const listings: Record<string, any> = {};
-      (listingRes.data || []).forEach((l: any) => { listings[String(l.listing_id)] = l; });
+      listingRows.forEach((l: any) => { listings[String(l.listing_id)] = l; });
       const timers: Record<string, any> = {};
       (timerRes.data || []).forEach((t: any) => { timers[t.reservation_key] = t; });
       const progress: Record<string, Record<string, boolean>> = {};
       (progressRes.data || []).forEach((p: any) => {
         (progress[p.reservation_key] ||= {})[p.item_name] = !!p.is_done;
       });
-      const body = buildMyDay({
-        date, me,
+      const body = await buildMyDay({
+        sb, date, me,
         reservations,
-        extras: extraRes.data || [],
+        extras,
         listings,
-        templates: templateRes.data || [],
+        templates: templateRows,
         assignedKeys: (assignRes.data || []).map((a: any) => String(a.reservation_key)),
         postponed,
         cancelled: (cancelRes.data || []).map((c: any) => String(c.reservation_key)),
         done: (doneRes.data || []).filter((d: any) => d.done).map((d: any) => String(d.reservation_key)),
         timers,
-        tickets: ticketRes.data || [],
+        tickets: ticketRows,
         progress,
       });
       return jsonResp(body);
@@ -1222,7 +1268,12 @@ Deno.serve(async (req: Request) => {
       if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
       // Le same-day est lu dans les instantanes deja en cache, jamais par un appel
       // Hostaway : une fin de menage ne doit pas attendre la pagination.
-      const ctx = await loadFinishContext(sb, String(body.jobId ?? ""));
+      // loadFinishContext prend la reservation_key (les instantanes de cache sont
+      // indexes sur « <checkOut>_<guest> »), pas l'id oppose du telephone.
+      // finishJob resout de son cote et rend 404 si l'id est inconnu : ici un
+      // contexte vide suffit, il ne sert qu'a la notification manager.
+      const cleFin = await resolveJob(sb, String(body.jobId ?? ""));
+      const ctx = await loadFinishContext(sb, cleFin ?? "");
       const r = await finishJob(sb, me, body, ctx);
       return jsonResp(r.body, r.status);
     }

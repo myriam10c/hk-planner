@@ -108,6 +108,48 @@ export function weekKeyFor(date: string): string {
   return "checkouts:" + date + "_" + plusDays(date, 6);
 }
 
+// Fenetre de dates acceptee par v3.myDay. Sept jours en arriere : une cleaner
+// relit sa semaine passee, un manager depanne un menage d'hier. Quatorze en
+// avant : de quoi preparer la quinzaine. Au-dela, ce n'est plus un usage de
+// l'ecran Today, et chaque date distincte coute une pagination Hostaway et une
+// ligne de proxy_cache (revue tache 3, constat 3).
+export const V3_DATE_WINDOW_BACK = 7;
+export const V3_DATE_WINDOW_AHEAD = 14;
+
+// Rend le message d'erreur en anglais, ou null si la date est utilisable.
+// La regex seule ne suffit pas : « 2026-13-45 » la passait, atteignait weekKeyFor
+// et levait un RangeError, donc un 500 « Internal error » avec un identifiant de
+// correlation a aller chercher dans les logs pour une simple faute de saisie.
+// « 2026-02-30 », lui, passait tout et fabriquait une journee qui n'existe pas.
+export function validMyDayDate(date: string, today: string = todayDubai()): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) return "date must be YYYY-MM-DD";
+  // Aller-retour : une date qui ne se reecrit pas a l'identique a deborde sur le
+  // mois suivant (30 fevrier) ou n'est pas une date du tout.
+  const d = new Date(String(date) + "T00:00:00Z");
+  if (!Number.isFinite(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
+    return "date must be YYYY-MM-DD";
+  }
+  if (date < plusDays(today, -V3_DATE_WINDOW_BACK) ||
+      date > plusDays(today, V3_DATE_WINDOW_AHEAD)) {
+    return "date out of range";
+  }
+  return null;
+}
+
+// Deballe une reponse PostgREST en levant si elle porte une erreur. Le client est
+// cree sans throwOnError : supabase-js RESOUT avec { data: null, error }, donc un
+// « X.data || [] » transforme une panne de lecture en liste vide. Cote v3.myDay
+// cela fabriquait une journee credible et fausse : plus de nom de logement, ou
+// plus aucun menage hors Hostaway, sans un mot (revue tache 3, constat 2).
+export function donneesOuLeve<T = any>(res: any, quoi: string): T[] {
+  if (res?.error) {
+    const e = res.error;
+    throw new Error("v3.myDay: lecture " + quoi + " impossible: " +
+      String(e?.message ?? e));
+  }
+  return (res?.data ?? []) as T[];
+}
+
 // Choisit, parmi les lignes proxy_cache « checkouts:% », le plus frais instantane
 // dont la plage couvre la date demandee. Rend aussi son age, pour que l'appelant
 // decide : servir tel quel, servir et revalider en arriere-plan, ou repaginer.
@@ -234,8 +276,8 @@ export function readLinen(
 // approchait le plafond de 400 lignes). Il est re-exporte ici pour que les imports
 // existants `from "./v3.ts"` des taches 4 a 7 continuent de fonctionner.
 export {
-  claimEvent, purgeStaleClaims, recordResult, releaseEvent, replayResponse,
-  staleClaimIds, V3_CLAIM_TTL_MS, V3_EVENT_TYPES,
+  claimEvent, ensureJobKey, ensureJobKeys, jobKeyFor, purgeStaleClaims, recordResult,
+  releaseEvent, replayResponse, resolveJob, staleClaimIds, V3_CLAIM_TTL_MS, V3_EVENT_TYPES,
 } from "./v3_idem.ts";
 export type { V3EventType } from "./v3_idem.ts";
 

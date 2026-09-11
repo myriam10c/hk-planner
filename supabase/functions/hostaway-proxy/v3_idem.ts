@@ -130,3 +130,72 @@ export async function purgeStaleClaims(
   }
   return ids.length;
 }
+
+// ===========================================================================
+// Identifiant de menage oppose (revue tache 3, constat 5)
+// ===========================================================================
+
+// La reservation_key est « <date>_<nom complet du guest> ». Le front de la phase A
+// met l'identifiant de menage dans le DOM et dans le hash de l'URL : rendre la cle
+// telle quelle mettrait le nom complet du guest dans la barre d'adresse et dans
+// l'historique du telephone de la cleaner, ce que le ruling 9 interdit.
+//
+// L'id est un hachage, donc deterministe : la meme reservation rend toujours le
+// meme id, et la file hors ligne du telephone peut rejouer un geste pose avant un
+// rechargement de l'ecran. 20 caracteres hexadecimaux, soit 80 bits : une collision
+// est hors de portee sur un portefeuille de cent logements, et la troncature
+// empeche de remonter a la cle par force brute plus facilement que le hachage
+// complet ne le permettait deja (la cle n'est pas un secret, elle est une donnee
+// personnelle : c'est l'affichage qu'on supprime, pas un mot de passe qu'on protege).
+export async function jobKeyFor(reservationKey: string): Promise<string> {
+  const data = new TextEncoder().encode(reservationKey);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  const hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+  return "job_" + hex.slice(0, 20);
+}
+
+// Pose la correspondance pour une cle. Leve si l'ecriture echoue : un id rendu
+// sans sa ligne serait un arret sur lequel aucune ecriture ne marcherait ensuite,
+// et la cleaner verrait « Job not found » sur un menage bien reel.
+export async function ensureJobKey(sb: any, reservationKey: string): Promise<string> {
+  const map = await ensureJobKeys(sb, [reservationKey]);
+  const id = map[reservationKey];
+  if (!id) throw new Error("v3: empty reservation key");
+  return id;
+}
+
+// Variante par lot, utilisee par v3.myDay. Une journee porte une dizaine d'arrets :
+// un ensureJobKey par arret ferait une dizaine d'allers-retours PostgREST en serie
+// sur le chemin de l'ecran Today, exactement ce que le reste de cette revue cherche
+// a supprimer. Le hachage est local, seule l'ecriture part au reseau, et elle part
+// une seule fois.
+export async function ensureJobKeys(
+  sb: any, reservationKeys: string[],
+): Promise<Record<string, string>> {
+  const uniq = [...new Set((reservationKeys ?? []).map(String).filter((k) => !!k))];
+  const map: Record<string, string> = {};
+  for (const cle of uniq) map[cle] = await jobKeyFor(cle);
+  if (uniq.length === 0) return map;
+  // ignoreDuplicates : une correspondance existante n'est jamais reecrite, donc
+  // created_at garde la date de la premiere apparition du menage.
+  const { error } = await sb.from("v3_job_keys").upsert(
+    uniq.map((cle) => ({ job_id: map[cle], reservation_key: cle })),
+    { onConflict: "job_id", ignoreDuplicates: true },
+  );
+  if (error) throw error;
+  return map;
+}
+
+// Chemin inverse, cote actions d'ecriture : l'id opaque rendu par myDay redevient
+// la reservation_key que portent cleaning_timer, checklist_progress et cleaning_log.
+// Rend null pour un id inconnu (l'appelant repond 404) mais LEVE sur une erreur de
+// lecture : confondre les deux transformerait une base qui tousse en un refus
+// definitif que la file hors ligne du telephone jetterait.
+export async function resolveJob(sb: any, jobId: string): Promise<string | null> {
+  if (!jobId) return null;
+  const { data, error } = await sb.from("v3_job_keys")
+    .select("reservation_key").eq("job_id", String(jobId)).maybeSingle();
+  if (error) throw error;
+  return data ? String(data.reservation_key) : null;
+}
