@@ -236,6 +236,14 @@ export async function boot() {
   await loadDay();
   // Un rejeu au demarrage : l'application a pu etre fermee hors ligne.
   if (navigator.onLine) flush();
+  // Enregistrement apres le premier rendu : l'installation ne doit jamais
+  // retarder l'affichage de la journee. Aucun abonnement push ici : la cleaner
+  // recoit deja ses notifications par l'app actuelle, un second abonnement lui
+  // en ferait deux pour chaque affectation.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/v3/sw.js', { scope: '/v3/' })
+      .catch(function (e) { console.warn('[v3] service worker non enregistre', e); });
+  }
   window.__v3ready = true;
 }
 

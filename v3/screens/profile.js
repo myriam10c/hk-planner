@@ -78,17 +78,26 @@ function lire(cle) {
 // desabonnement n'est pas une raison de retenir une deconnexion.
 const DELAI_PUSH_MS = 3000;
 
+// Tous les enregistrements, pas seulement celui qui controle la page. Depuis la
+// tache 13 la v3 a le sien (portee /v3/), et c'est LUI que rend
+// `navigator.serviceWorker.ready` sur une page de /v3/ : le plus specifique
+// gagne. Or il ne porte aucun abonnement push (phase A, aucun abonnement cote
+// v3), l'abonnement vit sur l'enregistrement de la racine. Chercher par `ready`
+// ne trouvait donc plus rien et le telephone continuait de recevoir les taches
+// de la cleaner precedente.
 async function retirerAbonnementPush() {
-  if (!navigator.serviceWorker) return;
-  const reg = await navigator.serviceWorker.ready;
-  const sub = reg.pushManager && await reg.pushManager.getSubscription();
-  if (!sub) return;
-  const endpoint = sub.toJSON().endpoint;
-  // Au mieux : sans cet appel, l'appareil continue de recevoir les taches de la
-  // cleaner precedente. Il exige la session courante, donc il passe AVANT la
-  // revocation.
-  try { await api.post('deletePushSubscription', { endpoint: endpoint }); } catch (e) { /* le serveur nettoiera */ }
-  try { await sub.unsubscribe(); } catch (e) { /* deja parti */ }
+  if (!navigator.serviceWorker || !navigator.serviceWorker.getRegistrations) return;
+  const regs = await navigator.serviceWorker.getRegistrations();
+  for (const reg of regs) {
+    const sub = reg.pushManager && await reg.pushManager.getSubscription();
+    if (!sub) continue;
+    const endpoint = sub.toJSON().endpoint;
+    // Au mieux : sans cet appel, l'appareil continue de recevoir les taches de
+    // la cleaner precedente. Il exige la session courante, donc il passe AVANT
+    // la revocation.
+    try { await api.post('deletePushSubscription', { endpoint: endpoint }); } catch (e) { /* le serveur nettoiera */ }
+    try { await sub.unsubscribe(); } catch (e) { /* deja parti */ }
+  }
 }
 
 function desabonnerPush() {

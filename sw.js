@@ -6,7 +6,7 @@
 //  - API calls (Supabase functions, Hostaway, etc.) bypass the cache entirely.
 //  - Bump VERSION to force all clients to drop the old cache.
 
-const VERSION = 'v-20260910-1947-69e4dd2';
+const VERSION = 'v-20260912-0038-3865e7c';
 const CACHE = 'hk-planner-' + VERSION;
 // /vendor/supabase-js-*.umd.js est une dependance dure : app.js appelle
 // createClient() en tete de fichier, si le vendor manque toute l'app est morte.
@@ -24,7 +24,11 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      // Seuls les caches de cette app sont nettoyes. Les caches sont partages
+      // par origine : sans ce prefixe, chaque activation (donc chaque
+      // deploiement) effacerait aussi le cache de l'app cleaner, qui a son
+      // propre service worker sous /v3/, et sa coquille hors ligne avec.
+      .then((keys) => Promise.all(keys.filter((k) => k.indexOf('hk-planner-') === 0 && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -34,6 +38,10 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
+  // La v3 a son propre service worker (/v3/sw.js). Sans cette sortie, celui de
+  // la racine mettrait en cache les modules de la v3 avant que le sien ne
+  // prenne la main, et servirait une version perimee apres un deploiement.
+  if (url.pathname.indexOf('/v3/') === 0) return;
   // Bypass dynamic API calls
   if (url.hostname.includes('supabase.co')) return;
   if (url.hostname.includes('hostaway.com')) return;
