@@ -182,15 +182,19 @@ export async function loadFinishContext(sb: any, reservationKey: string): Promis
       console.warn("[v3.finishJob] contexte indisponible: " + String(e));
     }
   }
-  // Le nom montre par la v3 est celui de listing_config (« Apt + Immeuble »),
-  // pas le titre commercial Hostaway : la notification manager dit la meme chose
-  // que l'ecran Today. Le titre Hostaway reste le repli.
+  // Meme precedence que l'ecran Today (v3_myday.nomDuLogement) : le nom interne
+  // « Apt - Immeuble » d'abord, le titre Hostaway ensuite, le titre marketing
+  // OTA en dernier. La notification manager dit donc exactement ce que la
+  // cleaner a lu sur son telephone. L'ordre etait inverse ici aussi : un manager
+  // recevait « Modern 1bdr, 10' to Burj Khalifa » au lieu de « 3207 - Sobha
+  // Waves » (revue de branche, finding 1).
   if (listingId) {
     try {
       const { data } = await sb.from("listing_config")
         .select("listing_id, listing_name, internal_name").eq("listing_id", listingId).maybeSingle();
-      const interne = data && (data.listing_name || data.internal_name);
-      if (interne) listingName = String(interne);
+      const propre = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim());
+      listingName = propre(data?.internal_name) || propre(listingName) ||
+        propre(data?.listing_name);
     } catch (e) {
       console.warn("[v3.finishJob] nom de logement indisponible: " + String(e));
     }

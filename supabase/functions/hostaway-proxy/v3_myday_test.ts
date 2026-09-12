@@ -37,11 +37,16 @@ function jeuDEssai() {
       },
     ],
     extras: [],
+    // Forme reelle de listing_config, mesuree en production le 2026-09-12 :
+    // `internal_name` porte « Apt - Immeuble » sur les 108 lignes, `listing_name`
+    // est le titre commercial OTA et ne contient meme pas le numero
+    // d'appartement dans 95 cas sur 108. La fixture inventee de la tache 10 les
+    // confondait, ce qui a laisse passer la precedence inversee.
     listings: {
-      "101": { listing_id: "101", listing_name: "704 Golf Links", bedrooms: 0, unit_type: "Studio", apt_number: "704" },
-      "102": { listing_id: "102", listing_name: "623 Samana Park View", bedrooms: 1, unit_type: "1 BHK", apt_number: "623" },
-      "103": { listing_id: "103", listing_name: "122 Oxford Boulevard", bedrooms: 0, unit_type: "Studio", apt_number: "122" },
-      "104": { listing_id: "104", listing_name: "506 Act One", bedrooms: 2, unit_type: "2 BHK", apt_number: "506" },
+      "101": { listing_id: "101", listing_name: "Bright studio by the golf course", internal_name: "704 Golf Links", bedrooms: 0, unit_type: "Studio", apt_number: "704" },
+      "102": { listing_id: "102", listing_name: "Sunny 1bdr with a pool view", internal_name: "623 Samana Park View", bedrooms: 1, unit_type: "1 BHK", apt_number: "623" },
+      "103": { listing_id: "103", listing_name: "Cosy studio steps from the metro", internal_name: "122 Oxford Boulevard", bedrooms: 0, unit_type: "Studio", apt_number: "122" },
+      "104": { listing_id: "104", listing_name: "Perfect 2br for families in JVC", internal_name: "506 Act One", bedrooms: 2, unit_type: "2 BHK", apt_number: "506" },
     },
     templates: [
       { name: "Studio", items: ["Living Room", "Bathroom"], photo_required_items: [] },
@@ -153,6 +158,66 @@ Deno.test("buildMyDay prend les menages hors Hostaway du jour", async () => {
   assertEquals(out.stops[0].unitType, "2 BHK");
   assertEquals(out.stops[0].estimatedMinutes, 165);
   assertEquals(out.stops[0].sameDay, false);
+});
+
+// ===========================================================================
+// Nom du logement montre a la cleaner (revue de branche, findings 1 et 2)
+// ===========================================================================
+//
+// Les trois sources possibles, dans l'ordre de la precedence attendue :
+//   1. listing_config.internal_name, le « Apt - Immeuble » du portefeuille ;
+//   2. le titre Hostaway du payload checkouts (`r.listing`), lui aussi de la
+//      forme « Apt - Immeuble » et seule source de l'app actuelle ;
+//   3. listing_config.listing_name, le titre marketing OTA, qui n'aide pas une
+//      cleaner a savoir ou elle est.
+// Valeurs mesurees en production le 2026-09-12 sur les deux arrets reels.
+function unArret(listing: any, hostawayTitle: string | undefined, fiche: any) {
+  return {
+    sb: fakeDb({ v3_job_keys: [] }),
+    date: "2026-09-12",
+    me: { cleaner_id: 4, name: "Faiza", role: "cleaner", color: "#e94560" },
+    reservations: [{
+      listingId: listing, listing: hostawayTitle, guest: "Sofia Marchetti",
+      checkOut: "2026-09-12", checkOutTime: 11, nextGuest: null,
+    }],
+    extras: [],
+    listings: fiche ? { [listing]: fiche } : {},
+    templates: [{ name: "Studio", items: ["Living Room"], photo_required_items: [] }],
+    assignedKeys: ["2026-09-12_Sofia Marchetti"],
+    postponed: {}, cancelled: [], done: [], timers: {}, tickets: [], progress: {},
+  };
+}
+
+Deno.test("buildMyDay montre le nom interne « Apt + Immeuble », jamais le titre OTA", async () => {
+  const out = await buildMyDay(unArret("208702", "3207 - Sobha Waves", {
+    listing_id: "208702", listing_name: "Modern 1bdr, 10' to Burj Khalifa",
+    internal_name: "3207 - Sobha Waves", apt_number: "3207", unit_type: "1 bhk", bedrooms: 1,
+  }) as any);
+  // Exactement ce que l'app actuelle affiche pour ce logement :
+  // formatPropLabel("208702", "3207 - Sobha Waves") rend le titre inchange,
+  // puisqu'il commence deja par le numero d'appartement.
+  assertEquals(out.stops[0].listingName, "3207 - Sobha Waves");
+});
+
+Deno.test("buildMyDay prefere le titre Hostaway au titre OTA quand la fiche n'a pas de nom interne", async () => {
+  const out = await buildMyDay(unArret("137197", "439 - Elysee 1", {
+    listing_id: "137197", listing_name: "Perfect 2br for families in JVC",
+    apt_number: "439", unit_type: "2 BHK", bedrooms: 2,
+  }) as any);
+  assertEquals(out.stops[0].listingName, "439 - Elysee 1");
+});
+
+Deno.test("buildMyDay se replie sur le titre Hostaway quand le logement n'a aucune fiche", async () => {
+  // Cas reel du 2026-09-12 : le listing 580602 n'a aucune ligne listing_config,
+  // et l'app actuelle affiche pourtant « 704 Golf Links ». La v3 disait
+  // « Apartment » parce que buildMyDay ne transmettait jamais r.listing.
+  const out = await buildMyDay(unArret("580602", "704 Golf Links", null) as any);
+  assertEquals(out.stops[0].listingName, "704 Golf Links");
+});
+
+Deno.test("buildMyDay ne dit « Apartment » que sans aucune des trois sources", async () => {
+  const out = await buildMyDay(unArret("999999", undefined, null) as any);
+  assertEquals(out.stops[0].listingName, "Apartment");
 });
 
 Deno.test("buildMyDay dit si le linge est demande (jamais pour un sous-traitant)", async () => {

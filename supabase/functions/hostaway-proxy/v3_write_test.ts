@@ -503,27 +503,50 @@ Deno.test("loadFinishContext lit le same-day dans le cache, sans appeler Hostawa
   assertEquals(ctx.managerIds, [1]);
 });
 
-// Le nom montre par la v3 est celui de listing_config (« Apt + Immeuble »), pas le
-// titre commercial Hostaway. La notification manager dit donc la meme chose que
-// l'ecran Today.
-Deno.test("loadFinishContext prefere le nom interne du logement", async () => {
-  const sb = base({
+// Meme precedence que l'ecran Today (v3_myday.nomDuLogement) : le nom interne
+// « Apt - Immeuble » d'abord, le titre Hostaway ensuite, le titre marketing OTA
+// en dernier. La notification manager dit donc exactement ce que la cleaner a
+// lu sur son telephone.
+function cacheAvecTitre(titreHostaway: string, fiches: any[]) {
+  return base({
     proxy_cache: [{
       key: "checkouts:2026-09-12_2026-09-18",
       updated_at: new Date().toISOString(),
       payload: {
         reservations: [{
-          checkOut: "2026-09-12", guest: "Marc Lefevre", listingId: "102",
-          listing: "Stunning 1BR with Marina View",
+          checkOut: "2026-09-12", guest: "Marc Lefevre", listingId: "208702",
+          listing: titreHostaway,
           nextGuest: { guest: "Anna Weber", date: "2026-09-12", checkInTime: 15, sameDay: true },
         }],
       },
     }],
-    listing_config: [{ listing_id: "102", listing_name: "Apt 623 Samana Park Views" }],
+    listing_config: fiches,
     cleaners: [],
   });
-  const ctx = await loadFinishContext(sb, JOB);
-  assertEquals(ctx.listingName, "Apt 623 Samana Park Views");
+}
+
+Deno.test("loadFinishContext prefere le nom interne du logement, jamais le titre OTA", async () => {
+  const sb = cacheAvecTitre("3207 - Sobha Waves", [{
+    listing_id: "208702", listing_name: "Modern 1bdr, 10' to Burj Khalifa",
+    internal_name: "3207 - Sobha Waves",
+  }]);
+  assertEquals((await loadFinishContext(sb, JOB)).listingName, "3207 - Sobha Waves");
+});
+
+Deno.test("loadFinishContext garde le titre Hostaway plutot que le titre OTA", async () => {
+  // Fiche sans nom interne : le titre Hostaway porte deja « Apt - Immeuble »,
+  // le titre marketing ne dit pas ou aller.
+  const sb = cacheAvecTitre("3207 - Sobha Waves", [{
+    listing_id: "208702", listing_name: "Modern 1bdr, 10' to Burj Khalifa",
+  }]);
+  assertEquals((await loadFinishContext(sb, JOB)).listingName, "3207 - Sobha Waves");
+});
+
+Deno.test("loadFinishContext se rabat sur le titre OTA quand c'est le seul nom connu", async () => {
+  const sb = cacheAvecTitre("", [{
+    listing_id: "208702", listing_name: "Modern 1bdr, 10' to Burj Khalifa",
+  }]);
+  assertEquals((await loadFinishContext(sb, JOB)).listingName, "Modern 1bdr, 10' to Burj Khalifa");
 });
 
 Deno.test("loadFinishContext ne bloque jamais une fin quand le cache est vide", async () => {

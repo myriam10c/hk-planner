@@ -10,7 +10,8 @@
 //     l'identifiant de menage : le jobId rendu est l'id oppose de v3_job_keys,
 //     jamais la reservation_key qui porte le nom du guest (revue tache 3,
 //     constat 5) ;
-//   - le nom montre est « Apt + Immeuble », jamais un identifiant de listing.
+//   - le nom montre est « Apt + Immeuble », jamais un identifiant de listing et
+//     jamais le titre marketing OTA (voir nomDuLogement plus bas).
 import {
   ensureJobKeys, estimatedMinutes, formatHour, normalizeUnitType, shortGuest,
   templateItems, V3_TEMPLATE_NAME,
@@ -95,6 +96,30 @@ export function orderStops(stops: V3Stop[]): V3Stop[] {
   );
 }
 
+// Le seul nom montre a une cleaner, dans l'ordre de ce qui l'aide vraiment a
+// savoir devant quelle porte elle est (revue de branche, findings 1 et 2) :
+//
+//   1. `listing_config.internal_name` : « 3207 - Sobha Waves ». Les 108 lignes du
+//      portefeuille en ont un, 106 commencent par le numero d'appartement.
+//   2. le titre Hostaway du payload checkouts : meme forme, et c'est la SEULE
+//      source de l'app actuelle (app.js, formatPropLabel(listingId, r.listing)).
+//      Il couvre les logements qui n'ont pas encore de fiche listing_config,
+//      comme 580602 « 704 Golf Links » le 2026-09-12.
+//   3. `listing_config.listing_name` : le titre marketing OTA (« Perfect 2br for
+//      families in JVC »). 95 lignes sur 108 ne contiennent meme pas le numero
+//      d'appartement : il ne dit pas ou aller, il est le dernier repli.
+//
+// L'inverse de cet ordre etait une regression franche contre l'app en service.
+// Le numero d'appartement n'est pas prefixe ici, contrairement a formatPropLabel :
+// les deux premieres sources le portent deja, et `apt_number` est parfois faux en
+// base (deux lignes ou il a ete tire du titre marketing, « 15 min from Downtown »
+// donne apt_number « 15 »).
+function nomDuLogement(listing: any, hostawayTitle: unknown): string {
+  const propre = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim());
+  return propre(listing?.internal_name) || propre(hostawayTitle) ||
+    propre(listing?.listing_name) || "Apartment";
+}
+
 // Statuts d'un ticket qui merite encore d'etre regarde pendant un menage.
 // to_confirm en est exclu : il attend le technicien, pas la cleaner (ruling 3).
 const TICKETS_A_VERIFIER = new Set(["open", "assigned", "in_progress", "waiting_parts"]);
@@ -114,6 +139,9 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
     reservationKey: string; listingId: string; guest: unknown; nextGuestName: unknown;
     checkOutTime: string | null; nextArrivalDate: string | null;
     nextArrivalTime: string | null; sameDay: boolean; label: string | null;
+    // Titre Hostaway porte par la reservation, repli quand le logement n'a pas
+    // encore de fiche listing_config. Nul pour un menage hors Hostaway.
+    hostawayTitle: unknown;
   }): V3Stop => {
     const listing = input.listings[base.listingId] ?? {};
     const unitType = normalizeUnitType(listing.unit_type, listing.bedrooms);
@@ -127,7 +155,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
     return {
       jobId: "",
       listingId: base.listingId,
-      listingName: String(listing.listing_name ?? listing.internal_name ?? "Apartment"),
+      listingName: nomDuLogement(listing, base.hostawayTitle),
       aptNumber: listing.apt_number ? String(listing.apt_number) : null,
       unitType,
       templateName,
@@ -176,6 +204,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
       nextArrivalTime: r?.nextGuest ? formatHour(r.nextGuest.checkInTime) : null,
       sameDay: !!(r?.nextGuest && r.nextGuest.sameDay),
       label: null,
+      hostawayTitle: r?.listing,
     }) });
   }
   for (const e of input.extras ?? []) {
@@ -199,6 +228,9 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
       nextArrivalTime: null,
       sameDay: false,
       label: e?.label ? String(e.label) : null,
+      // Un menage hors Hostaway n'a pas de reservation, donc pas de titre
+      // Hostaway : seule la fiche listing_config peut le nommer.
+      hostawayTitle: null,
     }) });
   }
 
