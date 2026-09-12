@@ -90,3 +90,9 @@ of the app.
 Profile, then Sign out. Do this if you hand the phone to someone else. It
 closes the session on the phone and on the server, and it stops the
 notifications for your account on that phone.
+
+Sign out also clears anything still waiting on the phone, so that your work is
+never sent under someone else's name. If the top of the screen still says
+"Saved on device", wait for it to disappear before you sign out: sign out
+before handing the phone to someone else, or your last few actions on it may be
+lost.

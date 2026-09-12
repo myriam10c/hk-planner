@@ -2,7 +2,7 @@
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
 import { queueStrip, render } from '/v3/app.js';
-import { clearDead, deadEntries } from '/v3/offline.js';
+import { clearDead, deadEntries, resetQueue } from '/v3/offline.js';
 import { esc, icon } from '/v3/ui.js';
 
 // Actions refusees par le serveur : elles ne sont jamais jetees en silence, elles
@@ -148,6 +148,20 @@ const actions = {
     CLES_SESSION.forEach(function (cle) {
       try { localStorage.removeItem(cle); } catch (e) { /* stockage indisponible */ }
     });
+    // 4. La base IndexedDB, avant de considerer la sortie faite. L'identite vient
+    // de la session et jamais du corps (ruling 6) : une entree encore en file
+    // serait rejouee sous la session de la personne SUIVANTE, qui recevrait le
+    // chrono, le comptage de linge et le signalement de la precedente. Le magasin
+    // mort part avec, sinon l'ecran Profile de la suivante affiche la liste
+    // « Not sent » de quelqu'un d'autre.
+    //
+    // Compromis assume : ce qui n'etait pas encore synchronise est vraiment
+    // perdu. Une action attribuee a la mauvaise personne est pire qu'une action
+    // a refaire, et le mode d'emploi dit de se deconnecter avec du reseau.
+    // Aucune de ces deux erreurs ne retient la sortie : un stockage indisponible
+    // laisserait sinon la cleaner enfermee dans une session qu'elle veut quitter.
+    try { await resetQueue(); } catch (e) { /* stockage indisponible */ }
+    try { await clearDead(); } catch (e) { /* stockage indisponible */ }
     location.replace('/#cleaner');
   },
 };

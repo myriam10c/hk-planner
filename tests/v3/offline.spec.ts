@@ -96,6 +96,64 @@ test('une action refusee par le proxy est signalee et mise de cote', async ({ pa
   expect(morts[0].reason).toBe('itemId required');
 });
 
+// Revue de branche, finding 4. L'identite vient de la session et jamais du corps
+// (ruling 6) : une entree encore en file au moment ou le telephone change de main
+// serait rejouee sous la session de la cleaner SUIVANTE, qui recevrait le chrono,
+// le comptage de linge et le signalement de la precedente. Et son ecran Profile
+// afficherait la liste « Not sent » de quelqu'un d'autre.
+//
+// Compromis assume : vider la file perd vraiment les gestes non synchronises. Une
+// action attribuee a la mauvaise personne est pire qu'une action a refaire, et le
+// mode d'emploi le dit maintenant en une phrase.
+test('Sign out vide la file hors ligne et le magasin mort', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myDay', status: 200, body: JOURNEE },
+    { match: 'action=v3.startJob', status: 200, body: { status: 'success', jobId: '2026-09-12_Marc Lefevre', startedAt: '2026-09-12T08:00:00Z' } },
+    { match: 'action=v3.tick', status: 400, body: { error: 'itemId required' } },
+    { match: 'action=cleanerLogout', status: 200, body: { status: 'success' } },
+  ], { pinToken: 'jeton-pin' });
+  await page.getByRole('button', { name: 'Start this cleaning' }).click();
+
+  // 1. Un geste refuse par le proxy : il quitte la file pour le magasin mort.
+  // Drapeau plutot que context.setOffline : la deconnexion navigue vers « / »,
+  // et un contexte hors ligne ferait echouer cette navigation.
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await page.getByRole('button', { name: 'Master Bed & Linens' }).click();
+  await expect(page.getByText('Saved on device, 1 to sync')).toBeVisible();
+  await page.evaluate(() => {
+    localStorage.removeItem('v3TestOffline');
+    window.dispatchEvent(new Event('online'));
+  });
+  await expect(page.getByText('Not sent: itemId required. Tell your manager.')).toBeVisible({ timeout: 10_000 });
+
+  // 2. Deux gestes encore en file au moment de la deconnexion.
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await page.getByRole('button', { name: 'Bathroom' }).click();
+  await page.getByRole('button', { name: 'Final Check' }).click();
+  await expect(page.getByText('Saved on device, 2 to sync')).toBeVisible();
+  expect(await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    return { file: (await m.pendingEntries()).length, morts: (await m.deadEntries()).length };
+  })).toEqual({ file: 2, morts: 1 });
+
+  // L'app actuelle est remplacee par une page vide du MEME domaine : IndexedDB
+  // reste donc observable apres la deconnexion.
+  await page.route((url) => url.pathname === '/', (route) => route.fulfill({
+    status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title><p>stub</p>',
+  }));
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await expect(page.getByRole('heading', { name: 'Faiza' })).toBeVisible();
+  await Promise.all([
+    page.waitForURL(/#cleaner$/),
+    page.getByRole('button', { name: 'Sign out' }).click(),
+  ]);
+
+  expect(await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    return { file: (await m.pendingEntries()).length, morts: (await m.deadEntries()).length };
+  })).toEqual({ file: 0, morts: 0 });
+});
+
 test('la file survit a un rechargement de page', async ({ page }) => {
   await bootV3(page, ROUTES, { pinToken: 'jeton-pin' });
   await page.getByRole('button', { name: 'Start this cleaning' }).click();
