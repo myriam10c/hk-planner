@@ -15,6 +15,14 @@
   Content-Type: application/json
   Access-Control-Allow-Origin: *
 
+# Netlify n'a pas de type pour .webmanifest et sert application/octet-stream.
+# Avec X-Content-Type-Options: nosniff pose plus haut, le manifeste de l'app
+# cleaner n'etait pas lisible comme manifeste : « Add to Home Screen » perdait
+# le nom, l'icone et le mode standalone. La racine n'est pas concernee, son
+# manifeste s'appelle manifest.json.
+/v3/manifest.webmanifest
+  Content-Type: application/manifest+json; charset=utf-8
+
 /downloads/*.apk
   Content-Type: application/octet-stream
   Content-Disposition: attachment; filename="HK-Planner.apk"
