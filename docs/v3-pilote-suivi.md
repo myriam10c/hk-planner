@@ -20,9 +20,12 @@ Document interne, pour Hillal. Le mode d'emploi des deux cleaners est
 ## A verifier une fois, avant d'ouvrir le pilote
 
 1. **Un logement sans fiche.** Le listing `580602` n'a pas de ligne dans
-   `listing_config` : la v3 l'affiche donc « Apartment », sans numero
-   d'appartement. Une cleaner ne saura pas ou aller. A completer avant, ou a
-   verifier qu'il n'est pas affecte pendant la semaine du pilote :
+   `listing_config`. Ce n'est plus bloquant depuis le correctif du 2026-09-12 :
+   la v3 se replie sur le titre Hostaway de la reservation et affiche
+   « 704 Golf Links », exactement comme l'app actuelle. Completer sa fiche reste
+   utile (numero d'appartement, type, nombre de chambres pour la checklist et la
+   duree estimee) : sans elle, le logement passe en Studio par defaut. Pour
+   savoir quels logements sont concernes pendant la semaine du pilote :
 
 ```sql
 SELECT DISTINCT split_part(ca.reservation_key, '_', 1) AS jour, ca.reservation_key
@@ -33,13 +36,21 @@ ORDER BY 1;
 ```
 
 Puis, pour chaque listing concerne, verifier qu'il a bien une ligne dans
-`listing_config` avec `listing_name` et `apt_number`.
+`listing_config` avec `internal_name` (le « Apt - Immeuble » que la v3 affiche
+en priorite), `unit_type` et `bedrooms`.
 
 2. **Technicien de permanence.** La table `on_duty` est vide. Ce n'est pas
-   bloquant : sans ligne du jour, un signalement part vers Semax (regle par
-   defaut, puis Ismael, puis le premier technicien actif). Si tu veux quelqu'un
+   bloquant : sans ligne du jour, un signalement part vers Semax. Il est
+   aujourd'hui le SEUL compte actif de role `maintenance` (verifie en base le
+   2026-09-12), donc le resultat est deterministe. La regle par defaut cite
+   ensuite Ismael, mais son role en base est `manager` : cette branche ne peut
+   jamais se declencher. Consequence a connaitre, sans correctif de code : si
+   Semax est desactive, aucun technicien n'est trouve, et un signalement reste
+   `open` non assigne, avec une notification a tous les managers, Ismael compris.
+   Personne n'est prevenu deux fois, et rien n'est perdu. Si tu veux quelqu'un
    d'autre pendant la semaine, poser une ligne par jour dans `on_duty`
-   (`duty_date`, `technician_id`, `set_by`).
+   (`duty_date`, `technician_id`, `set_by`) en pointant un compte actif de role
+   `maintenance`.
 
 3. **La premiere ouverture doit se faire avec du reseau.** La v3 n'installe sa
    coquille hors ligne qu'a une visite connectee. C'est ecrit dans le mode
@@ -58,6 +69,29 @@ GROUP BY 1 ORDER BY 1;
 
 Une difference veut dire qu'une cle d'idempotence a ete rejouee sans etre
 reconnue : c'est le seul chiffre qui justifie d'arreter le pilote le jour meme.
+
+**1 bis. Aucune cle d'idempotence bloquee.** Le resultat doit etre zero.
+
+```sql
+SELECT count(*) FROM public.job_events
+WHERE result IS NULL AND created_at < now() - interval '1 hour';
+```
+
+Une ligne ici veut dire qu'une cle a ete posee sans que l'ecriture qui suit
+aboutisse (fonction edge morte au milieu). Le telephone concerne recoit 409 sur
+ce geste, et comme la file hors ligne est strictement ordonnee, **tout ce qui
+suit est bloque derriere**. Le proxy purge tout seul ces lignes au-dela de six
+heures (`purgeStaleClaims`, lancee en arriere-plan par `v3.myDay`, au plus une
+fois par heure), donc cette requete sert a le voir AVANT ces six heures. Pour
+debloquer tout de suite, sans attendre la purge :
+
+```sql
+DELETE FROM public.job_events
+WHERE result IS NULL AND created_at < now() - interval '1 hour';
+```
+
+Le signe cote cleaner est un bandeau « Saved on device, N to sync » qui ne
+redescend jamais alors que le telephone a du reseau.
 
 **2. Menages termines depuis la v3, et duree.** Comparer a l'idee que tu as de
 la duree normale du logement : la v3 promet une duree estimee, si le reel s'en
@@ -114,6 +148,8 @@ quelque chose. Noter la reponse, meme quand c'est non.
 - Un menage passe « done » sans que personne ne l'ait fini, ou un menage fini
   dans la v3 qui reste « a faire » dans l'app actuelle.
 - Le bloc Not sent grossit au lieu de se vider : le serveur refuse en boucle.
+- Le bandeau « Saved on device, N to sync » ne redescend jamais alors que le
+  telephone a du reseau : lancer la requete 1 bis, puis son DELETE.
 - Une cleaner reste bloquee plus de dix minutes et rate un checkout.
 
 Tout le reste (un libelle moche, un bouton mal place, une estimation de duree a
