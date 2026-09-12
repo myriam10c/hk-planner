@@ -16,9 +16,17 @@ export async function bootV3(
       // Rien n'est efface ici : addInitScript rejoue a chaque navigation, et un
       // effacement emporterait le drapeau hors ligne et le journal d'un test qui
       // recharge la page. Chaque test part de toute facon d'un contexte neuf.
+      // La session n'est semee qu'une fois, au premier document du contexte :
+      // addInitScript rejoue a chaque navigation, et une session re-imposee
+      // ferait reapparaitre le jeton juste apres une deconnexion, ce que le test
+      // de Profile doit justement pouvoir constater. Rien n'efface ces cles par
+      // ailleurs, donc un rechargement les retrouve tel quel.
       try {
-        if (cfg.pinToken) localStorage.setItem('cleanerToken', cfg.pinToken);
-        if (cfg.emailSession) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.emailSession));
+        if (localStorage.getItem('v3TestSeeded') !== '1') {
+          localStorage.setItem('v3TestSeeded', '1');
+          if (cfg.pinToken) localStorage.setItem('cleanerToken', cfg.pinToken);
+          if (cfg.emailSession) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.emailSession));
+        }
       } catch (e) { /* stockage indisponible : le test le verra a l'ecran */ }
       (window as any).__unhandled = [];
       window.addEventListener('unhandledrejection', (ev: any) => {

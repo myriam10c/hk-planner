@@ -6,6 +6,7 @@ import { flush, onQueueChange, pendingCount, watchNetwork } from '/v3/offline.js
 import { closeSheet, esc, icon, sheetIsOpen, toast } from '/v3/ui.js';
 import today from '/v3/screens/today.js';
 import job from '/v3/screens/job.js';
+import profile from '/v3/screens/profile.js';
 
 export const state = {
   session: null,
@@ -24,6 +25,10 @@ export const state = {
   linen: {},            // sept postes de linge
   jobNote: '',
   finished: null,       // resume affiche apres la fin
+  report: null,         // feuille de signalement ouverte : categorie, photo, envoi
+  reportStop: null,     // l'arret que ce signalement concerne
+  dead: [],             // actions refusees par le proxy, lues par l'ecran Profile
+  prepared: false,      // l'ecran courant a deja charge ce dont il a besoin
 };
 
 const screens = {};
@@ -35,6 +40,7 @@ export function registerScreen(name, screen) { screens[name] = screen; }
 // temporelle du const et casserait le boot.
 registerScreen('today', today);
 registerScreen('job', job);
+registerScreen('profile', profile);
 
 function routeName() {
   const h = String(location.hash || '');
@@ -44,6 +50,7 @@ function routeName() {
 }
 
 export function navigate(hash) {
+  state.prepared = false;
   if (location.hash === hash) render();
   else location.hash = hash;
 }
@@ -83,6 +90,15 @@ export function render() {
   if (!screen) {
     app.innerHTML = queueStrip() + vueAttente('Loading your day.');
     return;
+  }
+  // Une seule passe : prepare() charge ce dont l'ecran a besoin (le magasin des
+  // actions refusees, pour Profile) puis redessine. Le drapeau est pose AVANT
+  // l'appel, sinon le redessin relancerait prepare() a l'infini ; il est remis a
+  // zero a chaque changement de route, pour qu'un retour sur l'ecran relise.
+  if (screen.prepare && !state.prepared) {
+    state.prepared = true;
+    Promise.resolve(screen.prepare(state)).catch(function () { /* l'ecran gere */ })
+      .then(function () { render(); });
   }
   app.innerHTML = screen.view(state);
   if (screen.mount) screen.mount(state);
@@ -174,7 +190,14 @@ document.addEventListener('click', function (evt) {
   });
 });
 
-window.addEventListener('hashchange', render);
+// Changer de route remet le drapeau de preparation a zero : les liens de la
+// barre du bas passent par le hash et non par navigate(), et sans cette remise a
+// zero un retour sur Profile reafficherait la liste telle qu'elle etait a la
+// premiere visite.
+window.addEventListener('hashchange', function () {
+  state.prepared = false;
+  render();
+});
 
 onQueueChange(function (n) {
   if (state.queued === n) return;

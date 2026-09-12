@@ -3,8 +3,10 @@
 // Aucune pause, aucun stop : le chrono demarre au Start et se clot au Finish.
 import { esc, icon, minutesUntil, toast } from '/v3/ui.js';
 import { newIdem, sendOrQueue } from '/v3/offline.js';
+import { prendrePhoto } from '/v3/photo.js';
 import { navigate, openJob, queueStrip } from '/v3/app.js';
 import { finishedView, openFinishSheet, submitFinish } from '/v3/screens/finish.js';
+import { openReportSheet, reportActions } from '/v3/screens/report.js';
 
 // Libelles des boutons d'appareil photo. Ils ne reprennent JAMAIS le nom de la
 // ligne ni le titre du ticket : le bouton photo est un descendant de la ligne,
@@ -117,57 +119,6 @@ function mount(state) {
   }, 1000);
 }
 
-// Redimensionne un Blob photo cote client avant envoi : une photo de camera
-// recente pese 4 a 10 Mo, au-dela du plafond 6 Mo du proxy (revue tache 5,
-// constat 3), et en data mobile chaque envoi rate coute une photo perdue.
-// Cote large a 1600 px, JPEG 0.8. Si le canvas echoue (image corrompue, type
-// non decode), on renvoie le fichier original : mieux vaut tenter l'envoi
-// (et laisser le proxy refuser en 400) que perdre la photo silencieusement.
-function redimensionnerPhoto(fichier) {
-  return new Promise(function (resolve) {
-    const img = new Image();
-    const url = URL.createObjectURL(fichier);
-    img.onload = function () {
-      URL.revokeObjectURL(url);
-      const cote = 1600;
-      const ratio = Math.min(1, cote / Math.max(img.width, img.height));
-      const w = Math.round(img.width * ratio);
-      const h = Math.round(img.height * ratio);
-      const c = document.createElement('canvas');
-      c.width = w;
-      c.height = h;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0, w, h);
-      c.toBlob(function (blob) {
-        resolve(blob ? new File([blob], 'photo.jpg', { type: 'image/jpeg' }) : fichier);
-      }, 'image/jpeg', 0.8);
-    };
-    img.onerror = function () {
-      URL.revokeObjectURL(url);
-      resolve(fichier);
-    };
-    img.src = url;
-  });
-}
-
-// Ouvre l'appareil photo et rend le Blob choisi, redimensionne. Une seule
-// entree de fichier pour toute l'application : on la reserve le temps d'une
-// prise.
-function prendrePhoto() {
-  return new Promise(function (resolve) {
-    const input = document.getElementById('v3-cam');
-    if (!input) { resolve(null); return; }
-    input.value = '';
-    input.onchange = function () {
-      const f = input.files && input.files[0] ? input.files[0] : null;
-      input.onchange = null;
-      if (!f) { resolve(null); return; }
-      redimensionnerPhoto(f).then(resolve);
-    };
-    input.click();
-  });
-}
-
 async function televerser(state, stop, extra) {
   const fichier = await prendrePhoto();
   if (!fichier) return null;
@@ -277,11 +228,7 @@ const actions = {
     toast(r.queued ? 'Saved on your phone' : 'Sent for confirmation', 'ok');
   },
   report(state) {
-    const stop = currentStop(state);
-    // Import differe : l'ecran de signalement arrive a la tache 12. La promesse
-    // est rendue, jamais avalee, pour que l'echec parte au filet d'app.js et
-    // devienne un toast au lieu d'un rejet non gere.
-    return import('/v3/screens/report.js').then(function (m) { m.openReportSheet(state, stop); });
+    openReportSheet(state, currentStop(state));
   },
   finish(state) {
     openFinishSheet(state, currentStop(state));
@@ -292,5 +239,11 @@ const actions = {
   'linen-plus'(state, el) { majLinge(state, el.getAttribute('data-field'), 1); },
   'linen-minus'(state, el) { majLinge(state, el.getAttribute('data-field'), -1); },
 };
+
+// La feuille de signalement vit au-dessus de cet ecran : ses actions sont
+// servies par la meme table, sinon la delegation d'app.js (qui lit l'ecran de la
+// route courante, et la route ne change pas quand une feuille s'ouvre) ne les
+// trouverait pas.
+Object.assign(actions, reportActions);
 
 export default { view: view, mount: mount, actions: actions };
