@@ -5,6 +5,7 @@ import { api, ApiError, readSession } from '/v3/api.js';
 import { flush, onQueueChange, pendingCount, watchNetwork } from '/v3/offline.js';
 import { closeSheet, esc, icon, sheetIsOpen, toast } from '/v3/ui.js';
 import today from '/v3/screens/today.js';
+import job from '/v3/screens/job.js';
 
 export const state = {
   session: null,
@@ -13,6 +14,16 @@ export const state = {
   queued: 0,          // gestes en attente de synchronisation
   loading: true,
   error: '',
+  // Etat de travail d'un menage, remis a zero a chaque ouverture d'un arret
+  // (openJob) pour ne jamais heriter du menage precedent.
+  ticks: {},            // item -> coche
+  itemPhotos: {},       // item -> {photoId, photoIdem}
+  ticketPhotos: {},     // ticketId -> {photoId, photoIdem}
+  checkedTickets: {},   // ticketId -> true
+  photoIds: [],         // identifiants a rattacher au menage a la fin
+  linen: {},            // sept postes de linge
+  jobNote: '',
+  finished: null,       // resume affiche apres la fin
 };
 
 const screens = {};
@@ -23,6 +34,7 @@ export function registerScreen(name, screen) { screens[name] = screen; }
 // appeler registerScreen avant `const screens = {}` leverait sur la zone morte
 // temporelle du const et casserait le boot.
 registerScreen('today', today);
+registerScreen('job', job);
 
 function routeName() {
   const h = String(location.hash || '');
@@ -53,12 +65,17 @@ export function render() {
       '<a href="/#cleaner">Sign in</a></div>';
     return;
   }
+  // Le bandeau de file accompagne aussi l'attente et l'erreur : rouvrir l'app
+  // hors ligne au milieu d'un menage echoue sur v3.myDay, et la cleaner doit
+  // voir la que ses gestes sont gardes, pas seulement une panne de reseau.
   if (state.loading) {
-    app.innerHTML = '<div class="gate"><h1>HK Planner</h1><p class="muted">Loading your day.</p></div>';
+    app.innerHTML = queueStrip() +
+      '<div class="gate"><h1>HK Planner</h1><p class="muted">Loading your day.</p></div>';
     return;
   }
   if (state.error) {
-    app.innerHTML = '<div class="gate"><h1>HK Planner</h1><p class="muted">' + esc(state.error) +
+    app.innerHTML = queueStrip() +
+      '<div class="gate"><h1>HK Planner</h1><p class="muted">' + esc(state.error) +
       '</p><button class="btn-primary" data-act="reload">Try again</button></div>';
     return;
   }
@@ -103,6 +120,19 @@ export async function loadDay() {
   try {
     const data = await api.get('v3.myDay', {});
     state.day = data;
+    // Au premier chargement, l'arret ouvert vient du fragment d'URL et non d'un
+    // clic : state.jobId est encore vide, on le lit dans l'adresse. Repartir de
+    // la progression enregistree fait qu'un rechargement au milieu d'un menage
+    // retrouve les cases deja cochees.
+    const ouvert = state.jobId ||
+      (String(location.hash).indexOf('#/job/') === 0
+        ? decodeURIComponent(String(location.hash).replace('#/job/', ''))
+        : null);
+    const stop = (data.stops || []).find(function (s) { return s.jobId === ouvert; });
+    if (stop) {
+      state.jobId = stop.jobId;
+      state.ticks = Object.assign({}, stop.progress || {});
+    }
     state.loading = false;
     render();
   } catch (err) {
