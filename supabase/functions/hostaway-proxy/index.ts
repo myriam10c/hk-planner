@@ -4,7 +4,7 @@ import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
 import {
   applyInvite, applyLinkEmail, CLEANER_PUBLIC_SELECT, currentUser, currentUserDetailed,
-  findAuthUserByEmail, findCleanerByEmail, normalizeEmail, parseInviteInput,
+  deleteCleanerAuthAccount, findCleanerByEmail, normalizeEmail, parseInviteInput,
   parseLinkEmailInput, planInvite, publicCleanerRows, saveCleanerUpdatePatch,
   systemRowGuard,
 } from "./auth.ts";
@@ -1642,9 +1642,11 @@ Deno.serve(async (req: Request) => {
         const { data: gone } = await sb.from("cleaners").select("email").eq("id", body.id).maybeSingle();
         const goneEmail = normalizeEmail(gone?.email);
         if (goneEmail) {
-          const authUser = await findAuthUserByEmail(sb, goneEmail);
-          if (authUser) await sb.auth.admin.deleteUser(authUser.id);
-          await sb.from("cleaners").update({ email: null }).eq("id", body.id);
+          // Revue round 3, constat 3 : ce bloc rendait 200 « success » meme quand
+          // le compte Auth du partant survivait (levee de borne avalee, erreur de
+          // deleteUser jamais lue). L'echec remonte desormais au manager.
+          const issue = await deleteCleanerAuthAccount(sb, body.id, goneEmail);
+          if (!issue.ok) return jsonResp(issue.body, issue.status);
         }
       } catch (e) {
         console.warn("[deleteCleaner] suppression du compte Auth impossible:", String(e));

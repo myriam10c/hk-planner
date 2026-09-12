@@ -588,7 +588,12 @@ Deno.test("applyInvite defait l'ecriture et rend 409 quand l'ancien compte resis
   assertEquals(r.status, 409);
   assertEquals(r.body, { error: "Could not replace the previous account." });
   // Aucune invitation n'est partie, et la ligne a retrouve son etat d'avant.
-  assertEquals(sb.calls, ["cleaners.update", "auth.listUsers", "auth.deleteUser", "cleaners.update"]);
+  // Le second listUsers est le filet anti-orphelin du round 4 : avant de defaire
+  // quoi que ce soit, on relit les comptes. Aucun ne porte walter@ ici, donc le
+  // rollback part comme avant.
+  assertEquals(sb.calls, [
+    "cleaners.update", "auth.listUsers", "auth.deleteUser", "auth.listUsers", "cleaners.update",
+  ]);
   assertEquals(sb.payloads[1].payload, {
     email: "ancien@example.com", is_active: true, name: "Ancien nom",
   });
@@ -604,10 +609,12 @@ Deno.test("applyInvite defait l'insertion et rend 502 quand l'invitation echoue"
   const r = await applyInvite(sb, plan, "walter@example.com", "https://app.test/");
   assertEquals(r.status, 502);
   assertEquals(r.body, { error: "Could not send the invitation." });
-  // Le second listUsers verifie qu'aucune requete jumelle n'a cree le compte
-  // entre-temps ; sans compte, le rollback part comme avant (hotfix du 12/09).
+  // Le deuxieme listUsers verifie qu'aucune requete jumelle n'a cree le compte
+  // entre-temps (hotfix du 12/09), le troisieme est le filet anti-orphelin du
+  // round 4 pose devant le rollback. Sans compte, le rollback part comme avant.
   assertEquals(sb.calls, [
-    "cleaners.insert", "auth.listUsers", "auth.invite", "auth.listUsers", "cleaners.delete",
+    "cleaners.insert", "auth.listUsers", "auth.invite",
+    "auth.listUsers", "auth.listUsers", "cleaners.delete",
   ]);
 });
 
@@ -1841,4 +1848,359 @@ Deno.test("linkEmail : une ligne sans adresse ne revendique pas le compte d'un a
   assertEquals(sb.calls, ["cleaners.select.id", "cleaners.select.email"]);
   assertEquals(sb.calls.some((c: string) => c.startsWith("auth.")), false);
   assertEquals(sb.payloads, []);
+});
+
+// ===========================================================================
+// Revue de securite round 4 (review-securite-round3.md)
+// Constat 1 : le round 3 rouvre la classe exacte de l'incident du 11/09 par un
+// autre entrelacement. Constat 3 : la levee de borne avalee par deleteCleaner.
+// ===========================================================================
+
+import {
+  DELETE_CLEANER_AUTH_UNCONFIRMED,
+  deleteCleanerAuthAccount,
+  shouldSkipRollback,
+} from "./auth.ts";
+
+// Faux client A ETAT, contrairement a fakeInviteSb qui sert des resultats
+// scriptes. Un entrelacement ne se rejoue pas avec des reponses fixes : il faut
+// une vraie ligne, une vraie liste de comptes Auth, et des ecritures
+// conditionnelles reellement evaluees, sinon la jumelle ne voit jamais ce que sa
+// soeur vient de poser.
+interface MondeInvite {
+  row: Record<string, any> | null;
+  authUsers: { id: string; email: string }[];
+  resetError?: any;
+  inviteError?: any;
+  // Appele AVANT chaque lecture des comptes Auth, avec le rang de l'appel :
+  // c'est le point d'insertion de la jumelle.
+  avantListUsers?: (rang: number) => Promise<void>;
+}
+
+function fakeMondeSb(monde: MondeInvite) {
+  const calls: string[] = [];
+  let rangListUsers = 0;
+  let prochainId = 100;
+  const sb: any = {
+    calls,
+    from(_table: string) {
+      const q: any = { filters: {}, cols: "" };
+      // Le filtre est evalue sur l'etat REEL de la ligne, exactement comme
+      // Postgres le ferait sous le verrou de ligne.
+      const matche = () => {
+        const r = monde.row;
+        if (!r) return false;
+        for (const [col, val] of Object.entries(q.filters)) {
+          const actuel = r[col] ?? null;
+          if (col === "email") {
+            if (normalizeEmail(actuel) !== normalizeEmail(val)) return false;
+          } else if (String(actuel) !== String(val)) return false;
+        }
+        return true;
+      };
+      const finish = () => {
+        calls.push("cleaners." + q.op);
+        if (q.op === "insert") {
+          const cree = { id: prochainId++, ...q.payload };
+          monde.row = cree;
+          return Promise.resolve({ data: { id: cree.id }, error: null });
+        }
+        if (q.op === "update") {
+          if (!matche()) return Promise.resolve({ data: [], error: null });
+          Object.assign(monde.row as any, q.payload);
+          return Promise.resolve({ data: [{ id: (monde.row as any).id }], error: null });
+        }
+        if (q.op === "delete") {
+          if (!matche()) return Promise.resolve({ data: [], error: null });
+          const id = (monde.row as any).id;
+          monde.row = null;
+          return Promise.resolve({ data: [{ id }], error: null });
+        }
+        if (!matche()) return Promise.resolve({ data: null, error: null });
+        const projete: Record<string, unknown> = {};
+        for (const c of q.cols.split(",").map((s: string) => s.trim()).filter(Boolean)) {
+          projete[c] = (monde.row as any)[c] ?? null;
+        }
+        return Promise.resolve({ data: projete, error: null });
+      };
+      q.update = (p: any) => { q.op = "update"; q.payload = p; return q; };
+      q.insert = (p: any) => { q.op = "insert"; q.payload = p; return q; };
+      q.delete = () => { q.op = "delete"; return q; };
+      q.select = (cols?: string) => {
+        if (q.op === undefined) q.op = "select";
+        if (cols) q.cols = cols;
+        return q;
+      };
+      q.limit = () => q;
+      q.eq = (col: string, val: any) => { q.filters[col] = val; return q; };
+      q.is = (col: string, val: any) => { q.filters[col] = val; return q; };
+      q.single = () => finish();
+      q.maybeSingle = () => finish();
+      q.then = (res: any, rej: any) => finish().then(res, rej);
+      return q;
+    },
+    auth: {
+      resetPasswordForEmail: async () => {
+        calls.push("auth.reset");
+        return { error: monde.resetError ?? null };
+      },
+      admin: {
+        listUsers: async () => {
+          rangListUsers += 1;
+          if (monde.avantListUsers) await monde.avantListUsers(rangListUsers);
+          calls.push("auth.listUsers");
+          return { data: { users: [...monde.authUsers] }, error: null };
+        },
+        deleteUser: async (id: string) => {
+          calls.push("auth.deleteUser");
+          monde.authUsers = monde.authUsers.filter((u) => u.id !== id);
+          return { error: null };
+        },
+        inviteUserByEmail: async (email: string) => {
+          calls.push("auth.invite");
+          if (monde.inviteError) return { error: monde.inviteError };
+          // GoTrue cree le compte ET envoie l'email : le compte existe apres coup.
+          monde.authUsers.push({ id: "u-" + String(monde.authUsers.length + 1), email });
+          return { error: null };
+        },
+      },
+    },
+  };
+  return sb;
+}
+
+// Comptes Auth que plus aucune ligne cleaners ne porte : la definition exacte de
+// la requete d'orphelins de la revue.
+function orphelins(monde: MondeInvite): string[] {
+  const portee = normalizeEmail(monde.row?.email);
+  return monde.authUsers
+    .filter((u) => normalizeEmail(u.email) !== portee || !portee)
+    .map((u) => u.email);
+}
+
+// --- Constat 1 : l'entrelacement exact de la preuve de la revue ---
+//
+// A gagne l'ecriture de la ligne. B, jumelle perdante, relit, trouve l'etat
+// conforme, poursuit jusqu'a Auth, ne trouve pas encore de compte, en cree un et
+// rend 200. A lit alors les comptes, trouve celui que B vient de creer, part donc
+// sur un resetPasswordForEmail au lieu d'une invitation, et cet envoi echoue
+// (limite de debit GoTrue, exactement le 11/09). Au round 3, A defaisait alors
+// l'ecriture de sa propre ligne alors que le compte de B la portait : la ligne
+// repartait sur l'ancienne adresse et le compte de B devenait orphelin.
+Deno.test("applyInvite : la perdante d'un envoi Auth ne defait plus la ligne quand un compte porte l'adresse", async () => {
+  const w = captureWarn();
+  try {
+    const monde: MondeInvite = {
+      row: { ...AVANT },
+      authUsers: [],
+      // L'envoi de reinitialisation de A echoue, l'invitation de B passe.
+      resetError: { message: "rate limit exceeded" },
+    };
+    const sb = fakeMondeSb(monde);
+    let rB: any = null;
+    monde.avantListUsers = async (rang: number) => {
+      // B s'intercale APRES la premiere lecture Auth de A (celle de l'ancienne
+      // adresse) et AVANT la seconde (celle de l'adresse cible).
+      if (rang !== 2 || rB) return;
+      rB = { pending: true };
+      rB = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+    };
+
+    const rA = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+
+    // B a bien gagne la course a la creation du compte et rendu un succes.
+    assertEquals(rB.status, 200);
+    assertEquals(rB.body, { status: "success", id: 8, mode: "invite" });
+    // A rend une erreur, c'est correct : SON envoi a echoue.
+    assertEquals(rA.status, 502);
+    assertEquals(rA.body, { error: "Could not send the reset email." });
+
+    // Le coeur du correctif : la ligne garde l'adresse et le compte de B survit.
+    assertEquals(monde.row?.email, "walter@example.com");
+    assertEquals(monde.authUsers.length, 1);
+    assertEquals(monde.authUsers[0].email, "walter@example.com");
+    assertEquals(orphelins(monde), []);
+
+    // Le rollback n'a pas eu lieu : la seule ecriture cleaners est l'aller de A
+    // (celle de B ne touche aucune ligne, elle ne compte pas comme rollback).
+    assertEquals(monde.row?.name, "Walter");
+    assertEquals(w.lines.some((l: string) => l.includes("un compte Auth porte deja l'adresse")), true);
+    assertEquals(w.lines.some((l: string) => l.includes("@")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+// Le pendant negatif : sans compte Auth pour l'adresse, le rollback doit encore
+// avoir lieu, sinon on laisserait une ligne reliee a rien apres un echec franc.
+Deno.test("applyInvite : sans compte Auth pour l'adresse, le rollback a toujours lieu", async () => {
+  const w = captureWarn();
+  try {
+    const monde: MondeInvite = {
+      row: { ...AVANT },
+      authUsers: [],
+      inviteError: { message: "smtp down" },
+    };
+    const sb = fakeMondeSb(monde);
+    const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+    assertEquals(r.status, 502);
+    assertEquals(r.body, { error: "Could not send the invitation." });
+    // La ligne est revenue a son etat d'avant, personne n'est reste a moitie relie.
+    assertEquals(monde.row?.email, "ancien@example.com");
+    assertEquals(monde.row?.name, "Ancien nom");
+    assertEquals(monde.authUsers.length, 0);
+  } finally {
+    w.restore();
+  }
+});
+
+// Second point d'appel du rollback : l'echec de destruction de l'ancien compte.
+// Meme entrelacement possible, meme garde.
+Deno.test("applyInvite : le rollback du remplacement d'ancien compte est garde lui aussi", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({
+      // L'aller passe.
+      writes: [{ data: [{ id: 8 }], error: null }],
+      // Page pleine : la lecture de l'ancien compte leve, on part en 409.
+      users: Array.from(
+        { length: AUTH_USERS_READ_LIMIT },
+        (_, i) => ({ id: "u" + String(i), email: "walter@example.com" }),
+      ),
+    });
+    const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+    assertEquals(r.status, 409);
+    assertEquals(r.body, { error: "Could not replace the previous account." });
+    // La relecture anti-orphelin leve elle aussi (meme page pleine) : elle echoue
+    // du cote de la CONSERVATION, donc aucune ecriture de rollback.
+    assertEquals(sb.calls.filter((c: string) => c === "cleaners.update").length, 1);
+    assertEquals(w.lines.some((l: string) => l.includes("@")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+// --- shouldSkipRollback, l'unite ---
+
+Deno.test("shouldSkipRollback dit oui des qu'un compte Auth porte l'adresse", async () => {
+  assertEquals(
+    await shouldSkipRollback(fakeAuthListSb([{ id: "u-1", email: "Walter@Example.com" }]), "walter@example.com"),
+    true,
+  );
+  assertEquals(
+    await shouldSkipRollback(fakeAuthListSb([{ id: "u-1", email: "autre@example.com" }]), "walter@example.com"),
+    false,
+  );
+});
+
+Deno.test("shouldSkipRollback echoue du cote de la conservation quand la lecture leve", async () => {
+  const w = captureWarn();
+  try {
+    // Page pleine : on ne peut plus affirmer qu'aucun compte ne porte l'adresse.
+    // Defaire sur ce doute fabriquerait l'orphelin, on ne defait donc pas.
+    const pleine = Array.from(
+      { length: AUTH_USERS_READ_LIMIT },
+      (_, i) => ({ id: "u" + String(i), email: "x" + String(i) + "@example.com" }),
+    );
+    assertEquals(await shouldSkipRollback(fakeAuthListSb(pleine), "walter@example.com"), true);
+    // Une adresse vide n'est pas une preuve d'existence : on laisse le rollback.
+    assertEquals(await shouldSkipRollback(fakeAuthListSb([]), ""), false);
+    assertEquals(w.lines.some((l: string) => l.includes("@")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+// --- Constat 3 : deleteCleaner avalait la levee de borne et rendait 200 ---
+
+function fakeDeleteSb(script: { users?: any[]; deleteUser?: any; throwOnList?: boolean } = {}) {
+  const calls: string[] = [];
+  const payloads: any[] = [];
+  const sb: any = {
+    calls,
+    payloads,
+    from(_t: string) {
+      const q: any = {};
+      const finish = () => {
+        calls.push("cleaners.update");
+        payloads.push(q.payload);
+        return Promise.resolve({ data: [{ id: 8 }], error: null });
+      };
+      q.update = (p: any) => { q.payload = p; return q; };
+      q.eq = () => q;
+      q.then = (res: any, rej: any) => finish().then(res, rej);
+      return q;
+    },
+    auth: {
+      admin: {
+        listUsers: async () => {
+          calls.push("auth.listUsers");
+          return { data: { users: script.users ?? [] }, error: null };
+        },
+        deleteUser: async () => {
+          calls.push("auth.deleteUser");
+          return script.deleteUser ?? { error: null };
+        },
+      },
+    },
+  };
+  return sb;
+}
+
+Deno.test("deleteCleanerAuthAccount detruit le compte et libere l'adresse", async () => {
+  const sb = fakeDeleteSb({ users: [{ id: "u-1", email: "walter@example.com" }] });
+  const r = await deleteCleanerAuthAccount(sb, 8, "walter@example.com");
+  assertEquals(r.ok, true);
+  assertEquals(r.status, 200);
+  assertEquals(sb.calls, ["auth.listUsers", "auth.deleteUser", "cleaners.update"]);
+  assertEquals(sb.payloads, [{ email: null }]);
+});
+
+Deno.test("deleteCleanerAuthAccount rend 409 quand la page des comptes Auth est pleine", async () => {
+  const w = captureWarn();
+  try {
+    // Avant le round 4, cette levee etait avalee et la route rendait 200
+    // "success" alors que le compte Auth du partant survivait : le manager
+    // croyait avoir coupe un acces reste ouvert.
+    const pleine = Array.from(
+      { length: AUTH_USERS_READ_LIMIT },
+      (_, i) => ({ id: "u" + String(i), email: "x" + String(i) + "@example.com" }),
+    );
+    const sb = fakeDeleteSb({ users: pleine });
+    const r = await deleteCleanerAuthAccount(sb, 8, "walter@example.com");
+    assertEquals(r.ok, false);
+    assertEquals(r.status, 409);
+    assertEquals(r.body, { error: DELETE_CLEANER_AUTH_UNCONFIRMED, deactivated: true });
+    // Et surtout : l'adresse n'est PAS liberee, donc la garde du porteur continue
+    // de proteger le compte survivant contre une revendication par une autre ligne.
+    assertEquals(sb.calls.includes("cleaners.update"), false);
+    assertEquals(sb.calls.includes("auth.deleteUser"), false);
+    assertEquals(w.lines.some((l: string) => l.includes("@")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("deleteCleanerAuthAccount rend 409 quand la destruction du compte echoue", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeDeleteSb({
+      users: [{ id: "u-1", email: "walter@example.com" }],
+      deleteUser: { error: { message: "user not deletable" } },
+    });
+    const r = await deleteCleanerAuthAccount(sb, 8, "walter@example.com");
+    assertEquals(r.ok, false);
+    assertEquals(r.status, 409);
+    assertEquals(sb.calls.includes("cleaners.update"), false);
+    assertEquals(w.lines.some((l: string) => l.includes("@")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("deleteCleanerAuthAccount ne fait rien sur une ligne sans adresse", async () => {
+  const sb = fakeDeleteSb();
+  const r = await deleteCleanerAuthAccount(sb, 8, "");
+  assertEquals(r.ok, true);
+  assertEquals(sb.calls, []);
 });

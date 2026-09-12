@@ -574,8 +574,17 @@ export function systemRowError(currentRole: unknown, nextRole: unknown): string 
 // seuil, le compte cherche peut se trouver hors de la page et la fonction rend
 // null. Cote applyInvite, ce null-la fait RATER l'ancien compte a supprimer,
 // donc la garde « l'ancien titulaire perd son acces » echouerait OUVERTE. On
-// leve plutot que de l'affirmer : chaque appelant remonte en erreur (409, 500
-// ou 502), l'invitation est refusee au lieu d'etre accordee a moitie.
+// leve plutot que de l'affirmer.
+//
+// Les CINQ appelants remontent tous en erreur, aucun n'avale la levee (liste
+// corrigee par la revue round 3, constat 3, qui en comptait un de trop en
+// silence) :
+//   - applyInvite, destruction de l'ancien compte  -> 409, ecriture defaite ;
+//   - applyInvite, recherche du compte cible       -> 500 (la levee sort) ;
+//   - shouldSkipRollback                           -> ne defait rien (voir plus bas) ;
+//   - applyLinkEmail                               -> 502 ;
+//   - deleteCleanerAuthAccount                     -> 409, adresse non liberee.
+// L'invitation ou la suppression est refusee au lieu d'etre accordee a moitie.
 export const AUTH_USERS_READ_LIMIT = 200;
 
 export async function findAuthUserByEmail(sb: any, email: string): Promise<any | null> {
@@ -645,6 +654,45 @@ export async function rollbackInvite(sb: any, plan: InvitePlan, cleanerId: numbe
   }
 }
 
+// Filet anti-orphelin, pose devant CHAQUE rollback d'invitation (revue round 3,
+// constat 1). C'est le correctif portant du round 4.
+//
+// Le round 3 a fait poursuivre la perdante d'un double-clic jusqu'a l'etape
+// Auth, mais a laisse rollbackInvite verrouille sur la seule ADRESSE. Or cette
+// adresse ne dit pas QUI l'a posee : la gagnante de la course a la ligne peut
+// donc defaire une adresse que la jumelle vient de relier a un compte Auth que
+// cette jumelle vient de creer. Le compte reste, la ligne repart en arriere, et
+// c'est exactement l'orphelin du 11/09, revendicable par n'importe quelle ligne
+// active sans adresse munie d'un PIN.
+//
+// La regle est donc plus simple qu'une empreinte de version, et elle vaut sur
+// tous les chemins : on ne defait JAMAIS l'ecriture d'une ligne quand un compte
+// Auth porte deja l'adresse visee. L'etat laisse (ligne reliee, compte existant,
+// email pas parti) est le residu benin que le code assume deja ailleurs, et la
+// ligne qui porte l'adresse est precisement ce qui protege le compte d'une
+// revendication par un tiers.
+//
+// « Un compte existe » veut dire « auth.users porte cette adresse », sans regard
+// sur email_confirmed_at : un compte invite et jamais accepte compte tout autant
+// comme orphelin dans la requete de detection, et le detacher de sa ligne serait
+// le meme degat.
+//
+// Lecture impossible (page pleine, service injoignable) : on rend true, donc on
+// ne defait rien. C'est l'echec FERME du bon cote ici : sur un doute, laisser la
+// ligne reliee est benin, la defaire peut fabriquer l'orphelin.
+export async function shouldSkipRollback(sb: any, email: string): Promise<boolean> {
+  const cible = normalizeEmail(email);
+  // Sans adresse, aucune existence a affirmer : rollbackInvite echoue lui-meme
+  // FERME dans ce cas, on le laisse decider.
+  if (!cible) return false;
+  try {
+    return !!(await findAuthUserByEmail(sb, cible));
+  } catch (e) {
+    console.warn("[inviteCleaner] comptes Auth illisibles avant rollback, rien n'est defait: " + String(e));
+    return true;
+  }
+}
+
 export interface InviteResult {
   status: number;
   body: Record<string, unknown>;
@@ -654,6 +702,35 @@ const EMAIL_CONFLICT: InviteResult = {
   status: 409,
   body: { error: EMAIL_CONFLICT_MESSAGE },
 };
+
+// Unique point de sortie vers rollbackInvite depuis applyInvite (revue round 3,
+// constat 1). Les deux chemins d'echec passent par ici, donc les deux gardes
+// s'appliquent aux deux, ce qui est justement ce qui manquait au round 3 : le
+// filet anti-orphelin n'y couvrait qu'une branche sur deux.
+//   1. adressePoseeIci : l'adresse portee par la ligne vient-elle de CETTE
+//      requete ? Sinon, la defaire emporterait le travail d'une jumelle ;
+//   2. shouldSkipRollback : un compte Auth porte-t-il MAINTENANT l'adresse ?
+//      Lecture fraiche a chaque fois, jamais une variable calculee plus haut
+//      dans applyInvite : c'est precisement pendant ce laps de temps qu'une
+//      jumelle cree le compte.
+async function rollbackInviteSiSur(
+  sb: any,
+  plan: InvitePlan,
+  cleanerId: number,
+  email: string,
+  adressePoseeIci: boolean,
+): Promise<void> {
+  if (!adressePoseeIci) {
+    console.warn("[inviteCleaner] rien a defaire: l'adresse portee vient d'une requete jumelle");
+    return;
+  }
+  if (await shouldSkipRollback(sb, email)) {
+    // Message fixe, sans adresse ni identifiant.
+    console.warn("[inviteCleaner] rien a defaire: un compte Auth porte deja l'adresse, le defaire creerait un orphelin");
+    return;
+  }
+  await rollbackInvite(sb, plan, cleanerId);
+}
 
 // Sequence des ecritures, et rollback qui en decoule :
 //   1. l'ecriture cleaners d'abord. C'est la seule qui peut lever un 23505, et un
@@ -741,9 +818,16 @@ export async function applyInvite(
       // succes alors qu'aucune invitation n'etait partie, et le rollback de la
       // jumelle pouvait encore defaire l'adresse sur laquelle ce 200 portait. On
       // poursuit donc jusqu'a l'etape Auth, exactement comme applyLinkEmail, ce
-      // qui rattrape au passage une jumelle dont l'appel Auth aurait echoue
-      // (compte deja cree : c'est un resetPasswordForEmail, pas un second
-      // email d'invitation).
+      // qui rattrape au passage une jumelle dont l'appel Auth aurait echoue.
+      // Contrepartie ASSUMEE, et il faut la dire (revue round 3, constat 4) : sur
+      // un vrai double-clic ou la jumelle a deja cree le compte, cette requete
+      // envoie en plus un resetPasswordForEmail. La personne recoit donc DEUX
+      // messages, une invitation et une reinitialisation, avec deux liens
+      // concurrents ; et si ce second envoi se heurte a la limite de debit
+      // GoTrue, le manager voit un 502 alors que l'invitation est bien partie.
+      // Choix de produit, pas defaut de securite : une erreur qui invite a
+      // verifier vaut mieux qu'un succes mensonger, et le round 2 avait paye
+      // l'autre parti d'un 200 sans email.
       adressePoseeIci = false;
     }
     cleanerId = plan.id;
@@ -763,8 +847,7 @@ export async function applyInvite(
       }
     } catch (e) {
       console.warn("[inviteCleaner] ancien compte Auth non supprime: " + String(e));
-      if (adressePoseeIci) await rollbackInvite(sb, plan, cleanerId);
-      else console.warn("[inviteCleaner] rien a defaire: l'adresse portee vient d'une requete jumelle");
+      await rollbackInviteSiSur(sb, plan, cleanerId, email, adressePoseeIci);
       return { status: 409, body: { error: "Could not replace the previous account." } };
     }
   }
@@ -787,6 +870,14 @@ export async function applyInvite(
     // efface le lien que le gagnant venait de poser. On relit donc les comptes
     // avant de defaire quoi que ce soit : si le compte existe maintenant, la
     // ligne est correctement reliee et le rollback ferait le degat.
+    //
+    // Ce bloc-ci ne couvre QUE le cas « on croyait qu'aucun compte n'existait et
+    // il en existe un maintenant », ou il y a mieux a rendre qu'une erreur : la
+    // jumelle a bien envoye son invitation, donc 200. Le cas symetrique
+    // (`existing` deja vrai, reinitialisation qui echoue) reste une erreur pour
+    // CETTE requete, mais il ne doit pas defaire la ligne pour autant : c'est
+    // rollbackInviteSiSur qui s'en charge plus bas, et c'est ce qui manquait au
+    // round 3 (revue round 3, constats 1 et 2).
     if (!existing) {
       let cree: any = null;
       try {
@@ -799,8 +890,7 @@ export async function applyInvite(
         return { status: 200, body: { status: "success", id: cleanerId, mode: "invite" } };
       }
     }
-    if (adressePoseeIci) await rollbackInvite(sb, plan, cleanerId);
-    else console.warn("[inviteCleaner] rien a defaire: l'adresse portee vient d'une requete jumelle");
+    await rollbackInviteSiSur(sb, plan, cleanerId, email, adressePoseeIci);
     return {
       status: 502,
       body: { error: existing ? "Could not send the reset email." : "Could not send the invitation." },
@@ -809,6 +899,68 @@ export async function applyInvite(
   console.log("[inviteCleaner] " + (existing ? "reset" : "invitation") +
     " envoye pour cleaner " + String(cleanerId));
   return { status: 200, body: { status: "success", id: cleanerId, mode: existing ? "reset" : "invite" } };
+}
+
+// ===========================================================================
+// deleteCleaner : destruction du compte Auth d'un membre qui part
+// ===========================================================================
+
+// Libelle rendu TEL QUEL par le front. Il dit les deux moities de la verite : le
+// membre est bien desactive (l'ecriture is_active a deja eu lieu et n'est pas
+// defaite), mais son compte de connexion n'a pas pu etre confirme detruit.
+export const DELETE_CLEANER_AUTH_UNCONFIRMED =
+  "Team member deactivated, but their login account could not be removed. Try again.";
+
+export interface DeleteAuthOutcome {
+  ok: boolean;
+  status: number;
+  body: Record<string, unknown>;
+}
+
+// Revue round 3, constat 3. Cette sequence vivait en clair dans la route
+// deleteCleaner d'index.ts, dans un try/catch qui journalisait puis rendait
+// 200 « success » quoi qu'il arrive. Deux facons d'y mentir :
+//   - findAuthUserByEmail LEVE quand sa page de lecture est pleine (echec FERME
+//     du round 3) : la levee etait avalee, la route rendait un succes alors que
+//     le compte Auth du partant survivait, et le manager croyait avoir coupe un
+//     acces reste ouvert ;
+//   - l'erreur rendue par deleteUser n'etait tout simplement pas lue, meme
+//     resultat.
+// On rend donc un echec explicite au lieu d'un succes mensonger. Elle vit ici et
+// non dans index.ts pour une seule raison : index.ts appelle Deno.serve au
+// chargement, donc rien de ce qu'il contient n'est testable.
+//
+// L'adresse n'est liberee qu'une fois le compte REELLEMENT detruit. Sur echec on
+// la laisse en place volontairement : c'est la garde du porteur qui empeche
+// alors une autre ligne de revendiquer le compte survivant. La liberer en aveugle
+// est ce qui fabriquait un orphelin avant la borne du round 3.
+export async function deleteCleanerAuthAccount(
+  sb: any,
+  cleanerId: unknown,
+  goneEmail: string,
+): Promise<DeleteAuthOutcome> {
+  const cible = normalizeEmail(goneEmail);
+  if (!cible) return { ok: true, status: 200, body: { status: "success" } };
+  try {
+    const authUser = await findAuthUserByEmail(sb, cible);
+    if (authUser) {
+      const res = await sb.auth.admin.deleteUser(authUser.id);
+      if (res?.error) throw res.error;
+    }
+  } catch (e) {
+    // Message sans adresse : il finit dans les journaux.
+    console.warn("[deleteCleaner] compte Auth non confirme detruit: " + String((e as any)?.message ?? e));
+    return {
+      ok: false,
+      status: 409,
+      body: { error: DELETE_CLEANER_AUTH_UNCONFIRMED, deactivated: true },
+    };
+  }
+  // Le compte n'existe plus : l'adresse peut retourner au pot commun. Une erreur
+  // ici ne laisse aucun acces ouvert (le compte est detruit), la route la traite
+  // comme avant.
+  await sb.from("cleaners").update({ email: null }).eq("id", cleanerId);
+  return { ok: true, status: 200, body: { status: "success" } };
 }
 
 // Garde `system` de saveCleaner. Une garde de securite echoue FERMEE : si la
