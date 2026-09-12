@@ -9,8 +9,8 @@ import {
   systemRowGuard,
 } from "./auth.ts";
 import {
-  donneesOuLeve, pickSnapshot, plusDays, resolveJob, roleAllowed, todayDubai,
-  validMyDayDate, V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
+  donneesOuLeve, pickSnapshot, plusDays, purgeStaleClaimsIfDue, resolveJob, roleAllowed,
+  todayDubai, validMyDayDate, V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
 } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
 import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
@@ -1094,6 +1094,18 @@ Deno.serve(async (req: Request) => {
       // Role : le tableau des actions de la specification (section 4) dit qui a
       // le droit d'appeler quoi. Une session valide ne suffit pas.
       if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      // Rattrapage des cles d'idempotence bloquees (ruling 7). Une cle posee dont
+      // l'ecriture metier n'a jamais abouti rend 409 pour toujours, et la file
+      // hors ligne etant strictement ordonnee, elle bloque definitivement tout ce
+      // qui la suit sur ce telephone. purgeStaleClaims existait, testee, sans
+      // aucun appelant (revue de branche, finding 3) : elle part d'ici, hors du
+      // chemin de reponse, au plus une fois par heure et par isolat. v3.myDay est
+      // le bon porteur : c'est la premiere action de chaque journee de travail, et
+      // aucune infrastructure de tache planifiee n'existe pour ce pilote.
+      const purge = purgeStaleClaimsIfDue(sb);
+      if (purge) {
+        try { (globalThis as any).EdgeRuntime?.waitUntil?.(purge); } catch (_e) { /* best effort */ }
+      }
       const date = url.searchParams.get("date") || todayDubai();
       // Forme, validite reelle et fenetre. Sans la validite, « 2026-13-45 »
       // ressortait en 500 ; sans la fenetre, n'importe quelle session valide

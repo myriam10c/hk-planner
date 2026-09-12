@@ -107,8 +107,9 @@ export function staleClaimIds(
 
 // Purge les cles restees sans resultat. Sans elle, une cle posee dont l'ecriture
 // metier n'a jamais abouti et dont releaseEvent a echoue rend 409 pour toujours :
-// le geste est bloque definitivement cote telephone. A lancer par la tache 14, en
-// planifie ou a la main. Rend le nombre de lignes supprimees.
+// le geste est bloque definitivement cote telephone, et la file hors ligne etant
+// strictement ordonnee, tout ce qui le suit l'est aussi. Rend le nombre de lignes
+// supprimees. L'appelant est purgeStaleClaimsIfDue, depuis v3.myDay.
 export async function purgeStaleClaims(
   sb: any, olderThanMs: number = V3_CLAIM_TTL_MS,
 ): Promise<number> {
@@ -129,6 +130,41 @@ export async function purgeStaleClaims(
     return 0;
   }
   return ids.length;
+}
+
+// Intervalle minimum entre deux purges lancees par un meme isolat edge. La purge
+// est declenchee par v3.myDay, l'action la plus frequente de la v3 : sans cette
+// borne, chaque ouverture de l'ecran Today, pour chaque cleaner, paierait deux
+// requetes de plus sur un plan Supabase gratuit. Une heure suffit largement face
+// a un TTL de six heures.
+export const V3_PURGE_INTERVAL_MS = 3600_000;
+
+// Horodatage de la derniere purge lancee par CET isolat. Les isolats edge sont
+// nombreux et sans memoire partagee : la borne n'est donc pas un verrou global,
+// juste un garde-fou contre la purge a chaque requete. Purger deux fois n'a
+// aucun effet de bord, la deuxieme ne trouve plus rien.
+let dernierePurgeMs = 0;
+
+// Lance la purge en arriere-plan si l'heure est venue. Rend la promesse a passer
+// a EdgeRuntime.waitUntil, ou null quand ce n'est pas encore le moment.
+//
+// La promesse ne rejette JAMAIS : elle part hors du chemin de reponse, et un
+// rejet non gere tuerait l'isolat pendant qu'il repond a une cleaner. Un echec
+// de purge n'est pas grave, le prochain appel reessaiera.
+export function purgeStaleClaimsIfDue(
+  sb: any, nowMs: number = Date.now(),
+): Promise<number> | null {
+  if (nowMs - dernierePurgeMs < V3_PURGE_INTERVAL_MS) return null;
+  dernierePurgeMs = nowMs;
+  try {
+    return purgeStaleClaims(sb).catch((e) => {
+      console.warn("[v3] purge en arriere-plan impossible: " + String(e));
+      return 0;
+    });
+  } catch (e) {
+    console.warn("[v3] purge en arriere-plan impossible: " + String(e));
+    return Promise.resolve(0);
+  }
 }
 
 // ===========================================================================

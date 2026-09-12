@@ -7,8 +7,9 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import {
-  claimEvent, ensureJobKey, ensureJobKeys, jobKeyFor, purgeStaleClaims, recordResult,
-  releaseEvent, replayResponse, resolveJob, staleClaimIds, V3_CLAIM_TTL_MS, V3_EVENT_TYPES,
+  claimEvent, ensureJobKey, ensureJobKeys, jobKeyFor, purgeStaleClaims,
+  purgeStaleClaimsIfDue, recordResult, releaseEvent, replayResponse, resolveJob,
+  staleClaimIds, V3_CLAIM_TTL_MS, V3_EVENT_TYPES, V3_PURGE_INTERVAL_MS,
 } from "./v3.ts";
 
 Deno.test("claimEvent laisse passer la premiere cle et rejoue les suivantes", async () => {
@@ -98,6 +99,44 @@ Deno.test("purgeStaleClaims supprime les cles bloquees et laisse les autres", as
   // Deuxieme passage : plus rien a purger, et aucune suppression a vide.
   assertEquals(await purgeStaleClaims(sb), 0);
   assertEquals(sb.tables.job_events.length, 2);
+});
+
+// La purge avait des tests mais aucun appelant (revue de branche, finding 3).
+// Elle part maintenant de v3.myDay, bornee a une fois par heure et par isolat :
+// sans cette borne, chaque ouverture de l'ecran Today, pour chaque cleaner,
+// paierait deux requetes de plus sur un plan Supabase gratuit.
+Deno.test("purgeStaleClaimsIfDue ne purge qu'une fois par heure et par isolat", async () => {
+  const vieux = new Date(Date.now() - 9 * 3600_000).toISOString();
+  const sb = fakeDb({
+    job_events: [
+      { id: 1, idem_key: "bloquee", result: null, created_at: vieux },
+      { id: 2, idem_key: "aboutie", result: { status: "success" }, created_at: vieux },
+    ],
+  });
+  // Premier appel de cet isolat : la purge part.
+  const t0 = Date.now();
+  const premier = purgeStaleClaimsIfDue(sb, t0);
+  assertEquals(premier === null, false);
+  assertEquals(await premier, 1);
+  // Rejeu immediat : rien ne part, l'appelant n'a rien a attendre.
+  assertEquals(purgeStaleClaimsIfDue(sb, t0), null);
+  assertEquals(purgeStaleClaimsIfDue(sb, t0 + V3_PURGE_INTERVAL_MS - 1), null);
+  // Une heure plus tard, la purge repart, et ne trouve plus rien a purger.
+  const plusTard = purgeStaleClaimsIfDue(sb, t0 + V3_PURGE_INTERVAL_MS);
+  assertEquals(plusTard === null, false);
+  assertEquals(await plusTard, 0);
+  assertEquals(sb.tables.job_events.map((r: any) => r.idem_key), ["aboutie"]);
+});
+
+Deno.test("purgeStaleClaimsIfDue ne rejette jamais : elle part en arriere-plan", async () => {
+  const casse = {
+    from() { throw new Error("base injoignable"); },
+  };
+  // Horodatage tres au-dela du dernier appel du test precedent, pour que la
+  // borne d'une heure ne masque pas ce qu'on veut verifier.
+  const p = purgeStaleClaimsIfDue(casse as any, Date.now() + 10 * V3_PURGE_INTERVAL_MS);
+  assertEquals(p === null, false);
+  assertEquals(await p, 0);
 });
 
 // ===========================================================================

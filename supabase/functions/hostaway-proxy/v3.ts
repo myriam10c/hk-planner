@@ -32,6 +32,14 @@ export const V3_TEMPLATE_NAME: Record<string, string> = {
 
 // Regle par defaut du technicien de permanence quand on_duty n'a pas de ligne
 // pour la date. Par nom et non par identifiant : aucun id n'est en dur nulle part.
+//
+// Etat reel de la base au 2026-09-12 : un seul compte de role `maintenance`,
+// Semax (id 7). Ismael (id 5) a le role `manager`, la deuxieme branche est donc
+// inatteignable aujourd'hui (revue de branche, finding 8). C'est voulu et ce
+// n'est pas corrige ici : mettre un manager en `assigned_technician_id` ferait
+// passer pour dispatche un ticket que personne ne traite. Sans Semax, la
+// degradation est propre et meilleure, le ticket reste `open` non assigne et part
+// en notification a TOUS les managers, Ismael compris.
 export const V3_DUTY_FALLBACK = ["Semax", "Ismael"];
 
 // Meme bucket prive que l'app actuelle, prefixe v3/. Voir « Ambiguites tranchees »
@@ -276,8 +284,9 @@ export function readLinen(
 // approchait le plafond de 400 lignes). Il est re-exporte ici pour que les imports
 // existants `from "./v3.ts"` des taches 4 a 7 continuent de fonctionner.
 export {
-  claimEvent, ensureJobKey, ensureJobKeys, jobKeyFor, purgeStaleClaims, recordResult,
-  releaseEvent, replayResponse, resolveJob, staleClaimIds, V3_CLAIM_TTL_MS, V3_EVENT_TYPES,
+  claimEvent, ensureJobKey, ensureJobKeys, jobKeyFor, purgeStaleClaims,
+  purgeStaleClaimsIfDue, recordResult, releaseEvent, replayResponse, resolveJob,
+  staleClaimIds, V3_CLAIM_TTL_MS, V3_EVENT_TYPES, V3_PURGE_INTERVAL_MS,
 } from "./v3_idem.ts";
 export type { V3EventType } from "./v3_idem.ts";
 
@@ -296,7 +305,9 @@ export async function v3Log(
 // ===========================================================================
 
 // Ligne du jour si elle existe, sinon la regle par defaut : Semax, puis Ismael,
-// puis le premier technicien actif. Aucun identifiant en dur.
+// puis le premier technicien actif. Aucun identifiant en dur. La recherche ne
+// porte que sur les comptes actifs de role `maintenance` : voir V3_DUTY_FALLBACK
+// pour la raison qui rend la branche Ismael inatteignable en base aujourd'hui.
 export async function onDutyTechnician(sb: any, date: string): Promise<number | null> {
   const { data: techs } = await sb.from("cleaners")
     .select("id, name, role, is_active").eq("is_active", true).eq("role", "maintenance").order("id");

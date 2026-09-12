@@ -353,6 +353,18 @@ Deno.test("aucune lecture du bloc myDay n'avale plus son erreur", async () => {
   assertEquals(/buildMyDay\(\{\s*sb,/.test(bloc![0]), true);
 });
 
+Deno.test("myDay lance la purge des cles bloquees en arriere-plan", async () => {
+  // Revue de branche, finding 3 : purgeStaleClaims etait testee et n'avait aucun
+  // appelant. Elle part de v3.myDay, hors du chemin de reponse.
+  const src = await sourceIndex();
+  const bloc = src.match(/if \(action === "v3\.myDay"\)[\s\S]*?return jsonResp\(body\);/);
+  assertEquals(bloc !== null, true);
+  assertEquals(bloc![0].includes("purgeStaleClaimsIfDue(sb)"), true);
+  assertEquals(bloc![0].includes("EdgeRuntime?.waitUntil?.(purge)"), true);
+  // Elle ne doit jamais etre attendue : la cleaner n'attend pas un menage de base.
+  assertEquals(bloc![0].includes("await purgeStaleClaimsIfDue"), false);
+});
+
 Deno.test("le commentaire des paquets de 100 ne cite plus un chiffre invente", async () => {
   // Constat 9 : « une semaine porte environ deux cents cles » etait faux, les
   // instantanes reels en portent une quarantaine.
