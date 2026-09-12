@@ -59,6 +59,11 @@ test('un second retour en ligne ne rejoue rien', async ({ page, context }) => {
   await page.getByRole('button', { name: 'Start this cleaning' }).click();
   await context.setOffline(true);
   await page.getByRole('button', { name: 'Bathroom' }).click();
+  // Attendre que le geste soit vraiment en file avant de repasser en ligne :
+  // sans cette attente, toHaveCount(0) plus bas peut etre satisfait a vide
+  // (la bande n'a jamais eu le temps de s'afficher), ce qui rend le test
+  // instable en v3-desktop (revue tache 11, constat 1).
+  await expect(page.getByText('Saved on device, 1 to sync')).toBeVisible();
   await context.setOffline(false);
   await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0, { timeout: 10_000 });
   const avant = (await fetchLog(page)).length;
