@@ -110,3 +110,54 @@ test('la deconnexion desabonne le push porte par l enregistrement de la racine',
   expect(appels[0].body).toContain('https://push.example/racine');
   expect(await page.evaluate(() => localStorage.getItem('v3TestUnsub'))).toBe('https://push.example/racine');
 });
+
+// Repli quand `getRegistrations` manque. Aucun moteur en circulation n'expose
+// `serviceWorker` sans cette methode, mais la garde d'entree la rendait
+// obligatoire : sur un tel moteur la deconnexion sautait la revocation en
+// silence, et un telephone qui change de main continuait de recevoir les taches
+// de la cleaner precedente. `ready` suffit a retrouver l'abonnement.
+test('la deconnexion desabonne aussi quand getRegistrations n existe pas', async ({ page }) => {
+  await page.addInitScript(() => {
+    const seul = {
+      scope: location.origin + '/',
+      pushManager: {
+        getSubscription: () => Promise.resolve({
+          toJSON: () => ({ endpoint: 'https://push.example/sans-getregistrations' }),
+          unsubscribe: () => {
+            try {
+              localStorage.setItem('v3TestUnsub', 'https://push.example/sans-getregistrations');
+            } catch (e) { /* vu par le test */ }
+            return Promise.resolve(true);
+          },
+        }),
+      },
+    };
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        register: () => Promise.resolve(seul),
+        ready: Promise.resolve(seul),
+        getRegistration: () => Promise.resolve(seul),
+        // Pas de getRegistrations : c'est tout l'objet du test.
+        addEventListener: () => {},
+      },
+    });
+  });
+  await bootV3(page, [
+    { match: 'action=v3.myDay', status: 200, body: { status: 'success', date: '2026-09-12', me: { id: 3, name: 'Faiza', role: 'cleaner' }, linenRequired: true, totalMinutes: 0, stops: [] } },
+    { match: 'action=deletePushSubscription', status: 200, body: { status: 'success' } },
+    { match: 'action=cleanerLogout', status: 200, body: { status: 'success' } },
+  ], { pinToken: 'jeton-pin', hash: '#/profile' });
+  await page.route((url) => url.pathname === '/', (route) => route.fulfill({
+    status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title><p>stub</p>',
+  }));
+  await Promise.all([
+    page.waitForURL(/#cleaner$/),
+    page.getByRole('button', { name: 'Sign out' }).click(),
+  ]);
+  const appels = (await fetchLog(page)).filter((l) => l.url.indexOf('action=deletePushSubscription') !== -1);
+  expect(appels.length).toBe(1);
+  expect(appels[0].body).toContain('https://push.example/sans-getregistrations');
+  expect(await page.evaluate(() => localStorage.getItem('v3TestUnsub')))
+    .toBe('https://push.example/sans-getregistrations');
+});

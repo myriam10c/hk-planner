@@ -86,8 +86,14 @@ const DELAI_PUSH_MS = 3000;
 // ne trouvait donc plus rien et le telephone continuait de recevoir les taches
 // de la cleaner precedente.
 async function retirerAbonnementPush() {
-  if (!navigator.serviceWorker || !navigator.serviceWorker.getRegistrations) return;
-  const regs = await navigator.serviceWorker.getRegistrations();
+  if (!navigator.serviceWorker) return;
+  // Repli sur `ready` quand `getRegistrations` manque : aucun moteur en
+  // circulation n'expose l'un sans l'autre, mais exiger `getRegistrations`
+  // faisait sauter la revocation en silence, ce qui est exactement le defaut
+  // que la tache 12 avait ferme.
+  const regs = navigator.serviceWorker.getRegistrations
+    ? await navigator.serviceWorker.getRegistrations()
+    : [await navigator.serviceWorker.ready];
   for (const reg of regs) {
     const sub = reg.pushManager && await reg.pushManager.getSubscription();
     if (!sub) continue;
