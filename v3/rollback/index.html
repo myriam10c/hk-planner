@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HK Planner</title>
+</head>
+<body>
+<p>Opening HK Planner.</p>
+<!-- Chemin relatif volontairement : la meme page fonctionne servie a
+     /v3/rollback/ (elle y trouve /v3/rollback/rollback.js) et une fois copiee
+     en /v3/index.html par la procedure de retour arriere (elle y trouve
+     /v3/rollback.js). Un chemin absolu ne marcherait qu'apres la copie. -->
+<script type="module" src="rollback.js"></script>
+</body>
+</html>
