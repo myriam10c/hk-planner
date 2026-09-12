@@ -235,6 +235,42 @@ export async function rowCarriesEmail(sb: any, id: unknown, email: string): Prom
   }
 }
 
+// Relecture de controle d'applyInvite, qui compare le PATCH ENTIER et pas la
+// seule colonne email (revue round 2, constat 2). Le patch d'une invitation
+// porte aussi name, role, phone, color et is_active : deux jumelles sur la meme
+// adresse mais avec des attributs differents ne sont pas un double-clic, et
+// rendre 200 sur la seule egalite d'adresse perdait le changement de role de la
+// perdante en silence. Trois verdicts :
+//   - "conflit"       : la ligne ne porte pas l'adresse demandee, ou la lecture
+//                       est anormale. Fail-ferme, l'appelant rend 409 ;
+//   - "patch-partiel" : l'adresse concorde, au moins une autre colonne non ;
+//   - "conforme"      : vrai double-clic, l'etat voulu est deja pose.
+export type InviteRereadVerdict = "conflit" | "patch-partiel" | "conforme";
+
+export async function rereadInviteRow(
+  sb: any,
+  id: unknown,
+  patch: Record<string, unknown>,
+): Promise<InviteRereadVerdict> {
+  const cible = normalizeEmail(patch.email);
+  if (!cible) return "conflit";
+  const autres = Object.keys(patch).filter((c) => c !== "email");
+  try {
+    const { data, error } = await sb.from("cleaners")
+      .select(["id", "email", ...autres].join(", ")).eq("id", id).maybeSingle();
+    if (error) return "conflit";
+    const row = data as any;
+    if (!row) return "conflit";
+    if (normalizeEmail(row.email) !== cible) return "conflit";
+    // Une colonne absente de la relecture compte comme differente : on preferera
+    // toujours rejouer une ecriture que rendre un succes qu'on n'a pas applique.
+    const memeValeur = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
+    return autres.every((c) => memeValeur(row[c], patch[c])) ? "conforme" : "patch-partiel";
+  } catch (_e) {
+    return "conflit";
+  }
+}
+
 // Nombre de lignes reellement touchees par une ecriture. PostgREST rend un
 // tableau quand .select() suit un .update() ; les faux clients historiques
 // rendent un objet, on l'accepte aussi.
@@ -532,10 +568,29 @@ export function systemRowError(currentRole: unknown, nextRole: unknown): string 
 
 // L'admin API n'expose pas de recherche par email. L'equipe tient tres largement
 // sur une page, on liste et on filtre. Ne journalise jamais la liste.
+//
+// Borne de lecture, meme motif que findCleanerByEmail (revue round 2, section
+// « Risque residuel »). GoTrue tronque la page sans rien dire : au-dela du
+// seuil, le compte cherche peut se trouver hors de la page et la fonction rend
+// null. Cote applyInvite, ce null-la fait RATER l'ancien compte a supprimer,
+// donc la garde « l'ancien titulaire perd son acces » echouerait OUVERTE. On
+// leve plutot que de l'affirmer : chaque appelant remonte en erreur (409, 500
+// ou 502), l'invitation est refusee au lieu d'etre accordee a moitie.
+export const AUTH_USERS_READ_LIMIT = 200;
+
 export async function findAuthUserByEmail(sb: any, email: string): Promise<any | null> {
-  const { data, error } = await sb.auth.admin.listUsers({ page: 1, perPage: 200 });
+  const { data, error } = await sb.auth.admin.listUsers({
+    page: 1,
+    perPage: AUTH_USERS_READ_LIMIT,
+  });
   if (error) throw error;
   const users = (data?.users ?? []) as any[];
+  // Echec FERME : page pleine, donc lecture possiblement tronquee, donc on ne
+  // peut plus affirmer qu'aucun compte ne porte cette adresse. On ne l'affirme
+  // pas. Message sans adresse : il finit dans les journaux.
+  if (users.length >= AUTH_USERS_READ_LIMIT) {
+    throw new Error("auth.users: lecture tronquee a la borne, controle du compte impossible");
+  }
   return users.find((u) => String(u.email ?? "").toLowerCase() === email) ?? null;
 }
 
@@ -622,6 +677,11 @@ export async function applyInvite(
   if (plan.kind === "error") return { status: plan.status, body: { error: plan.error } };
 
   let cleanerId: number;
+  // Vrai tant que l'adresse portee par la ligne est celle que CETTE requete a
+  // posee (revue round 2, constat 3). Le rattrapage double-clic la met a faux :
+  // l'adresse vient alors d'une jumelle, et rollbackInvite, qui se verrouille
+  // justement sur cette adresse, defairait le travail de quelqu'un d'autre.
+  let adressePoseeIci = true;
   if (plan.kind === "update") {
     // Verrou optimiste sur la ligne (hotfix du 2026-09-12, constat 2 de la
     // revue). L'ecriture ne s'applique que si la colonne email est encore dans
@@ -647,16 +707,44 @@ export async function applyInvite(
     if (error) throw error;
     if (rowsTouched(touchees) === 0) {
       // Un vrai double-clic n'est pas un conflit (revue de verification,
-      // constat 6) : si la ligne porte deja exactement l'adresse demandee, la
-      // jumelle a fait le travail, invitation comprise. On rend le succes plutot
-      // qu'un « This email is already used by another team member » qui designe
-      // le membre lui-meme, et on n'envoie pas un second email.
-      if (await rowCarriesEmail(sb, plan.id, String(plan.patch.email ?? ""))) {
-        console.warn("[inviteCleaner] adresse deja posee par une requete jumelle, rien de plus a ecrire");
-        return { status: 200, body: { status: "success", id: plan.id, mode: "invite" } };
+      // constat 6) : si la ligne porte deja exactement l'etat demande, la
+      // jumelle a fait le travail. On ne rend pas un « This email is already
+      // used by another team member » qui designerait le membre lui-meme.
+      // La relecture compare le PATCH ENTIER (revue round 2, constat 2) : sur la
+      // seule egalite d'adresse, une jumelle qui demandait un autre role
+      // recevait 200 alors que son changement n'etait jamais applique.
+      const verdict = await rereadInviteRow(sb, plan.id, plan.patch);
+      if (verdict === "conflit") {
+        console.warn("[inviteCleaner] ligne modifiee par une requete concurrente, rien n'est ecrit");
+        return EMAIL_CONFLICT;
       }
-      console.warn("[inviteCleaner] ligne modifiee par une requete concurrente, rien n'est ecrit");
-      return EMAIL_CONFLICT;
+      if (verdict === "patch-partiel") {
+        // L'adresse est la bonne, le reste non : ce n'est pas un etat atteint,
+        // c'est une ecriture qui reste a faire. On la rejoue, verrouillee cette
+        // fois sur l'adresse que la ligne porte reellement, au lieu de rendre un
+        // succes silencieux. Si elle perd a son tour, c'est un vrai 409.
+        const rejeu = sb.from("cleaners").update(plan.patch)
+          .eq("id", plan.id).eq("email", normalizeEmail(plan.patch.email));
+        const { data: rejouees, error: rejeuErr } = await rejeu.select("id");
+        if (isEmailUniqueViolation(rejeuErr)) return EMAIL_CONFLICT;
+        if (rejeuErr) throw rejeuErr;
+        if (rowsTouched(rejouees) === 0) {
+          console.warn("[inviteCleaner] ligne modifiee par une requete concurrente, rien n'est ecrit");
+          return EMAIL_CONFLICT;
+        }
+        console.warn("[inviteCleaner] patch partiel d'une requete jumelle rejoue sur la ligne");
+      } else {
+        console.warn("[inviteCleaner] adresse deja posee par une requete jumelle, on poursuit");
+      }
+      // On NE rend PAS 200 ici (revue round 2, constat 3). L'ancien
+      // court-circuit sortait AVANT l'etape Auth : la personne recevait un
+      // succes alors qu'aucune invitation n'etait partie, et le rollback de la
+      // jumelle pouvait encore defaire l'adresse sur laquelle ce 200 portait. On
+      // poursuit donc jusqu'a l'etape Auth, exactement comme applyLinkEmail, ce
+      // qui rattrape au passage une jumelle dont l'appel Auth aurait echoue
+      // (compte deja cree : c'est un resetPasswordForEmail, pas un second
+      // email d'invitation).
+      adressePoseeIci = false;
     }
     cleanerId = plan.id;
   } else {
@@ -675,7 +763,8 @@ export async function applyInvite(
       }
     } catch (e) {
       console.warn("[inviteCleaner] ancien compte Auth non supprime: " + String(e));
-      await rollbackInvite(sb, plan, cleanerId);
+      if (adressePoseeIci) await rollbackInvite(sb, plan, cleanerId);
+      else console.warn("[inviteCleaner] rien a defaire: l'adresse portee vient d'une requete jumelle");
       return { status: 409, body: { error: "Could not replace the previous account." } };
     }
   }
@@ -710,7 +799,8 @@ export async function applyInvite(
         return { status: 200, body: { status: "success", id: cleanerId, mode: "invite" } };
       }
     }
-    await rollbackInvite(sb, plan, cleanerId);
+    if (adressePoseeIci) await rollbackInvite(sb, plan, cleanerId);
+    else console.warn("[inviteCleaner] rien a defaire: l'adresse portee vient d'une requete jumelle");
     return {
       status: 502,
       body: { error: existing ? "Could not send the reset email." : "Could not send the invitation." },

@@ -1406,16 +1406,26 @@ Deno.test("applyInvite : un double-clic rend success au lieu d'un 409 mensonger"
     writes: [
       // La jumelle a gagne l'ecriture, celle-ci ne touche aucune ligne.
       { data: [], error: null },
-      // Relecture de controle : la ligne porte deja exactement l'adresse voulue.
-      { data: { id: 8, email: "walter@example.com" }, error: null },
+      // Relecture de controle : la ligne porte deja exactement le patch voulu,
+      // pas seulement l'adresse (revue round 2, constat 2).
+      {
+        data: { id: 8, email: "walter@example.com", name: "Walter", is_active: true },
+        error: null,
+      },
     ],
+    // La jumelle n'est pas allee jusqu'a son etape Auth : aucun compte n'existe.
     users: [],
   });
   const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
   assertEquals(r.status, 200);
   assertEquals(r.body, { status: "success", id: 8, mode: "invite" });
-  // Aucune seconde invitation n'est partie, aucun rollback : la jumelle a tout fait.
-  assertEquals(sb.calls, ["cleaners.update", "cleaners.select"]);
+  // On poursuit jusqu'a l'etape Auth au lieu de rendre 200 tout de suite (revue
+  // round 2, constat 3) : sinon la personne recevait un succes alors qu'aucune
+  // invitation n'etait partie. Aucun rollback : la ligne vient de la jumelle.
+  assertEquals(sb.calls, [
+    "cleaners.update", "cleaners.select",
+    "auth.listUsers", "auth.listUsers", "auth.invite",
+  ]);
 });
 
 // --- Constat 3 : applyLinkEmail posait le mot de passe AVANT sa revendication ---
@@ -1524,4 +1534,311 @@ Deno.test("findCleanerByEmail echoue FERMEE quand la page de lecture est pleine"
   // Une page non pleine reste nominale.
   const presque = pleine.slice(0, CLEANERS_READ_LIMIT - 1);
   assertEquals(await findCleanerByEmail(fakeListeSb(presque), "foo@bar.com"), null);
+});
+
+// ===========================================================================
+// Revue de securite round 3 (review-securite-round2-verif.md)
+// Constats 2, 3 et 4 : les angles morts restes ouverts apres le round 2.
+// ===========================================================================
+
+import { AUTH_USERS_READ_LIMIT, findAuthUserByEmail } from "./auth.ts";
+
+// --- Constat 2 : le rattrapage double-clic ne comparait que l'adresse ---
+//
+// Le patch d'applyInvite porte aussi name, role, phone, color et is_active. Deux
+// invitations jumelles sur la meme adresse mais avec des attributs differents
+// rendaient toutes les deux 200, et le changement de role de la perdante etait
+// perdu en silence.
+
+function planPourRole(role: string) {
+  const input = parseInviteInput({
+    email: "walter@example.com", name: "Walter", role,
+  }) as any;
+  return planInvite(input, 8, AVANT, 8);
+}
+
+Deno.test("applyInvite : un faux double-clic qui change le role ne rend pas un 200 silencieux", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({
+      writes: [
+        // 1. La jumelle a gagne l'ecriture, celle-ci ne touche aucune ligne.
+        { data: [], error: null },
+        // 2. Relecture : l'adresse concorde, mais la jumelle a pose role
+        //    "cleaner" alors que cette requete demande "manager".
+        {
+          data: {
+            id: 8, email: "walter@example.com", name: "Walter",
+            role: "cleaner", is_active: true,
+          },
+          error: null,
+        },
+        // 3. Le rejeu, verrouille sur l'adresse reellement portee, passe.
+        { data: [{ id: 8 }], error: null },
+      ],
+      users: [{ id: "u-jumelle", email: "walter@example.com" }],
+    });
+    const r = await applyInvite(sb, planPourRole("manager"), "walter@example.com", "https://app.test/");
+    assertEquals(r.status, 200);
+    // Le changement de role est REELLEMENT applique, pas seulement annonce.
+    const updates = sb.payloads.filter((p: any) => p.op === "update");
+    assertEquals(updates.length, 2);
+    assertEquals((updates[1].payload as any).role, "manager");
+    // L'aller est verrouille sur l'adresse lue, le rejeu sur l'adresse portee.
+    assertEquals(sb.writeFilters, [
+      { id: 8, email: "ancien@example.com" },
+      { id: 8, email: "walter@example.com" },
+    ]);
+    assertEquals(w.lines.some((l: string) => l.includes("patch partiel")), true);
+    assertEquals(w.lines.some((l: string) => l.includes("@")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("applyInvite : un rejeu de patch partiel qui perd a son tour repart en 409", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({
+      writes: [
+        { data: [], error: null },
+        {
+          data: {
+            id: 8, email: "walter@example.com", name: "Walter",
+            role: "cleaner", is_active: true,
+          },
+          error: null,
+        },
+        // Le rejeu ne touche rien non plus : une troisieme requete est passee.
+        { data: [], error: null },
+      ],
+      users: [{ id: "u-jumelle", email: "walter@example.com" }],
+    });
+    const r = await applyInvite(sb, planPourRole("manager"), "walter@example.com", "https://app.test/");
+    assertEquals(r.status, 409);
+    assertEquals(r.body, { error: "This email is already used by another team member." });
+    // Aucun appel Auth : rien n'a ete ecrit, rien n'est envoye.
+    assertEquals(sb.calls.some((c: string) => c.startsWith("auth.")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+// --- Constat 3 : le 200 du double-clic sortait AVANT l'etape Auth ---
+
+Deno.test("applyInvite : le 200 d'un vrai double-clic passe par l'etape Auth", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({
+      writes: [
+        { data: [], error: null },
+        // La ligne porte deja EXACTEMENT le patch demande : vrai double-clic.
+        {
+          data: { id: 8, email: "walter@example.com", name: "Walter", is_active: true },
+          error: null,
+        },
+      ],
+      // La jumelle a cree le compte : c'est donc une reinitialisation, pas une
+      // seconde invitation, donc pas de second email d'invitation.
+      users: [{ id: "u-jumelle", email: "walter@example.com" }],
+    });
+    const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+    assertEquals(r.status, 200);
+    // mode "reset" et non "invite" : le corps dit ce qui est REELLEMENT parti.
+    assertEquals(r.body, { status: "success", id: 8, mode: "reset" });
+    // Le 200 n'est rendu qu'apres l'etape Auth, comme dans applyLinkEmail.
+    assertEquals(sb.calls, [
+      "cleaners.update", "cleaners.select",
+      "auth.listUsers", "auth.listUsers", "auth.reset",
+    ]);
+    assertEquals(w.lines.some((l: string) => l.includes("@")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("applyInvite : le double-clic ne defait jamais l'ecriture de sa jumelle", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({
+      writes: [
+        { data: [], error: null },
+        {
+          data: { id: 8, email: "walter@example.com", name: "Walter", is_active: true },
+          error: null,
+        },
+      ],
+      users: [{ id: "u-jumelle", email: "walter@example.com" }],
+      // L'envoi Auth echoue apres coup.
+      authResult: { error: { message: "rate limit exceeded" } },
+    });
+    const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+    assertEquals(r.status, 502);
+    // L'adresse portee par la ligne vient de la jumelle, pas de cette requete :
+    // aucun rollback, donc aucune ecriture apres la relecture.
+    assertEquals(sb.writeFilters, [{ id: 8, email: "ancien@example.com" }]);
+    assertEquals(sb.calls.filter((c: string) => c === "cleaners.update").length, 1);
+    assertEquals(w.lines.some((l: string) => l.includes("rien a defaire")), true);
+  } finally {
+    w.restore();
+  }
+});
+
+// --- Constat 4 : deux branches de fail-ferme sans aucun test ---
+
+function planSansAdresse(kind: "update" | "insert"): any {
+  if (kind === "insert") {
+    return { kind: "insert", row: { name: "Walter", email: "" } };
+  }
+  return {
+    kind: "update",
+    id: 8,
+    patch: { is_active: true },
+    previousEmail: null,
+    restore: { email: "ancien@example.com", is_active: true },
+  };
+}
+
+Deno.test("rollbackInvite echoue FERME quand l'aller n'a pose aucune adresse", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({ writes: [{ data: [{ id: 8 }], error: null }] });
+    await rollbackInvite(sb, planSansAdresse("update"), 8);
+    // Rien n'est defait : sans adresse de reference, on ne sait plus si la ligne
+    // est encore la notre, et un update inconditionnel ecraserait un voisin.
+    assertEquals(sb.calls, []);
+    assertEquals(sb.writeFilters, []);
+    assertEquals(w.lines.length, 1);
+    assertEquals(w.lines[0].includes("rollback sans adresse de reference"), true);
+    assertEquals(w.lines[0].includes("@"), false);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("rollbackInvite echoue FERME quand l'insertion n'a pose aucune adresse", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({ writes: [{ data: [{ id: 77 }], error: null }] });
+    await rollbackInvite(sb, planSansAdresse("insert"), 77);
+    // Une suppression inconditionnelle est encore pire qu'un update : on ne la
+    // fait pas non plus.
+    assertEquals(sb.calls, []);
+    assertEquals(w.lines.length, 1);
+    assertEquals(w.lines[0].includes("rollback sans adresse de reference"), true);
+  } finally {
+    w.restore();
+  }
+});
+
+function fakeAuthListSb(users: any[]) {
+  const calls: string[] = [];
+  return {
+    calls,
+    auth: {
+      admin: {
+        listUsers: async (opts: any) => {
+          calls.push("auth.listUsers:" + String(opts?.perPage));
+          return { data: { users }, error: null };
+        },
+      },
+    },
+  } as any;
+}
+
+Deno.test("findAuthUserByEmail echoue FERMEE quand la page de lecture est pleine", async () => {
+  // Meme motif que findCleanerByEmail : une page pleine veut dire que la lecture
+  // peut etre tronquee, donc qu'un compte existant peut se trouver hors page. On
+  // refuse au lieu de conclure qu'il n'existe pas, sinon la garde « supprimer
+  // l'ancien compte » echoue OUVERTE.
+  const pleine = Array.from(
+    { length: AUTH_USERS_READ_LIMIT },
+    (_, i) => ({ id: "u" + String(i), email: "x" + String(i) + "@example.com" }),
+  );
+  await assertRejects(() => findAuthUserByEmail(fakeAuthListSb(pleine), "foo@bar.com"));
+  // Une page non pleine reste nominale, et la borne est bien celle demandee.
+  const presque = pleine.slice(0, AUTH_USERS_READ_LIMIT - 1);
+  const sb = fakeAuthListSb(presque);
+  assertEquals(await findAuthUserByEmail(sb, "foo@bar.com"), null);
+  assertEquals(sb.calls[0], "auth.listUsers:" + String(AUTH_USERS_READ_LIMIT));
+});
+
+Deno.test("applyInvite refuse l'invitation quand la page des comptes Auth est pleine", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeInviteSb({
+      writes: [
+        // L'ecriture d'aller passe.
+        { data: [{ id: 8 }], error: null },
+        // Puis le rollback, puisque la suite echoue FERMEE.
+        { data: [{ id: 8 }], error: null },
+      ],
+      // Page pleine : impossible d'affirmer que l'ancien compte n'existe pas.
+      users: Array.from(
+        { length: AUTH_USERS_READ_LIMIT },
+        (_, i) => ({ id: "u" + String(i), email: "x" + String(i) + "@example.com" }),
+      ),
+    });
+    const r = await applyInvite(sb, planPourAvant(), "walter@example.com", "https://app.test/");
+    // On refuse l'invitation au lieu de poursuivre comme si l'ancien compte
+    // n'existait pas : l'ancien titulaire ne garde jamais un acces en silence.
+    assertEquals(r.status, 409);
+    assertEquals(r.body, { error: "Could not replace the previous account." });
+    assertEquals(sb.calls.includes("auth.deleteUser"), false);
+    assertEquals(sb.calls.includes("auth.invite"), false);
+    assertEquals(w.lines.some((l: string) => l.includes("@")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+Deno.test("linkEmail refuse quand la page des comptes Auth est pleine", async () => {
+  const w = captureWarn();
+  try {
+    const sb = fakeLinkSb({
+      mine: { id: 7, email: null },
+      holder: null,
+      users: Array.from(
+        { length: AUTH_USERS_READ_LIMIT },
+        (_, i) => ({ id: "u" + String(i), email: "x" + String(i) + "@example.com" }),
+      ),
+    });
+    const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+    assertEquals(r.status, 502);
+    assertEquals(r.body, { error: "Could not reach the accounts service." });
+    // Aucun mot de passe n'est pose, aucun compte n'est cree.
+    assertEquals(sb.calls.includes("auth.createUser"), false);
+    assertEquals(sb.calls.includes("auth.updateUserById"), false);
+    assertEquals(w.lines.some((l: string) => l.includes("motdepasse1")), false);
+  } finally {
+    w.restore();
+  }
+});
+
+// --- Verrou de regression : le compte orphelin du 11/09 ---
+//
+// L'incident du 11/09 a laisse en production un compte Auth qu'aucune ligne
+// cleaners ne portait, et cinq lignes sans adresse pouvaient le revendiquer puis
+// y poser leur mot de passe. Le residu de donnees est ferme a la main ; ce test
+// verrouille la classe de faille cote code : une ligne active sans adresse ne
+// doit jamais pouvoir revendiquer un compte Auth deja rattache a une AUTRE ligne
+// active, quelle que soit la casse de l'adresse.
+
+Deno.test("linkEmail : une ligne sans adresse ne revendique pas le compte d'un autre membre actif", async () => {
+  const sb = fakeLinkSb({
+    // Ma ligne est active et libre : tous les pre-controles la laissent passer.
+    mine: { id: 7, email: null },
+    // Une AUTRE ligne active porte deja l'adresse, en casse mixte.
+    holder: { id: 9, email: "SSerunkumaVan@Example.com", is_active: true },
+    // Et le compte Auth correspondant existe.
+    users: [{ id: "u-titulaire", email: "sserunkumavan@example.com" }],
+  });
+  const r = await applyLinkEmail(sb, SESSION_SEMAX, INPUT_SEMAX);
+  assertEquals(r.status, 409);
+  assertEquals(r.body, { error: "This email is already used by another team member." });
+  // Le refus tombe AVANT la moindre ecriture et avant le moindre appel Auth :
+  // ni revendication de la ligne, ni mot de passe pose sur le compte du voisin.
+  assertEquals(sb.calls, ["cleaners.select.id", "cleaners.select.email"]);
+  assertEquals(sb.calls.some((c: string) => c.startsWith("auth.")), false);
+  assertEquals(sb.payloads, []);
 });
