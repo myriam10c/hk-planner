@@ -111,6 +111,58 @@ test('une journee vide le dit clairement', async ({ page }) => {
   await expect(page.getByText('Nothing assigned to you today.')).toBeVisible();
 });
 
+// Constat 2 de la revue : sans retour arriere, l'arret restait « running » apres
+// un refus du serveur, le bouton passait a « Continue this cleaning », et le
+// second appui sautait la garde `todo` sans jamais retenter v3.startJob.
+test('un Start refuse par le serveur revient en arriere et se retente', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myDay', status: 200, body: JOURNEE },
+    { match: 'action=v3.startJob', status: 500, body: { error: 'timer write failed' } },
+  ], { pinToken: 'jeton-pin' });
+  const start = page.getByRole('button', { name: 'Start this cleaning' });
+  await start.click();
+  await expect(page.getByText('timer write failed')).toBeVisible();
+  await expect(page).not.toHaveURL(/#\/job\//);
+  await expect(start).toBeVisible();
+  const arret = await page.evaluate(async () => {
+    const m = await import('/v3/app.js');
+    const s = (m as any).state.day.stops[0];
+    return { state: s.state, startedAt: s.startedAt };
+  });
+  expect(arret.state).toBe('todo');
+  expect(arret.startedAt).toBe(null);
+
+  // Second appui : la garde `todo` laisse passer, l'appel repart vraiment.
+  await start.click();
+  // Un second toast d'erreur : la preuve que l'appel est reparti et a echoue
+  // de nouveau, plutot que d'etre saute par la garde `todo`.
+  await expect(page.locator('.toast.err')).toHaveCount(2);
+  const log = await fetchLog(page);
+  expect(log.filter((l) => l.url.indexOf('action=v3.startJob') !== -1).length).toBe(2);
+});
+
+// Constat 3 de la revue : une reponse tronquee ecrivait « undefined NaN
+// undefined » a la place de la date, au lieu de degrader comme le fait la garde
+// sur `me`.
+const DATES_CASSEES: Array<[string, string | null]> = [['absente', null], ['illisible', '12/09/2026']];
+for (const [nom, date] of DATES_CASSEES) {
+  test('une date ' + nom + ' ne salit pas l en-tete', async ({ page }) => {
+    const jour: any = { ...JOURNEE };
+    if (date === null) delete jour.date;
+    else jour.date = date;
+    await bootV3(page, [
+      { match: 'action=v3.myDay', status: 200, body: jour },
+    ], { pinToken: 'jeton-pin' });
+    await expect(page.locator('.dr-top .date')).toHaveText('');
+    // Le reste de la journee reste utilisable : c'est le point de la degradation.
+    await expect(page.locator('.nextup .n')).toHaveText('623 Samana Park View');
+    await expect(page.getByRole('button', { name: 'Start this cleaning' })).toBeVisible();
+    const texte = await page.locator('body').innerText();
+    expect(texte).not.toContain('undefined');
+    expect(texte).not.toContain('NaN');
+  });
+}
+
 // Le proxy ne rend plus la cle de reservation : depuis le correctif de la revue
 // de la tache 3, `jobId` est un identifiant oppose « job_<20 hex> », sans aucune
 // donnee guest. Les six cas ci-dessus gardent le libelle historique du brief ;

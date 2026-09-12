@@ -6,6 +6,10 @@ import { newIdem, sendOrQueue } from '/v3/offline.js';
 import { esc, fmtDuration, icon, toast } from '/v3/ui.js';
 
 function jourLisible(iso) {
+  // Une date absente ou illisible n'ecrit rien plutot que « undefined NaN
+  // undefined » (revue tache 10, constat 3) : new Date('undefinedT00:00:00')
+  // est une Invalid Date, et getDay() rend alors NaN.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return '';
   const d = new Date(String(iso) + 'T00:00:00');
   const jours = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const mois = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -21,7 +25,11 @@ function sousTitre(stop) {
 
 function ligneEcheance(stop) {
   if (stop.sameDay && stop.nextArrivalTime) return 'Guest arrives ' + stop.nextArrivalTime + ' today';
-  if (stop.nextArrivalTime && stop.nextArrivalDate) return 'Guest arrives ' + stop.nextArrivalTime + ' on ' + jourLisible(stop.nextArrivalDate);
+  // Le jour est lu par la meme garde : une date d'arrivee illisible donne
+  // l'heure seule, jamais un « on » suivi du vide.
+  const jour = jourLisible(stop.nextArrivalDate);
+  if (stop.nextArrivalTime && jour) return 'Guest arrives ' + stop.nextArrivalTime + ' on ' + jour;
+  if (stop.nextArrivalTime) return 'Guest arrives ' + stop.nextArrivalTime;
   return 'No guest booked yet';
 }
 
@@ -90,11 +98,24 @@ const actions = {
     if (!stop) return;
     if (stop.state === 'todo') {
       stop.state = 'running';
+      let r;
+      try {
+        r = await sendOrQueue('v3.startJob', { jobId: jobId, idem: newIdem() });
+      } catch (err) {
+        // sendOrQueue ne met en file que les coupures reseau : tout 4xx hors
+        // 401 et tout 5xx remontent ici. L'arret n'a pas demarre, il faut le
+        // rendre a son etat d'origine (revue tache 10, constat 2). Sans ce
+        // retour arriere le bouton passerait a « Continue this cleaning », le
+        // second appui sauterait la garde `todo`, et le serveur n'aurait
+        // jamais de chrono de depart pour ce menage.
+        stop.state = 'todo';
+        stop.startedAt = null;
+        throw err;   // app.js montre le message et ne navigue pas
+      }
       // startedAt vient de la reponse serveur (revue tache 4, constat mineur
       // 6) : hors ligne, sendOrQueue rend { queued: true } sans reponse, on
       // garde alors l'heure locale comme approximation optimiste, corrigee
       // au prochain sync par la vraie valeur si le serveur en renvoie une.
-      const r = await sendOrQueue('v3.startJob', { jobId: jobId, idem: newIdem() });
       // sendOrQueue rend { ok, queued, data } : l'heure serveur est dans
       // r.data.startedAt, jamais sur r directement (piege trouve en revue
       // de la tache 8, avant l'ecriture de cet ecran).
