@@ -4,6 +4,7 @@
 import { api, ApiError, readSession } from '/v3/api.js';
 import { flush, onQueueChange, pendingCount, watchNetwork } from '/v3/offline.js';
 import { closeSheet, esc, icon, sheetIsOpen, toast } from '/v3/ui.js';
+import today from '/v3/screens/today.js';
 
 export const state = {
   session: null,
@@ -16,6 +17,12 @@ export const state = {
 
 const screens = {};
 export function registerScreen(name, screen) { screens[name] = screen; }
+
+// L'enregistrement vient apres la declaration de `screens` et non en tete de
+// fichier : l'import de l'ecran est circulaire (today.js importe app.js), donc
+// appeler registerScreen avant `const screens = {}` leverait sur la zone morte
+// temporelle du const et casserait le boot.
+registerScreen('today', today);
 
 function routeName() {
   const h = String(location.hash || '');
