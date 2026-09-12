@@ -51,6 +51,53 @@ function view(state) {
 // cleanerLogout, dont le second sur une session deja revoquee.
 let deconnexionEnCours = false;
 
+// Tout ce que l'app actuelle laisse sur l'appareil pendant une session, et
+// qu'elle efface elle-meme a sa deconnexion (app.js, cleanerLogout et
+// emailLogout). `hkAuthSession` est la cle de stockage du client Supabase :
+// c'est elle que readSession() relit, la laisser en place rendait le bouton
+// « Sign out » purement decoratif. `hkPlannerCache` porte les noms et telephones
+// des voyageurs de la derniere semaine consultee : il ne survit pas a un
+// telephone qui change de main (ruling 9).
+const CLES_SESSION = [
+  'cleanerToken',
+  'cleanerMode',
+  'hkAuthSession',
+  'hkSessionCleanerId',
+  'hkPlannerCache',
+  'pushSubscribed',
+  'pushEndpointSynced',
+];
+
+function lire(cle) {
+  try { return localStorage.getItem(cle); } catch (e) { return null; }
+}
+
+// Meme borne que disablePushForLogout de l'app actuelle :
+// navigator.serviceWorker.ready ne se resout JAMAIS quand l'enregistrement du
+// service worker a echoue (fenetre privee, navigateur qui le bloque), et un
+// desabonnement n'est pas une raison de retenir une deconnexion.
+const DELAI_PUSH_MS = 3000;
+
+async function retirerAbonnementPush() {
+  if (!navigator.serviceWorker) return;
+  const reg = await navigator.serviceWorker.ready;
+  const sub = reg.pushManager && await reg.pushManager.getSubscription();
+  if (!sub) return;
+  const endpoint = sub.toJSON().endpoint;
+  // Au mieux : sans cet appel, l'appareil continue de recevoir les taches de la
+  // cleaner precedente. Il exige la session courante, donc il passe AVANT la
+  // revocation.
+  try { await api.post('deletePushSubscription', { endpoint: endpoint }); } catch (e) { /* le serveur nettoiera */ }
+  try { await sub.unsubscribe(); } catch (e) { /* deja parti */ }
+}
+
+function desabonnerPush() {
+  return Promise.race([
+    retirerAbonnementPush(),
+    new Promise(function (r) { setTimeout(r, DELAI_PUSH_MS); }),
+  ]);
+}
+
 const actions = {
   async 'clear-dead'(state) {
     await clearDead();
@@ -63,17 +110,29 @@ const actions = {
   async signout() {
     if (deconnexionEnCours) return;
     deconnexionEnCours = true;
-    // La session est celle de l'app actuelle : on la revoque cote serveur, puis on
-    // efface les deux cles locales et on rend la main a l'ecran de connexion.
-    try {
-      await api.post('cleanerLogout', {});
-    } catch (e) {
-      /* hors ligne ou session deja morte : on ferme quand meme cote telephone */
+    // 1. Le desabonnement push d'abord : il exige la session encore vivante.
+    try { await desabonnerPush(); } catch (e) { /* jamais une raison de retenir la sortie */ }
+    // 2. Revocation cote serveur. L'action cleanerLogout du proxy ne lit QUE
+    // x-cleaner-token pour savoir quelle ligne de cleaner_sessions supprimer :
+    // avec une session email a cote, authHeaders pose le Bearer et la session
+    // PIN survivait au serveur. On pose donc l'en-tete explicitement, comme
+    // emailLogout de l'app actuelle, et on n'appelle l'action que s'il y a bien
+    // un jeton PIN a revoquer.
+    const jetonPin = lire('cleanerToken');
+    if (jetonPin) {
+      try {
+        await api.post('cleanerLogout', {}, { 'X-Cleaner-Token': jetonPin });
+      } catch (e) {
+        /* hors ligne ou session deja morte : on ferme quand meme cote telephone */
+      }
     }
-    try {
-      localStorage.removeItem('cleanerToken');
-      localStorage.removeItem('cleanerMode');
-    } catch (e) { /* stockage indisponible */ }
+    // 3. Le telephone. Limite assumee : sans le SDK Supabase, la v3 ne peut pas
+    // revoquer le jeton de rafraichissement email cote serveur (l'app actuelle
+    // appelle sbAuth.auth.signOut()). Effacer hkAuthSession suffit a ce que
+    // l'appareil n'ait plus de session, ce que le bouton promet.
+    CLES_SESSION.forEach(function (cle) {
+      try { localStorage.removeItem(cle); } catch (e) { /* stockage indisponible */ }
+    });
     location.replace('/#cleaner');
   },
 };

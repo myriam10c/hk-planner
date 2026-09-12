@@ -128,6 +128,26 @@ test('un sous-traitant ne voit jamais le comptage du linge', async ({ page }) =>
   expect(corps.linen).toBeUndefined();
 });
 
+// Meme defaut que la feuille de signalement (revue tache 12, constat 2) : la
+// feuille de fin vit hors de #app, un geste Back la laissait ouverte au-dessus de
+// la journee, et « Finish anyway » n'y repondait plus, sans le moindre retour.
+test('le geste Back ferme aussi la feuille de fin de menage', async ({ page }) => {
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', hash: '#/today' });
+  await page.getByRole('button', { name: 'Continue this cleaning' }).click();
+  await page.getByRole('button', { name: 'Finish 0/3' }).click();
+  await expect(page.getByRole('heading', { name: 'Finish this cleaning' })).toBeVisible();
+
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Finish this cleaning' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Finish anyway' })).toHaveCount(0);
+  expect(await page.evaluate(() => {
+    const host = document.getElementById('sheet-host');
+    return host ? host.innerHTML : 'absent';
+  })).toBe('');
+  // Aucun menage n'a ete clos par ce geste.
+  expect((await fetchLog(page)).filter((l) => l.url.indexOf('v3.finishJob') !== -1).length).toBe(0);
+});
+
 test('le Job ne deborde pas a 390 px et ses lignes font 60 px', async ({ page }) => {
   await ouvrirJob(page);
   const { scrollWidth, clientWidth } = await noHorizontalScroll(page);

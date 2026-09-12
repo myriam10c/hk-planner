@@ -70,10 +70,15 @@ export const reportActions = {
     majEnvoi(state);
   },
   // Pas de verrou anti double appui ici, volontairement, et comme l'appareil
-  // photo de l'ecran Job : un verrou pose avant l'ouverture de l'entree de
-  // fichier ne se leverait jamais si la cleaner annule la prise (Chrome
-  // n'emet alors aucun `change`), et le bouton resterait mort pour de bon. Deux
-  // appuis rapides ne coutent qu'une promesse pendante, jamais un doublon.
+  // photo de l'ecran Job. Un verrou serait techniquement possible : une
+  // annulation n'emet aucun `change`, mais l'evenement `cancel` de
+  // input[type=file] existe bien sur les deux moteurs vises
+  // (`'oncancel' in input === true` sur Chromium 151 et WebKit 26, mesure de la
+  // revue tache 12), donc un verrou relache sur `change` ET sur `cancel` se
+  // leverait. Il ne servirait a rien : mesure a l'appui, un double appui rapide
+  // ouvre deux selecteurs mais ne produit qu'un seul v3.uploadPhoto, avec le bon
+  // libelle et le bon etat du bouton d'envoi. Le seul cout est une promesse
+  // pendante par appui perdu, jamais un doublon ni un bouton mort.
   async 'report-shot'(state) {
     const stop = state.reportStop;
     if (!stop || !state.report) return;

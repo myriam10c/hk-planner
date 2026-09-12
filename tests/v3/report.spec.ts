@@ -152,6 +152,74 @@ test('Profile renvoie vers l app actuelle et permet de se deconnecter', async ({
   expect((await fetchLog(page)).some((l) => l.url.indexOf('action=cleanerLogout') !== -1)).toBe(true);
 });
 
+// Constat 1 de la revue de la tache 12, securite. Une cleaner qui a AUSSI une
+// session email garde son Bearer : api.js pose alors l'Authorization et PAS
+// X-Cleaner-Token, or l'action cleanerLogout du proxy ne lit que ce dernier
+// en-tete pour savoir quelle ligne de cleaner_sessions supprimer. Rien n'etait
+// donc revoque, et hkAuthSession (la session Supabase elle-meme), hkPlannerCache
+// (noms et telephones des voyageurs) et hkSessionCleanerId restaient sur le
+// telephone.
+test('Sign out revoque la session au serveur et ne laisse aucune donnee sur le telephone', async ({ page }) => {
+  await bootV3(page, ROUTES, {
+    pinToken: 'jeton-pin',
+    emailSession: { access_token: 'jwt-frais', expires_at: Math.floor(Date.now() / 1000) + 3600 },
+    hash: '#/profile',
+  });
+  // Ce que l'app actuelle laisse sur l'appareil pendant une session.
+  await page.evaluate(() => {
+    localStorage.setItem('cleanerMode', 'cleaner');
+    localStorage.setItem('hkPlannerCache', JSON.stringify([{ guest: 'Marc Lefevre', phone: '+971500000000' }]));
+    localStorage.setItem('hkSessionCleanerId', '3');
+  });
+  // L'app actuelle est remplacee par une page vide du MEME domaine : elle ne
+  // peut donc pas remettre la cleaner dans sa session pendant la mesure, et
+  // localStorage comme readSession() restent observables apres la deconnexion.
+  await page.route((url) => url.pathname === '/', (route) => route.fulfill({
+    status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title><p>stub</p>',
+  }));
+  await Promise.all([
+    page.waitForURL(/#cleaner$/),
+    page.getByRole('button', { name: 'Sign out' }).click(),
+  ]);
+
+  expect(await page.evaluate(() => ({
+    pin: localStorage.getItem('cleanerToken'),
+    email: localStorage.getItem('hkAuthSession'),
+    mode: localStorage.getItem('cleanerMode'),
+    cache: localStorage.getItem('hkPlannerCache'),
+    cleanerId: localStorage.getItem('hkSessionCleanerId'),
+  }))).toEqual({ pin: null, email: null, mode: null, cache: null, cleanerId: null });
+  expect(await page.evaluate(() => import('/v3/api.js').then((m) => m.readSession()))).toBeNull();
+
+  const appels = (await fetchLog(page)).filter((l) => l.url.indexOf('action=cleanerLogout') !== -1);
+  expect(appels.length).toBe(1);
+  expect(appels[0].headers['X-Cleaner-Token']).toBe('jeton-pin');
+});
+
+// Constat 2 de la revue de la tache 12. La feuille vit dans #sheet-host, hors de
+// #app : un redessin ne la retire pas. Apres un geste Back, la delegation lit les
+// actions de l'ecran de la NOUVELLE route, « Send » n'y existe plus et l'appui
+// est avale sans un mot : la cleaner croit avoir signale, le ticket est perdu et
+// la photo reste orpheline sur le serveur.
+test('le geste Back ferme la feuille de signalement au lieu de la laisser muette', async ({ page }) => {
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', hash: '#/today' });
+  await page.getByRole('button', { name: 'Continue this cleaning' }).click();
+  await page.getByRole('button', { name: 'Report a problem' }).click();
+  await page.getByRole('button', { name: 'AC', exact: true }).click();
+  await prendreLaPhoto(page, () => page.getByRole('button', { name: 'Take a photo' }).click());
+  await expect(page.getByText('Photo taken')).toBeVisible();
+
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Report a problem' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Send to the technician on duty' })).toHaveCount(0);
+  const apres = await page.evaluate(async () => {
+    const m = await import('/v3/app.js');
+    const host = document.getElementById('sheet-host');
+    return { feuille: host ? host.innerHTML : 'absent', report: m.state.report, reportStop: m.state.reportStop };
+  });
+  expect(apres).toEqual({ feuille: '', report: null, reportStop: null });
+});
+
 // Le magasin mort n'existe que si quelqu'un le lit : c'est la raison d'etre du
 // bloc « Not sent » de Profile. Le critere de la phase A est « zero action
 // perdue », pas « zero action refusee ».

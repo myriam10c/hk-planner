@@ -53,7 +53,11 @@ async function request(action, opts) {
   for (const k of Object.keys(o.params || {})) {
     url += '&' + k + '=' + encodeURIComponent(o.params[k]);
   }
-  const headers = authHeaders(readSession());
+  // `o.headers` s'ajoute aux en-tetes de session, et gagne en cas de doublon :
+  // la deconnexion doit pouvoir poser X-Cleaner-Token meme quand une session
+  // email fait passer authHeaders en Bearer, sinon le proxy ne sait pas quelle
+  // ligne de cleaner_sessions revoquer (revue tache 12, constat 1).
+  const headers = Object.assign(authHeaders(readSession()), o.headers || {});
   const init = { headers: headers };
   if (o.form) {
     init.method = 'POST';
@@ -88,6 +92,6 @@ async function request(action, opts) {
 
 export const api = {
   get: function (action, params) { return request(action, { params: params }); },
-  post: function (action, body) { return request(action, { body: body }); },
+  post: function (action, body, headers) { return request(action, { body: body, headers: headers }); },
   upload: function (action, form) { return request(action, { form: form }); },
 };

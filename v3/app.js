@@ -195,6 +195,17 @@ document.addEventListener('click', function (evt) {
 // zero un retour sur Profile reafficherait la liste telle qu'elle etait a la
 // premiere visite.
 window.addEventListener('hashchange', function () {
+  // Une feuille vit dans #sheet-host, hors de #app : un redessin ne la retire
+  // pas. Apres un geste Back elle restait donc ouverte au-dessus d'un autre
+  // ecran, et la delegation, qui lit les actions de l'ecran de la NOUVELLE
+  // route, n'y trouvait plus « Send » ni « Finish » : l'appui etait avale sans
+  // un mot et le signalement perdu (revue tache 12, constat 2). On ferme la
+  // feuille avant de redessiner, et on rend son etat de travail avec elle.
+  if (sheetIsOpen()) {
+    closeSheet();
+    state.report = null;
+    state.reportStop = null;
+  }
   state.prepared = false;
   render();
 });
