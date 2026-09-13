@@ -4501,10 +4501,33 @@ async function emailLogout(){
 // une session PIN est disponible sur l'appareil.
 const AUTH_SESSION_WAIT_MS=2500;
 
+// Hotfix du 13/09. Le fragment d'un lien d'email (#access_token=...&type=recovery
+// ou #error=...) restait dans la barre d'adresse : un onglet, un signet ou une
+// icone d'ecran d'accueil pointant sur cette URL rejouait le meme fragment a
+// CHAQUE ouverture, donc l'ecran « Set a new password », meme avec une session
+// valide et persistante. On retire le fragment des qu'il a ete lu, qu'il ait
+// abouti ou non, pour que le prochain chargement complet reparte d'un BOOT_HASH
+// vide. supabase-js fait deja ce menage quand il consomme un jeton valide, pas
+// dans les autres cas (lien expire, fragment incomplet), d'ou ce filet.
+// Limite : un signet DEJA enregistre avec le fragment garde l'URL de sa creation,
+// replaceState ne reecrit pas un signet. Le correctif empeche la recidive, il ne
+// repare pas un raccourci existant.
+// Sans danger pour le lien d'email : createClient (plus haut dans ce fichier) lit
+// window.location.href DE FACON SYNCHRONE (option `lock` absente, donc
+// _initialize part sans verrou et parse le fragment avant son premier await), le
+// jeton est donc deja capture quand hkAuthBoot s'execute en fin de script.
+function hkClearAuthHash(h){
+  // Un fragment qui n'est pas d'authentification (#cleaner, sur lequel vit
+  // l'ecran PIN) ne doit surtout pas etre efface.
+  if(!h||(!h.type&&!h.error&&!h.hasToken))return;
+  try{ history.replaceState({},'',window.location.pathname+window.location.search); }catch(e){}
+}
+
 // Boot : decide quel ecran ouvrir avant le premier fetchAll().
 // Retourne true si l'app peut charger ses donnees.
 async function hkAuthBoot(){
   const h=parseAuthHash(BOOT_HASH);
+  hkClearAuthHash(h);
   if(h.error){
     authScreen='login';
     authError=authErrorMessage({code:h.error,message:h.errorDescription});

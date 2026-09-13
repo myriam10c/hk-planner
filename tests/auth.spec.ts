@@ -40,6 +40,16 @@ async function bootWithFakeNetwork(
       window.addEventListener('unhandledrejection', (ev: any) => {
         (window as any).__unhandled.push(String((ev && ev.reason) || ''));
       });
+      // Espion sur history.replaceState : il sert a distinguer le menage fait
+      // par hkAuthBoot (hotfix du 13/09) de celui que supabase-js fait tout seul
+      // quand il consomme un jeton valide, et de celui de writeUrlState a chaque
+      // render. On garde la pile d'appel, le nom de la fonction appelante suffit.
+      (window as any).__replaceStateStacks = [];
+      const realReplace = history.replaceState.bind(history);
+      history.replaceState = function (this: any, ...args: any[]) {
+        (window as any).__replaceStateStacks.push(String((new Error()).stack || ''));
+        return realReplace(...args);
+      } as any;
       (window as any).__fetchLog = [];
       const real = window.fetch.bind(window);
       window.fetch = ((input: any, init: any) => {
@@ -72,11 +82,12 @@ async function bootWithFakeNetwork(
   const hash = opts.hash || '';
   await page.goto('/' + hash, { waitUntil: 'domcontentloaded' });
   // Le rechargement rend l'etat de depart deterministe (localStorage pose, fetch
-  // bouchonne des le premier script). On le saute quand le fragment porte un
-  // access_token : supabase-js le consomme au premier chargement puis nettoie
-  // l'URL par replaceState, donc un reload repartirait sans le fragment et
-  // l'ecran teste ne serait jamais celui du lien d'email.
-  if (hash.indexOf('access_token') === -1) await page.reload({ waitUntil: 'domcontentloaded' });
+  // bouchonne des le premier script). On le saute des que le fragment porte un
+  // element d'authentification (jeton ou erreur) : il est consomme puis retire
+  // de l'URL au premier chargement, par supabase-js pour un jeton valide et par
+  // hkAuthBoot dans tous les cas depuis le hotfix du 13/09. Un reload repartirait
+  // donc sans le fragment et l'ecran teste ne serait jamais celui du lien d'email.
+  if (!/access_token|error/.test(hash)) await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof (window as any).parseAuthHash === 'function', null, { timeout: 10_000 });
 }
 
@@ -523,6 +534,81 @@ test('un refus du proxy est affiche tel quel et garde l ecran', async ({ page })
   await page.click('[data-action="submitLinkEmail"]');
   await expect(page.locator('.auth-error')).toHaveText('This email is already used by another team member.');
   await expect(page.locator('#linkEmail')).toBeVisible();
+});
+
+// ===== Hotfix du 13/09 : le fragment du lien d'email ne survit pas au boot =====
+//
+// Un signet, un onglet epingle ou une icone d'ecran d'accueil enregistree depuis
+// le lien recu par email garde le fragment #access_token=...&type=recovery. A
+// chaque ouverture, BOOT_HASH le relisait et renvoyait sur « Set a new
+// password », meme avec une session valide et persistante. hkAuthBoot retire
+// desormais le fragment de la barre d'adresse des qu'il en a lu un.
+
+const HASH_RECOVERY =
+  '#access_token=jwt-test-token&refresh_token=refresh-test&expires_in=3600&token_type=bearer&type=recovery';
+const HASH_EXPIRE =
+  '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired';
+
+// Reponses du lien de reinitialisation : /auth/v1/user valide le jeton du
+// fragment, cleanerMe ouvre la session manager, le reste sert a fetchAll.
+function recoveryRoutes(): FakeRoute[] {
+  return [
+    { match: '/auth/v1/user', status: 200, body: SESSION.user },
+    { match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: { id: 8, name: 'Walter', color: '#e94560', role: 'manager' } } },
+    { match: 'action=', status: 200, body: { status: 'success', reservations: [], done: {}, assignments: {}, cleaners: [], templates: [], listingPrices: {}, timers: {}, cancelled: {}, postponed: {}, extraCleanings: [], leaves: [], holidays: [] } },
+  ];
+}
+
+function urlEtMenage(page: any) {
+  return page.evaluate(() => ({
+    hash: location.hash,
+    href: location.href,
+    parHkAuthBoot: ((window as any).__replaceStateStacks || [])
+      .some((s: string) => s.indexOf('hkAuthBoot') !== -1),
+  }));
+}
+
+test('hotfix hash : un lien de reinitialisation laisse la barre d adresse propre', async ({ page }) => {
+  await bootWithFakeNetwork(page, recoveryRoutes(), { hash: HASH_RECOVERY });
+  // Inchange : le lien ouvre bien l'ecran de nouveau mot de passe.
+  await expect(page.locator('#authNewPassword')).toBeVisible();
+  const u = await urlEtMenage(page);
+  expect(u.hash).toBe('');
+  expect(u.href).not.toContain('#');
+  // C'est bien le boot de l'app qui a nettoye, pas seulement supabase-js.
+  expect(u.parHkAuthBoot).toBe(true);
+});
+
+test('hotfix hash : rouvrir la meme page ne redemande plus un mot de passe', async ({ page }) => {
+  await bootWithFakeNetwork(page, recoveryRoutes(), { hash: HASH_RECOVERY });
+  await expect(page.locator('#authNewPassword')).toBeVisible();
+  expect((await urlEtMenage(page)).hash).toBe('');
+  // Simulateur d'une reouverture du signet : on recharge l'URL telle qu'elle est
+  // affichee maintenant, donc sans fragment.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('#authNewPassword')).toHaveCount(0);
+  await expect(page.locator('#authEmail')).toHaveCount(0);
+});
+
+test('hotfix hash : un lien expire nettoie aussi la barre d adresse', async ({ page }) => {
+  await bootWithFakeNetwork(page, [], { hash: HASH_EXPIRE });
+  // Inchange : le message d'expiration s'affiche sur l'ecran de connexion.
+  await expect(page.locator('.auth-error')).toContainText('expired');
+  const u = await urlEtMenage(page);
+  expect(u.hash).toBe('');
+  expect(u.href).not.toContain('#');
+  expect(u.parHkAuthBoot).toBe(true);
+});
+
+test('hotfix hash : sans fragment, le boot ne touche pas a l URL', async ({ page }) => {
+  await bootWithFakeNetwork(page, []);
+  await expect(page.locator('#authEmail')).toBeVisible();
+  const u = await urlEtMenage(page);
+  // writeUrlState appelle replaceState a chaque render : seul un appel venant de
+  // hkAuthBoot serait de trop ici.
+  expect(u.parHkAuthBoot).toBe(false);
+  expect(u.hash).toBe('');
 });
 
 test('l ecran Create your account tient dans 390 px sans defilement horizontal', async ({ page }) => {
