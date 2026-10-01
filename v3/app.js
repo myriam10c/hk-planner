@@ -3,6 +3,7 @@
 // anglais. Les ecrans vivent dans /v3/screens/ et exposent view/actions/mount.
 import { api, ApiError, readSession } from '/v3/api.js';
 import { flush, onQueueChange, pendingCount, watchNetwork } from '/v3/offline.js';
+import { onSessionRenewed } from '/v3/session.js';
 import { closeSheet, esc, icon, sheetIsOpen, toast } from '/v3/ui.js';
 import today from '/v3/screens/today.js';
 import job from '/v3/screens/job.js';
@@ -223,8 +224,21 @@ onQueueChange(function (n) {
   render();
 });
 
+// Un renouvellement de la session email (minuteur de supabase-js, retour du
+// reseau, ou onglet de l'app racine) relance le rejeu : des gestes mis en file
+// pendant une session « stale » repartent avec le nouveau Bearer.
+onSessionRenewed(function () {
+  if (state.session) flush();
+});
+
 export async function boot() {
-  state.session = readSession();
+  // La lecture de session peut attendre un renouvellement (quelques secondes au
+  // pire) : on montre l'attente plutot qu'un ecran vide ou « Sign in ».
+  const app = document.getElementById('app');
+  if (app) app.innerHTML = vueAttente('Loading your day.');
+  // { kind: 'stale' } compte comme connecte : la cleaner reste dans l'app, les
+  // appels partent dans la file comme pour toute coupure.
+  state.session = await readSession();
   if (!state.session) {
     state.loading = false;
     render();

@@ -16,7 +16,10 @@ const VERSION = 'v3-dev';
 const CACHE = 'hk-v3-' + VERSION;
 // Tout ce que /v3/ sert : la coquille, les six modules, les cinq ecrans, les
 // deux feuilles de style, les deux polices auto-hebergees et leurs licences
-// (l'OFL demande que la licence voyage avec la police).
+// (l'OFL demande que la licence voyage avec la police). Plus le client de
+// session supabase-js charge par index.html, seul fichier hors de /v3/ : le
+// gestionnaire fetch le sert aussi. Aucun commentaire DANS la liste, le test
+// tests/v3/sw.spec.ts la decoupe sur les virgules.
 const PRECACHE = [
   '/v3/',
   '/v3/index.html',
@@ -26,6 +29,7 @@ const PRECACHE = [
   '/v3/ui.js',
   '/v3/photo.js',
   '/v3/proxy-config.js',
+  '/v3/session.js',
   '/v3/screens/today.js',
   '/v3/screens/job.js',
   '/v3/screens/finish.js',
@@ -38,6 +42,7 @@ const PRECACHE = [
   '/v3/fonts/OFL-BricolageGrotesque.txt',
   '/v3/fonts/OFL-InstrumentSans.txt',
   '/v3/manifest.webmanifest',
+  '/vendor/supabase-js-2.116.0.umd.js',
 ];
 
 // Un fichier apres l'autre, jamais cache.addAll : addAll est tout ou rien, un
@@ -78,7 +83,10 @@ self.addEventListener('fetch', (e) => {
   if (url.hostname.indexOf('supabase.co') !== -1) return;
   if (url.hostname.indexOf('hostaway.com') !== -1) return;
   if (url.origin !== location.origin) return;
-  if (url.pathname.indexOf('/v3/') !== 0) return;
+  // Seul fichier hors de /v3/ que la v3 charge : sans lui hors ligne, la v3
+  // demarrerait sans client de session.
+  const vendor = url.pathname === '/vendor/supabase-js-2.116.0.umd.js';
+  if (url.pathname.indexOf('/v3/') !== 0 && !vendor) return;
 
   if (req.mode === 'navigate' || url.pathname === '/v3/app.js' || url.pathname === '/v3/index.html') {
     e.respondWith(networkFirst(req));

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bootV3, fetchLog, noHorizontalScroll } from './helpers';
+import { bootV3, emailSession, fetchLog, noHorizontalScroll } from './helpers';
 
 // jobId opaque (`job_<20 hex>`) et non la forme historique
 // `2026-09-12_<nom du guest>` : aucun nom de guest ne doit atteindre le DOM, un
@@ -162,7 +162,7 @@ test('Profile renvoie vers l app actuelle et permet de se deconnecter', async ({
 test('Sign out revoque la session au serveur et ne laisse aucune donnee sur le telephone', async ({ page }) => {
   await bootV3(page, ROUTES, {
     pinToken: 'jeton-pin',
-    emailSession: { access_token: 'jwt-frais', expires_at: Math.floor(Date.now() / 1000) + 3600 },
+    emailSession: emailSession('jwt-frais', 'rt-1', 3600),
     hash: '#/profile',
   });
   // Ce que l'app actuelle laisse sur l'appareil pendant une session.
@@ -189,7 +189,10 @@ test('Sign out revoque la session au serveur et ne laisse aucune donnee sur le t
     cache: localStorage.getItem('hkPlannerCache'),
     cleanerId: localStorage.getItem('hkSessionCleanerId'),
   }))).toEqual({ pin: null, email: null, mode: null, cache: null, cleanerId: null });
-  expect(await page.evaluate(() => import('/v3/api.js').then((m) => m.readSession()))).toBeNull();
+  expect(await page.evaluate(async () => {
+    const m = await import('/v3/api.js');
+    return await m.readSession();
+  })).toBeNull();
 
   const appels = (await fetchLog(page)).filter((l) => l.url.indexOf('action=cleanerLogout') !== -1);
   expect(appels.length).toBe(1);

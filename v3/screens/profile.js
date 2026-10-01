@@ -3,6 +3,7 @@
 import { api } from '/v3/api.js';
 import { queueStrip, render } from '/v3/app.js';
 import { clearDead, deadEntries, resetQueue } from '/v3/offline.js';
+import { signOutEmail } from '/v3/session.js';
 import { esc, icon } from '/v3/ui.js';
 
 // Actions refusees par le serveur : elles ne sont jamais jetees en silence, elles
@@ -141,10 +142,11 @@ const actions = {
         /* hors ligne ou session deja morte : on ferme quand meme cote telephone */
       }
     }
-    // 3. Le telephone. Limite assumee : sans le SDK Supabase, la v3 ne peut pas
-    // revoquer le jeton de rafraichissement email cote serveur (l'app actuelle
-    // appelle sbAuth.auth.signOut()). Effacer hkAuthSession suffit a ce que
-    // l'appareil n'ait plus de session, ce que le bouton promet.
+    // 3. Le telephone. La session email part par le client supabase-js
+    // (auth.signOut, portee locale) : son minuteur de renouvellement s'arrete et
+    // l'onglet de l'app racine est prevenu. Puis les cles que l'app actuelle
+    // efface elle-meme a sa deconnexion.
+    try { await signOutEmail(); } catch (e) { /* jamais une raison de retenir la sortie */ }
     CLES_SESSION.forEach(function (cle) {
       try { localStorage.removeItem(cle); } catch (e) { /* stockage indisponible */ }
     });

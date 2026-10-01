@@ -1,38 +1,27 @@
-// Acces au proxy. Session prise dans le stockage ecrit par l'app actuelle : la
-// v3 ne cree aucune session a elle, se connecter une fois sur « / » suffit
-// (specification, phase A : « login reutilisant l'ecran email/PIN existant »).
+// Acces au proxy. La session vient de /v3/session.js : la session email de
+// l'app actuelle (meme client supabase-js, meme stockage, renouvelee quand elle
+// expire), sinon le jeton PIN. La v3 ne cree aucune session a elle, se connecter
+// une fois sur « / » suffit (specification, phase A : « login reutilisant
+// l'ecran email/PIN existant »).
 import { API, APP_SECRET } from '/v3/proxy-config.js';
+import { getSession, renewSession } from '/v3/session.js';
 
 const TIMEOUT_MS = 15000;
 
 // Bearer d'abord, jeton PIN ensuite, comme le proxy (Bearer > X-Cleaner-Token).
-// Une session email expiree est ignoree : la v3 ne sait pas la rafraichir, elle
-// laisse la main au jeton PIN, sinon elle enverrait un 401 a chaque geste.
-export function readSession(store) {
-  const s = store || (typeof localStorage !== 'undefined' ? localStorage : null);
-  if (!s) return null;
-  let raw = null;
-  try { raw = s.getItem('hkAuthSession'); } catch (e) { raw = null; }
-  if (raw) {
-    try {
-      const sess = JSON.parse(raw);
-      const token = sess && sess.access_token;
-      const exp = sess && Number(sess.expires_at);
-      if (token && (!Number.isFinite(exp) || exp * 1000 > Date.now() + 30000)) {
-        return { kind: 'bearer', token: token };
-      }
-    } catch (e) { /* session illisible : on tente le PIN */ }
-  }
-  let pin = null;
-  try { pin = s.getItem('cleanerToken'); } catch (e) { pin = null; }
-  return pin ? { kind: 'pin', token: pin } : null;
+// Lue a chaque requete, jamais gardee depuis le boot : un jeton expire entre
+// deux gestes est renouvele avant l'envoi, aucun Bearer perime ne part.
+// { kind: 'stale' } : session email a renouveler des que le reseau revient.
+export async function readSession() {
+  return await getSession();
 }
 
 export function authHeaders(session) {
   const h = { 'X-App-Secret': APP_SECRET };
   if (!session) return h;
   if (session.kind === 'bearer') h['Authorization'] = 'Bearer ' + session.token;
-  else h['X-Cleaner-Token'] = session.token;
+  else if (session.kind === 'pin') h['X-Cleaner-Token'] = session.token;
+  // 'stale' : aucun en-tete d'identite.
   return h;
 }
 
@@ -47,17 +36,22 @@ export class ApiError extends Error {
   }
 }
 
-async function request(action, opts) {
+async function request(action, opts, dejaRenouvele) {
   const o = opts || {};
   let url = API + '?action=' + encodeURIComponent(action);
   for (const k of Object.keys(o.params || {})) {
     url += '&' + k + '=' + encodeURIComponent(o.params[k]);
   }
+  const session = dejaRenouvele ? dejaRenouvele.session : await readSession();
+  // Session email en attente de reseau : le renouvellement vient d'echouer faute
+  // de reseau, une requete sans identite ne ferait que revenir en 401. On la
+  // traite comme une coupure, avant tout fetch : le geste part dans la file.
+  if (session && session.kind === 'stale') throw new ApiError('offline', 'offline', 0);
   // `o.headers` s'ajoute aux en-tetes de session, et gagne en cas de doublon :
   // la deconnexion doit pouvoir poser X-Cleaner-Token meme quand une session
   // email fait passer authHeaders en Bearer, sinon le proxy ne sait pas quelle
   // ligne de cleaner_sessions revoquer (revue tache 12, constat 1).
-  const headers = Object.assign(authHeaders(readSession()), o.headers || {});
+  const headers = Object.assign(authHeaders(session), o.headers || {});
   const init = { headers: headers };
   if (o.form) {
     init.method = 'POST';
@@ -81,7 +75,15 @@ async function request(action, opts) {
   } finally {
     clearTimeout(timer);
   }
-  if (resp.status === 401) throw new ApiError('Sign in again', 'auth', 401);
+  if (resp.status === 401) {
+    // Un Bearer refuse (revoque, horloge du telephone en avance) : un seul
+    // renouvellement, un seul nouvel essai de la meme requete, jamais de boucle.
+    if (session && session.kind === 'bearer' && !dejaRenouvele) {
+      const neuve = await renewSession();
+      if (neuve) return request(action, opts, { session: neuve });
+    }
+    throw new ApiError('Sign in again', 'auth', 401);
+  }
   let data = null;
   try { data = await resp.json(); } catch (e) { data = null; }
   if (!resp.ok || (data && data.error)) {

@@ -4,15 +4,44 @@ import type { Page } from '@playwright/test';
 // chargement des modules, par addInitScript. La difference tient a une chose,
 // le bouchon refuse quand navigator.onLine est faux, pour que
 // context.setOffline() coupe vraiment le reseau de l'application.
-export type FakeRoute = { match: string; status: number; body: any; delay?: number };
+// `once` : la route ne sert qu'une fois par page, la suivante qui correspond
+// prend le relais (un 401 puis un 200, par exemple).
+export type FakeRoute = { match: string; status: number; body: any; delay?: number; once?: boolean };
+
+// Session email au format ecrit par supabase-js dans hkAuthSession. Le client
+// juge invalide (et efface) une session sans refresh_token ni expires_at.
+export function emailSession(access: string, refresh: string, expiresInSec: number) {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    access_token: access, refresh_token: refresh, token_type: 'bearer',
+    expires_in: Math.abs(expiresInSec), expires_at: now + expiresInSec,
+    user: { id: 'u-test', email: 'cleaner@example.com' },
+  };
+}
+
+// Reponse de POST /auth/v1/token?grant_type=refresh_token.
+export function tokenResponse(access: string, refresh: string) {
+  return {
+    access_token: access, refresh_token: refresh, token_type: 'bearer', expires_in: 3600,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: 'u-test', email: 'cleaner@example.com' },
+  };
+}
 
 export async function bootV3(
   page: Page,
   routes: FakeRoute[],
-  opts: { hash?: string; pinToken?: string | null; emailSession?: any } = {},
+  opts: {
+    hash?: string; pinToken?: string | null; emailSession?: any;
+    // Supabase Auth (/auth/v1/...). Sans route, /auth/v1/token repond 400 (un
+    // refus net, jamais un essai reseau) et /auth/v1/logout 204.
+    authRoutes?: FakeRoute[];
+    // Pose le drapeau v3TestOffline des le premier document (une seule fois).
+    offline?: boolean;
+  } = {},
 ) {
   await page.addInitScript(
-    (cfg: { routes: FakeRoute[]; pinToken: string | null; emailSession: any }) => {
+    (cfg: { routes: FakeRoute[]; authRoutes: FakeRoute[]; pinToken: string | null; emailSession: any; offline: boolean }) => {
       // Rien n'est efface ici : addInitScript rejoue a chaque navigation, et un
       // effacement emporterait le drapeau hors ligne et le journal d'un test qui
       // recharge la page. Chaque test part de toute facon d'un contexte neuf.
@@ -26,6 +55,7 @@ export async function bootV3(
           localStorage.setItem('v3TestSeeded', '1');
           if (cfg.pinToken) localStorage.setItem('cleanerToken', cfg.pinToken);
           if (cfg.emailSession) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.emailSession));
+          if (cfg.offline) localStorage.setItem('v3TestOffline', '1');
         }
       } catch (e) { /* stockage indisponible : le test le verra a l'ecran */ }
       (window as any).__unhandled = [];
@@ -49,9 +79,41 @@ export async function bootV3(
         try { return localStorage.getItem('v3TestOffline') === '1'; } catch (e) { return false; }
       };
       const real = window.fetch.bind(window);
+      // Routes deja servies une fois (option `once`), par page.
+      const servies = new Set<FakeRoute>();
+      const repondre = (routes: FakeRoute[], url: string) => {
+        for (const r of routes) {
+          if (url.indexOf(r.match) === -1 || servies.has(r)) continue;
+          if (r.once) servies.add(r);
+          const make = () => new Response(r.status === 204 ? null : JSON.stringify(r.body), {
+            status: r.status, headers: { 'Content-Type': 'application/json' },
+          });
+          if (r.delay) return new Promise((res) => setTimeout(() => res(make()), r.delay));
+          return Promise.resolve(make());
+        }
+        return null;
+      };
       window.fetch = ((input: any, init: any) => {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         const proxy = url.indexOf('hostaway-proxy') !== -1;
+        // Supabase Auth : supabase-js passe par le fetch global, donc par ce
+        // bouchon. Journal et coupure reseau comme pour le proxy.
+        if (url.indexOf('/auth/v1/') !== -1) {
+          (window as any).__logFetch({
+            url,
+            body: init && init.body && typeof init.body === 'string' ? init.body : '',
+            headers: {},
+          });
+          if (!navigator.onLine || (window as any).__offlineFlag()) {
+            return Promise.reject(new TypeError('Failed to fetch'));
+          }
+          const rep = repondre(cfg.authRoutes, url);
+          if (rep) return rep;
+          if (url.indexOf('/auth/v1/logout') !== -1) return Promise.resolve(new Response(null, { status: 204 }));
+          return Promise.resolve(new Response(JSON.stringify({ code: 'no_fake_route', msg: 'no fake route' }), {
+            status: 400, headers: { 'Content-Type': 'application/json' },
+          }));
+        }
         if (proxy) {
           (window as any).__logFetch({
             url,
@@ -61,15 +123,8 @@ export async function bootV3(
           if (!navigator.onLine || (window as any).__offlineFlag()) {
             return Promise.reject(new TypeError('Failed to fetch'));
           }
-          for (const r of cfg.routes) {
-            if (url.indexOf(r.match) !== -1) {
-              const make = () => new Response(JSON.stringify(r.body), {
-                status: r.status, headers: { 'Content-Type': 'application/json' },
-              });
-              if (r.delay) return new Promise((res) => setTimeout(() => res(make()), r.delay));
-              return Promise.resolve(make());
-            }
-          }
+          const rep = repondre(cfg.routes, url);
+          if (rep) return rep;
           return Promise.resolve(new Response(JSON.stringify({ error: 'no fake route' }), {
             status: 500, headers: { 'Content-Type': 'application/json' },
           }));
@@ -77,7 +132,10 @@ export async function bootV3(
         return real(input, init);
       }) as any;
     },
-    { routes, pinToken: opts.pinToken ?? null, emailSession: opts.emailSession ?? null },
+    {
+      routes, authRoutes: opts.authRoutes ?? [], pinToken: opts.pinToken ?? null,
+      emailSession: opts.emailSession ?? null, offline: !!opts.offline,
+    },
   );
   await page.goto('/v3/' + (opts.hash || ''), { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });

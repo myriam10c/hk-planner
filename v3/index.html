@@ -21,6 +21,10 @@
 <div id="sheet-host"></div>
 <div id="toast-host" aria-live="polite" role="status"></div>
 <input type="file" id="v3-cam" accept="image/*" capture="environment" hidden>
+<!-- supabase-js avant le module : la v3 partage le client de session de l'app
+     actuelle (renouvellement du jeton email). Balise classique, non bloquante
+     pour l'app : sans elle, /v3/session.js retombe sur la lecture directe. -->
+<script src="/vendor/supabase-js-2.116.0.umd.js"></script>
 <script type="module" src="/v3/app.js"></script>
 </body>
 </html>

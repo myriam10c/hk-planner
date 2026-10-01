@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bootV3, fetchLog, noHorizontalScroll } from './helpers';
+import { bootV3, emailSession, fetchLog, noHorizontalScroll } from './helpers';
 
 test('sans session, la v3 renvoie vers la connexion existante sans appeler le proxy', async ({ page }) => {
   await bootV3(page, []);
@@ -16,27 +16,28 @@ test('la coquille ne deborde jamais en largeur', async ({ page }) => {
   expect(scrollWidth).toBe(clientWidth);
 });
 
-test('readSession prend le Bearer avant le PIN, et ignore une session expiree', async ({ page }) => {
+test('readSession prend le Bearer avant le PIN, et un refresh refuse rend la main au PIN', async ({ page }) => {
   await bootV3(page, [], {
     pinToken: 'jeton-pin',
-    emailSession: { access_token: 'jwt-frais', expires_at: Math.floor(Date.now() / 1000) + 3600 },
+    emailSession: emailSession('jwt-frais', 'rt-1', 3600),
+    // Le renouvellement est refuse (session revoquee) : supabase-js efface la
+    // session email et la v3 retombe sur le jeton PIN.
+    authRoutes: [{ match: '/auth/v1/token', status: 400, body: { code: 'refresh_token_not_found', msg: 'Invalid Refresh Token' } }],
   });
   const frais = await page.evaluate(async () => {
     const m = await import('/v3/api.js');
-    return m.authHeaders(m.readSession());
+    return m.authHeaders(await m.readSession());
   });
   expect(frais['Authorization']).toBe('Bearer jwt-frais');
   expect(frais['X-Cleaner-Token']).toBeUndefined();
   expect(frais['X-App-Secret']).toBeTruthy();
 
-  await page.evaluate(() => {
-    localStorage.setItem('hkAuthSession', JSON.stringify({
-      access_token: 'jwt-perime', expires_at: Math.floor(Date.now() / 1000) - 60,
-    }));
-  });
+  await page.evaluate((s) => {
+    localStorage.setItem('hkAuthSession', JSON.stringify(s));
+  }, emailSession('jwt-perime', 'rt-1', -60));
   const perime = await page.evaluate(async () => {
     const m = await import('/v3/api.js');
-    return m.authHeaders(m.readSession());
+    return m.authHeaders(await m.readSession());
   });
   expect(perime['Authorization']).toBeUndefined();
   expect(perime['X-Cleaner-Token']).toBe('jeton-pin');

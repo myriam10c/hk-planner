@@ -21,11 +21,17 @@ test('le service worker v3 precache la coquille, les modules et les polices', as
     '/v3/fonts/bricolage-grotesque-latin.woff2', '/v3/fonts/instrument-sans-latin.woff2',
     '/v3/fonts/OFL-BricolageGrotesque.txt', '/v3/fonts/OFL-InstrumentSans.txt',
     '/v3/manifest.webmanifest', '/v3/proxy-config.js',
+    // supabase-js : sans lui en cache, la v3 demarrerait hors ligne sans client
+    // de session (elle retomberait sur la lecture directe).
+    '/vendor/supabase-js-2.116.0.umd.js', '/v3/session.js',
   ]) {
     expect(source).toContain("'" + chemin + "'");
   }
   // Les appels au proxy ne passent jamais par le cache.
   expect(source).toContain('supabase.co');
+  // Le bundle vendor vit hors de /v3/ : le gestionnaire fetch doit quand meme le
+  // servir depuis le cache, sinon le precache ne sert a rien hors ligne.
+  expect(source).toContain("url.pathname === '/vendor/supabase-js-2.116.0.umd.js'");
   // Aucun abonnement push cote v3 (spec, phase A) : la cleaner recoit deja ses
   // notifications par l'app actuelle. Un handler `push` ici voudrait dire qu'un
   // second abonnement existe, donc deux notifications par affectation.
