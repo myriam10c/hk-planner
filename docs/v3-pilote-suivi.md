@@ -56,6 +56,15 @@ en priorite), `unit_type` et `bedrooms`.
    coquille hors ligne qu'a une visite connectee. C'est ecrit dans le mode
    d'emploi, mais autant le leur redire de vive voix.
 
+4. **Reseau qui pend sans couper, session email seule.** Sur un reseau qui
+   reste « connecte » mais ne repond plus (wifi d'immeuble sature, 4G a une
+   barre), le renouvellement de la session email peut rester suspendu. Une
+   cleaner connectee par email seulement, sans PIN, voit alors « No network »
+   pendant quelques minutes, meme quand le reseau est revenu. Ses gestes sont
+   gardes sur le telephone et partent tout seuls ensuite, rien n'est perdu.
+   Si ca dure, fermer et rouvrir l'app, ou se connecter aussi avec son PIN,
+   regle le probleme. L'app actuelle a la meme limite.
+
 ## A regarder chaque jour du pilote, dans cet ordre
 
 **1. Rien de perdu, rien de double.** Les deux colonnes doivent etre egales.
