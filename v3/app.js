@@ -227,8 +227,13 @@ onQueueChange(function (n) {
 // Un renouvellement de la session email (minuteur de supabase-js, retour du
 // reseau, ou onglet de l'app racine) relance le rejeu : des gestes mis en file
 // pendant une session « stale » repartent avec le nouveau Bearer.
+// Si la journee n'a pas pu se charger (demarrage en « stale » sur un reseau
+// lent), elle se recharge aussi : sinon « No network » resterait affiche alors
+// que la session et le reseau marchent.
 onSessionRenewed(function () {
-  if (state.session) flush();
+  if (!state.session) return;
+  flush();
+  if (state.error && !state.loading) loadDay();
 });
 
 export async function boot() {

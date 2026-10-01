@@ -254,7 +254,7 @@ test('Bearer valide passe avant le PIN', async ({ page }) => {
 test('401 du proxy puis succes : un renouvellement, un nouvel essai avec le nouveau Bearer', async ({ page }) => {
   await bootV3(page, [
     MYDAY,
-    { match: 'action=v3.tick', status: 401, body: { error: 'Unauthorized' }, once: true },
+    { match: 'action=v3.tick', status: 401, body: { error: 'auth required' }, once: true },
     TICK_OK,
   ], { emailSession: emailSession('jwt-frais', 'rt-1', 3600), authRoutes: [REFRESH_OK] });
   const r = await page.evaluate(async () => {
@@ -265,13 +265,16 @@ test('401 du proxy puis succes : un renouvellement, un nouvel essai avec le nouv
   const log = await fetchLog(page);
   const tick = appelsProxy(log, 'v3.tick');
   expect(tick.map((t) => t.headers['Authorization'])).toEqual(['Bearer jwt-frais', 'Bearer jwt-neuf']);
+  // Meme requete, meme cle d'idempotence : le nouvel essai ne reconstruit rien.
+  expect(tick[1].body).toBe(tick[0].body);
+  expect(tick[0].body).toContain('k2');
   expect(appelsToken(log).length).toBe(1);
 });
 
 test('401 du proxy deux fois : ApiError auth, sans boucle', async ({ page }) => {
   await bootV3(page, [
     MYDAY,
-    { match: 'action=v3.tick', status: 401, body: { error: 'Unauthorized' } },
+    { match: 'action=v3.tick', status: 401, body: { error: 'auth required' } },
   ], { emailSession: emailSession('jwt-frais', 'rt-1', 3600), authRoutes: [REFRESH_OK] });
   const r = await page.evaluate(async () => {
     const m = await import('/v3/api.js');
@@ -283,10 +286,28 @@ test('401 du proxy deux fois : ApiError auth, sans boucle', async ({ page }) => 
   expect(appelsToken(log).length).toBe(1);
 });
 
+// Le 401 du secret applicatif (« unauthorized ») ne dit rien de la session :
+// aucun renouvellement, donc aucune rotation du refresh token pour rien.
+test('401 unauthorized (secret applicatif) avec un Bearer : aucun renouvellement', async ({ page }) => {
+  await bootV3(page, [
+    MYDAY,
+    { match: 'action=v3.tick', status: 401, body: { error: 'unauthorized' } },
+  ], { emailSession: emailSession('jwt-frais', 'rt-1', 3600), authRoutes: [REFRESH_OK] });
+  const r = await page.evaluate(async () => {
+    const m = await import('/v3/api.js');
+    try { await m.api.post('v3.tick', { idem: 'k5' }); return 'ok'; } catch (e: any) { return e.kind + ':' + e.status; }
+  });
+  expect(r).toBe('auth:401');
+  const log = await fetchLog(page);
+  expect(appelsProxy(log, 'v3.tick').length).toBe(1);
+  expect(appelsToken(log)).toEqual([]);
+  expect((await stocke(page)).refresh_token).toBe('rt-1');
+});
+
 test('401 du proxy avec un PIN : aucun renouvellement, ApiError auth', async ({ page }) => {
   await bootV3(page, [
     MYDAY,
-    { match: 'action=v3.tick', status: 401, body: { error: 'Unauthorized' } },
+    { match: 'action=v3.tick', status: 401, body: { error: 'auth required' } },
   ], { pinToken: 'jeton-pin' });
   const r = await page.evaluate(async () => {
     const m = await import('/v3/api.js');
@@ -333,4 +354,126 @@ test('sans window.supabase : lecture directe, Bearer frais puis PIN, et un avert
   expect(await lireSession(page)).toBeNull();
   expect(avertissements.some((t) => t.indexOf('supabase') !== -1)).toBe(true);
   expect(appelsToken(await fetchLog(page))).toEqual([]);
+});
+
+// Constat 1 de la revue. La boucle de retry du client (30 s) se termine en echec
+// hors ligne : supabase-js garde cet echec 60 s pour le meme refresh token. Le
+// retour du reseau doit l'effacer, sinon le rejeu attendrait 60 a 90 s.
+test('retour du reseau apres un echec de renouvellement en cache : rejeu en moins de 5 s', async ({ page }) => {
+  test.setTimeout(120_000);
+  await bootV3(page, [MYDAY, TICK_OK], {
+    emailSession: emailSession('jwt-perime', 'rt-1', -60),
+    authRoutes: [REFRESH_OK],
+    offline: true,
+  });
+  // Le champ interne existe dans le bundle : une montee de version qui le
+  // renomme doit casser ce test, pas desactiver la remise a zero en silence.
+  expect(await page.evaluate(async () => {
+    const m = await import('/v3/session.js');
+    const c: any = m.supabaseClientForTests();
+    return !!c && 'lastRefreshFailure' in c.auth;
+  })).toBe(true);
+  await expect.poll(async () => page.evaluate(async () => {
+    const m = await import('/v3/session.js');
+    const c: any = m.supabaseClientForTests();
+    return c.auth.lastRefreshFailure !== null;
+  }), { timeout: 60_000, intervals: [1000] }).toBe(true);
+
+  const r = await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    return await m.sendOrQueue('v3.tick', { jobId: 'j', itemId: 'i', idem: 'k6' });
+  });
+  expect(r.queued).toBe(true);
+  const t0 = Date.now();
+  await page.evaluate(() => {
+    localStorage.removeItem('v3TestOffline');
+    window.dispatchEvent(new Event('online'));
+  });
+  await expect.poll(async () => appelsProxy(await fetchLog(page), 'v3.tick').length, { timeout: 5_000 }).toBe(1);
+  expect(Date.now() - t0).toBeLessThan(5_000);
+  expect(appelsProxy(await fetchLog(page), 'v3.tick')[0].headers['Authorization']).toBe('Bearer jwt-neuf');
+});
+
+// Constat 2. Une demande de rejeu qui arrive pendant un rejeu en cours n'est
+// pas perdue : une seule passe de plus part a la fin.
+test('un flush demande pendant un flush en cours relance exactement une passe', async ({ page }) => {
+  await bootV3(page, [MYDAY, { ...TICK_OK, delay: 800 }], { pinToken: 'jeton-pin', offline: true });
+  const r = await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    await m.sendOrQueue('v3.tick', { idem: 'a1' });
+    // Le journal garde aussi la tentative refusee hors ligne : on repart a vide.
+    localStorage.setItem('v3FetchLog', '[]');
+    localStorage.removeItem('v3TestOffline');
+    const premier = m.flush();
+    // Le rejeu a deja lu la file (une entree) : B arrive apres, puis une
+    // demande de rejeu pendant que A est en vol.
+    await new Promise((res) => setTimeout(res, 200));
+    await m.enqueue({ action: 'v3.tick', body: { idem: 'b2' }, at: Date.now() });
+    m.flush();
+    m.flush();
+    await premier;
+    for (let i = 0; i < 50 && (await m.pendingCount()) > 0; i++) {
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    return await m.pendingCount();
+  });
+  expect(r).toBe(0);
+  const tick = appelsProxy(await fetchLog(page), 'v3.tick');
+  // A une fois, B une fois : ni passe perdue, ni passe en double.
+  expect(tick.map((t) => JSON.parse(t.body).idem)).toEqual(['a1', 'b2']);
+});
+
+// Constat 2, variante : l'onglet de l'app racine a renouvele ou reconnecte, le
+// client de la v3 recoit SIGNED_IN par BroadcastChannel, la file repart.
+test('SIGNED_IN venu d un autre onglet relance le rejeu', async ({ page }) => {
+  await bootV3(page, [MYDAY, TICK_OK], { emailSession: emailSession('jwt-frais', 'rt-1', 3600) });
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  const r = await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    return await m.sendOrQueue('v3.tick', { idem: 'c3' });
+  });
+  expect(r.queued).toBe(true);
+  // Reseau revenu sans evenement « online » : seul SIGNED_IN peut relancer.
+  // Le journal garde aussi la tentative refusee hors ligne : on repart a vide.
+  await page.evaluate((s) => {
+    localStorage.setItem('v3FetchLog', '[]');
+    localStorage.removeItem('v3TestOffline');
+    const ch = new BroadcastChannel('hkAuthSession');
+    ch.postMessage({ event: 'SIGNED_IN', session: s });
+    ch.close();
+  }, emailSession('jwt-frais', 'rt-1', 3600));
+  await expect.poll(async () => appelsProxy(await fetchLog(page), 'v3.tick').length, { timeout: 5_000 }).toBe(1);
+  await expect(page.getByText('Saved on device, 1 to sync')).toHaveCount(0);
+});
+
+// Constat 3. Demarrage en « stale » sur un reseau lent : le renouvellement
+// aboutit apres le delai de 4 s, la journee se recharge d'elle-meme.
+test('renouvellement tardif apres un demarrage en stale : la journee remplace No network', async ({ page }) => {
+  await bootV3(page, [MYDAY], {
+    emailSession: emailSession('jwt-perime', 'rt-1', -60),
+    authRoutes: [{ ...REFRESH_OK, delay: 6_000 }],
+  });
+  await expect(page.getByText('No network. Your saved actions will sync on their own.')).toBeVisible();
+  await expect(page.getByText('No network. Your saved actions will sync on their own.')).toHaveCount(0, { timeout: 10_000 });
+  const myDay = appelsProxy(await fetchLog(page), 'v3.myDay');
+  expect(myDay.length).toBe(1);
+  expect(myDay[0].headers['Authorization']).toBe('Bearer jwt-neuf');
+});
+
+// Constat 6. Hors ligne avec un jeton expire, auth.signOut ne peut pas aboutir
+// (il attend le renouvellement, puis /logout) : le filet de signOutEmail est
+// alors la seule chose qui retire la session du telephone.
+test('signOutEmail hors ligne avec un jeton expire efface quand meme la session', async ({ page }) => {
+  await bootV3(page, [MYDAY], {
+    emailSession: emailSession('jwt-perime', 'rt-1', -60),
+    offline: true,
+  });
+  const t0 = Date.now();
+  await page.evaluate(async () => {
+    const m = await import('/v3/session.js');
+    await m.signOutEmail();
+  });
+  expect(Date.now() - t0).toBeLessThan(6_000);
+  expect(await stocke(page)).toBeNull();
+  expect(await lireSession(page)).toBeNull();
 });

@@ -7,6 +7,9 @@ import { API, APP_SECRET } from '/v3/proxy-config.js';
 import { getSession, renewSession } from '/v3/session.js';
 
 const TIMEOUT_MS = 15000;
+// Message du proxy quand la session (Bearer ou PIN) n'est pas reconnue :
+// currentUser, supabase/functions/hostaway-proxy/index.ts.
+const ERREUR_SESSION = 'auth required';
 
 // Bearer d'abord, jeton PIN ensuite, comme le proxy (Bearer > X-Cleaner-Token).
 // Lue a chaque requete, jamais gardee depuis le boot : un jeton expire entre
@@ -78,7 +81,14 @@ async function request(action, opts, dejaRenouvele) {
   if (resp.status === 401) {
     // Un Bearer refuse (revoque, horloge du telephone en avance) : un seul
     // renouvellement, un seul nouvel essai de la meme requete, jamais de boucle.
-    if (session && session.kind === 'bearer' && !dejaRenouvele) {
+    // Seulement sur l'erreur de session du proxy (« auth required », renvoyee
+    // par currentUser) : un 401 « unauthorized » vient du secret applicatif,
+    // et renouveler la session n'y changerait rien sinon faire tourner le
+    // refresh token pour rien.
+    let corps = null;
+    try { corps = await resp.json(); } catch (e) { corps = null; }
+    const erreurSession = !!corps && corps.error === ERREUR_SESSION;
+    if (erreurSession && session && session.kind === 'bearer' && !dejaRenouvele) {
       const neuve = await renewSession();
       if (neuve) return request(action, opts, { session: neuve });
     }

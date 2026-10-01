@@ -76,7 +76,9 @@ function sbClient() {
   // Un renouvellement reussi (ici, par le minuteur du client ou par l'onglet de
   // l'app racine via BroadcastChannel) previent l'app : la file peut repartir.
   client.auth.onAuthStateChange(function (evt) {
-    if (evt !== 'TOKEN_REFRESHED') return;
+    // SIGNED_IN aussi : au retour d'une page gelee, si l'onglet de l'app racine a
+    // deja renouvele, le client annonce SIGNED_IN et non TOKEN_REFRESHED.
+    if (evt !== 'TOKEN_REFRESHED' && evt !== 'SIGNED_IN') return;
     renouvellements.forEach(function (fn) {
       try { fn(evt); } catch (e) { /* un abonne ne casse pas les autres */ }
     });
@@ -190,3 +192,8 @@ export async function signOutEmail() {
 
 // Abonnement aux renouvellements reussis (rejeu de la file).
 export function onSessionRenewed(fn) { renouvellements.push(fn); }
+
+// Pour les tests seulement : le client, ou null sans supabase-js. Permet de
+// verifier que le champ interne lastRefreshFailure existe toujours dans le
+// bundle (une montee de version qui le renomme doit casser un test).
+export function supabaseClientForTests() { return sbClient(); }

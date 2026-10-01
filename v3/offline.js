@@ -158,13 +158,19 @@ function formFrom(body, file, fileName) {
 }
 
 let enCours = false;
+// Une demande de rejeu arrivee pendant un rejeu en cours (renouvellement de la
+// session, retour du reseau) n'est pas perdue : une seule passe de plus part a
+// la fin de celle-ci. Jamais deux rejeux en parallele, jamais de boucle : la
+// passe suivante ne se relance que si une NOUVELLE demande arrive pendant elle.
+let encore = false;
 
 // Rejeu strictement ordonne. On s'arrete des qu'une entree ne passe pas pour une
 // raison temporaire, pour ne jamais inverser l'ordre des gestes. L'ordre compte :
 // un signalement rejoue apres sa photo la retrouve par photoIdem.
 export async function flush() {
-  if (enCours) return;
+  if (enCours) { encore = true; return; }
   enCours = true;
+  encore = false;
   try {
     const entries = await pendingEntries();
     for (const e of entries) {
@@ -194,6 +200,10 @@ export async function flush() {
   } finally {
     enCours = false;
     await annoncer();
+    if (encore && !enCours) {
+      encore = false;
+      flush();
+    }
   }
 }
 
