@@ -4,7 +4,7 @@
 import { esc, icon, minutesUntil, toast } from '/v3/ui.js';
 import { newIdem, sendOrQueue } from '/v3/offline.js';
 import { prendrePhoto } from '/v3/photo.js';
-import { navigate, openJob, queueStrip } from '/v3/app.js';
+import { navigate, openJob, queueStrip, readOnly } from '/v3/app.js';
 import { finishedView, openFinishSheet, submitFinish } from '/v3/screens/finish.js';
 import { openReportSheet, reportActions } from '/v3/screens/report.js';
 
@@ -30,26 +30,33 @@ function chrono(startedAt) {
   return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
 }
 
-function ligneChecklist(nom, coche, photoExigee, photoPrise) {
+// En lecture seule (« View as »), la ligne garde son etat reel (aria-pressed)
+// mais elle est desactivee, et l'appareil photo n'est plus qu'une icone.
+function ligneChecklist(nom, coche, photoExigee, photoPrise, lecture) {
   return '<button class="crow" type="button" aria-pressed="' + (coche ? 'true' : 'false') + '" ' +
-    'data-act="tick" data-item="' + esc(nom) + '">' +
+    'data-act="tick" data-item="' + esc(nom) + '"' + (lecture ? ' disabled' : '') + '>' +
     '<span class="bx">' + icon('check', 18) + '</span>' +
     '<span class="nm">' + esc(nom) + '</span>' +
     (photoExigee
-      ? '<span class="cam' + (photoPrise ? ' done' : '') + '" data-act="shoot" data-item="' + esc(nom) + '" role="button" tabindex="0" aria-label="' + CAM_ITEM + '">' + icon('camera', 18) + '</span>'
+      ? (lecture
+        ? '<span class="cam' + (photoPrise ? ' done' : '') + '">' + icon('camera', 18) + '</span>'
+        : '<span class="cam' + (photoPrise ? ' done' : '') + '" data-act="shoot" data-item="' + esc(nom) + '" role="button" tabindex="0" aria-label="' + CAM_ITEM + '">' + icon('camera', 18) + '</span>')
       : '<span class="spacer"></span>') +
     '</button>';
 }
 
 function ligneTicket(state, t) {
   const fait = state.checkedTickets[t.id] === true;
+  const lecture = readOnly(state);
   return '<button class="crow check" type="button" aria-pressed="' + (fait ? 'true' : 'false') + '" ' +
-    'data-act="checkTicket" data-ticket="' + esc(t.id) + '">' +
+    'data-act="checkTicket" data-ticket="' + esc(t.id) + '"' + (lecture ? ' disabled' : '') + '>' +
     '<span class="bx">' + icon('check', 18) + '</span>' +
     '<span class="nm">' + esc(t.title) + '</span>' +
-    '<span class="cam' + (state.ticketPhotos[t.id] ? ' done' : '') + '" data-act="shoot-ticket" ' +
-    'data-ticket="' + esc(t.id) + '" role="button" tabindex="0" aria-label="' + CAM_TICKET + '">' +
-    icon('camera', 18) + '</span>' +
+    (lecture
+      ? '<span class="cam">' + icon('camera', 18) + '</span>'
+      : '<span class="cam' + (state.ticketPhotos[t.id] ? ' done' : '') + '" data-act="shoot-ticket" ' +
+        'data-ticket="' + esc(t.id) + '" role="button" tabindex="0" aria-label="' + CAM_TICKET + '">' +
+        icon('camera', 18) + '</span>') +
     '</button>';
 }
 
@@ -66,6 +73,7 @@ function view(state) {
   const rang = stops.indexOf(stop) + 1;
   const coches = (stop.checklist || []).filter(function (i) { return state.ticks[i] === true; }).length;
   const total = (stop.checklist || []).length;
+  const lecture = readOnly(state);
 
   let h = '<header class="job-head">' +
     '<button class="btn-back" type="button" data-act="back" aria-label="Back">' + icon('back', 20) + '</button>' +
@@ -94,14 +102,17 @@ function view(state) {
   h += '<div id="c-list">';
   (stop.checklist || []).forEach(function (nom) {
     h += ligneChecklist(nom, state.ticks[nom] === true,
-      (stop.photoRequired || []).indexOf(nom) !== -1, !!state.itemPhotos[nom]);
+      (stop.photoRequired || []).indexOf(nom) !== -1, !!state.itemPhotos[nom], lecture);
   });
   h += '</div>';
-  h += '<p class="pad muted">The whole row ticks. The camera opens from the row that needs it.</p>';
+  h += '<p class="pad muted">' + (lecture
+    ? 'Read only. Ticks show here as they are saved.'
+    : 'The whole row ticks. The camera opens from the row that needs it.') + '</p>';
   h += '</div>';
+  const inerte = lecture ? ' disabled aria-disabled="true"' : '';
   h += '<div class="jobactions">' +
-    '<button class="btn-report" type="button" data-act="report">Report a problem</button>' +
-    '<button class="btn-finish" type="button" data-act="finish">' +
+    '<button class="btn-report" type="button" data-act="report"' + inerte + '>Report a problem</button>' +
+    '<button class="btn-finish" type="button" data-act="finish"' + inerte + '>' +
       (coches === total && total > 0 ? 'Finish' : 'Finish ' + coches + '/' + total) + '</button>' +
     '</div>';
   return h;
@@ -162,6 +173,7 @@ const actions = {
     if (stop) openJob(state, stop);
   },
   async tick(state, el) {
+    if (readOnly(state)) return;   // double garde, voir la delegation d'app.js
     const stop = currentStop(state);
     if (!stop) return;
     const nom = el.getAttribute('data-item');
@@ -192,6 +204,7 @@ const actions = {
   },
   async shoot(state, el, evt) {
     evt.stopPropagation();
+    if (readOnly(state)) return;
     const stop = currentStop(state);
     if (!stop) return;
     const nom = el.getAttribute('data-item');
@@ -203,6 +216,7 @@ const actions = {
   },
   async 'shoot-ticket'(state, el, evt) {
     evt.stopPropagation();
+    if (readOnly(state)) return;
     const stop = currentStop(state);
     if (!stop) return;
     const id = Number(el.getAttribute('data-ticket'));
@@ -212,6 +226,7 @@ const actions = {
     el.classList.add('done');
   },
   async checkTicket(state, el) {
+    if (readOnly(state)) return;   // double garde, voir la delegation d'app.js
     const id = Number(el.getAttribute('data-ticket'));
     const photo = state.ticketPhotos[id];
     // Photo obligatoire (ruling 3) : sans preuve, le technicien ne peut rien
@@ -228,9 +243,11 @@ const actions = {
     toast(r.queued ? 'Saved on your phone' : 'Sent for confirmation', 'ok');
   },
   report(state) {
+    if (readOnly(state)) return;
     openReportSheet(state, currentStop(state));
   },
   finish(state) {
+    if (readOnly(state)) return;
     openFinishSheet(state, currentStop(state));
   },
   'finish-confirm'(state) {

@@ -4,7 +4,7 @@
 // blanchisserie, ils ne peuvent pas etre approximes.
 import { closeSheet, esc, fmtDuration, icon, openSheet, toast } from '/v3/ui.js';
 import { newIdem, sendOrQueue } from '/v3/offline.js';
-import { navigate } from '/v3/app.js';
+import { navigate, readOnly } from '/v3/app.js';
 
 export const LINEN_FIELDS = [
   { key: 'bed_sheets', label: 'Bed sheets' },
@@ -27,7 +27,7 @@ function ligneLinge(champ, valeur) {
 
 // Feuille unique : confirmation des lignes non cochees (si besoin), puis linge.
 export function openFinishSheet(state, stop) {
-  if (!stop) return;
+  if (!stop || readOnly(state)) return;
   const total = (stop.checklist || []).length;
   const coches = (stop.checklist || []).filter(function (i) { return state.ticks[i] === true; }).length;
   const manquants = total - coches;
@@ -50,7 +50,8 @@ export function openFinishSheet(state, stop) {
 }
 
 export async function submitFinish(state, stop) {
-  if (!stop) return;
+  // Lecture seule (« View as ») : aucun v3.finishJob, ni envoye ni mis en file.
+  if (!stop || readOnly(state)) return;
   const checklist = {};
   (stop.checklist || []).forEach(function (i) { checklist[i] = state.ticks[i] === true; });
   const corps = {

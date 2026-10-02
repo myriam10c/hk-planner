@@ -1,7 +1,7 @@
 // Ecran Today : la route de la journee. Les arrets dans l'ordre des heures
 // limites (le serveur les rend deja tries), le prochain en carte pleine, les
 // suivants en lignes. Aucun compteur d'equipe (specification, section 3).
-import { loadDay, openJob, queueStrip } from '/v3/app.js';
+import { loadDay, openJob, queueStrip, readOnly } from '/v3/app.js';
 import { newIdem, sendOrQueue } from '/v3/offline.js';
 import { esc, fmtDuration, icon, toast } from '/v3/ui.js';
 
@@ -46,6 +46,7 @@ function view(state) {
   const restants = stops.filter(function (s) { return s.state !== 'done'; });
   const suivant = restants[0] || null;
   const autres = stops.filter(function (s) { return s !== suivant; });
+  const lecture = readOnly(state);
 
   let h = '<header class="drench">' +
     '<div class="dr-top"><span>' + esc(moi.name) + '</span>' +
@@ -59,15 +60,24 @@ function view(state) {
       '<p class="n">' + esc(suivant.listingName) + '</p>' +
       '<p class="m">' + esc(sousTitre(suivant)) + '</p>' +
       '<span class="dl">' + icon('clock', 15) + esc(ligneEcheance(suivant)) + '</span>' +
-      '<button class="btn-start" data-act="start" data-job="' + esc(suivant.jobId) + '">' +
+      '<button class="btn-start" data-act="start" data-job="' + esc(suivant.jobId) + '"' +
+      (lecture ? ' disabled aria-disabled="true"' : '') + '>' +
       (suivant.state === 'running' ? 'Continue this cleaning' : 'Start this cleaning') + '</button>' +
+      // En « View as », le Start reste visible (c'est l'ecran qu'elle voit) mais
+      // inerte ; ouvrir le menage passe par un geste de lecture.
+      (lecture
+        ? '<button class="btn-view" type="button" data-act="open" data-job="' + esc(suivant.jobId) + '">' +
+          'View this cleaning</button>'
+        : '') +
       '</div>';
   }
   h += '</header>';
   h += queueStrip();
   h += '<div class="body">';
   if (stops.length === 0) {
-    h += '<p class="pad muted">Nothing assigned to you today.</p>';
+    h += '<p class="pad muted">' + (lecture
+      ? 'Nothing assigned to ' + esc(moi.name) + ' today.'
+      : 'Nothing assigned to you today.') + '</p>';
   } else if (autres.length > 0) {
     h += '<p class="sec-lab">Then today</p>';
     autres.forEach(function (s) {
@@ -93,6 +103,8 @@ function view(state) {
 
 const actions = {
   async start(state, el) {
+    // Double garde avec la delegation d'app.js : aucun Start en lecture seule.
+    if (readOnly(state)) return;
     const jobId = el.getAttribute('data-job');
     const stop = (state.day.stops || []).find(function (s) { return s.jobId === jobId; });
     if (!stop) return;

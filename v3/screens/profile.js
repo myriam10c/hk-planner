@@ -1,7 +1,7 @@
 // Profile : qui je suis, la porte vers les ecrans que la v3 ne refait pas encore
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
-import { queueStrip, render } from '/v3/app.js';
+import { CLE_VIEW_AS, queueStrip, render, startViewAs } from '/v3/app.js';
 import { clearDead, deadEntries, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
 import { esc, icon } from '/v3/ui.js';
@@ -21,6 +21,26 @@ function refuses(state) {
   return h;
 }
 
+// Selecteur « View as », pour un manager seulement : le proxy ne rend `team`
+// qu'a une session de role manager. Une ligne par membre ; la personne regardee
+// en ce moment est marquee, et un appui sur une autre ligne bascule directement.
+function selecteurEquipe(state) {
+  const team = (state.day && state.day.team) || [];
+  if (!Array.isArray(team) || team.length === 0) return '';
+  const actuel = state.viewAs ? String(state.viewAs.id) : '';
+  let h = '<div class="team"><p class="sec-lab">View a cleaner\'s day</p>';
+  team.forEach(function (m) {
+    const ici = String(m.id) === actuel;
+    h += '<button class="stop" type="button" data-act="viewas" data-id="' + esc(m.id) + '" ' +
+      'data-name="' + esc(m.name) + '"' + (ici ? ' aria-current="true"' : '') + '>' +
+      '<span class="tx"><b>' + esc(m.name) + '</b><span>' + esc(m.role) + '</span></span>' +
+      '<span class="pill">' + (ici ? 'Viewing' : 'View') + '</span></button>';
+  });
+  // La liste prend toute la largeur, hors du padding du bloc Profile : on ferme
+  // ce bloc et on le rouvre autour d'elle.
+  return '</div>' + h + '</div><div class="pad">';
+}
+
 function view(state) {
   const jour = state.day || {};
   const me = jour.me || { name: '', role: '' };
@@ -36,6 +56,7 @@ function view(state) {
       '<h1 style="font-family:var(--disp);font-size:26px;margin:0">' + esc(me.name) + '</h1>' +
       '<p class="muted">' + esc(me.role) + '</p>' +
       refuses(state) +
+      selecteurEquipe(state) +
       '<p class="muted" style="margin-top:18px">Leave requests, linen at the store and your history are still in ' +
         'the main app. Everything you do here is saved in the same place.</p>' +
       '<a class="btn-primary" style="text-align:center;text-decoration:none;line-height:58px" ' +
@@ -115,6 +136,9 @@ function desabonnerPush() {
 }
 
 const actions = {
+  viewas(state, el) {
+    return startViewAs({ id: el.getAttribute('data-id'), name: el.getAttribute('data-name') });
+  },
   async 'clear-dead'(state) {
     await clearDead();
     state.dead = [];
@@ -150,6 +174,8 @@ const actions = {
     CLES_SESSION.forEach(function (cle) {
       try { localStorage.removeItem(cle); } catch (e) { /* stockage indisponible */ }
     });
+    // Le mode « View as » ne survit jamais a une deconnexion.
+    try { sessionStorage.removeItem(CLE_VIEW_AS); } catch (e) { /* stockage indisponible */ }
     // 4. La base IndexedDB, avant de considerer la sortie faite. L'identite vient
     // de la session et jamais du corps (ruling 6) : une entree encore en file
     // serait rejouee sous la session de la personne SUIVANTE, qui recevrait le

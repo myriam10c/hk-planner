@@ -30,7 +30,72 @@ export const state = {
   reportStop: null,     // l'arret que ce signalement concerne
   dead: [],             // actions refusees par le proxy, lues par l'ecran Profile
   prepared: false,      // l'ecran courant a deja charge ce dont il a besoin
+  viewAs: null,         // {id, name} : un manager regarde la journee de quelqu'un
 };
+
+// Mode « View as » : un manager regarde la journee d'une cleaner, en lecture
+// seule. Il vit dans sessionStorage, jamais dans localStorage : il ne survit ni
+// a la fermeture de l'onglet ni a Sign out, et ce n'est jamais une identite (le
+// proxy relit le role de la session a chaque appel, et refuse `as` a quiconque
+// n'est pas manager).
+export const CLE_VIEW_AS = 'v3ViewAs';
+
+function lireViewAs() {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(CLE_VIEW_AS) || 'null');
+    return v && /^\d+$/.test(String(v.id)) ? { id: String(v.id), name: String(v.name || '') } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function ecrireViewAs(v) {
+  try {
+    if (v) sessionStorage.setItem(CLE_VIEW_AS, JSON.stringify(v));
+    else sessionStorage.removeItem(CLE_VIEW_AS);
+  } catch (e) { /* stockage indisponible : le mode vit le temps de la page */ }
+}
+
+// Vrai des que l'une des deux sources le dit : le choix local (avant meme la
+// reponse du proxy) ou le payload. Les deux gardes vont dans le sens ferme.
+export function readOnly(st) {
+  const s = st || state;
+  return !!s.viewAs || !!(s.day && s.day.viewAs);
+}
+
+// Gestes d'ecriture des ecrans Job, Today et des feuilles. En « View as », la
+// delegation les avale avant meme l'ecran : rien ne part, rien n'entre en file.
+const GESTES_ECRITURE = new Set([
+  'start', 'tick', 'shoot', 'shoot-ticket', 'checkTicket', 'report', 'finish',
+  'finish-confirm', 'report-cat', 'report-shot', 'report-send', 'linen-plus', 'linen-minus',
+]);
+
+// Bandeau permanent, en tete de chaque ecran. Dans le flux et non en position
+// fixe : il ne recouvre jamais la barre du bas ni les actions du Job.
+export function viewAsBar() {
+  if (!state.viewAs) return '';
+  const nom = (state.day && state.day.viewAs && state.day.me && state.day.me.name) || state.viewAs.name;
+  return '<div class="viewas" role="status"><span>Viewing ' + esc(nom) + '\'s day · read only</span>' +
+    '<button type="button" data-act="viewas-exit">Exit</button></div>';
+}
+
+export function startViewAs(membre) {
+  state.viewAs = { id: String(membre.id), name: String(membre.name || '') };
+  ecrireViewAs(state.viewAs);
+  state.jobId = null;
+  state.finished = null;
+  if (location.hash !== '#/today') location.hash = '#/today';
+  return loadDay();
+}
+
+export function exitViewAs() {
+  state.viewAs = null;
+  ecrireViewAs(null);
+  state.jobId = null;
+  state.finished = null;
+  if (location.hash !== '#/today') location.hash = '#/today';
+  return loadDay();
+}
 
 const screens = {};
 export function registerScreen(name, screen) { screens[name] = screen; }
@@ -77,12 +142,12 @@ export function render() {
   // hors ligne au milieu d'un menage echoue sur v3.myDay, et la cleaner doit
   // voir la que ses gestes sont gardes, pas seulement une panne de reseau.
   if (state.loading) {
-    app.innerHTML = queueStrip() +
+    app.innerHTML = viewAsBar() + queueStrip() +
       '<div class="gate"><h1>HK Planner</h1><p class="muted">Loading your day.</p></div>';
     return;
   }
   if (state.error) {
-    app.innerHTML = queueStrip() +
+    app.innerHTML = viewAsBar() + queueStrip() +
       '<div class="gate"><h1>HK Planner</h1><p class="muted">' + esc(state.error) +
       '</p><button class="btn-primary" data-act="reload">Try again</button></div>';
     return;
@@ -101,7 +166,7 @@ export function render() {
     Promise.resolve(screen.prepare(state)).catch(function () { /* l'ecran gere */ })
       .then(function () { render(); });
   }
-  app.innerHTML = screen.view(state);
+  app.innerHTML = viewAsBar() + screen.view(state);
   if (screen.mount) screen.mount(state);
 }
 
@@ -135,7 +200,7 @@ export async function loadDay() {
   state.error = '';
   render();
   try {
-    const data = await api.get('v3.myDay', {});
+    const data = await api.get('v3.myDay', state.viewAs ? { as: state.viewAs.id } : {});
     state.day = data;
     // Au premier chargement, l'arret ouvert vient du fragment d'URL et non d'un
     // clic : state.jobId est encore vide, on le lit dans l'adresse. Repartir de
@@ -154,6 +219,18 @@ export async function loadDay() {
     render();
   } catch (err) {
     state.loading = false;
+    // La cible n'est plus dans l'equipe (400), ou la session n'est plus celle
+    // d'un manager (403) : on sort du mode et on recharge sa propre journee,
+    // une seule fois puisque state.viewAs est alors vide.
+    if (state.viewAs && err instanceof ApiError && err.kind === 'server' &&
+        (err.status === 400 || err.status === 403)) {
+      state.viewAs = null;
+      ecrireViewAs(null);
+      state.jobId = null;
+      toast('This view is no longer available', 'err');
+      if (location.hash !== '#/today') location.hash = '#/today';
+      return loadDay();
+    }
     if (err instanceof ApiError && err.kind === 'auth') {
       state.session = null;
     } else if (err instanceof ApiError && err.kind === 'offline') {
@@ -177,6 +254,12 @@ document.addEventListener('click', function (evt) {
   const nom = cible.getAttribute('data-act');
   if (nom === 'reload') { loadDay(); return; }
   if (nom === 'close-sheet') { closeSheet(); return; }
+  if (nom === 'viewas-exit') { evt.preventDefault(); exitViewAs(); return; }
+  if (readOnly(state) && GESTES_ECRITURE.has(nom)) {
+    evt.preventDefault();
+    toast('Read only', 'err');
+    return;
+  }
   const screen = screens[routeName()] || screens.today;
   const handler = screen && screen.actions && screen.actions[nom];
   if (!handler) return;
@@ -244,6 +327,7 @@ export async function boot() {
   // { kind: 'stale' } compte comme connecte : la cleaner reste dans l'app, les
   // appels partent dans la file comme pour toute coupure.
   state.session = await readSession();
+  state.viewAs = state.session ? lireViewAs() : null;
   if (!state.session) {
     state.loading = false;
     render();

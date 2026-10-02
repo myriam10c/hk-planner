@@ -4,6 +4,7 @@
 import { closeSheet, esc, openSheet, toast } from '/v3/ui.js';
 import { newIdem, sendOrQueue } from '/v3/offline.js';
 import { prendrePhoto } from '/v3/photo.js';
+import { readOnly } from '/v3/app.js';
 
 export const CATEGORIES = [
   { key: 'ac', label: 'AC' },
@@ -18,7 +19,8 @@ const LIBELLE_PHOTO = 'Take a photo';
 const LIBELLE_PHOTO_PRISE = 'Photo taken';
 
 export function openReportSheet(state, stop) {
-  if (!stop) return;
+  // Lecture seule (« View as ») : la feuille ne s'ouvre pas, rien ne part.
+  if (!stop || readOnly(state)) return;
   state.reportStop = stop;
   state.report = { category: null, photo: null, sending: false };
   let h = '<h2>Report a problem</h2>' +
@@ -80,6 +82,7 @@ export const reportActions = {
   // libelle et le bon etat du bouton d'envoi. Le seul cout est une promesse
   // pendante par appui perdu, jamais un doublon ni un bouton mort.
   async 'report-shot'(state) {
+    if (readOnly(state)) return;
     const stop = state.reportStop;
     if (!stop || !state.report) return;
     const fichier = await prendrePhoto();
@@ -97,6 +100,7 @@ export const reportActions = {
     majEnvoi(state);
   },
   async 'report-send'(state) {
+    if (readOnly(state)) return;
     const stop = state.reportStop;
     if (!stop || !state.report) return;
     if (state.report.sending) return;
