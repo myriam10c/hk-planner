@@ -38,12 +38,21 @@ export const state = {
 // a la fermeture de l'onglet ni a Sign out, et ce n'est jamais une identite (le
 // proxy relit le role de la session a chaque appel, et refuse `as` a quiconque
 // n'est pas manager).
+//
+// Il est lie a la personne qui l'a choisi (`viewerId`, revue tache 1, constat
+// 2) : si une autre personne se connecte dans la meme fenetre, le mode est
+// jete avant tout appel quand l'identite est connue sur l'appareil
+// (hkSessionCleanerId, pose par les deux connexions de l'app racine), sinon des
+// la reponse du proxy, qui dit qui regarde. Un mode relu au demarrage n'affiche
+// son bandeau qu'une fois confirme par cette reponse.
 export const CLE_VIEW_AS = 'v3ViewAs';
+const CLE_IDENTITE = 'hkSessionCleanerId';
 
 function lireViewAs() {
   try {
     const v = JSON.parse(sessionStorage.getItem(CLE_VIEW_AS) || 'null');
-    return v && /^\d+$/.test(String(v.id)) ? { id: String(v.id), name: String(v.name || '') } : null;
+    if (!v || !/^\d+$/.test(String(v.id)) || !/^\d+$/.test(String(v.viewerId))) return null;
+    return { id: String(v.id), name: String(v.name || ''), viewerId: String(v.viewerId), confirmed: false };
   } catch (e) {
     return null;
   }
@@ -51,9 +60,29 @@ function lireViewAs() {
 
 function ecrireViewAs(v) {
   try {
-    if (v) sessionStorage.setItem(CLE_VIEW_AS, JSON.stringify(v));
+    if (v) sessionStorage.setItem(CLE_VIEW_AS, JSON.stringify({ id: v.id, name: v.name, viewerId: v.viewerId }));
     else sessionStorage.removeItem(CLE_VIEW_AS);
   } catch (e) { /* stockage indisponible : le mode vit le temps de la page */ }
+}
+
+function identiteLocale() {
+  try {
+    const v = localStorage.getItem(CLE_IDENTITE);
+    return v && /^\d+$/.test(v) ? v : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function oublierViewAs() {
+  state.viewAs = null;
+  ecrireViewAs(null);
+}
+
+// Toute perte de session emporte le mode : il n'appartient qu'a elle.
+function perdreSession() {
+  state.session = null;
+  oublierViewAs();
 }
 
 // Vrai des que l'une des deux sources le dit : le choix local (avant meme la
@@ -70,17 +99,43 @@ const GESTES_ECRITURE = new Set([
   'finish-confirm', 'report-cat', 'report-shot', 'report-send', 'linen-plus', 'linen-minus',
 ]);
 
+// Mode d'affichage courant, ou null : une seule source pour le bandeau. Un mode
+// futur s'ajoute ici et dans BANDEAUX, sans toucher aux ecrans.
+export function currentMode() {
+  if (state.viewAs && state.viewAs.confirmed) {
+    const jour = state.day && state.day.viewAs ? state.day : null;
+    return { kind: 'viewAs', name: (jour && jour.me && jour.me.name) || state.viewAs.name };
+  }
+  return null;
+}
+
+const BANDEAUX = {
+  viewAs: function (mode) {
+    return { text: 'Viewing ' + mode.name + '\'s day · read only', act: 'viewas-exit', label: 'Exit' };
+  },
+};
+
 // Bandeau permanent, en tete de chaque ecran. Dans le flux et non en position
 // fixe : il ne recouvre jamais la barre du bas ni les actions du Job.
-export function viewAsBar() {
-  if (!state.viewAs) return '';
-  const nom = (state.day && state.day.viewAs && state.day.me && state.day.me.name) || state.viewAs.name;
-  return '<div class="viewas" role="status"><span>Viewing ' + esc(nom) + '\'s day · read only</span>' +
-    '<button type="button" data-act="viewas-exit">Exit</button></div>';
+export function modeBar(mode) {
+  const m = mode === undefined ? currentMode() : mode;
+  const b = m && BANDEAUX[m.kind] ? BANDEAUX[m.kind](m) : null;
+  if (!b) return '';
+  return '<div class="viewas" role="status" data-mode="' + esc(m.kind) + '"><span>' + esc(b.text) + '</span>' +
+    '<button type="button" data-act="' + esc(b.act) + '">' + esc(b.label) + '</button></div>';
 }
 
 export function startViewAs(membre) {
-  state.viewAs = { id: String(membre.id), name: String(membre.name || '') };
+  const jour = state.day || {};
+  // Le manager qui choisit : lui-meme sur sa journee, ou celui qui regarde deja.
+  const viewer = jour.viewAs && jour.viewer ? jour.viewer.id : (jour.me && jour.me.id);
+  if (viewer === undefined || viewer === null) return;
+  state.viewAs = {
+    id: String(membre.id), name: String(membre.name || ''), viewerId: String(viewer),
+    // Choisi a l'instant dans cette page : l'identite est celle de la journee
+    // affichee, le bandeau peut paraitre des le chargement.
+    confirmed: true,
+  };
   ecrireViewAs(state.viewAs);
   state.jobId = null;
   state.finished = null;
@@ -89,8 +144,7 @@ export function startViewAs(membre) {
 }
 
 export function exitViewAs() {
-  state.viewAs = null;
-  ecrireViewAs(null);
+  oublierViewAs();
   state.jobId = null;
   state.finished = null;
   if (location.hash !== '#/today') location.hash = '#/today';
@@ -142,12 +196,12 @@ export function render() {
   // hors ligne au milieu d'un menage echoue sur v3.myDay, et la cleaner doit
   // voir la que ses gestes sont gardes, pas seulement une panne de reseau.
   if (state.loading) {
-    app.innerHTML = viewAsBar() + queueStrip() +
+    app.innerHTML = modeBar() + queueStrip() +
       '<div class="gate"><h1>HK Planner</h1><p class="muted">Loading your day.</p></div>';
     return;
   }
   if (state.error) {
-    app.innerHTML = viewAsBar() + queueStrip() +
+    app.innerHTML = modeBar() + queueStrip() +
       '<div class="gate"><h1>HK Planner</h1><p class="muted">' + esc(state.error) +
       '</p><button class="btn-primary" data-act="reload">Try again</button></div>';
     return;
@@ -166,7 +220,7 @@ export function render() {
     Promise.resolve(screen.prepare(state)).catch(function () { /* l'ecran gere */ })
       .then(function () { render(); });
   }
-  app.innerHTML = viewAsBar() + screen.view(state);
+  app.innerHTML = modeBar() + screen.view(state);
   if (screen.mount) screen.mount(state);
 }
 
@@ -195,12 +249,50 @@ export function openJob(state, stop) {
   navigate('#/job/' + encodeURIComponent(stop.jobId));
 }
 
+// Generation de la demande de journee (revue tache 1, constat 1). Depuis le
+// mode « View as », deux appels successifs ne demandent plus la meme journee :
+// sans ce numero, la reponse arrivee la DERNIERE gagnait, et un Exit ou un
+// changement de cleaner pendant un chargement lent affichait la journee de
+// quelqu'un d'autre sans bandeau. Seule la reponse de la demande la plus
+// recente est appliquee, succes comme erreur.
+let generationJour = 0;
+
+// La reponse colle-t-elle au mode demande ? Seconde garde, en plus du numero.
+function reponseConforme(data, vue) {
+  if (!data) return false;
+  if (!vue) return !data.viewAs;
+  return !!data.viewAs && !!data.me && String(data.me.id) === vue.id;
+}
+
 export async function loadDay() {
+  const generation = ++generationJour;
+  const vue = state.viewAs;
   state.loading = true;
   state.error = '';
   render();
   try {
-    const data = await api.get('v3.myDay', state.viewAs ? { as: state.viewAs.id } : {});
+    const data = await api.get('v3.myDay', vue ? { as: vue.id } : {});
+    if (generation !== generationJour) return;   // demande depassee
+    if (state.viewAs !== vue || !reponseConforme(data, vue)) {
+      // Mode change sans nouvelle demande, ou reponse d'un autre mode : on ne
+      // l'affiche jamais. En « View as », on repart de sa propre journee ; sur
+      // sa propre journee, une reponse non conforme est une erreur (pas de
+      // boucle de rechargement).
+      if (vue) {
+        oublierViewAs();
+        return loadDay();
+      }
+      throw new Error('Could not load your day.');
+    }
+    if (vue) {
+      // Le mode appartient a qui l'a choisi : un autre manager connecte dans
+      // la meme fenetre n'en herite pas, meme en silence.
+      if (!data.viewer || String(data.viewer.id) !== vue.viewerId) {
+        oublierViewAs();
+        return loadDay();
+      }
+      vue.confirmed = true;
+    }
     state.day = data;
     // Au premier chargement, l'arret ouvert vient du fragment d'URL et non d'un
     // clic : state.jobId est encore vide, on le lit dans l'adresse. Repartir de
@@ -218,21 +310,23 @@ export async function loadDay() {
     state.loading = false;
     render();
   } catch (err) {
+    if (generation !== generationJour) return;   // erreur d'une demande depassee
     state.loading = false;
     // La cible n'est plus dans l'equipe (400), ou la session n'est plus celle
     // d'un manager (403) : on sort du mode et on recharge sa propre journee,
-    // une seule fois puisque state.viewAs est alors vide.
-    if (state.viewAs && err instanceof ApiError && err.kind === 'server' &&
+    // une seule fois puisque state.viewAs est alors vide. Le message n'est dit
+    // qu'a la personne qui avait choisi le mode dans cette page : un mode relu
+    // au demarrage et jamais confirme sort en silence.
+    if (vue && state.viewAs === vue && err instanceof ApiError && err.kind === 'server' &&
         (err.status === 400 || err.status === 403)) {
-      state.viewAs = null;
-      ecrireViewAs(null);
+      oublierViewAs();
       state.jobId = null;
-      toast('This view is no longer available', 'err');
+      if (vue.confirmed) toast('This view is no longer available', 'err');
       if (location.hash !== '#/today') location.hash = '#/today';
       return loadDay();
     }
     if (err instanceof ApiError && err.kind === 'auth') {
-      state.session = null;
+      perdreSession();
     } else if (err instanceof ApiError && err.kind === 'offline') {
       state.error = 'No network. Your saved actions will sync on their own.';
     } else {
@@ -266,7 +360,7 @@ document.addEventListener('click', function (evt) {
   evt.preventDefault();
   Promise.resolve(handler(state, cible, evt)).catch(function (err) {
     if (err instanceof ApiError && err.kind === 'auth') {
-      state.session = null;
+      perdreSession();
       render();
       return;
     }
@@ -327,7 +421,13 @@ export async function boot() {
   // { kind: 'stale' } compte comme connecte : la cleaner reste dans l'app, les
   // appels partent dans la file comme pour toute coupure.
   state.session = await readSession();
+  // Le mode relu n'est garde que pour une session, et pour la personne qui l'a
+  // choisi quand l'appareil sait deja qui est connecte : aucun `as` ne part
+  // alors pour quelqu'un d'autre.
   state.viewAs = state.session ? lireViewAs() : null;
+  const qui = identiteLocale();
+  if (state.viewAs && qui && qui !== state.viewAs.viewerId) state.viewAs = null;
+  if (!state.viewAs) ecrireViewAs(null);
   if (!state.session) {
     state.loading = false;
     render();

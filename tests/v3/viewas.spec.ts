@@ -175,16 +175,158 @@ test('le View as survit au rechargement de l onglet, et Sign out l efface', asyn
 
 test('une cible qui n est plus dans l equipe sort du View as sur la journee du manager', async ({ page }) => {
   await bootV3(page, [
-    { match: 'action=v3.myDay&as=9', status: 400, body: { error: 'unknown team member' } },
+    { match: 'action=v3.myDay&as=4', status: 400, body: { error: 'unknown team member' } },
     { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
-  ], { pinToken: 'jeton-manager' });
-  // Un onglet ou le mode avait ete choisi, puis la cleaner desactivee.
-  await page.evaluate(() => sessionStorage.setItem('v3ViewAs', JSON.stringify({ id: '9', name: 'Old' })));
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
+  ], { pinToken: 'jeton-manager', hash: '#/profile' });
+  // Amina a ete desactivee entre le chargement de la liste et l'appui.
+  await page.getByRole('button', { name: /Amina/ }).click();
   await expect(page.getByText('This view is no longer available')).toBeVisible();
   await expect(page.locator('.viewas')).toHaveCount(0);
   await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
+});
+
+test('un mode relu au demarrage et refuse sort en silence, sans bandeau', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myDay&as=9', status: 400, body: { error: 'unknown team member' }, delay: 600 },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
+  ], { pinToken: 'jeton-manager' });
+  await page.evaluate(() => sessionStorage.setItem('v3ViewAs',
+    JSON.stringify({ id: '9', name: 'Old', viewerId: '1' })));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  // Pendant le chargement : pas encore confirme, donc pas de bandeau.
+  await expect(page.getByText('Loading your day.')).toBeVisible();
+  await expect(page.locator('.viewas')).toHaveCount(0);
+  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.viewas')).toHaveCount(0);
+  await expect(page.getByText('This view is no longer available')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
+});
+
+// Revue tache 1, constat 1 : une reponse de v3.myDay arrivee en retard ne doit
+// jamais ecraser l'etat apres un Exit ou un changement de personne.
+const JOUR_AMINA = {
+  ...JOUR_FAIZA, me: { id: 4, name: 'Amina', role: 'cleaner' }, totalMinutes: 94, stops: [STOP_FAIZA_2],
+};
+
+test('Exit pendant un chargement lent : la reponse en retard est ignoree', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myDay&as=3', status: 200, body: JOUR_FAIZA, delay: 1500 },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
+  ], { pinToken: 'jeton-manager', hash: '#/profile' });
+  await page.getByRole('button', { name: /Faiza/ }).click();
+  await expect(page.getByText('Loading your day.')).toBeVisible();
+  await page.getByRole('button', { name: 'Exit' }).click();
+  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  // La reponse de Faiza arrive maintenant : rien ne doit bouger.
+  await page.waitForTimeout(2000);
+  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.viewas')).toHaveCount(0);
+  await expect(page.locator('.nextup')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
+});
+
+test('Exit pendant un chargement lent : une erreur en retard n ecrase pas la journee', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myDay&as=4', status: 400, body: { error: 'unknown team member' }, delay: 1500 },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
+  ], { pinToken: 'jeton-manager', hash: '#/profile' });
+  await page.getByRole('button', { name: /Amina/ }).click();
+  await page.getByRole('button', { name: 'Exit' }).click();
+  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await page.waitForTimeout(2000);
+  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.getByText('unknown team member')).toHaveCount(0);
+  await expect(page.getByText('This view is no longer available')).toHaveCount(0);
+});
+
+test('changement de personne pendant un chargement lent : seule la derniere demande s affiche', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myDay&as=3', status: 200, body: JOUR_FAIZA, delay: 2500 },
+    { match: 'action=v3.myDay&as=4', status: 200, body: JOUR_AMINA },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
+  ], { pinToken: 'jeton-manager', hash: '#/profile' });
+  // Par l'interface : Faiza (lente), Exit, Profile, Amina, avant le retour de Faiza.
+  await page.getByRole('button', { name: /Faiza/ }).click();
+  await page.getByRole('button', { name: 'Exit' }).click();
+  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await page.getByRole('button', { name: /Amina/ }).click();
+  await expect(page.locator('.viewas')).toContainText("Viewing Amina's day · read only");
+  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
+  await page.waitForTimeout(2500);
+  await expect(page.locator('.viewas')).toContainText("Viewing Amina's day · read only");
+  await expect(page.locator('.drench .dr-top')).toContainText('Amina');
+  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
+});
+
+test('changement direct de personne pendant le chargement : la reponse de la premiere est jetee', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myDay&as=3', status: 200, body: JOUR_FAIZA, delay: 1500 },
+    { match: 'action=v3.myDay&as=4', status: 200, body: JOUR_AMINA, delay: 300 },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
+  ], { pinToken: 'jeton-manager', hash: '#/profile' });
+  await page.getByRole('button', { name: /Faiza/ }).click();
+  // L'ecran de chargement ne montre pas le selecteur : on passe par le module,
+  // comme le ferait un second appui servi par un ecran deja dessine.
+  await page.evaluate(async () => {
+    const m = await import('/v3/app.js');
+    m.startViewAs({ id: 4, name: 'Amina' });
+  });
+  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
+  await page.waitForTimeout(1800);
+  await expect(page.locator('.viewas')).toContainText("Viewing Amina's day · read only");
+  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
+});
+
+// Revue tache 1, constat 2 : le mode appartient a la personne qui l'a choisi.
+test('une cleaner connectee dans la meme fenetre n herite pas du View as', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'as=', status: 200, body: JOUR_AMINA },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_CLEANER, delay: 600 },
+  ], { pinToken: 'jeton-pin' });
+  await page.evaluate(() => {
+    sessionStorage.setItem('v3ViewAs', JSON.stringify({ id: '4', name: 'Amina', viewerId: '1' }));
+    localStorage.setItem('hkSessionCleanerId', '3');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByText('Loading your day.')).toBeVisible();
+  await expect(page.locator('.viewas')).toHaveCount(0);
+  await expect(page.locator('.drench .dr-top')).toContainText('Faiza');
+  await expect(page.locator('.viewas')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Start this cleaning' })).toBeEnabled();
+  expect((await fetchLog(page)).some((l) => l.url.indexOf('as=') !== -1)).toBe(false);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
+});
+
+test('un autre manager, identite inconnue de l appareil : la reponse le trahit et le mode tombe', async ({ page }) => {
+  const JOUR_ISMAEL = { ...JOUR_MANAGER, me: { id: 5, name: 'Ismael', role: 'manager' } };
+  await bootV3(page, [
+    { match: 'action=v3.myDay&as=3', status: 200, delay: 600,
+      body: { ...JOUR_FAIZA, viewer: { id: 5, name: 'Ismael' } } },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_ISMAEL },
+  ], { pinToken: 'jeton-ismael' });
+  await page.evaluate(() => sessionStorage.setItem('v3ViewAs',
+    JSON.stringify({ id: '3', name: 'Faiza', viewerId: '1' })));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.viewas')).toHaveCount(0);
+  await expect(page.locator('.drench .dr-top')).toContainText('Ismael');
+  await expect(page.locator('.viewas')).toHaveCount(0);
+  await expect(page.getByText('This view is no longer available')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
+});
+
+test('une session perdue emporte le View as', async ({ page }) => {
+  await voirFaiza(page);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toContain('"viewerId":"1"');
+  // Le proxy ne reconnait plus la session : 401 « auth required ».
+  await page.evaluate(async () => {
+    window.fetch = (() => Promise.resolve(new Response(JSON.stringify({ error: 'auth required' }),
+      { status: 401, headers: { 'Content-Type': 'application/json' } }))) as any;
+    const m = await import('/v3/app.js');
+    await m.loadDay();
+  });
+  await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
 });
 
