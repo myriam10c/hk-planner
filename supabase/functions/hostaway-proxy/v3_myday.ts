@@ -17,6 +17,7 @@ import {
   templateItems, V3_TEMPLATE_NAME,
 } from "./v3.ts";
 import type { SessionUser } from "./v3.ts";
+import type { TeamMember } from "./v3_viewas.ts";
 
 export interface V3Ticket {
   id: number;
@@ -63,6 +64,11 @@ export interface MyDayInput {
   timers: Record<string, any>;
   tickets: any[];                           // maintenance_tickets non clos
   progress: Record<string, Record<string, boolean>>;
+  // Mode « View as » (v3_viewas.ts) : `me` est alors la cleaner regardee, et
+  // `viewer` le manager qui regarde. Absent pour une journee normale.
+  viewer?: SessionUser | null;
+  // Selecteur de Profile, pour un manager seulement.
+  team?: TeamMember[] | null;
 }
 
 export interface MyDayPayload {
@@ -72,6 +78,9 @@ export interface MyDayPayload {
   linenRequired: boolean;
   totalMinutes: number;
   stops: V3Stop[];
+  viewAs?: true;
+  viewer?: { id: number; name: string };
+  team?: TeamMember[];
 }
 
 // Ordre des arrets (specification, section 3) : same-day d'abord, puis arrivee du
@@ -241,14 +250,22 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
   for (const b of brut) b.stop.jobId = ids[b.cle];
 
   const ordered = orderStops(brut.map((b) => b.stop));
-  return {
+  const out: MyDayPayload = {
     status: "success",
     date: input.date,
     me: { id: input.me.cleaner_id, name: input.me.name, role: input.me.role },
     // Elite ne compte pas le linge : meme ecran Today, sans le linge
-    // (specification, section 3).
+    // (specification, section 3). En « View as », c'est le role de la cible.
     linenRequired: input.me.role !== "subcontractor",
     totalMinutes: ordered.reduce((sum, s) => sum + s.estimatedMinutes, 0),
     stops: ordered,
   };
+  // Champs poses seulement quand ils ont un sens : le payload d'une cleaner
+  // reste exactement celui d'avant.
+  if (input.viewer) {
+    out.viewAs = true;
+    out.viewer = { id: input.viewer.cleaner_id, name: input.viewer.name };
+  }
+  if (input.team) out.team = input.team;
+  return out;
 }

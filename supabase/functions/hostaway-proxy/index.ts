@@ -13,6 +13,7 @@ import {
   todayDubai, validMyDayDate, V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
 } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
+import { loadTeam, resolveViewAs } from "./v3_viewas.ts";
 import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
 import { checkTicket, reportProblem, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES } from "./v3_tickets.ts";
 
@@ -1094,6 +1095,13 @@ Deno.serve(async (req: Request) => {
       // Role : le tableau des actions de la specification (section 4) dit qui a
       // le droit d'appeler quoi. Une session valide ne suffit pas.
       if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      // Mode « View as » (v3_viewas.ts) : `as` n'est accepte que d'un manager, et
+      // seulement vers une cleaner ou un sous-traitant actif. `sujet` est la
+      // personne dont on construit la journee ; l'identite de la session (`me`)
+      // ne change pas, et aucune ecriture ne s'ouvre (V3_ROLES).
+      const vue = await resolveViewAs(sb, me, url.searchParams.get("as"));
+      if (!vue.ok) return jsonResp({ error: vue.error }, vue.status);
+      const sujet = vue.subject;
       // Rattrapage des cles d'idempotence bloquees (ruling 7). Une cle posee dont
       // l'ecriture metier n'a jamais abouti rend 409 pour toujours, et la file
       // hors ligne etant strictement ordonnee, elle bloque definitivement tout ce
@@ -1174,7 +1182,7 @@ Deno.serve(async (req: Request) => {
       };
       const [assignRes, doneRes, timerRes, cancelRes, progressRes, postponed] = await Promise.all([
         parCle("cleaning_assignments", "reservation_key, cleaner_id",
-          (q: any) => q.eq("cleaner_id", me.cleaner_id)),
+          (q: any) => q.eq("cleaner_id", sujet.cleaner_id)),
         parCle("menage_done", "reservation_key, done"),
         parCle("cleaning_timer", "reservation_key, started_at, finished_at, duration_minutes"),
         parCle("cleaning_cancelled", "reservation_key"),
@@ -1189,8 +1197,13 @@ Deno.serve(async (req: Request) => {
       (progressRes.data || []).forEach((p: any) => {
         (progress[p.reservation_key] ||= {})[p.item_name] = !!p.is_done;
       });
+      // Le selecteur de Profile n'existe que pour un manager : la liste n'est
+      // lue que pour lui, et ne porte que id, name, role.
+      const team = me.role === "manager" ? await loadTeam(sb) : null;
       const body = await buildMyDay({
-        sb, date, me,
+        sb, date, me: sujet,
+        viewer: vue.viewer,
+        team,
         reservations,
         extras,
         listings,
