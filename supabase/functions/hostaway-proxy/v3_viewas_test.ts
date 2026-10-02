@@ -160,3 +160,42 @@ Deno.test("buildMyDay en « View as » : la journee de la cible, viewAs, viewer 
   assertEquals(out.stops[0].progress, { "Bathroom": true });
   assertEquals(out.stops[0].guest, "Sofia M.");
 });
+
+// ---------------------------------------------------------------------------
+// Garde sur le cablage d'index.ts (revue tache 1, constat 3). Le bloc de
+// dispatch n'est pas importable (Deno.serve au chargement) : on le lit comme du
+// texte, meme technique que les gardes de v3_myday_test.ts. Les regles sont
+// testees plus haut ; ici on verifie qu'index.ts les applique vraiment.
+// ---------------------------------------------------------------------------
+async function blocMyDay(): Promise<string> {
+  const src = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  const bloc = src.match(/if \(action === "v3\.myDay"\)[\s\S]*?return jsonResp\(body\);/);
+  assertEquals(bloc !== null, true);
+  return bloc![0];
+}
+
+Deno.test("index.ts : resolveViewAs part apres le controle de role, et un refus sort tout de suite", async () => {
+  const bloc = await blocMyDay();
+  const role = bloc.indexOf("roleAllowed(action, me.role)");
+  const vue = bloc.indexOf('resolveViewAs(sb, me, url.searchParams.get("as"))');
+  assertEquals(role >= 0 && vue > role, true);
+  assertEquals(bloc.includes("if (!vue.ok) return jsonResp({ error: vue.error }, vue.status);"), true);
+  // Rien de la journee n'est lu avant la decision : la premiere lecture de
+  // donnees (cleaning_postponed) vient apres.
+  assertEquals(vue < bloc.indexOf('sb.from("cleaning_postponed")'), true);
+});
+
+Deno.test("index.ts : les assignations sont filtrees sur la personne regardee, jamais sur la session", async () => {
+  const bloc = await blocMyDay();
+  assertEquals(bloc.includes("const sujet = vue.subject;"), true);
+  assertEquals(bloc.includes('q.eq("cleaner_id", sujet.cleaner_id)'), true);
+  assertEquals(bloc.includes('q.eq("cleaner_id", me.cleaner_id)'), false);
+  assertEquals(/buildMyDay\(\{[\s\S]*?me: sujet,[\s\S]*?viewer: vue\.viewer,[\s\S]*?team,/.test(bloc), true);
+});
+
+Deno.test("index.ts : la liste team n'est lue que pour un manager", async () => {
+  const bloc = await blocMyDay();
+  assertEquals(bloc.includes('const team = me.role === "manager" ? await loadTeam(sb) : null;'), true);
+  // Un seul appel a loadTeam dans le bloc : aucun autre chemin ne la rend.
+  assertEquals(bloc.split("loadTeam(").length - 1, 1);
+});
