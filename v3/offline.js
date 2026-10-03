@@ -3,7 +3,7 @@
 // reseau (specification, ruling 7). Le proxy accepte les rejeux : meme cle, meme
 // resultat, aucune ecriture en double.
 import { api, ApiError } from '/v3/api.js';
-import { practiceActive } from '/v3/practice.js';
+import { practiceActive, practiceMark } from '/v3/practice.js';
 import { toast } from '/v3/ui.js';
 
 const DB_NAME = 'hk-v3';
@@ -221,18 +221,25 @@ export async function flush() {
 // en file porte la meme cle que la tentative qui a echoue : le proxy rejoue le
 // meme resultat au lieu d'ecrire deux fois.
 // `file` (optionnel) est le Blob d'une photo : l'envoi passe alors en multipart.
-export async function sendOrQueue(action, body, file, fileName) {
+// `origine` (optionnel) : la marque Practice capturee au debut du geste
+// (practiceMark), quand le geste attend quelque chose avant d'appeler ici ;
+// par defaut, la seance du moment. api.js refuse l'ecriture si cette seance
+// est finie, et rien de ne d'une seance Practice n'entre jamais en file.
+export async function sendOrQueue(action, body, file, fileName, origine) {
+  const marque = origine === undefined ? practiceMark() : origine;
   try {
     const data = file
-      ? await api.upload(action, formFrom(body, file, fileName))
-      : await api.post(action, body);
+      ? await api.upload(action, formFrom(body, file, fileName), marque)
+      : await api.post(action, body, undefined, marque);
     await annoncer();
     return { ok: true, queued: false, data: data };
   } catch (err) {
     const kind = err instanceof ApiError ? err.kind : 'offline';
     // En Practice, rien n'entre jamais en file : le simulateur ne rend pas de
-    // coupure, et s'il levait quand meme, le geste simule n'a rien a garder.
-    if (kind === 'offline' && !practiceActive()) {
+    // coupure, mais toute erreur locale qui n'est pas une ApiError compte ici
+    // comme une coupure (multipart impossible a batir, par exemple), et le
+    // geste simule n'a rien a garder. Ni pendant la seance, ni s'il en vient.
+    if (kind === 'offline' && !marque && !practiceActive()) {
       const garde = file ? await gardable(file) : { bytes: null, fileType: null, file: null };
       await enqueue({
         action: action, body: body,

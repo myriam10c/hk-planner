@@ -85,10 +85,25 @@ function identiteLocale() {
 
 // Toute sortie du mode emporte la seance Practice et ce qu'elle a simule :
 // Exit, Sign out, perte de session, changement de personne, refus du proxy.
-function oublierViewAs() {
+// Pendant la seance, flush est muet (une vraie entree serait servie par le
+// simulateur puis effacee) : a sa fin, quelle qu'en soit la cause, la vraie file
+// reprend son rejeu (revue tache 2, constat 3). `sansRejeu` : Sign out, qui
+// vide la file juste apres.
+function oublierViewAs(sansRejeu) {
+  const enPractice = practiceActive();
   state.viewAs = null;
   ecrireViewAs(null);
   practiceOff();
+  if (enPractice && !sansRejeu && navigator.onLine) flush();
+}
+
+// Sign out depuis Practice : on quitte le mode AVANT la deconnexion reseau, pour
+// que le bandeau disparaisse et que les gestes ne soient plus servis par le
+// simulateur pendant la sortie (revue tache 2, constat 2). La journee affichee
+// reste celle de la cleaner (payload viewAs), donc en lecture seule.
+export function leaveModeForSignOut() {
+  oublierViewAs(true);
+  render();
 }
 
 // Mode Practice (tache 2) : meme journee que « View as » (v3.myDay?as=<id>),
@@ -102,7 +117,9 @@ export function practicing(st) {
 // Toute perte de session emporte le mode : il n'appartient qu'a elle.
 function perdreSession() {
   state.session = null;
-  oublierViewAs();
+  // Sans session, un rejeu ne ferait que revenir en 401 : il repartira au
+  // renouvellement de la session.
+  oublierViewAs(true);
 }
 
 // Vrai des que l'une des deux sources le dit : le choix local (avant meme la
@@ -110,7 +127,9 @@ function perdreSession() {
 // En Practice, les gestes sont rendus : ils ne quittent jamais le telephone.
 export function readOnly(st) {
   const s = st || state;
-  if (s.viewAs && s.viewAs.practice) return false;
+  // Une seance fermee (Exit, Sign out en cours) redevient lecture seule : les
+  // gestes ne sont rendus que tant que le simulateur les sert.
+  if (s.viewAs && s.viewAs.practice) return !practiceActive();
   return !!s.viewAs || !!(s.day && s.day.viewAs);
 }
 
@@ -168,8 +187,11 @@ export function startViewAs(membre, practice) {
     practice: practice === true,
   };
   ecrireViewAs(state.viewAs);
+  const etaitPractice = practiceActive();
   practiceOff();
   if (state.viewAs.practice) practiceOn(state.viewAs, false);
+  // De Practice vers View : la seance est finie, la vraie file reprend.
+  else if (etaitPractice && navigator.onLine) flush();
   state.jobId = null;
   state.finished = null;
   if (location.hash !== '#/today') location.hash = '#/today';
@@ -185,8 +207,6 @@ export function exitViewAs() {
   state.jobId = null;
   state.finished = null;
   if (location.hash !== '#/today') location.hash = '#/today';
-  // Une vraie entree en file a pu attendre la fin d'une seance Practice.
-  if (navigator.onLine) flush();
   return loadDay();
 }
 
@@ -407,6 +427,9 @@ document.addEventListener('click', function (evt) {
       render();
       return;
     }
+    // Geste ne dans une seance Practice finie : abandonne en silence, rien
+    // n'est parti et il n'y a rien a dire.
+    if (err instanceof ApiError && err.kind === 'practice') return;
     toast(err && err.message ? err.message : 'Something went wrong', 'err');
   });
 });

@@ -49,6 +49,21 @@ const BASE_ID = 900000000;
 let cible = null;     // {id, viewerId} : la seance en cours, ou null
 let seance = null;    // avancement simule
 let jour = null;      // la journee affichee (state.day), deja recouverte
+// Numero de seance, change a chaque ouverture et a chaque fermeture. Un geste
+// le capture a son debut (practiceMark) : s'il a change quand l'attente du geste
+// se termine (redimensionnement d'une photo), la seance d'origine est finie et
+// le geste ne doit ni partir au proxy ni entrer en file (revue tache 2, constat 1).
+let epoque = 0;
+
+// Marque de la seance en cours, ou 0 hors Practice.
+export function practiceMark() {
+  return cible ? epoque : 0;
+}
+
+// Vrai si `mark` vient d'une seance Practice qui n'est plus celle en cours.
+export function practiceEnded(mark) {
+  return !!mark && (!cible || mark !== epoque);
+}
 
 function neuve(c) {
   return {
@@ -82,6 +97,7 @@ export function practiceOn(c, reprendre) {
   const memeCible = cible && cible.id === n.id && cible.viewerId === n.viewerId;
   cible = n;
   if (reprendre && memeCible && seance) return;
+  epoque += 1;
   seance = (reprendre && lire(n)) || neuve(n);
   jour = null;
   ecrire();
@@ -89,6 +105,7 @@ export function practiceOn(c, reprendre) {
 
 // Ferme la seance et efface tout ce qu'elle a simule.
 export function practiceOff() {
+  epoque += 1;
   cible = null;
   seance = null;
   jour = null;
@@ -366,8 +383,10 @@ function finishJob(body) {
   if (linen) j.linen = linen;
   // Chrono : duree enregistree s'il est deja clos, calculee s'il est ouvert,
   // nulle s'il n'a jamais demarre (le proxy ne refuse pas une fin sans Start).
+  // Un menage deja fini dans la journee reelle a un chrono clos dont v3.myDay
+  // ne rend pas la duree : null, le front affiche son approximation.
   let durationMinutes = null;
-  if (j.state === 'done') {
+  if (j.state === 'done' || (!j.state && stop.state === 'done')) {
     durationMinutes = j.durationMinutes === undefined ? null : j.durationMinutes;
   } else {
     const depart = j.startedAt || stop.startedAt;

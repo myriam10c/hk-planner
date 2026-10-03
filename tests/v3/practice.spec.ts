@@ -70,8 +70,8 @@ async function fileEtMorts(page: any) {
   });
 }
 
-async function practiceFaiza(page: any, opts: { hash?: string } = {}) {
-  await bootV3(page, ROUTES, { pinToken: 'jeton-manager', hash: opts.hash ?? '#/profile' });
+async function practiceFaiza(page: any, opts: { hash?: string; routes?: any[] } = {}) {
+  await bootV3(page, opts.routes ?? ROUTES, { pinToken: 'jeton-manager', hash: opts.hash ?? '#/profile' });
   await page.evaluate(() => { location.hash = '#/profile'; });
   await expect(page.getByText('Try the cleaner app')).toBeVisible();
   await page.getByRole('button', { name: 'Practice as Faiza' }).click();
@@ -434,5 +434,190 @@ test('6b. Practice ne rejoue pas la file reelle, et sendOrQueue n y met rien', a
   });
   await page.waitForTimeout(400);
   expect(await page.evaluate(async () => (await import('/v3/offline.js')).pendingCount())).toBe(1);
+  expect(await appelsInterdits(page)).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// Revue tache 2, correctif 1.
+// ---------------------------------------------------------------------------
+
+const ROUTES_REJEU = [
+  { match: 'action=v3.tick', status: 200, body: { status: 'success' } },
+  ...ROUTES,
+];
+
+const JOUR_CLEANER = {
+  status: 'success', date: '2026-09-12', me: { id: 3, name: 'Faiza', role: 'cleaner' },
+  linenRequired: true, totalMinutes: 212, stops: [STOP_FAIZA, STOP_FAIZA_2],
+};
+
+const ECRITURES = /action=v3\.(startJob|tick|uploadPhoto|finishJob|reportProblem|checkTicket)/;
+
+for (const horsLigne of [false, true]) {
+  test('constat 1 : Exit pendant la prise de photo, la photo ne part pas' + (horsLigne ? ' (hors ligne)' : ''), async ({ page }) => {
+    await practiceFaiza(page);
+    await page.getByRole('button', { name: 'Start this cleaning' }).click();
+    await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
+    if (horsLigne) await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+    // Le selecteur de fichier est ouvert : la photo n'est pas encore choisie.
+    const chooser = page.waitForEvent('filechooser');
+    await page.locator('[data-act="shoot"][data-item="Final Check"]').click();
+    const fc = await chooser;
+    // Exit pendant l'attente, puis la photo arrive.
+    await page.getByRole('button', { name: 'Exit' }).click();
+    await expect(page.locator('.practicebar')).toHaveCount(0);
+    await fc.setFiles({ name: 'shot.png', mimeType: 'image/png', buffer: Buffer.from(PNG_1x1, 'base64') });
+    await page.waitForTimeout(1200);
+    const log = await fetchLog(page);
+    expect(log.filter((l) => l.url.indexOf('action=v3.uploadPhoto') !== -1)).toEqual([]);
+    expect(log.filter((l) => ECRITURES.test(l.url))).toEqual([]);
+    expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
+    await expect(page.getByText('forbidden')).toHaveCount(0);
+    await expect(page.getByText('Photo saved on your phone')).toHaveCount(0);
+    await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);
+  });
+
+  test('constat 1 : api.js refuse une ecriture nee d une seance Practice finie' + (horsLigne ? ' (hors ligne)' : ''), async ({ page }) => {
+    await practiceFaiza(page);
+    const marque = await page.evaluate(async () => (await import('/v3/practice.js')).practiceMark());
+    expect(marque).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Exit' }).click();
+    await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+    if (horsLigne) await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+    const r = await page.evaluate(async (m: number) => {
+      const o = await import('/v3/offline.js');
+      const essai = async (f: () => Promise<any>) => {
+        try { await f(); return 'ok'; } catch (e: any) { return e.kind + ' ' + e.message; }
+      };
+      const blob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+      return {
+        tick: await essai(() => o.sendOrQueue('v3.tick',
+          { jobId: 'job_aaaaaaaaaaaaaaaaaaaa', itemId: 'Bathroom', checked: true, idem: 'apres-exit-0001' }, undefined, undefined, m)),
+        photo: await essai(() => o.sendOrQueue('v3.uploadPhoto',
+          { jobId: 'job_aaaaaaaaaaaaaaaaaaaa', idem: 'apres-exit-0002' }, blob, 'p.png', m)),
+      };
+    }, marque);
+    expect(r).toEqual({ tick: 'practice Practice ended', photo: 'practice Practice ended' });
+    expect((await fetchLog(page)).filter((l) => ECRITURES.test(l.url))).toEqual([]);
+    expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
+  });
+}
+
+test('constat 2 : Sign out quitte Practice avant la deconnexion reseau', async ({ page }) => {
+  await practiceFaiza(page, {
+    routes: [{ match: 'action=cleanerLogout', status: 200, body: { status: 'success' }, delay: 2500 }, ...ROUTES],
+  });
+  await page.route((url) => url.pathname === '/', (route) => route.fulfill({
+    status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title><p>stub</p>',
+  }));
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await expect(page.locator('.practicebar')).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  // Pendant la sortie (cleanerLogout lent) : plus de bandeau, gestes inertes.
+  await expect(page.locator('.practicebar')).toHaveCount(0);
+  const pendant = await page.evaluate(async () => {
+    const app = await import('/v3/app.js');
+    const pr = await import('/v3/practice.js');
+    return { lecture: app.readOnly(), practice: pr.practiceActive(), url: location.hash };
+  });
+  expect(pendant).toEqual({ lecture: true, practice: false, url: '#/profile' });
+  await page.waitForURL(/#cleaner$/);
+  expect((await fetchLog(page)).filter((l) => ECRITURES.test(l.url))).toEqual([]);
+});
+
+test('constats 3 et 4b : Exit relance le rejeu de la vraie file', async ({ page }) => {
+  await practiceFaiza(page, { routes: ROUTES_REJEU });
+  await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    await m.enqueue({ action: 'v3.tick', body: { jobId: 'x', itemId: 'y', checked: true, idem: 'reelle-12345' }, at: Date.now() });
+    await m.flush();
+  });
+  expect(await page.evaluate(async () => (await import('/v3/offline.js')).pendingCount())).toBe(1);
+  expect((await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.tick') !== -1)).toEqual([]);
+  await page.getByRole('button', { name: 'Exit' }).click();
+  await expect.poll(async () => page.evaluate(async () => (await import('/v3/offline.js')).pendingCount())).toBe(0);
+  const ticks = (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.tick') !== -1);
+  expect(ticks.length).toBe(1);
+  expect(ticks[0].body).toContain('reelle-12345');
+  expect((await fileEtMorts(page)).morts).toBe(0);
+});
+
+test('constat 3 : Practice relu puis refuse par le proxy, la vraie file repart', async ({ page }) => {
+  // Une cleaner dont l'identite n'est pas connue de l'appareil ouvre un onglet
+  // ou un manager avait laisse Practice ; elle a un vrai geste en file.
+  await bootV3(page, [
+    { match: 'as=', status: 403, body: { error: 'forbidden' } },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_CLEANER },
+    { match: 'action=v3.tick', status: 200, body: { status: 'success' } },
+  ], { pinToken: 'jeton-pin' });
+  await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    await m.enqueue({ action: 'v3.tick', body: { jobId: 'x', itemId: 'y', checked: true, idem: 'reelle-67890' }, at: Date.now() });
+    sessionStorage.setItem('v3ViewAs', JSON.stringify({ id: '4', name: 'Amina', viewerId: '1', practice: true }));
+    localStorage.removeItem('hkSessionCleanerId');
+    // Elle demarre hors ligne : la journee demandee (as=) ne vient pas, le rejeu
+    // est muet tant que la seance relue est ouverte.
+    localStorage.setItem('v3TestOffline', '1');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  // Le reseau revient : l'evenement online tombe pendant la seance, rien ne part.
+  await page.evaluate(() => {
+    localStorage.removeItem('v3TestOffline');
+    window.dispatchEvent(new Event('online'));
+  });
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(async () => (await import('/v3/offline.js')).pendingCount())).toBe(1);
+  // Try again : le proxy refuse as=, le mode tombe, et la vraie file repart.
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.locator('.drench .dr-top')).toContainText('Faiza');
+  await expect(page.locator('.practicebar')).toHaveCount(0);
+  await expect.poll(async () => page.evaluate(async () => (await import('/v3/offline.js')).pendingCount())).toBe(0);
+  expect((await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.tick') !== -1).length).toBe(1);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toBeNull();
+});
+
+test('constat 4c : une cleaner qui ouvre l app avec un Practice residuel ecrit pour de vrai', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'as=', status: 200, body: JOUR_AMINA },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_CLEANER },
+    { match: 'action=v3.startJob', status: 200, body: { status: 'success', startedAt: new Date().toISOString() } },
+  ], { pinToken: 'jeton-pin' });
+  await page.evaluate(() => {
+    sessionStorage.setItem('v3ViewAs', JSON.stringify({ id: '4', name: 'Amina', viewerId: '1', practice: true }));
+    sessionStorage.setItem('v3PracticeState', JSON.stringify({ targetId: '4', viewerId: '1', seq: 0, jobs: {}, photos: {}, tickets: {}, idem: {} }));
+    localStorage.setItem('hkSessionCleanerId', '3');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
+  await expect(page.locator('.drench .dr-top')).toContainText('Faiza');
+  await expect(page.locator('.practicebar')).toHaveCount(0);
+  await expect(page.locator('.viewas')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
+  expect(await page.evaluate(async () => (await import('/v3/practice.js')).practiceActive())).toBe(false);
+  await page.getByRole('button', { name: 'Start this cleaning' }).click();
+  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
+  const log = await fetchLog(page);
+  expect(log.some((l) => l.url.indexOf('as=') !== -1)).toBe(false);
+  expect(log.filter((l) => l.url.indexOf('action=v3.startJob') !== -1).length).toBe(1);
+});
+
+test('constat 4d : en Practice, une erreur locale n entre jamais en file', async ({ page }) => {
+  await practiceFaiza(page);
+  // Un « fichier » qui n'est pas un Blob : le multipart ne se batit pas, et
+  // sendOrQueue traite toute erreur qui n'est pas une ApiError comme une coupure.
+  const r = await page.evaluate(async () => {
+    const o = await import('/v3/offline.js');
+    const faux = { type: 'image/png', size: 3, arrayBuffer: async () => new ArrayBuffer(3) };
+    try {
+      await o.sendOrQueue('v3.uploadPhoto', { jobId: 'job_aaaaaaaaaaaaaaaaaaaa', idem: 'erreur-locale-01' }, faux as any, 'p.png');
+      return 'ok';
+    } catch (e: any) {
+      return e && e.name;
+    }
+  });
+  expect(r).toBe('TypeError');
+  expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
   expect(await appelsInterdits(page)).toEqual([]);
 });

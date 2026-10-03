@@ -14,7 +14,7 @@
 // second abonnement lui en ferait deux pour chaque affectation (spec, phase A).
 const VERSION = 'v3-dev';
 const CACHE = 'hk-v3-' + VERSION;
-// Tout ce que /v3/ sert : la coquille, les six modules, les cinq ecrans, les
+// Tout ce que /v3/ sert : la coquille, les huit modules, les cinq ecrans, les
 // deux feuilles de style, les deux polices auto-hebergees et leurs licences
 // (l'OFL demande que la licence voyage avec la police). Plus le client de
 // session supabase-js charge par index.html, seul fichier hors de /v3/ : le

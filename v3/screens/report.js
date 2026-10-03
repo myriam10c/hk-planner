@@ -4,6 +4,7 @@
 import { closeSheet, esc, openSheet, toast } from '/v3/ui.js';
 import { newIdem, sendOrQueue } from '/v3/offline.js';
 import { prendrePhoto } from '/v3/photo.js';
+import { practiceEnded, practiceMark } from '/v3/practice.js';
 import { readOnly } from '/v3/app.js';
 
 export const CATEGORIES = [
@@ -85,14 +86,18 @@ export const reportActions = {
     if (readOnly(state)) return;
     const stop = state.reportStop;
     if (!stop || !state.report) return;
+    // Meme garde que la photo de l'ecran Job : un geste ne dans une seance
+    // Practice finie pendant l'attente ne part pas (revue tache 2, constat 1).
+    const origine = practiceMark();
     const fichier = await prendrePhoto();
     if (!fichier) return;
+    if (practiceEnded(origine)) return;
     const idem = newIdem();
     // Un refus dur du proxy ne garde rien et leve : la photo n'est pas prise, le
     // bouton garde son libelle d'origine et reste appuyable (meme regle que le
     // retour arriere du Start, revue tache 10). app.js montre le message.
     const r = await sendOrQueue('v3.uploadPhoto',
-      { jobId: stop.jobId, idem: idem }, fichier, fichier.name || 'photo.jpg');
+      { jobId: stop.jobId, idem: idem }, fichier, fichier.name || 'photo.jpg', origine);
     if (!state.report) return;   // feuille fermee pendant l'envoi
     state.report.photo = { photoIdem: idem, photoId: r.data ? r.data.photoId : null };
     if (r.queued) toast('Photo saved on your phone', 'ok');

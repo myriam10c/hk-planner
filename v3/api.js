@@ -5,7 +5,7 @@
 // l'ecran email/PIN existant »).
 import { API, APP_SECRET } from '/v3/proxy-config.js';
 import { getSession, renewSession } from '/v3/session.js';
-import { PASSE_PRACTICE, practiceActive, simulate } from '/v3/practice.js';
+import { PASSE_PRACTICE, practiceActive, practiceEnded, simulate } from '/v3/practice.js';
 
 const TIMEOUT_MS = 15000;
 // Message du proxy quand la session (Bearer ou PIN) n'est pas reconnue :
@@ -51,6 +51,12 @@ function reponseSimulee(r) {
 
 async function request(action, opts, dejaRenouvele) {
   const o = opts || {};
+  // Ecriture nee dans une seance Practice qui est finie depuis (Exit pendant le
+  // redimensionnement d'une photo, par exemple) : elle ne part jamais, ni au
+  // proxy ni en file. Erreur locale, d'un type que sendOrQueue ne garde pas.
+  if (o.practice && practiceEnded(o.practice)) {
+    throw new ApiError('Practice ended', 'practice', 0);
+  }
   // Mode Practice : point de passage unique. Toute action autre que la lecture
   // de la journee et la deconnexion est servie par le simulateur, avant meme la
   // lecture de session : rien ne part, hors ligne compris.
@@ -118,8 +124,12 @@ async function request(action, opts, dejaRenouvele) {
   return data;
 }
 
+// `practice` (optionnel) : la marque de la seance Practice ou le geste est ne
+// (practiceMark), posee par sendOrQueue.
 export const api = {
   get: function (action, params) { return request(action, { params: params }); },
-  post: function (action, body, headers) { return request(action, { body: body, headers: headers }); },
-  upload: function (action, form) { return request(action, { form: form }); },
+  post: function (action, body, headers, practice) {
+    return request(action, { body: body, headers: headers, practice: practice });
+  },
+  upload: function (action, form, practice) { return request(action, { form: form, practice: practice }); },
 };

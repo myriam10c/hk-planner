@@ -4,6 +4,7 @@
 import { esc, icon, minutesUntil, toast } from '/v3/ui.js';
 import { newIdem, sendOrQueue } from '/v3/offline.js';
 import { prendrePhoto } from '/v3/photo.js';
+import { practiceEnded, practiceMark } from '/v3/practice.js';
 import { navigate, openJob, queueStrip, readOnly } from '/v3/app.js';
 import { finishedView, openFinishSheet, submitFinish } from '/v3/screens/finish.js';
 import { openReportSheet, reportActions } from '/v3/screens/report.js';
@@ -131,11 +132,16 @@ function mount(state) {
 }
 
 async function televerser(state, stop, extra) {
+  // La seance Practice est capturee AVANT l'attente de la photo : un Exit
+  // pendant le choix ou le redimensionnement ne doit pas faire partir une vraie
+  // photo sous la session du manager (revue tache 2, constat 1).
+  const origine = practiceMark();
   const fichier = await prendrePhoto();
   if (!fichier) return null;
+  if (practiceEnded(origine)) return null;
   const idem = newIdem();
   const corps = Object.assign({ jobId: stop.jobId, idem: idem }, extra || {});
-  const r = await sendOrQueue('v3.uploadPhoto', corps, fichier, fichier.name || 'photo.jpg');
+  const r = await sendOrQueue('v3.uploadPhoto', corps, fichier, fichier.name || 'photo.jpg', origine);
   if (r.queued) {
     toast('Photo saved on your phone', 'ok');
     return { photoIdem: idem, photoId: null };

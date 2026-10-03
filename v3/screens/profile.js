@@ -1,8 +1,7 @@
 // Profile : qui je suis, la porte vers les ecrans que la v3 ne refait pas encore
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
-import { CLE_VIEW_AS, practicing, queueStrip, render, startPractice, startViewAs } from '/v3/app.js';
-import { practiceOff } from '/v3/practice.js';
+import { CLE_VIEW_AS, leaveModeForSignOut, practicing, queueStrip, render, startPractice, startViewAs } from '/v3/app.js';
 import { clearDead, deadEntries, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
 import { esc, icon } from '/v3/ui.js';
@@ -161,9 +160,11 @@ const actions = {
   async signout() {
     if (deconnexionEnCours) return;
     deconnexionEnCours = true;
-    // 0. La seance Practice se ferme d'abord : la deconnexion est reelle, le
-    // desabonnement push compris, et rien de simule ne survit a la sortie.
-    practiceOff();
+    // 0. Le mode se ferme d'abord, avant tout appel reseau : la deconnexion est
+    // reelle, le desabonnement push compris ; le bandeau Practice disparait et
+    // les gestes ne sont plus servis par le simulateur pendant la sortie (la
+    // journee affichee, celle de la cleaner, repasse en lecture seule).
+    leaveModeForSignOut();
     // 1. Le desabonnement push d'abord : il exige la session encore vivante.
     try { await desabonnerPush(); } catch (e) { /* jamais une raison de retenir la sortie */ }
     // 2. Revocation cote serveur. L'action cleanerLogout du proxy ne lit QUE
