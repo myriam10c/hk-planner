@@ -33,6 +33,9 @@
   --line: #E0D6C8;
   --sand: #E9DFD2;
   --card: #FBF6EE;
+  /* Bandeau Practice seulement (tache 2) : un jaune de signalisation qui
+     n'apparait nulle part ailleurs dans l'interface cleaner. */
+  --practice: #FFD23F;
   --ff: "Instrument Sans", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --disp: "Bricolage Grotesque", "Avenir Next Condensed", "Helvetica Neue", Arial, sans-serif;
 }

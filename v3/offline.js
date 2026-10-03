@@ -3,6 +3,7 @@
 // reseau (specification, ruling 7). Le proxy accepte les rejeux : meme cle, meme
 // resultat, aucune ecriture en double.
 import { api, ApiError } from '/v3/api.js';
+import { practiceActive } from '/v3/practice.js';
 import { toast } from '/v3/ui.js';
 
 const DB_NAME = 'hk-v3';
@@ -168,12 +169,20 @@ let encore = false;
 // raison temporaire, pour ne jamais inverser l'ordre des gestes. L'ordre compte :
 // un signalement rejoue apres sa photo la retrouve par photoIdem.
 export async function flush() {
+  // En Practice, api.js servirait chaque entree par le simulateur : une vraie
+  // entree en attente serait jugee passee et effacee sans jamais partir. Le
+  // rejeu attend la fin de la seance (Exit recharge la journee, et le retour du
+  // reseau ou le demarrage suivant relancent flush).
+  if (practiceActive()) return;
   if (enCours) { encore = true; return; }
   enCours = true;
   encore = false;
   try {
     const entries = await pendingEntries();
     for (const e of entries) {
+      // Une seance Practice ouverte pendant un rejeu deja lance l'arrete net :
+      // l'entree suivante serait servie par le simulateur, puis effacee.
+      if (practiceActive()) return;
       try {
         const blob = blobDe(e);
         if (blob) await api.upload(e.action, formFrom(e.body, blob, e.fileName));
@@ -221,7 +230,9 @@ export async function sendOrQueue(action, body, file, fileName) {
     return { ok: true, queued: false, data: data };
   } catch (err) {
     const kind = err instanceof ApiError ? err.kind : 'offline';
-    if (kind === 'offline') {
+    // En Practice, rien n'entre jamais en file : le simulateur ne rend pas de
+    // coupure, et s'il levait quand meme, le geste simule n'a rien a garder.
+    if (kind === 'offline' && !practiceActive()) {
       const garde = file ? await gardable(file) : { bytes: null, fileType: null, file: null };
       await enqueue({
         action: action, body: body,

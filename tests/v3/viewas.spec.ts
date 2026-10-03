@@ -64,8 +64,8 @@ async function fileHorsLigne(page: any) {
 
 async function voirFaiza(page: any) {
   await bootV3(page, ROUTES_MANAGER, { pinToken: 'jeton-manager', hash: '#/profile' });
-  await expect(page.getByText("View a cleaner's day")).toBeVisible();
-  await page.getByRole('button', { name: /Faiza/ }).click();
+  await expect(page.getByText('Try the cleaner app')).toBeVisible();
+  await page.getByRole('button', { name: "View Faiza's day" }).click();
   await expect(page.locator('.viewas')).toContainText("Viewing Faiza's day · read only");
   // Le bandeau est deja la pendant le chargement : on attend la journee rendue.
   await expect(page.locator('.nextup .n')).toHaveText('623 Samana Park View');
@@ -73,15 +73,15 @@ async function voirFaiza(page: any) {
 
 test('Profile d un manager : le selecteur liste l equipe et ouvre la journee de la cleaner', async ({ page }) => {
   await bootV3(page, ROUTES_MANAGER, { pinToken: 'jeton-manager', hash: '#/profile' });
-  await expect(page.getByText("View a cleaner's day")).toBeVisible();
+  await expect(page.getByText('Try the cleaner app')).toBeVisible();
   const lignes = page.locator('[data-act="viewas"]');
   await expect(lignes).toHaveCount(3);
-  await expect(lignes.nth(0)).toContainText('Amina');
-  await expect(lignes.nth(2)).toContainText('Faiza');
+  await expect(lignes.nth(0)).toHaveAttribute('data-name', 'Amina');
+  await expect(lignes.nth(2)).toHaveAttribute('data-name', 'Faiza');
   // Journee du manager : aucun bandeau tant qu'il ne regarde personne.
   await expect(page.locator('.viewas')).toHaveCount(0);
 
-  await page.getByRole('button', { name: /Faiza/ }).click();
+  await page.getByRole('button', { name: "View Faiza's day" }).click();
   await expect(page).toHaveURL(/#\/today$/);
   await expect(page.locator('.viewas')).toContainText("Viewing Faiza's day · read only");
   await expect(page.locator('.drench .dr-top')).toContainText('Faiza');
@@ -99,7 +99,7 @@ test('le bandeau suit tous les ecrans, et Exit rend la journee du manager', asyn
   await expect(page.locator('.viewas')).toBeVisible();
   await page.evaluate(() => { location.hash = '#/profile'; });
   await expect(page.locator('.viewas')).toBeVisible();
-  await expect(page.locator('[data-act="viewas"][aria-current="true"]')).toContainText('Faiza');
+  await expect(page.locator('[data-act="viewas"][aria-current="true"]')).toHaveAttribute('data-name', 'Faiza');
 
   await page.getByRole('button', { name: 'Exit' }).click();
   await expect(page).toHaveURL(/#\/today$/);
@@ -179,7 +179,7 @@ test('une cible qui n est plus dans l equipe sort du View as sur la journee du m
     { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
   ], { pinToken: 'jeton-manager', hash: '#/profile' });
   // Amina a ete desactivee entre le chargement de la liste et l'appui.
-  await page.getByRole('button', { name: /Amina/ }).click();
+  await page.getByRole('button', { name: "View Amina's day" }).click();
   await expect(page.getByText('This view is no longer available')).toBeVisible();
   await expect(page.locator('.viewas')).toHaveCount(0);
   await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
@@ -188,7 +188,7 @@ test('une cible qui n est plus dans l equipe sort du View as sur la journee du m
 
 test('un mode relu au demarrage et refuse sort en silence, sans bandeau', async ({ page }) => {
   await bootV3(page, [
-    { match: 'action=v3.myDay&as=9', status: 400, body: { error: 'unknown team member' }, delay: 600 },
+    { match: 'action=v3.myDay&as=9', status: 400, body: { error: 'unknown team member' }, delay: 2000 },
     { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
   ], { pinToken: 'jeton-manager' });
   await page.evaluate(() => sessionStorage.setItem('v3ViewAs',
@@ -214,7 +214,7 @@ test('Exit pendant un chargement lent : la reponse en retard est ignoree', async
     { match: 'action=v3.myDay&as=3', status: 200, body: JOUR_FAIZA, delay: 1500 },
     { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
   ], { pinToken: 'jeton-manager', hash: '#/profile' });
-  await page.getByRole('button', { name: /Faiza/ }).click();
+  await page.getByRole('button', { name: "View Faiza's day" }).click();
   await expect(page.getByText('Loading your day.')).toBeVisible();
   await page.getByRole('button', { name: 'Exit' }).click();
   await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
@@ -231,7 +231,7 @@ test('Exit pendant un chargement lent : une erreur en retard n ecrase pas la jou
     { match: 'action=v3.myDay&as=4', status: 400, body: { error: 'unknown team member' }, delay: 1500 },
     { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
   ], { pinToken: 'jeton-manager', hash: '#/profile' });
-  await page.getByRole('button', { name: /Amina/ }).click();
+  await page.getByRole('button', { name: "View Amina's day" }).click();
   await page.getByRole('button', { name: 'Exit' }).click();
   await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
   await page.waitForTimeout(2000);
@@ -247,11 +247,11 @@ test('changement de personne pendant un chargement lent : seule la derniere dema
     { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
   ], { pinToken: 'jeton-manager', hash: '#/profile' });
   // Par l'interface : Faiza (lente), Exit, Profile, Amina, avant le retour de Faiza.
-  await page.getByRole('button', { name: /Faiza/ }).click();
+  await page.getByRole('button', { name: "View Faiza's day" }).click();
   await page.getByRole('button', { name: 'Exit' }).click();
   await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
   await page.evaluate(() => { location.hash = '#/profile'; });
-  await page.getByRole('button', { name: /Amina/ }).click();
+  await page.getByRole('button', { name: "View Amina's day" }).click();
   await expect(page.locator('.viewas')).toContainText("Viewing Amina's day · read only");
   await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
   await page.waitForTimeout(2500);
@@ -266,7 +266,7 @@ test('changement direct de personne pendant le chargement : la reponse de la pre
     { match: 'action=v3.myDay&as=4', status: 200, body: JOUR_AMINA, delay: 300 },
     { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER },
   ], { pinToken: 'jeton-manager', hash: '#/profile' });
-  await page.getByRole('button', { name: /Faiza/ }).click();
+  await page.getByRole('button', { name: "View Faiza's day" }).click();
   // L'ecran de chargement ne montre pas le selecteur : on passe par le module,
   // comme le ferait un second appui servi par un ecran deja dessine.
   await page.evaluate(async () => {
@@ -283,7 +283,7 @@ test('changement direct de personne pendant le chargement : la reponse de la pre
 test('une cleaner connectee dans la meme fenetre n herite pas du View as', async ({ page }) => {
   await bootV3(page, [
     { match: 'as=', status: 200, body: JOUR_AMINA },
-    { match: 'action=v3.myDay', status: 200, body: JOUR_CLEANER, delay: 600 },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_CLEANER, delay: 2000 },
   ], { pinToken: 'jeton-pin' });
   await page.evaluate(() => {
     sessionStorage.setItem('v3ViewAs', JSON.stringify({ id: '4', name: 'Amina', viewerId: '1' }));
@@ -336,7 +336,7 @@ test('une cleaner ne voit ni selecteur ni bandeau, et ses gestes ecrivent toujou
     { match: 'action=v3.startJob', status: 200, body: { status: 'success', startedAt: new Date().toISOString() } },
   ], { pinToken: 'jeton-pin', hash: '#/profile' });
   await expect(page.getByRole('heading', { name: 'Faiza' })).toBeVisible();
-  await expect(page.getByText("View a cleaner's day")).toHaveCount(0);
+  await expect(page.getByText('Try the cleaner app')).toHaveCount(0);
   await expect(page.locator('.viewas')).toHaveCount(0);
   await page.evaluate(() => { location.hash = '#/today'; });
   await expect(page.locator('.viewas')).toHaveCount(0);

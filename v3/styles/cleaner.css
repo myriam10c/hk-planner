@@ -111,4 +111,23 @@
 .btn-view { width: 100%; min-height: 52px; margin: 9px 0 0; border-radius: 14px; border: 1.5px solid var(--ink); background: transparent; color: var(--ink); font-size: 16px; font-weight: 800; cursor: pointer; }
 .btn-start[disabled], .jobactions button[disabled] { opacity: .45; cursor: not-allowed; }
 .crow[disabled] { cursor: default; color: inherit; }
-.team .stop[aria-current="true"] .pill { background: var(--ink); color: var(--bone); }
+
+/* --- Try the cleaner app (Profile d'un manager) ---
+   Une ligne par membre : Practice en principal, View en secondaire. */
+.member { display: flex; align-items: center; gap: 9px; padding: 12px 18px; border-top: 1px solid var(--line); min-height: 74px; }
+.member .tx { min-width: 0; flex: 1 1 auto; }
+.member .tx b { display: block; font-size: 16px; font-weight: 700; line-height: 1.22; overflow-wrap: anywhere; }
+.member .tx span { display: block; margin-top: 4px; font-size: 14px; font-weight: 600; color: var(--mute); }
+.member button { flex: 0 0 auto; min-height: 44px; padding: 0 13px; border-radius: 11px; font-size: 14px; font-weight: 800; cursor: pointer; }
+.mb-practice { border: 0; background: var(--terra); color: #FFF; }
+.mb-view { border: 1.5px solid var(--ink); background: transparent; color: var(--ink); }
+.member button[aria-current="true"] { box-shadow: 0 0 0 3px var(--bone), 0 0 0 5px var(--ink); }
+
+/* --- Practice (manager, gestes simules) ---
+   Jaune de signalisation, propre a ce mode, pour qu'on ne le confonde jamais
+   avec la lecture seule (encre) ni avec l'app d'une vraie cleaner. Encre sur
+   jaune : 12,9:1 ; Exit en jaune sur encre, meme rapport. Dans le flux comme le
+   bandeau View : il ne recouvre ni la barre du bas ni les actions du Job. */
+.practicebar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 18px; background: var(--practice); color: var(--ink); font-size: 13.5px; font-weight: 800; border-bottom: 3px dashed var(--ink); }
+.practicebar span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.practicebar button { flex: 0 0 auto; min-height: 44px; min-width: 64px; padding: 0 14px; border-radius: 11px; border: 0; background: var(--ink); color: var(--practice); font-size: 14px; font-weight: 800; cursor: pointer; }

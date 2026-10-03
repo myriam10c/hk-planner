@@ -14,7 +14,7 @@ test('le service worker v3 precache la coquille, les modules et les polices', as
   const source = await r.text();
   for (const chemin of [
     '/v3/', '/v3/index.html', '/v3/app.js', '/v3/api.js', '/v3/offline.js', '/v3/ui.js',
-    '/v3/photo.js',
+    '/v3/photo.js', '/v3/practice.js',
     '/v3/screens/today.js', '/v3/screens/job.js', '/v3/screens/finish.js',
     '/v3/screens/report.js', '/v3/screens/profile.js',
     '/v3/styles/tokens.css', '/v3/styles/cleaner.css',

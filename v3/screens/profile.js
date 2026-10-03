@@ -1,7 +1,8 @@
 // Profile : qui je suis, la porte vers les ecrans que la v3 ne refait pas encore
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
-import { CLE_VIEW_AS, queueStrip, render, startViewAs } from '/v3/app.js';
+import { CLE_VIEW_AS, practicing, queueStrip, render, startPractice, startViewAs } from '/v3/app.js';
+import { practiceOff } from '/v3/practice.js';
 import { clearDead, deadEntries, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
 import { esc, icon } from '/v3/ui.js';
@@ -21,20 +22,27 @@ function refuses(state) {
   return h;
 }
 
-// Selecteur « View as », pour un manager seulement : le proxy ne rend `team`
-// qu'a une session de role manager. Une ligne par membre ; la personne regardee
-// en ce moment est marquee, et un appui sur une autre ligne bascule directement.
+// Selecteur « Try the cleaner app », pour un manager seulement : le proxy ne
+// rend `team` qu'a une session de role manager. Une ligne par membre, deux
+// boutons : Practice (tous ses gestes, rien d'enregistre, tache 2) et View (la
+// lecture seule de la tache 1). Le mode en cours est marque sur son bouton, et
+// un appui sur un autre bouton bascule directement, en repartant du reel.
 function selecteurEquipe(state) {
   const team = (state.day && state.day.team) || [];
   if (!Array.isArray(team) || team.length === 0) return '';
   const actuel = state.viewAs ? String(state.viewAs.id) : '';
-  let h = '<div class="team"><p class="sec-lab">View a cleaner\'s day</p>';
+  const enPractice = practicing(state);
+  let h = '<div class="team"><p class="sec-lab">Try the cleaner app</p>';
   team.forEach(function (m) {
     const ici = String(m.id) === actuel;
-    h += '<button class="stop" type="button" data-act="viewas" data-id="' + esc(m.id) + '" ' +
-      'data-name="' + esc(m.name) + '"' + (ici ? ' aria-current="true"' : '') + '>' +
+    const attrs = 'data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '"';
+    h += '<div class="member"' + (ici ? ' data-current="true"' : '') + '>' +
       '<span class="tx"><b>' + esc(m.name) + '</b><span>' + esc(m.role) + '</span></span>' +
-      '<span class="pill">' + (ici ? 'Viewing' : 'View') + '</span></button>';
+      '<button class="mb-practice" type="button" data-act="practice" ' + attrs +
+        ' aria-label="Practice as ' + esc(m.name) + '"' + (ici && enPractice ? ' aria-current="true"' : '') + '>Practice</button>' +
+      '<button class="mb-view" type="button" data-act="viewas" ' + attrs +
+        ' aria-label="View ' + esc(m.name) + '\'s day"' + (ici && !enPractice ? ' aria-current="true"' : '') + '>View</button>' +
+      '</div>';
   });
   // La liste prend toute la largeur, hors du padding du bloc Profile : on ferme
   // ce bloc et on le rouvre autour d'elle.
@@ -139,6 +147,9 @@ const actions = {
   viewas(state, el) {
     return startViewAs({ id: el.getAttribute('data-id'), name: el.getAttribute('data-name') });
   },
+  practice(state, el) {
+    return startPractice({ id: el.getAttribute('data-id'), name: el.getAttribute('data-name') });
+  },
   async 'clear-dead'(state) {
     await clearDead();
     state.dead = [];
@@ -150,6 +161,9 @@ const actions = {
   async signout() {
     if (deconnexionEnCours) return;
     deconnexionEnCours = true;
+    // 0. La seance Practice se ferme d'abord : la deconnexion est reelle, le
+    // desabonnement push compris, et rien de simule ne survit a la sortie.
+    practiceOff();
     // 1. Le desabonnement push d'abord : il exige la session encore vivante.
     try { await desabonnerPush(); } catch (e) { /* jamais une raison de retenir la sortie */ }
     // 2. Revocation cote serveur. L'action cleanerLogout du proxy ne lit QUE

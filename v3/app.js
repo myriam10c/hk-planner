@@ -4,6 +4,7 @@
 import { api, ApiError, readSession } from '/v3/api.js';
 import { flush, onQueueChange, pendingCount, watchNetwork } from '/v3/offline.js';
 import { onSessionRenewed } from '/v3/session.js';
+import { practiceActive, practiceDay, practiceOff, practiceOn } from '/v3/practice.js';
 import { closeSheet, esc, icon, sheetIsOpen, toast } from '/v3/ui.js';
 import today from '/v3/screens/today.js';
 import job from '/v3/screens/job.js';
@@ -30,7 +31,8 @@ export const state = {
   reportStop: null,     // l'arret que ce signalement concerne
   dead: [],             // actions refusees par le proxy, lues par l'ecran Profile
   prepared: false,      // l'ecran courant a deja charge ce dont il a besoin
-  viewAs: null,         // {id, name} : un manager regarde la journee de quelqu'un
+  viewAs: null,         // {id, name, viewerId, confirmed, practice} : un manager
+                        // regarde (ou, en Practice, rejoue) la journee de quelqu'un
 };
 
 // Mode « View as » : un manager regarde la journee d'une cleaner, en lecture
@@ -52,7 +54,10 @@ function lireViewAs() {
   try {
     const v = JSON.parse(sessionStorage.getItem(CLE_VIEW_AS) || 'null');
     if (!v || !/^\d+$/.test(String(v.id)) || !/^\d+$/.test(String(v.viewerId))) return null;
-    return { id: String(v.id), name: String(v.name || ''), viewerId: String(v.viewerId), confirmed: false };
+    return {
+      id: String(v.id), name: String(v.name || ''), viewerId: String(v.viewerId), confirmed: false,
+      practice: v.practice === true,
+    };
   } catch (e) {
     return null;
   }
@@ -60,7 +65,11 @@ function lireViewAs() {
 
 function ecrireViewAs(v) {
   try {
-    if (v) sessionStorage.setItem(CLE_VIEW_AS, JSON.stringify({ id: v.id, name: v.name, viewerId: v.viewerId }));
+    if (v) {
+      sessionStorage.setItem(CLE_VIEW_AS, JSON.stringify({
+        id: v.id, name: v.name, viewerId: v.viewerId, practice: v.practice === true,
+      }));
+    }
     else sessionStorage.removeItem(CLE_VIEW_AS);
   } catch (e) { /* stockage indisponible : le mode vit le temps de la page */ }
 }
@@ -74,9 +83,20 @@ function identiteLocale() {
   }
 }
 
+// Toute sortie du mode emporte la seance Practice et ce qu'elle a simule :
+// Exit, Sign out, perte de session, changement de personne, refus du proxy.
 function oublierViewAs() {
   state.viewAs = null;
   ecrireViewAs(null);
+  practiceOff();
+}
+
+// Mode Practice (tache 2) : meme journee que « View as » (v3.myDay?as=<id>),
+// mais tous les gestes de la cleaner, servis par le simulateur de
+// /v3/practice.js au point de passage unique d'api.js. Rien n'est enregistre.
+export function practicing(st) {
+  const s = st || state;
+  return !!(s.viewAs && s.viewAs.practice);
 }
 
 // Toute perte de session emporte le mode : il n'appartient qu'a elle.
@@ -87,8 +107,10 @@ function perdreSession() {
 
 // Vrai des que l'une des deux sources le dit : le choix local (avant meme la
 // reponse du proxy) ou le payload. Les deux gardes vont dans le sens ferme.
+// En Practice, les gestes sont rendus : ils ne quittent jamais le telephone.
 export function readOnly(st) {
   const s = st || state;
+  if (s.viewAs && s.viewAs.practice) return false;
   return !!s.viewAs || !!(s.day && s.day.viewAs);
 }
 
@@ -104,14 +126,20 @@ const GESTES_ECRITURE = new Set([
 export function currentMode() {
   if (state.viewAs && state.viewAs.confirmed) {
     const jour = state.day && state.day.viewAs ? state.day : null;
-    return { kind: 'viewAs', name: (jour && jour.me && jour.me.name) || state.viewAs.name };
+    return {
+      kind: state.viewAs.practice ? 'practice' : 'viewAs',
+      name: (jour && jour.me && jour.me.name) || state.viewAs.name,
+    };
   }
   return null;
 }
 
 const BANDEAUX = {
   viewAs: function (mode) {
-    return { text: 'Viewing ' + mode.name + '\'s day · read only', act: 'viewas-exit', label: 'Exit' };
+    return { cls: 'viewas', text: 'Viewing ' + mode.name + '\'s day · read only', act: 'viewas-exit', label: 'Exit' };
+  },
+  practice: function (mode) {
+    return { cls: 'practicebar', text: 'Practice as ' + mode.name + ' · nothing is saved', act: 'viewas-exit', label: 'Exit' };
   },
 };
 
@@ -121,11 +149,13 @@ export function modeBar(mode) {
   const m = mode === undefined ? currentMode() : mode;
   const b = m && BANDEAUX[m.kind] ? BANDEAUX[m.kind](m) : null;
   if (!b) return '';
-  return '<div class="viewas" role="status" data-mode="' + esc(m.kind) + '"><span>' + esc(b.text) + '</span>' +
+  return '<div class="' + esc(b.cls) + '" role="status" data-mode="' + esc(m.kind) + '"><span>' + esc(b.text) + '</span>' +
     '<button type="button" data-act="' + esc(b.act) + '">' + esc(b.label) + '</button></div>';
 }
 
-export function startViewAs(membre) {
+// `practice` : Practice plutot que la lecture seule. Choisir un membre, dans un
+// mode ou dans l'autre, repart toujours de sa journee reelle.
+export function startViewAs(membre, practice) {
   const jour = state.day || {};
   // Le manager qui choisit : lui-meme sur sa journee, ou celui qui regarde deja.
   const viewer = jour.viewAs && jour.viewer ? jour.viewer.id : (jour.me && jour.me.id);
@@ -135,12 +165,19 @@ export function startViewAs(membre) {
     // Choisi a l'instant dans cette page : l'identite est celle de la journee
     // affichee, le bandeau peut paraitre des le chargement.
     confirmed: true,
+    practice: practice === true,
   };
   ecrireViewAs(state.viewAs);
+  practiceOff();
+  if (state.viewAs.practice) practiceOn(state.viewAs, false);
   state.jobId = null;
   state.finished = null;
   if (location.hash !== '#/today') location.hash = '#/today';
   return loadDay();
+}
+
+export function startPractice(membre) {
+  return startViewAs(membre, true);
 }
 
 export function exitViewAs() {
@@ -148,6 +185,8 @@ export function exitViewAs() {
   state.jobId = null;
   state.finished = null;
   if (location.hash !== '#/today') location.hash = '#/today';
+  // Une vraie entree en file a pu attendre la fin d'une seance Practice.
+  if (navigator.onLine) flush();
   return loadDay();
 }
 
@@ -226,7 +265,8 @@ export function render() {
 
 // Bandeau « Saved on device » : une seule formulation, celle de la maquette.
 export function queueStrip() {
-  if (!state.queued) return '';
+  // En Practice, rien n'entre en file : le bandeau ferait croire le contraire.
+  if (!state.queued || practicing()) return '';
   return '<div class="offstrip"><i></i><span>Saved on device, ' + state.queued +
     ' to sync</span></div>';
 }
@@ -292,6 +332,9 @@ export async function loadDay() {
         return loadDay();
       }
       vue.confirmed = true;
+      // Practice : l'avancement simule recouvre la journee reelle, comme le
+      // proxy rendrait ce qu'il aurait ecrit.
+      if (vue.practice && practiceActive()) practiceDay(data);
     }
     state.day = data;
     // Au premier chargement, l'arret ouvert vient du fragment d'URL et non d'un
@@ -427,7 +470,9 @@ export async function boot() {
   state.viewAs = state.session ? lireViewAs() : null;
   const qui = identiteLocale();
   if (state.viewAs && qui && qui !== state.viewAs.viewerId) state.viewAs = null;
-  if (!state.viewAs) ecrireViewAs(null);
+  if (!state.viewAs) oublierViewAs();
+  // Practice relu : la seance reprend son avancement, avant tout appel.
+  else if (state.viewAs.practice) practiceOn(state.viewAs, true);
   if (!state.session) {
     state.loading = false;
     render();
