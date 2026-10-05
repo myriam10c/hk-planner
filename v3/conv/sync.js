@@ -23,6 +23,18 @@ import { LINEN_USUAL } from "./rules.js";
 // Types que le proxy accepte sans photo (V3_PHOTO_OPTIONAL_KINDS côté serveur).
 export const PHOTO_OPTIONAL = ["Gas smell", "Can't get in", "AC not working", "Gas not working", "Wi-Fi not working"];
 
+// Qui écrit (tâche 6 du branchement), seule garde de app.js : « real » = la personne connectée,
+// sur sa propre journée, par la file hors ligne ; « practice » = le simulateur local de
+// practice.js, rien ne sort ; « none » = View as (lecture seule), pas de session, ou un mode
+// Practice dont la séance est fermée. Une journée rendue pour une autre personne (dayViewAs)
+// n'écrit jamais, même si le téléphone a perdu la trace du mode.
+export function writeMode({ session, viewAs, dayViewAs, practiceActive }) {
+  if (!session) return "none";
+  if (viewAs && viewAs.practice) return practiceActive ? "practice" : "none";
+  if (viewAs || dayViewAs || practiceActive) return "none";
+  return "real";
+}
+
 function ensureSync(conv) {
   if (!conv.sync) conv.sync = { started: null, photos: {}, problems: {}, finish: null, idems: {}, acked: {} };
   return conv.sync;
@@ -37,7 +49,8 @@ function ticketRef(s, idem) {
 }
 
 export function syncPlan(conv, { newIdem, active = true } = {}) {
-  if (!active || !conv) return [];
+  // Conversation en lecture seule (View as) : jamais d'écriture, quel que soit l'appelant.
+  if (!active || !conv || conv.readOnly) return [];
   const s = ensureSync(conv);
   const out = [];
   const jobId = conv.apt.id;
@@ -124,7 +137,7 @@ export function syncPlan(conv, { newIdem, active = true } = {}) {
 // le linge et le rapport. Aide : à « Add to <lead>'s report », sans linge ni rapport. Après un
 // refus « linge » (requireLinen) : le linge seul. Une seule fin par conversation.
 export function finishPlan(conv, { newIdem, active = true, now = new Date() } = {}) {
-  if (!active || !conv) return [];
+  if (!active || !conv || conv.readOnly) return [];
   const s = ensureSync(conv);
   if (s.finish) return [];
   const idem = newIdem();

@@ -6,12 +6,12 @@ import { bootV3, fetchLog, noHorizontalScroll } from './helpers';
 // (v3/practice.js) repond a la place du proxy, au point de passage unique
 // d'api.js : aucune ecriture ne part, rien n'entre dans la file hors ligne.
 //
-// Depuis le portage de l'interface conversation (tache 4 du plan 2026-10-05),
-// la journee est la liste du prototype et aucun geste de l'ecran n'ecrit encore.
-// Les parcours qui passaient par l'ancien ecran Job (Start, cases, photos de
-// ligne, Finish) sont marques fixme : la tache 6 les reecrit sur la
-// conversation (gestes simules, avancement qui survit au rechargement). Les
-// gardes du simulateur et de la file, appelees par les modules, restent testees.
+// Depuis la tache 6 du plan 2026-10-05, les gestes sont ceux de l'app
+// conversation : chaque action que la vraie conversation mettrait en file
+// (startJob, uploadPhoto, reportProblem, addProblemPhoto, setProblemNote,
+// finishJob...) est servie par le simulateur, dans l'ordre, et la bulle passe a
+// ✓✓ sur sa reponse. Rien ne part au proxy hors v3.myDay, rien n'entre en file,
+// rien n'est partage, et la conversation simulee vit a part (v3PracticeConvs).
 const TEAM = [
   { id: 4, name: 'Amina', role: 'cleaner' },
   { id: 6, name: 'Elite', role: 'subcontractor' },
@@ -86,10 +86,56 @@ async function practiceFaiza(page: any, opts: { hash?: string; routes?: any[] } 
   await expect(page.locator('.row-name').first()).toHaveText('623 Samana Park View');
 }
 
-async function photo(page: any, cible: any, nom = 'shot.png', type = 'image/png', octets?: Buffer) {
+// Pas de camera dans le harnais : repli champ fichier, comme pour les tests des
+// ecritures. Le partage est observe (il ne doit jamais s'ouvrir en Practice).
+async function sansCamera(page: any) {
+  await page.addInitScript(() => {
+    (window as any).__gum = 0;
+    if (navigator.mediaDevices) {
+      navigator.mediaDevices.getUserMedia = async () => {
+        (window as any).__gum += 1;
+        throw new DOMException('denied', 'NotAllowedError');
+      };
+    }
+    (window as any).__shared = [];
+    (navigator as any).share = async (d: any) => { (window as any).__shared.push(d.text); };
+    (navigator as any).canShare = () => true;
+  });
+}
+
+async function photo(page: any, act = 'shutter') {
   const chooser = page.waitForEvent('filechooser');
-  await cible.click();
-  await (await chooser).setFiles({ name: nom, mimeType: type, buffer: octets ?? Buffer.from(PNG_1x1, 'base64') });
+  await page.locator('[data-act="' + act + '"]').click();
+  await (await chooser).setFiles({ name: 'p.png', mimeType: 'image/png', buffer: Buffer.from(PNG_1x1, 'base64') });
+}
+
+async function piece(page: any, step: number, nom: string) {
+  await expect(page.locator('.vf-top b')).toHaveText(new RegExp('^Step ' + step + ' · ' + nom + ' '));
+  await photo(page);
+  await expect(page.locator('.vf .count')).toHaveText('1 photo');
+  await page.locator('.vf [data-reply="next-room"]').click();
+}
+
+// Etat du simulateur (sessionStorage), pour verifier ce qu'il a « ecrit ».
+async function seance(page: any) {
+  return await page.evaluate(() => JSON.parse(sessionStorage.getItem('v3PracticeState') || 'null'));
+}
+
+// Rien de la vraie conversation : ni v3Convs (sessionStorage, IndexedDB), ni photo gardee.
+async function rienDeReel(page: any) {
+  return await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    const fichiers = await new Promise<number>((res) => {
+      const r = indexedDB.open('hk-v3');
+      r.onsuccess = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains('files')) { db.close(); res(0); return; }
+        const c = db.transaction('files').objectStore('files').count();
+        c.onsuccess = () => { db.close(); res(c.result); };
+      };
+    });
+    return { session: sessionStorage.getItem('v3Convs'), idb: await m.getState('v3Convs'), fichiers };
+  });
 }
 
 test('1. entree : Profile propose Practice et View pour chaque membre', async ({ page }) => {
@@ -220,7 +266,63 @@ test('3. parcourir un menage en Practice ne fait partir rien', async ({ page }) 
   await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);
 });
 
-test.fixme('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part (tache 6 : gestes de la conversation)', async () => {});
+test('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part', async ({ page }) => {
+  await sansCamera(page);
+  await practiceFaiza(page);
+  await page.getByRole('button', { name: /704 Golf Links/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
+  await page.locator('[data-reply="walls-ok"]').click();
+  // Un probleme avec photo et note : signale, photo rattachee, note.
+  await page.locator('[data-reply="some-damage"]').click();
+  await page.locator('[data-kind="Leak"]').click();
+  await photo(page, 'flow-shutter');
+  await photo(page, 'flow-shutter');
+  await page.locator('[data-flow="photos-done"]').click();
+  await page.locator('#problem-note').fill('under the sink');
+  await page.locator('[data-flow="save-text"]').click();
+  await expect(page.locator('.msg.me.problem .ticks').first()).toHaveText('✓✓');
+  // Un probleme sans photo : il reste dans le rapport, comme pour la cleaner.
+  await page.locator('[data-reply="another-problem"]').click();
+  await page.locator('[data-kind="Broken"]').click();
+  await page.locator('[data-flow="no-photo"]').click();
+  await expect(page.getByText('No photo: this problem stays in your report.', { exact: false })).toBeVisible();
+  await page.locator('[data-flow="no-note"]').click();
+  await page.locator('[data-reply="damage-done"]').click();
+  await page.locator('[data-reply="linen-yes"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
+  // AC en panne depuis la ligne de sortie : photo facultative, signale tout de suite.
+  for (const k of ['gas', 'ac-ko', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
+  await page.locator('[data-reply="low-done"]').click();
+  await page.locator('[data-reply="send"]').click();
+  await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
+  await expect(page.getByText('Practice: nothing is shared.', { exact: false })).toBeVisible();
+  // Toutes les bulles de la cleaner a ✓✓ : le simulateur a repondu a chaque geste. Seul le
+  // probleme sans photo reste a ✓ : il n'est jamais parti (comme pour la cleaner).
+  const simples = page.locator('.msg.me').filter({ has: page.locator('.ticks', { hasText: /^✓$/ }) });
+  await expect(simples).toHaveCount(1);
+  await expect(simples).toContainText('Broken');
+  expect(await page.locator('.msg.me .ticks').count()).toBeGreaterThan(10);
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(page.getByRole('button', { name: /704 Golf Links/ }).locator('.row-sub')).toHaveText('Report sent ✓✓');
+
+  // Le simulateur a tout recu, dans les formes du proxy.
+  const s = await seance(page);
+  const tickets = Object.values(s.tickets).filter((t: any) => t.created).map((t: any) => [t.title, t.priority, t.status]);
+  expect(tickets).toEqual([['Leak · Whole apartment', 'medium', 'open'], ['AC not working · Whole apartment', 'medium', 'open']]);
+  expect((Object.values(s.tickets)[0] as any).note).toBe('under the sink');
+  expect(Object.keys(s.photos).length).toBe(8);
+  expect(s.jobs['job_bbbbbbbbbbbbbbbbbbbb']).toMatchObject({ state: 'done', report: true });
+
+  // Rien n'est parti : ni ecriture, ni file, ni magasin mort, ni partage, ni sauvegarde reelle.
+  expect(await appelsInterdits(page)).toEqual([]);
+  expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
+  expect(await page.evaluate(() => (window as any).__shared)).toEqual([]);
+  expect(await rienDeReel(page)).toEqual({ session: null, idb: null, fichiers: 0 });
+  await expect(page.getByText('forbidden')).toHaveCount(0);
+  await expect(page.getByText('Not sent', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);
+});
 
 test('3b. le simulateur rend les refus du serveur avec le meme texte', async ({ page }) => {
   await practiceFaiza(page);
@@ -237,8 +339,18 @@ test('3b. le simulateur rend les refus du serveur avec le meme texte', async ({ 
       checked: await essai('v3.tick', { jobId: 'job_bbbbbbbbbbbbbbbbbbbb', itemId: 'Bathroom', checked: 'yes', idem: idem() }),
       ticketSansPhoto: await essai('v3.checkTicket', { ticketId: 71, idem: idem() }),
       ticketInconnu: await essai('v3.checkTicket', { ticketId: 999, photoId: 5, idem: idem() }),
-      photoInconnue: await essai('v3.reportProblem', { jobId: 'job_bbbbbbbbbbbbbbbbbbbb', listingId: '101', category: 'ac', photoId: 123456, idem: idem() }),
-      categorie: await essai('v3.reportProblem', { listingId: '101', category: 'constructor', photoId: 5, idem: idem() }),
+      photoInconnue: await essai('v3.reportProblem', { jobId: 'job_bbbbbbbbbbbbbbbbbbbb', listingId: '101', kind: 'AC', urgency: 'soon', photoId: 123456, idem: idem() }),
+      ancienContrat: await essai('v3.reportProblem', { listingId: '101', category: 'ac', photoId: 5, idem: idem() }),
+      categorie: await essai('v3.reportProblem', { listingId: '101', kind: 'constructor', urgency: 'soon', photoId: 5, idem: idem() }),
+      sansPhoto: await essai('v3.reportProblem', { jobId: 'job_bbbbbbbbbbbbbbbbbbbb', listingId: '101', kind: 'Leak', urgency: 'soon', idem: idem() }),
+      gazSansPhoto: await essai('v3.reportProblem', { jobId: 'job_bbbbbbbbbbbbbbbbbbbb', listingId: '101', kind: 'Gas smell', urgency: 'urgent', idem: idem() }),
+      urgence: await essai('v3.reportProblem', { listingId: '101', kind: 'Leak', urgency: 'now', idem: idem() }),
+      pasAMoi: await essai('v3.addProblemPhoto', { ticketId: 71, photoId: 5, idem: idem() }),
+      ticketIdemInconnu: await essai('v3.setProblemNote', { ticketIdem: 'inconnue-00001', note: 'x', idem: idem() }),
+      noteAbsente: await essai('v3.setProblemNote', { ticketId: 71, idem: idem() }),
+      rienAChanger: await essai('v3.updateProblem', { ticketId: 71, idem: idem() }),
+      photoEffacee: await essai('v3.deletePhoto', { photoId: 'abc', idem: idem() }),
+      rapport: await essai('v3.finishJob', { jobId: 'job_bbbbbbbbbbbbbbbbbbbb', idem: idem(), report: [1] }),
       linge: await essai('v3.finishJob', { jobId: 'job_bbbbbbbbbbbbbbbbbbbb', idem: idem(), linen: { bed_sheets: 1 } }),
       autre: await essai('deletePushSubscription', { endpoint: 'x' }),
     };
@@ -249,14 +361,67 @@ test('3b. le simulateur rend les refus du serveur avec le meme texte', async ({ 
   expect(refus.ticketSansPhoto).toBe('server 400 photoId required');
   expect(refus.ticketInconnu).toBe('server 400 ticket not found');
   expect(refus.photoInconnue).toBe('server 400 photo not found');
-  expect(refus.categorie).toBe('server 400 unknown category');
+  expect(refus.ancienContrat).toBe('server 400 unknown kind');
+  expect(refus.categorie).toBe('server 400 unknown kind');
+  expect(refus.sansPhoto).toBe('server 400 photo required');
+  expect(refus.gazSansPhoto).toBe('ok');
+  expect(refus.urgence).toBe('server 400 invalid urgency');
+  expect(refus.pasAMoi).toBe('server 403 not your problem');
+  expect(refus.ticketIdemInconnu).toBe('server 400 ticket not found');
+  expect(refus.noteAbsente).toBe('server 400 note required');
+  expect(refus.rienAChanger).toBe('server 400 nothing to update');
+  expect(refus.photoEffacee).toBe('server 400 Invalid photo id.');
+  expect(refus.rapport).toBe('server 400 report must be an object');
   expect(refus.linge).toBe('server 400 pillowcases must be an integer');
   expect(refus.autre).toBe('server 400 Not available in practice');
   expect(await appelsInterdits(page)).toEqual([]);
   expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
 });
 
-test.fixme('5. l avancement survit a la navigation et au rechargement, Exit et Re-entrer repartent du reel (tache 6)', async () => {});
+test('5. l avancement survit a la navigation et au rechargement, Exit et Re-entrer repartent du reel', async ({ page }) => {
+  await sansCamera(page);
+  await practiceFaiza(page);
+  await page.getByRole('button', { name: /704 Golf Links/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  await piece(page, 1, 'Bed');
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Bathroom /);
+
+  // Navigation : la liste, Profile, puis retour au menage.
+  await page.locator('[data-act="close-camera"]').click();
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(page.getByRole('button', { name: /704 Golf Links/ }).locator('.row-sub')).toContainText('Step 1 of 5');
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await expect(page.locator('.practicebar')).toBeVisible();
+  await page.evaluate(() => { location.hash = '#/today'; });
+  await page.getByRole('button', { name: /704 Golf Links/ }).click();
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Bathroom /);
+
+  // Rechargement de l'onglet, au milieu du menage : meme ecran, meme etape.
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('v3PracticeConvs'))).toContain('job_bbbbbbbbbbbbbbbbbbbb');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
+  await expect(page.locator('.practicebar')).toContainText('Practice as Faiza · nothing is saved');
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Bathroom /);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toContain('job_bbbbbbbbbbbbbbbbbbbb');
+  // La seance continue : le simulateur repond toujours (✓✓).
+  await piece(page, 1, 'Bathroom');
+  await page.locator('[data-act="close-camera"]').click();
+  await expect(page.locator('.msg.me.photo .ticks').last()).toHaveText('✓✓');
+  expect(await rienDeReel(page)).toEqual({ session: null, idb: null, fichiers: 0 });
+
+  // Exit puis Practice a nouveau : la journee reelle, sans rien de simule.
+  await page.getByRole('button', { name: 'Exit' }).click();
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
+  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeConvs'))).toBeNull();
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await page.getByRole('button', { name: 'Practice as Faiza' }).click();
+  await expect(page.getByRole('button', { name: /704 Golf Links/ }).locator('.row-sub')).not.toContainText('Step');
+  await page.getByRole('button', { name: /704 Golf Links/ }).click();
+  await expect(page.locator('[data-reply="here"]')).toBeVisible();
+  expect(await appelsInterdits(page)).toEqual([]);
+  expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
+});
 
 test('5b. changer de membre et Sign out effacent la seance', async ({ page }) => {
   await practiceFaiza(page);
@@ -289,7 +454,33 @@ test('5b. changer de membre et Sign out effacent la seance', async ({ page }) =>
   expect(log.filter((l) => /action=v3\.(startJob|tick|uploadPhoto|finishJob|reportProblem|checkTicket)/.test(l.url))).toEqual([]);
 });
 
-test.fixme('6. hors ligne, les gestes marchent et aucun bandeau Saved on device (tache 6)', async () => {});
+test('6. hors ligne, les gestes marchent et aucun bandeau Saved on device', async ({ page }) => {
+  await sansCamera(page);
+  await practiceFaiza(page);
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await page.getByRole('button', { name: /704 Golf Links/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
+  await page.locator('[data-reply="walls-ok"]').click();
+  await page.locator('[data-reply="no-damage"]').click();
+  await page.locator('[data-reply="linen-yes"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
+  for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
+  await page.locator('[data-reply="low-done"]').click();
+  await page.locator('[data-reply="send"]').click();
+  await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
+  await expect(page.locator('.msg.me .ticks').filter({ hasText: /^✓$/ })).toHaveCount(0);
+  await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);
+  expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
+  // Retour du reseau : aucun rejeu, rien a rejouer.
+  await page.evaluate(() => {
+    localStorage.removeItem('v3TestOffline');
+    window.dispatchEvent(new Event('online'));
+  });
+  await page.waitForTimeout(400);
+  expect(await appelsInterdits(page)).toEqual([]);
+  expect(await rienDeReel(page)).toEqual({ session: null, idb: null, fichiers: 0 });
+});
 
 test('6b. Practice ne rejoue pas la file reelle, et sendOrQueue n y met rien', async ({ page }) => {
   await practiceFaiza(page);
@@ -326,10 +517,36 @@ const JOUR_CLEANER = {
   linenRequired: true, totalMinutes: 212, stops: [STOP_FAIZA, STOP_FAIZA_2],
 };
 
-const ECRITURES = /action=v3\.(startJob|tick|uploadPhoto|finishJob|reportProblem|checkTicket)/;
+const ECRITURES = /action=v3\.(startJob|tick|uploadPhoto|finishJob|reportProblem|checkTicket|addProblemPhoto|setProblemNote|updateProblem|deleteProblem|deletePhoto)/;
 
 for (const horsLigne of [false, true]) {
-  test.fixme('constat 1 : Exit pendant la prise de photo, la photo ne part pas' + (horsLigne ? ' (hors ligne)' : '') + ' (tache 6)', async () => {});
+  test('constat 1 : Exit pendant la prise de photo, la photo ne part pas' + (horsLigne ? ' (hors ligne)' : ''), async ({ page }) => {
+    await sansCamera(page);
+    await practiceFaiza(page);
+    await page.getByRole('button', { name: /704 Golf Links/ }).click();
+    await page.locator('[data-reply="here"]').click();
+    await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Bed /);
+    if (horsLigne) await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+    // Le selecteur de fichier est ouvert : la photo n'est pas encore choisie.
+    const chooser = page.waitForEvent('filechooser');
+    await page.locator('[data-act="shutter"]').click();
+    const fc = await chooser;
+    // Exit pendant l'attente (le viseur ferme pour atteindre le bandeau), puis la photo arrive.
+    await page.locator('[data-act="close-camera"]').click();
+    await page.getByRole('button', { name: 'Exit' }).click();
+    await expect(page.locator('.practicebar')).toHaveCount(0);
+    await fc.setFiles({ name: 'shot.png', mimeType: 'image/png', buffer: Buffer.from(PNG_1x1, 'base64') });
+    await page.waitForTimeout(1200);
+    const log = await fetchLog(page);
+    expect(log.filter((l) => l.url.indexOf('action=v3.uploadPhoto') !== -1)).toEqual([]);
+    expect(log.filter((l) => ECRITURES.test(l.url))).toEqual([]);
+    expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
+    expect(await rienDeReel(page)).toEqual({ session: null, idb: null, fichiers: 0 });
+    expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeConvs'))).toBeNull();
+    await expect(page.getByText('forbidden')).toHaveCount(0);
+    await expect(page.getByText('Not sent', { exact: false })).toHaveCount(0);
+    await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);
+  });
 
   test('constat 1 : api.js refuse une ecriture nee d une seance Practice finie' + (horsLigne ? ' (hors ligne)' : ''), async ({ page }) => {
     await practiceFaiza(page);
