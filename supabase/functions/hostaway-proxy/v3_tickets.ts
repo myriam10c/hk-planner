@@ -8,80 +8,39 @@
 // cle interne « <date>_<guest> », qui ne quitte jamais le proxy.
 import type { SessionUser } from "./auth.ts";
 import {
-  ActionResult, claimEvent, managerIds, onDutyTechnician, recordResult, releaseEvent,
-  replayResponse, resolveJob, todayDubai, V3_CATEGORIES, v3Log, validIdem,
+  ActionResult, claimEvent, onDutyTechnician, ownKey, recordResult, releaseEvent,
+  replayResponse, resolveJob, todayDubai, V3_PHOTO_OPTIONAL_KINDS, V3_PROBLEM_KINDS,
+  V3_URGENCY_PRIORITY, v3Log, validIdem,
 } from "./v3.ts";
+import { ownedPhoto, resolvePhotoId, sansEchec } from "./v3_photos.ts";
+import { cleanNote, cleanWhere, notifyProblem, problemTitle } from "./v3_problems.ts";
+import type { PushFn } from "./v3_problems.ts";
 import { sendPush } from "./push.ts";
 
-export { uploadPhoto, V3_MAX_PHOTO_BYTES, V3_MAX_UPLOAD_BODY_BYTES, V3_PHOTO_MIME } from "./v3_photos.ts";
+export {
+  ownedPhoto, resolvePhotoId, uploadPhoto, V3_MAX_PHOTO_BYTES, V3_MAX_UPLOAD_BODY_BYTES,
+  V3_PHOTO_MIME,
+} from "./v3_photos.ts";
+export {
+  addProblemPhoto, cleanNote, cleanWhere, deleteProblem, setProblemNote, updateProblem,
+  V3_PROBLEM_ACTIONS,
+} from "./v3_problems.ts";
+export type { PushFn } from "./v3_problems.ts";
 
 // ===========================================================================
 // Signalement d'une panne et verification d'un ticket pendant un menage
 // ===========================================================================
-
-// L'envoi de push est injecte pour que les tests observent qui est prevenu sans
-// dependre des secrets VAPID ni des heures de silence.
-export type PushFn = (sb: any, cleanerId: number, payload: any, opts?: any) => Promise<any>;
-
-// Priorite d'un signalement de cleaner. Jamais `urgent` : les heures de silence
-// de push.ts (22h00 a 08h30 Dubai) ne laissent passer que l'urgent, et une panne
-// constatee pendant un menage n'a pas a reveiller la permanence la nuit. Un
-// signalement nocturne part donc en notification silencieuse, ce qui est le
-// comportement voulu. La montee en urgence reste une decision de manager, par
-// l'ecran desktop existant.
-export const V3_REPORT_PRIORITY = "medium";
 
 // Statuts dont une cleaner ne fait jamais sortir un ticket. `to_confirm` n'en
 // fait pas partie : re-verifier un ticket deja en attente de confirmation est
 // sans effet de bord.
 export const V3_TICKET_CLOSED = ["resolved", "cancelled"];
 
-// La photo est designee soit par son identifiant (chemin en ligne : la cleaner
-// vient de la televerser), soit par la cle d'idempotence de ce televersement
-// (chemin hors ligne : la file rejoue la photo puis le geste, dans cet ordre, et
-// le second retrouve le premier dans job_events.result).
-export async function resolvePhotoId(sb: any, body: any): Promise<number | null> {
-  if (body?.photoId) {
-    const n = Number(body.photoId);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  }
-  if (!validIdem(body?.photoIdem)) return null;
-  const { data } = await sb.from("job_events")
-    .select("result").eq("idem_key", String(body.photoIdem)).maybeSingle();
-  const pid = data && data.result ? (data.result as any).photoId : null;
-  return pid ? Number(pid) : null;
-}
-
-// Lit la ligne photos et verifie qu'elle appartient bien a la cleaner qui parle.
-// Les identifiants de photos sont des entiers de sequence, donc previsibles : le
-// controle coute zero requete de plus (le chemin de stockage est de toute facon
-// a lire) et il evite qu'un compte attache le cliche d'une autre a un ticket.
-// Rend null dans les deux cas, le telephone n'a rien a faire de la distinction.
-async function ownedPhoto(
-  sb: any, photoId: number, me: SessionUser,
-): Promise<{ storage_path: string } | null> {
-  const { data } = await sb.from("photos")
-    .select("id, storage_path, cleaner_id").eq("id", photoId).maybeSingle();
-  if (!data) return null;
-  if (Number(data.cleaner_id) !== Number(me.cleaner_id)) {
-    console.warn("[v3] photo " + String(photoId) + " refusee: elle n'est pas a " +
-      String(me.cleaner_id));
-    return null;
-  }
-  return data as { storage_path: string };
-}
-
-// Enveloppe une ecriture accessoire : journalisee si elle rate, jamais propagee.
-// A n'utiliser qu'APRES l'ecriture decisive d'une action : passe ce point,
-// liberer la cle ferait recreer le ticket au rejeu (revue tache 6, constat 4).
-async function sansEchec(quoi: string, fn: () => Promise<unknown>): Promise<void> {
-  try {
-    await fn();
-  } catch (e) {
-    console.warn("[v3] " + quoi + ": " + String((e as any)?.message ?? e));
-  }
-}
-
+// Branchement 2026-10-05 (tache 2) : le corps est celui de l'app conversation,
+// { jobId?, listingId, kind, urgency, where, note?, photoId? | photoIdem?, idem }.
+// L'ancien champ `category` n'est plus lu : son seul client est remplace.
+// La priorite vient de l'urgence choisie par la cleaner, et seul `urgent` part
+// en push prioritaire (heures de silence traversees, Global Constraints).
 export async function reportProblem(
   sb: any, me: SessionUser, body: any,
   deps: { push?: PushFn } = {},
@@ -89,18 +48,16 @@ export async function reportProblem(
   const push = deps.push ?? sendPush;
   const jobId = body?.jobId ? String(body.jobId) : null;
   const listingId = body?.listingId ? String(body.listingId) : "";
-  const category = String(body?.category ?? "").toLowerCase();
   const idem = body?.idem;
   if (!listingId) return { status: 400, body: { error: "listingId required" } };
-  // hasOwnProperty et non une simple lecture : « constructor » ou « toString »
-  // sont heritees d'Object.prototype, donc verite pour `!V3_CATEGORIES[category]`,
-  // et le technicien lisait « undefined problem reported » (revue tache 6,
-  // constat 3).
-  const meta = Object.prototype.hasOwnProperty.call(V3_CATEGORIES, category)
-    ? V3_CATEGORIES[category]
-    : null;
-  if (!meta) return { status: 400, body: { error: "unknown category" } };
+  const kind = typeof body?.kind === "string" ? body.kind : "";
+  const cat = ownKey(V3_PROBLEM_KINDS, kind);
+  if (!cat) return { status: 400, body: { error: "unknown kind" } };
+  const priority = ownKey(V3_URGENCY_PRIORITY, body?.urgency);
+  if (!priority) return { status: 400, body: { error: "invalid urgency" } };
   if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
+  const where = cleanWhere(body?.where);
+  const note = cleanNote(body?.note);
   // Un signalement pendant un menage porte un jobId, un signalement depuis l'ecran
   // d'un logement n'en porte pas. Quand il y en a un, il doit designer un menage
   // reel : resolu AVANT la pose de la cle d'idempotence, comme partout ailleurs.
@@ -112,14 +69,18 @@ export async function reportProblem(
     reservationKey = await resolveJob(sb, jobId);
     if (!reservationKey) return { status: 404, body: { error: "Job not found." } };
   }
-  // Photo obligatoire : un signalement sans image repart en aller-retour WhatsApp,
-  // c'est exactement ce que cette action supprime. Resolue AVANT la pose de la cle
-  // d'idempotence, pour qu'un refus ne brule pas la cle.
+  // Photo obligatoire sauf pour les types de V3_PHOTO_OPTIONAL_KINDS (gaz, porte,
+  // et les trois « not working » d'une ligne de verification). Designee mais introuvable, elle est refusee meme pour ces deux types. Resolue
+  // AVANT la pose de la cle d'idempotence, pour qu'un refus ne brule pas la cle.
+  const designee = body?.photoId !== undefined && body?.photoId !== null ||
+    (body?.photoIdem !== undefined && body?.photoIdem !== null);
   const photoId = await resolvePhotoId(sb, body);
-  if (!photoId) return { status: 400, body: { error: "photoId required" } };
+  if (!photoId && (designee || V3_PHOTO_OPTIONAL_KINDS.indexOf(kind) === -1)) {
+    return { status: 400, body: { error: "photo required" } };
+  }
 
   const claim = await claimEvent(sb, String(idem), "report_problem", jobId, me.cleaner_id, {
-    listingId, category, photoId, note: body?.note ?? null,
+    listingId, kind, urgency: body.urgency, where, photoId, note,
   });
   // Rejeu : 200 avec le ticket memorise, ou 409 si la cle a ete posee sans que
   // le ticket soit cree. Jamais de succes fabrique, sinon le telephone effacerait
@@ -127,18 +88,21 @@ export async function reportProblem(
   const rejeu = replayResponse(claim);
   if (rejeu) return rejeu;
 
+  const title = problemTitle(kind, where);
   let result: Record<string, unknown>;
   try {
-    const photo = await ownedPhoto(sb, photoId, me);
-    // La cle est deja posee : la liberer avant de refuser, sinon un rejeu de la
-    // file rendrait 200 pour un signalement qui n'a jamais cree de ticket.
-    if (!photo) {
-      await releaseEvent(sb, String(idem));
-      return { status: 400, body: { error: "photo not found" } };
+    let photoPath: string | null = null;
+    if (photoId) {
+      const photo = await ownedPhoto(sb, photoId, me);
+      // La cle est deja posee : la liberer avant de refuser, sinon un rejeu de la
+      // file rendrait 200 pour un signalement qui n'a jamais cree de ticket.
+      if (!photo) {
+        await releaseEvent(sb, String(idem));
+        return { status: 400, body: { error: "photo not found" } };
+      }
+      photoPath = photo.storage_path;
     }
 
-    const cat = meta.ticketCategory;
-    const priority = V3_REPORT_PRIORITY;
     const { data: sla } = await sb.from("maintenance_sla")
       .select("max_hours").eq("category", cat).eq("priority", priority).maybeSingle();
     const slaHours = sla && sla.max_hours ? Number(sla.max_hours) : 72;
@@ -146,24 +110,29 @@ export async function reportProblem(
 
     // Ecriture decisive du signalement. Tout ce qui precede peut encore liberer
     // la cle et rejouer ; plus rien apres, sinon le rejeu creerait un second
-    // ticket et un second push (revue tache 6, constat 4).
-    const title = meta.label + " problem reported during a cleaning";
+    // ticket et un second push (revue tache 6, constat 4). created_at est pose
+    // ici (meme valeur que le defaut de la base) : les gestes suivants
+    // (v3_problems.ts) ne sont ouverts que le jour meme.
+    const now = Date.now();
     const { data: ticket, error } = await sb.from("maintenance_tickets").insert({
       listing_id: listingId,
       title,
-      description: body?.note ? String(body.note).slice(0, 1000) : null,
+      description: note,
       category: cat,
       priority,
       assigned_technician_id: technicianId,
       reported_by: me.name,
       source: "hk_planner_v3",
       source_ref: reservationKey,
-      photo_path: photo.storage_path,
-      sla_deadline: new Date(Date.now() + slaHours * 3600_000).toISOString(),
+      photo_path: photoPath,
+      sla_deadline: new Date(now + slaHours * 3600_000).toISOString(),
       status: technicianId ? "assigned" : "open",
+      created_at: new Date(now).toISOString(),
     }).select("id").single();
     if (error) throw error;
-    result = { status: "success", ticketId: Number(ticket.id), technicianId: technicianId ?? null };
+    result = {
+      status: "success", ticketId: Number(ticket.id), technicianId: technicianId ?? null, priority,
+    };
   } catch (e) {
     await releaseEvent(sb, String(idem));
     throw e;
@@ -175,36 +144,21 @@ export async function reportProblem(
     () => recordResult(sb, String(idem), result));
   // Le ticket porte deja photo_path : ce retro-lien est un confort de lecture
   // cote table photos, pas une donnee dont le ticket depend.
-  await sansEchec("retro-lien photo absent sur le ticket " + String(ticketId), async () => {
-    const { error } = await sb.from("photos").update({ ticket_id: ticketId }).eq("id", photoId);
-    if (error) throw error;
-  });
+  if (photoId) {
+    await sansEchec("retro-lien photo absent sur le ticket " + String(ticketId), async () => {
+      const { error } = await sb.from("photos").update({ ticket_id: ticketId }).eq("id", photoId);
+      if (error) throw error;
+    });
+  }
   await sansEchec("journal du ticket " + String(ticketId), () =>
     v3Log(sb, "ticket_" + String(ticketId), "ticket_created", me.name, {
-      category: meta.ticketCategory, via: "v3", job_id: jobId,
+      category: cat, kind, urgency: body.urgency, via: "v3", job_id: jobId,
     }));
 
   // Notification apres l'ecriture : un push rate ne doit jamais annuler un ticket
-  // deja cree. sendPush ne leve pas, la garde est doublee par le try.
-  const destinataires = [
-    ...(result.technicianId ? [Number(result.technicianId)] : []),
-    ...(await managerIds(sb)),
-  ];
-  // Le titre porte la categorie : sur l'ecran verrouille d'un telephone, c'est la
-  // seule ligne lue. Aucun nom de guest, aucun numero (ruling 9).
-  const payload = {
-    title: meta.label + " problem reported",
-    body: "Reported by " + me.name + ". Open HK Planner to see the photo.",
-    url: "https://stunning-kleicha-f61101.netlify.app/",
-    tag: "v3-ticket-" + String(result.ticketId),
-  };
-  for (const cid of [...new Set(destinataires)]) {
-    try {
-      await push(sb, cid, payload, { dedupeKey: "v3-ticket:" + String(result.ticketId) + ":" + String(cid) });
-    } catch (e) {
-      console.warn("[v3.reportProblem] push failed for cleaner " + String(cid) + ":", e);
-    }
-  }
+  // deja cree. notifyProblem ne leve pas.
+  await notifyProblem(sb, push, ticketId, (result.technicianId as number | null) ?? null,
+    title, me, priority === "urgent", "v3-ticket");
   return { status: 200, body: result };
 }
 

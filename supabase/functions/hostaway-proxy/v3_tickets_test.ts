@@ -203,7 +203,7 @@ function baseTickets() {
     job_events: [],
     photos: [{ id: 55, storage_path: "v3/2026-09-12/abc.jpg", job_id: null, ticket_id: null, cleaner_id: 3 }],
     maintenance_tickets: [],
-    maintenance_sla: [{ category: "ac", priority: "medium", max_hours: 24 }],
+    maintenance_sla: [{ category: "ac", priority: "medium", max_hours: 24 }, { category: "plumbing", priority: "urgent", max_hours: 4 }],
     ticket_comments: [],
     cleaning_log: [],
     on_duty: [],
@@ -219,7 +219,7 @@ Deno.test("reportProblem cree le ticket, l'assigne a la permanence et pousse", a
   const sb = baseTickets();
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55,
+    jobId: JOB_ID, listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", photoId: 55,
     note: "Bedroom unit stops after 10 minutes", idem: "idem-report-0001",
   }, { push: spy.push });
   assertEquals(r.status, 200);
@@ -239,35 +239,36 @@ Deno.test("reportProblem cree le ticket, l'assigne a la permanence et pousse", a
   assertEquals(sb.tables.photos[0].ticket_id, ticket.id);
   // Le technicien de permanence et le manager sont prevenus.
   assertEquals(spy.envois.map((e) => e.cleanerId).sort(), [1, 5]);
-  assertEquals(spy.envois[0].payload.title, "AC problem reported");
+  assertEquals(spy.envois[0].payload.title, "AC · Bedroom");
   assertEquals(spy.envois[0].payload.body.includes("Faiza"), true);
 });
 
-// Un signalement n'est jamais urgent par defaut : les heures de silence de
-// push.ts (22h00 a 08h30 Dubai) ne laissent passer que l'urgent, et une panne
-// constatee pendant un menage n'a pas a reveiller la permanence la nuit.
-Deno.test("reportProblem ne fabrique jamais une priorite urgente", async () => {
+// La priorite vient de l'urgence choisie par la cleaner, jamais d'un champ
+// `priority` du corps : un « soon » reste medium meme si le corps dit urgent.
+Deno.test("reportProblem ignore un champ priority du corps", async () => {
   const sb = baseTickets();
   const spy = espionPush();
   await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55,
+    jobId: JOB_ID, listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", photoId: 55,
     priority: "urgent", idem: "idem-report-0100",
   }, { push: spy.push });
   assertEquals(sb.tables.maintenance_tickets[0].priority, "medium");
   assertEquals(spy.envois.every((e) => e.opts.priority === undefined), true);
 });
 
-Deno.test("reportProblem exige une photo, une categorie connue et un logement", async () => {
+Deno.test("reportProblem exige une photo, un type connu et un logement", async () => {
   const sb = baseTickets();
   const spy = espionPush();
   const sansPhoto = await reportProblem(sb, FAIZA as any,
-    { jobId: JOB_ID, listingId: "102", category: "ac", idem: "idem-report-0002" }, { push: spy.push });
+    { jobId: JOB_ID, listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", idem: "idem-report-0002" }, { push: spy.push });
   assertEquals(sansPhoto.status, 400);
+  assertEquals((sansPhoto.body as any).error, "photo required");
   const mauvaiseCat = await reportProblem(sb, FAIZA as any,
-    { jobId: JOB_ID, listingId: "102", category: "volcan", photoId: 55, idem: "idem-report-0003" }, { push: spy.push });
+    { jobId: JOB_ID, listingId: "102", kind: "Volcano", urgency: "soon", where: "Kitchen", photoId: 55, idem: "idem-report-0003" }, { push: spy.push });
   assertEquals(mauvaiseCat.status, 400);
+  assertEquals((mauvaiseCat.body as any).error, "unknown kind");
   const sansLogement = await reportProblem(sb, FAIZA as any,
-    { jobId: JOB_ID, category: "ac", photoId: 55, idem: "idem-report-0004" }, { push: spy.push });
+    { jobId: JOB_ID, kind: "AC", urgency: "soon", where: "Bedroom", photoId: 55, idem: "idem-report-0004" }, { push: spy.push });
   assertEquals(sansLogement.status, 400);
   assertEquals(sb.tables.maintenance_tickets.length, 0);
   assertEquals(spy.envois.length, 0);
@@ -277,7 +278,7 @@ Deno.test("reportProblem rejoue sans creer un second ticket", async () => {
   const sb = baseTickets();
   const spy = espionPush();
   const corps = {
-    jobId: JOB_ID, listingId: "102", category: "plumbing", photoId: 55, idem: "idem-report-0005",
+    jobId: JOB_ID, listingId: "102", kind: "Leak", urgency: "soon", where: "Bathroom", photoId: 55, idem: "idem-report-0005",
   };
   const un = await reportProblem(sb, FAIZA as any, corps, { push: spy.push });
   const deux = await reportProblem(sb, FAIZA as any, corps, { push: spy.push });
@@ -297,7 +298,7 @@ Deno.test("reportProblem rend 409 quand la cle est posee sans resultat", async (
   });
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0409",
+    jobId: JOB_ID, listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", photoId: 55, idem: "idem-report-0409",
   }, { push: spy.push });
   assertEquals(r.status, 409);
   assertEquals((r.body as any).error, "Still processing. Retry.");
@@ -313,7 +314,7 @@ Deno.test("reportProblem reste ouvert quand aucun technicien n'est disponible", 
   });
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "other", photoId: 55, idem: "idem-report-0006",
+    jobId: JOB_ID, listingId: "102", kind: "Broken", urgency: "later", where: "Kitchen", photoId: 55, idem: "idem-report-0006",
   }, { push: spy.push });
   assertEquals(r.status, 200);
   assertEquals(sb.tables.maintenance_tickets[0].status, "open");
@@ -357,7 +358,7 @@ Deno.test("reportProblem retrouve la photo par la cle de son televersement", asy
   });
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "pest", photoIdem: "idem-photo-9000",
+    jobId: JOB_ID, listingId: "102", kind: "Insects", urgency: "soon", where: "Kitchen", photoIdem: "idem-photo-9000",
     idem: "idem-report-0007",
   }, { push: spy.push });
   assertEquals(r.status, 200);
@@ -368,7 +369,7 @@ Deno.test("un signalement dont la photo n'est pas retrouvee ne brule pas sa cle"
   const sb = baseTickets();
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "pest", photoIdem: "idem-photo-9999",
+    jobId: JOB_ID, listingId: "102", kind: "Insects", urgency: "soon", where: "Kitchen", photoIdem: "idem-photo-9999",
     idem: "idem-report-0008",
   }, { push: spy.push });
   assertEquals(r.status, 400);
@@ -384,7 +385,7 @@ Deno.test("reportProblem libere sa cle quand la photo designee n'existe plus", a
   const sb = baseTickets();
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 4242, idem: "idem-report-0009",
+    jobId: JOB_ID, listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", photoId: 4242, idem: "idem-report-0009",
   }, { push: spy.push });
   assertEquals(r.status, 400);
   assertEquals(sb.tables.job_events.length, 0);
@@ -392,7 +393,7 @@ Deno.test("reportProblem libere sa cle quand la photo designee n'existe plus", a
   // Et le rejeu repart pour de vrai, au lieu de rendre un faux succes.
   sb.tables.photos.push({ id: 4242, storage_path: "v3/2026-09-12/def.jpg", job_id: null, ticket_id: null, cleaner_id: 3 });
   const deux = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 4242, idem: "idem-report-0009",
+    jobId: JOB_ID, listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", photoId: 4242, idem: "idem-report-0009",
   }, { push: spy.push });
   assertEquals(deux.status, 200);
   assertEquals(sb.tables.maintenance_tickets.length, 1);
@@ -459,7 +460,7 @@ Deno.test("une photo qui n'appartient pas a la cleaner est refusee", async () =>
   sb.tables.maintenance_tickets.push({ id: 71, listing_id: "102", title: "X", status: "open" });
   const spy = espionPush();
   const signalement = await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 56, idem: "idem-report-0010",
+    jobId: JOB_ID, listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", photoId: 56, idem: "idem-report-0010",
   }, { push: spy.push });
   assertEquals(signalement.status, 400);
   const verif = await checkTicket(sb, FAIZA as any, { ticketId: 71, photoId: 56, idem: "idem-check-0010" });
@@ -498,15 +499,15 @@ Deno.test("checkTicket rejoue son succes meme si le ticket a ete clos entre-temp
 
 // Constat 3 : `if (!V3_CATEGORIES[cat])` est verite pour toute propriete heritee
 // d'Object.prototype, et le ticket partait avec « undefined problem reported ».
-Deno.test("reportProblem refuse une categorie heritee d'Object.prototype", async () => {
+Deno.test("reportProblem refuse un type herite d'Object.prototype", async () => {
   const sb = baseTickets();
   const spy = espionPush();
   for (const cat of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
     const r = await reportProblem(sb, FAIZA as any, {
-      jobId: JOB_ID, listingId: "102", category: cat, photoId: 55, idem: "idem-proto-" + cat,
+      jobId: JOB_ID, listingId: "102", kind: cat, urgency: "soon", where: "Kitchen", photoId: 55, idem: "idem-proto-" + cat,
     }, { push: spy.push });
     assertEquals(r.status, 400);
-    assertEquals((r.body as any).error, "unknown category");
+    assertEquals((r.body as any).error, "unknown kind");
   }
   assertEquals(sb.tables.maintenance_tickets.length, 0);
   assertEquals(sb.tables.job_events.length, 0);
@@ -520,7 +521,7 @@ Deno.test("reportProblem ne duplique pas le ticket quand le retro-lien photo ech
   const sb = baseTickets();
   sb.fail["photos.update"] = { message: "photos down" };
   const spy = espionPush();
-  const corps = { jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0011" };
+  const corps = { jobId: JOB_ID, listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", photoId: 55, idem: "idem-report-0011" };
   const un = await reportProblem(sb, FAIZA as any, corps, { push: spy.push });
   assertEquals(un.status, 200);
   assertEquals(sb.tables.maintenance_tickets.length, 1);
@@ -578,7 +579,7 @@ Deno.test("reportProblem rend 404 sur un jobId inconnu, sans creer de ticket", a
   const sb = baseTickets();
   const spy = espionPush();
   const r = await reportProblem(sb, FAIZA as any, {
-    jobId: "job_ffffffffffffffffffff", listingId: "102", category: "ac",
+    jobId: "job_ffffffffffffffffffff", listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom",
     photoId: 55, idem: "idem-report-0404",
   }, { push: spy.push });
   assertEquals(r.status, 404);
@@ -592,7 +593,7 @@ Deno.test("reportProblem sans jobId ouvre quand meme un ticket, sans source_ref"
   // jobId a resoudre et il n'en faut pas.
   const sb = baseTickets();
   const r = await reportProblem(sb, FAIZA as any, {
-    listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0405",
+    listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", photoId: 55, idem: "idem-report-0405",
   }, { push: espionPush().push });
   assertEquals(r.status, 200);
   assertEquals(sb.tables.maintenance_tickets[0].source_ref, null);
@@ -601,7 +602,7 @@ Deno.test("reportProblem sans jobId ouvre quand meme un ticket, sans source_ref"
 Deno.test("reportProblem ne laisse aucun nom de guest dans le journal d'idempotence", async () => {
   const sb = baseTickets();
   await reportProblem(sb, FAIZA as any, {
-    jobId: JOB_ID, listingId: "102", category: "ac", photoId: 55, idem: "idem-report-0406",
+    jobId: JOB_ID, listingId: "102", kind: "AC", urgency: "soon", where: "Bedroom", photoId: 55, idem: "idem-report-0406",
   }, { push: espionPush().push });
   assertEquals(sb.tables.job_events[0].job_id, JOB_ID);
   assertEquals(JSON.stringify(sb.tables.job_events[0]).includes("Lefevre"), false);

@@ -40,9 +40,11 @@ Deno.test("claimEvent refuse un type d'evenement absent de la contrainte CHECK",
   );
   // Rien n'a ete ecrit : la cle reste disponible pour le vrai geste.
   assertEquals(sb.tables.job_events.length, 0);
-  assertEquals(V3_EVENT_TYPES.length, 6);
+  assertEquals(V3_EVENT_TYPES.length, 13);
   assertEquals([...V3_EVENT_TYPES], [
     "start_job", "tick", "upload_photo", "finish_job", "report_problem", "check_ticket",
+    "delete_photo", "add_problem_photo", "set_problem_note", "upload_voice",
+    "set_problem_voice", "update_problem", "delete_problem",
   ]);
 });
 

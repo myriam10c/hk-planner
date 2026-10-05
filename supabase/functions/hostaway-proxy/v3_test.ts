@@ -4,8 +4,9 @@ import {
   donneesOuLeve, estimatedMinutes, formatHour, managerIds, normalizeUnitType,
   onDutyTechnician, pickSnapshot, plusDays, readLinen, roleAllowed, shortGuest,
   templateItems, todayDubai, v3Log, validIdem, validMyDayDate, V3_CACHE_STALE_MS,
-  V3_CATEGORIES, V3_DATE_WINDOW_AHEAD, V3_DATE_WINDOW_BACK, V3_LINEN_FIELDS,
-  V3_PHOTO_BUCKET, V3_ROLES, V3_TEMPLATE_NAME, weekKeyFor,
+  V3_DATE_WINDOW_AHEAD, V3_DATE_WINDOW_BACK, V3_LINEN_FIELDS,
+  V3_PHOTO_BUCKET, V3_PHOTO_OPTIONAL_KINDS, V3_PROBLEM_KINDS, V3_ROLES, V3_TEMPLATE_NAME,
+  V3_URGENCY_PRIORITY, weekKeyFor,
 } from "./v3.ts";
 
 Deno.test("normalizeUnitType lit le tag Hostaway puis retombe sur les chambres", () => {
@@ -159,7 +160,8 @@ Deno.test("roleAllowed accepte les roles prevus par la specification", () => {
   assertEquals(roleAllowed("v3.uploadPhoto", "maintenance"), true);
   assertEquals(roleAllowed("v3.reportProblem", "subcontractor"), true);
   assertEquals(roleAllowed("inconnue", "cleaner"), false);
-  assertEquals(Object.keys(V3_ROLES).length, 7);
+  // 7 actions de la phase A, 4 gestes sur un probleme (branchement, tache 2).
+  assertEquals(Object.keys(V3_ROLES).length, 11);
 });
 
 for (const [action, refuse] of [
@@ -264,16 +266,15 @@ Deno.test("v3Log ecrit la ligne et n'explose pas quand l'insert echoue", async (
 Deno.test("les tables de correspondance exposees aux taches 5 a 7 sont figees", () => {
   assertEquals(V3_PHOTO_BUCKET, "cleaning-photos");
   assertEquals(V3_TEMPLATE_NAME, { "Studio": "Studio", "1 BHK": "1 Bedroom", "2 BHK": "2 Bedrooms" });
-  assertEquals(Object.keys(V3_CATEGORIES),
-    ["ac", "plumbing", "electrical", "appliance", "pest", "other"]);
-  // « other » est la seule categorie dont le nom change en base.
-  assertEquals(V3_CATEGORIES.other, { label: "Other", ticketCategory: "general" });
-  assertEquals(V3_CATEGORIES.ac, { label: "AC", ticketCategory: "ac" });
-  for (const [cle, v] of Object.entries(V3_CATEGORIES)) {
-    assertEquals(typeof v.label, "string");
-    assertEquals(v.label.length > 0, true);
-    assertEquals(typeof v.ticketCategory, "string");
-    assertEquals(cle === cle.toLowerCase(), true);
+  // Branchement 2026-10-05 : les types de l'app conversation remplacent les six
+  // categories de la phase A. Toute categorie cible existe dans maintenance_tickets.
+  const cibles = ["ac", "plumbing", "electrical", "appliance", "pest", "general"];
+  for (const cat of Object.values(V3_PROBLEM_KINDS)) {
+    assertEquals(cibles.includes(cat), true, cat);
+  }
+  assertEquals(V3_URGENCY_PRIORITY, { urgent: "urgent", soon: "medium", later: "low" });
+  for (const k of V3_PHOTO_OPTIONAL_KINDS) {
+    assertEquals(k in V3_PROBLEM_KINDS, true, k);
   }
 });
 

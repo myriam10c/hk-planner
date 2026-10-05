@@ -15,7 +15,9 @@ import {
 import { buildMyDay } from "./v3_myday.ts";
 import { loadTeam, resolveViewAs } from "./v3_viewas.ts";
 import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
-import { checkTicket, reportProblem, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES } from "./v3_tickets.ts";
+import {
+  checkTicket, reportProblem, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES, V3_PROBLEM_ACTIONS,
+} from "./v3_tickets.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -976,6 +978,11 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["v3.finishJob", "POST"],
   ["v3.reportProblem", "POST"],
   ["v3.checkTicket", "POST"],
+  // Problemes de l'app conversation (branchement 2026-10-05, tache 2)
+  ["v3.addProblemPhoto", "POST"],
+  ["v3.setProblemNote", "POST"],
+  ["v3.updateProblem", "POST"],
+  ["v3.deleteProblem", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -1282,6 +1289,18 @@ Deno.serve(async (req: Request) => {
       const body = await req.json().catch(() => null);
       if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
       const r = await checkTicket(sb, me, body);
+      return jsonResp(r.body, r.status);
+    }
+
+    // Gestes sur un probleme deja signale (v3_problems.ts). Meme forme que les
+    // autres ecritures : session, role, corps JSON, identite jamais lue du corps.
+    if (action && Object.prototype.hasOwnProperty.call(V3_PROBLEM_ACTIONS, action) && req.method === "POST") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await V3_PROBLEM_ACTIONS[action](sb, me, body);
       return jsonResp(r.body, r.status);
     }
 

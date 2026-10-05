@@ -6,6 +6,11 @@
 //
 // Le bucket est prive : rien n'en sort sans URL signee, et cette action ne rend
 // aucune URL publique.
+//
+// Branchement 2026-10-05 (tache 2) : les aides communes aux actions sur un
+// ticket (resolution d'un identifiant de photo, controle du proprietaire,
+// ecriture accessoire) vivent ici, d'ou v3_tickets.ts et v3_problems.ts les
+// importent sans cycle.
 import type { SessionUser } from "./auth.ts";
 import {
   ActionResult, claimEvent, recordResult, releaseEvent, replayResponse, resolveJob,
@@ -122,6 +127,59 @@ export async function uploadPhoto(
     // rate est journalise, jamais propage, pour ne pas masquer l'erreur d'origine.
     if (depose) await removeQuietly(sb, path);
     throw e;
+  }
+}
+
+// ===========================================================================
+// Aides communes aux gestes sur un ticket
+// ===========================================================================
+
+// La photo est designee soit par son identifiant (chemin en ligne : la cleaner
+// vient de la televerser), soit par la cle d'idempotence de ce televersement
+// (chemin hors ligne : la file rejoue la photo puis le geste, dans cet ordre, et
+// le second retrouve le premier dans job_events.result).
+export async function resolvePhotoId(sb: any, body: any): Promise<number | null> {
+  if (body?.photoId) {
+    const n = Number(body.photoId);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  if (!validIdem(body?.photoIdem)) return null;
+  const { data } = await sb.from("job_events")
+    .select("result").eq("idem_key", String(body.photoIdem)).maybeSingle();
+  const pid = data && data.result ? (data.result as any).photoId : null;
+  return pid ? Number(pid) : null;
+}
+
+// Lit la ligne photos et verifie qu'elle appartient bien a la cleaner qui parle
+// et qu'elle est une photo (la colonne `kind` admet aussi 'voice', inutilise
+// depuis l'abandon du vocal, mais une telle ligne ne doit jamais devenir la
+// photo d'un ticket). Les identifiants sont des entiers de sequence, donc
+// previsibles : sans ce controle, un compte attacherait le cliche d'une autre a
+// un ticket. Une ligne d'avant la colonne `kind` est une photo. Rend null dans
+// tous les cas de refus.
+export async function ownedPhoto(
+  sb: any, photoId: number, me: SessionUser,
+): Promise<{ storage_path: string } | null> {
+  const { data } = await sb.from("photos")
+    .select("id, storage_path, cleaner_id, kind").eq("id", photoId).maybeSingle();
+  if (!data) return null;
+  if (Number(data.cleaner_id) !== Number(me.cleaner_id)) {
+    console.warn("[v3] photo " + String(photoId) + " refusee: elle n'est pas a " +
+      String(me.cleaner_id));
+    return null;
+  }
+  if (String(data.kind ?? "photo") !== "photo") return null;
+  return data as { storage_path: string };
+}
+
+// Enveloppe une ecriture accessoire : journalisee si elle rate, jamais propagee.
+// A n'utiliser qu'APRES l'ecriture decisive d'une action : passe ce point,
+// liberer la cle ferait rejouer l'ecriture decisive (revue tache 6, constat 4).
+export async function sansEchec(quoi: string, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (e) {
+    console.warn("[v3] " + quoi + ": " + String((e as any)?.message ?? e));
   }
 }
 

@@ -6,12 +6,15 @@
 import type { ActionResult } from "./v3.ts";
 
 // Liste fermee, copie exacte de la contrainte CHECK de job_events.event_type
-// (migration 20260912090000_v3_cleaner.sql). Sans elle, une faute de frappe dans
+// (migration 20260912090000_v3_cleaner.sql, etendue par
+// 20261005120000_v3_conversation.sql). Sans elle, une faute de frappe dans
 // une action passe les tests Deno (le faux client ne simule aucun CHECK) puis
 // remonte en production sous la forme d'un 23514 propage, donc un 500 pour la
 // cleaner. Toute modification ici veut dire une migration en face.
 export const V3_EVENT_TYPES = [
   "start_job", "tick", "upload_photo", "finish_job", "report_problem", "check_ticket",
+  "delete_photo", "add_problem_photo", "set_problem_note", "upload_voice",
+  "set_problem_voice", "update_problem", "delete_problem",
 ] as const;
 
 export type V3EventType = typeof V3_EVENT_TYPES[number];

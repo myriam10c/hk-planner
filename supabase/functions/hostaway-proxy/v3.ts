@@ -67,6 +67,13 @@ export const V3_ROLES: Record<string, string[]> = {
   "v3.finishJob": ["cleaner", "subcontractor"],
   "v3.reportProblem": ["cleaner", "subcontractor"],
   "v3.checkTicket": ["cleaner", "subcontractor"],
+  // Problemes de l'app conversation (branchement 2026-10-05, tache 2). Pas de
+  // vocal (decision de Hillal du 2026-10-05 : il ne part pas avec le message
+  // WhatsApp) ; la note est du texte, dictee au clavier du telephone.
+  "v3.addProblemPhoto": ["cleaner", "subcontractor"],
+  "v3.setProblemNote": ["cleaner", "subcontractor"],
+  "v3.updateProblem": ["cleaner", "subcontractor"],
+  "v3.deleteProblem": ["cleaner", "subcontractor"],
 };
 
 // Echoue fermee : une action inconnue de la table n'est autorisee a personne.
@@ -81,16 +88,49 @@ export function roleAllowed(action: string, role: string): boolean {
 export const V3_CACHE_FRESH_MS = 2 * 60 * 1000;
 export const V3_CACHE_STALE_MS = 10 * 60 * 1000;
 
-// Categories de la feuille « Report a problem » (specification, section 3), et
-// leur equivalent dans maintenance_tickets.category.
-export const V3_CATEGORIES: Record<string, { label: string; ticketCategory: string }> = {
-  ac: { label: "AC", ticketCategory: "ac" },
-  plumbing: { label: "Plumbing", ticketCategory: "plumbing" },
-  electrical: { label: "Electrical", ticketCategory: "electrical" },
-  appliance: { label: "Appliance", ticketCategory: "appliance" },
-  pest: { label: "Pest", ticketCategory: "pest" },
-  other: { label: "Other", ticketCategory: "general" },
+// Types de probleme de l'app conversation et leur categorie dans
+// maintenance_tickets.category (Global Constraints du branchement). Remplace
+// l'ancienne table V3_CATEGORIES : le seul client de v3.reportProblem a change.
+export const V3_PROBLEM_KINDS: Record<string, string> = {
+  "Gas smell": "appliance",
+  "Leak": "plumbing",
+  "AC": "ac",
+  "AC not working": "ac",
+  "Power": "electrical",
+  "Insects": "pest",
+  "Missing": "general",
+  "Broken": "general",
+  "Stain": "general",
+  "Very dirty": "general",
+  "Guest forgot": "general",
+  "Wall damage": "general",
+  "Can't get in": "general",
+  "Gas not working": "appliance",
+  "Wi-Fi not working": "general",
 };
+
+// Types qui se signalent sans photo : on ne photographie pas une odeur, une porte
+// qui ne s'ouvre pas se signale avant d'entrer, et les trois « not working »
+// viennent d'une ligne de verification de sortie (decision du 2026-10-05).
+export const V3_PHOTO_OPTIONAL_KINDS = [
+  "Gas smell", "Can't get in", "AC not working", "Gas not working", "Wi-Fi not working",
+];
+
+// Urgence choisie par la cleaner -> priorite du ticket. Seul `urgent` traverse
+// les heures de silence de push.ts.
+export const V3_URGENCY_PRIORITY: Record<string, string> = {
+  urgent: "urgent",
+  soon: "medium",
+  later: "low",
+};
+
+// Lecture sure d'une table : hasOwnProperty, pour qu'un « constructor » ou un
+// « toString » herites d'Object.prototype ne passent jamais pour une cle valide
+// (revue tache 6, constat 3).
+export function ownKey<T>(table: Record<string, T>, key: unknown): T | null {
+  const k = typeof key === "string" ? key : "";
+  return Object.prototype.hasOwnProperty.call(table, k) ? table[k] : null;
+}
 
 // Dubai est en UTC+4 toute l'annee, aucun changement d'heure : un decalage fixe
 // suffit, pas besoin d'Intl ni de tzdata dans l'edge runtime.
