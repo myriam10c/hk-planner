@@ -65,7 +65,7 @@ test('409 : message du serveur et liste rechargee', async ({ page }) => {
     { status: 200, match: 'action=insp.today', body: t2 }], { pinToken: 'tok' });
   await page.getByRole('button', { name: "I'll take it" }).first().click();
   await expect(page.getByText('Already taken by Walter.')).toBeVisible();
-  await expect(page.getByText('Taken by Walter')).toBeVisible();
+  await expect(page.getByText('Taken by Walter', { exact: true })).toBeVisible();
 });
 
 test('manager : Release et Assign, sous-traitants et inactifs exclus', async ({ page }) => {
