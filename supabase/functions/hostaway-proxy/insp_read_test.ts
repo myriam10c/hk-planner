@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { inspHistory, inspOverview, inspToday } from "./insp_read.ts";
+import { inspHistory, inspOverview, inspRecap, inspToday } from "./insp_read.ts";
 
 const D = "2026-10-06";
 const base = () => fakeDb({
@@ -170,4 +170,89 @@ Deno.test("today : cleaners lu exactement une fois par appel", async () => {
   const wrapped = { ...db, from: (t: string) => { calls.push(t); return db.from(t); } };
   await inspToday(wrapped, D, [], null);
   assertEquals(calls.filter((t) => t === "cleaners").length, 1);
+});
+
+// ---- recap ----
+const recapDb = () => {
+  const db = base();
+  db.tables.maintenance_tickets = [
+    { id: 50, status: "open", title: "AC: Leak", source: "inspection" },
+    { id: 51, status: "resolved", title: "old", source: "inspection" },
+    { id: 52, status: "cancelled", title: "old", source: "inspection" },
+    { id: 53, status: "in_progress", title: "Paint", source: "inspection" },
+    { id: 60, status: "open", title: "other", source: "hk_planner_v3" },
+  ];
+  db.tables.inspection_proposals = [
+    { proposal_date: D, listing_id: "A", rank: 1 },
+    { proposal_date: D, listing_id: "B", rank: 2 },
+    { proposal_date: D, listing_id: "C", rank: 3 },
+    { proposal_date: D, listing_id: "X", rank: 0 },
+  ];
+  return db;
+};
+
+Deno.test("recap : statuts done, in_progress, not_done ordonnes par rang", async () => {
+  const db = recapDb();
+  db.tables.inspections.push(
+    { id: 3, listing_id: "A", inspector_id: 3, inspection_date: D, started_at: D + "T09:00:00+04:00", finished_at: D + "T10:00:00+04:00", eligibility: "vacant" },
+    { id: 4, listing_id: "B", inspector_id: 2, inspection_date: D, started_at: D + "T11:00:00+04:00", finished_at: null, eligibility: "vacant" },
+  );
+  const r = await inspRecap(db, D);
+  assertEquals(r.proposals.map((p: any) => [p.listingId, p.rank, p.status, p.by]), [
+    ["A", 1, "done", "Faiza"], ["B", 2, "in_progress", null], ["C", 3, "not_done", null],
+  ]);
+  assertEquals(r.proposals[0].at, D + "T10:00:00+04:00");
+  assertEquals(r.proposals[0].name, "Apt 101 · Tower A");
+  assertEquals(r.target, 2);
+});
+
+Deno.test("recap : inspection hors propositions = adhoc, avec problemes et tickets", async () => {
+  const db = recapDb();
+  db.tables.inspection_proposals = [{ proposal_date: D, listing_id: "A", rank: 1 }];
+  db.tables.inspections.push(
+    { id: 3, listing_id: "C", inspector_id: 3, inspection_date: D, started_at: D + "T09:00:00+04:00", finished_at: D + "T10:00:00+04:00", eligibility: "vacant" },
+    { id: 5, listing_id: "A", inspector_id: 2, inspection_date: D, started_at: D + "T08:00:00+04:00", finished_at: D + "T08:30:00+04:00", eligibility: "vacant" },
+  );
+  db.tables.inspection_items.push(
+    { inspection_id: 3, zone: "ac", status: "not_ok", note: "x", outcome: "maintenance", ticket_id: 53 },
+    { inspection_id: 3, zone: "lights", status: "not_ok", note: "y", outcome: "fixed", ticket_id: null },
+    { inspection_id: 3, zone: "kitchen", status: "ok", note: null, outcome: null, ticket_id: null },
+  );
+  const r = await inspRecap(db, D);
+  assertEquals(r.doneToday.map((d) => [d.listingId, d.adhoc]), [["A", false], ["C", true]]); // plus ancien d'abord
+  const c = r.doneToday[1];
+  assertEquals(c.issues.length, 2);
+  assertEquals(c.issues.map((i: any) => [i.outcome, i.ticketId]).sort(), [["fixed", null], ["maintenance", 53]]);
+  assertEquals(r.doneToday[0].issues, []);
+});
+
+Deno.test("recap : openTickets ne compte que source inspection non resolus", async () => {
+  const r = await inspRecap(recapDb(), D);
+  assertEquals(r.openTickets, 2); // 50 open + 53 in_progress
+});
+
+Deno.test("recap : 21:00 UTC la veille = aujourd'hui a Dubai", async () => {
+  const db = recapDb();
+  db.tables.inspections.push({ id: 3, listing_id: "C", inspector_id: 3, inspection_date: D, started_at: "2026-10-05T20:00:00+00:00", finished_at: "2026-10-05T21:00:00+00:00", eligibility: "vacant" });
+  const r = await inspRecap(db, D);
+  assertEquals(r.doneToday.map((d) => d.listingId), ["C"]);
+  assertEquals(r.proposals.find((p: any) => p.listingId === "C")!.status, "done");
+  assertEquals(r.inspectedThisMonth, 1);
+});
+
+Deno.test("recap : aucune proposition journalisee = proposals []", async () => {
+  const db = recapDb();
+  db.tables.inspection_proposals = [];
+  const r = await inspRecap(db, D);
+  assertEquals(r.proposals, []);
+  assertEquals(r.doneToday, []);
+});
+
+Deno.test("recap : couverture identique a overview, jamais inspectes et en retard", async () => {
+  const db = recapDb();
+  const [r, o] = [await inspRecap(db, D), await inspOverview(db, D)];
+  assertEquals(r.coveragePct, o.coveragePct);
+  assertEquals(r.inspectedThisMonth, o.inspectedThisMonth);
+  assertEquals(r.neverInspected, 1); // C ; X exclu
+  assertEquals(r.overdue, 2); // A (66 j) + C (jamais) ; B 11 j
 });

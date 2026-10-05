@@ -23,7 +23,7 @@ import {
 
 import { inspRoleAllowed, type InspReservation } from "./insp_rules.ts";
 import { loadReservationsCached, normalizeReservations } from "./insp_reservations.ts";
-import { inspHistory, inspOverview, inspToday } from "./insp_read.ts";
+import { inspHistory, inspOverview, inspRecap, inspToday } from "./insp_read.ts";
 import {
   assignProposal, claimProposal, finishInspection, saveItem, setExcluded, startInspection,
   unclaimProposal, uploadInspectionPhoto,
@@ -41,6 +41,7 @@ const APP_SHARED_SECRET = Deno.env.get("APP_SHARED_SECRET") ?? "";
 // X-App-Secret gating so deploying this code can't break the VPS jobs.
 const SERVER_SHARED_SECRET = Deno.env.get("SERVER_SHARED_SECRET") ?? "";
 const SERVER_ONLY_ACTIONS = new Set([
+  "insp.recap",
   "syncListings",
   "dispatchPendingEvents",
   "dispatchMaintenance",
@@ -847,7 +848,7 @@ async function getPhotoUrl(sb: any, path: string | null): Promise<string | null>
 // Used at request entry for 404 (unknown) + 405 (method mismatch) before reaching the dispatch logic below.
 const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   // ===== Inspections =====
-  ["insp.today", "GET"], ["insp.overview", "GET"], ["insp.history", "GET"],
+  ["insp.recap", "GET"], ["insp.today", "GET"], ["insp.overview", "GET"], ["insp.history", "GET"],
   ["insp.start", "POST"], ["insp.saveItem", "POST"], ["insp.uploadPhoto", "POST"], ["insp.finish", "POST"],
   ["insp.claim", "POST"], ["insp.unclaim", "POST"], ["insp.assign", "POST"], ["insp.setExcluded", "POST"],
   // ===== Checkouts / sync =====
@@ -1364,6 +1365,8 @@ Deno.serve(async (req: Request) => {
     }
 
     // ==================== INSPECTIONS ====================
+    // Recap du job Telegram : serveur seul (X-Server-Secret verifie plus haut), sans session.
+    if (action === "insp.recap") return jsonResp(await inspRecap(sb, todayDubai()));
     if (action !== null && action.startsWith("insp.")) {
       const me = await currentUser(sb, req);
       if (!me) return jsonResp({ error: "auth required" }, 401);

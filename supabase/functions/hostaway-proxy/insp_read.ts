@@ -233,3 +233,73 @@ export async function inspHistory(sb: any, listingId: string) {
     })),
   };
 }
+
+// Recap quotidien (job serveur Telegram) : couverture, propositions du jour et ce qui a ete fait.
+export async function inspRecap(sb: any, day: string) {
+  const [names, finished, target, { data: listings }, { data: props }, { data: running }, { data: openT }] = await Promise.all([
+    cleanerNames(sb), finishedInspections(sb), readTarget(sb),
+    sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded"),
+    sb.from("inspection_proposals").select("listing_id, rank").eq("proposal_date", day),
+    sb.from("inspections").select("listing_id").eq("inspection_date", day).is("finished_at", null),
+    sb.from("maintenance_tickets").select("id, status").eq("source", "inspection").not("status", "in", "(resolved,cancelled)"),
+  ]);
+  const lastDone = await loadLastDone(sb, names, finished);
+  const lById: Record<string, any> = {};
+  for (const l of listings ?? []) lById[String(l.listing_id)] = l;
+  const nameOf = (id: string) => listingLabel(lById[id] ?? {});
+
+  // Meme calcul que inspOverview.
+  const active = (listings ?? []).filter((l: any) => !l.inspection_excluded);
+  const days = active.map((l: any) => {
+    const last = lastDone[l.listing_id];
+    return last ? daysBetween(last.finishedAt, day) : null;
+  });
+  const covered = days.filter((d: number | null) => d !== null && d < INSP_GOAL_DAYS).length;
+  const monthStart = day.slice(0, 8) + "01";
+
+  const todays = finished.filter((r: any) => dubaiDay(r.finished_at) === day)
+    .sort((a: any, b: any) => String(a.finished_at).localeCompare(String(b.finished_at)) || Number(a.id) - Number(b.id));
+  const doneFirst: Record<string, any> = {};
+  for (const r of todays) if (!doneFirst[r.listing_id]) doneFirst[r.listing_id] = r;
+  const runningIds = new Set((running ?? []).map((r: any) => String(r.listing_id)));
+  const logged = (props ?? []).filter((p: any) => Number(p.rank) >= 1).sort((a: any, b: any) => Number(a.rank) - Number(b.rank));
+  const loggedIds = new Set<string>(logged.map((p: any) => String(p.listing_id)));
+
+  const proposals = logged.map((p: any) => {
+    const id = String(p.listing_id);
+    const d = doneFirst[id];
+    return {
+      listingId: id, name: nameOf(id), rank: Number(p.rank),
+      status: (d ? "done" : runningIds.has(id) ? "in_progress" : "not_done") as "done" | "in_progress" | "not_done",
+      by: d ? names[String(d.inspector_id)] ?? "Someone" : null, at: d ? d.finished_at as string : null,
+    };
+  });
+
+  const ids = todays.map((r: any) => r.id);
+  const { data: items } = ids.length
+    ? await sb.from("inspection_items").select("inspection_id, zone, status, outcome, ticket_id").in("inspection_id", ids)
+    : { data: [] };
+  const label = (z: string) => INSP_ZONES.find((x) => x.key === z)?.label ?? z;
+  const doneToday = todays.map((r: any) => ({
+    listingId: String(r.listing_id), name: nameOf(String(r.listing_id)),
+    by: names[String(r.inspector_id)] ?? "Someone", at: r.finished_at as string,
+    adhoc: !loggedIds.has(String(r.listing_id)),
+    issues: (items ?? []).filter((i: any) => i.inspection_id === r.id && i.status === "not_ok")
+      .sort((a: any, b: any) => INSP_ZONES.findIndex((z) => z.key === a.zone) - INSP_ZONES.findIndex((z) => z.key === b.zone))
+      .map((i: any) => ({
+        label: label(i.zone),
+        outcome: (i.outcome === "fixed" || i.outcome === "maintenance" ? i.outcome : null) as "fixed" | "maintenance" | null,
+        ticketId: i.ticket_id ? Number(i.ticket_id) : null,
+      })),
+  }));
+
+  return {
+    day, target,
+    coveragePct: active.length ? Math.round((covered / active.length) * 100) : 0,
+    inspectedThisMonth: finished.filter((r: any) => dubaiDay(r.finished_at) >= monthStart).length,
+    neverInspected: days.filter((d: number | null) => d === null).length,
+    overdue: days.filter((d: number | null) => d === null || d > 30).length,
+    proposals, doneToday,
+    openTickets: (openT ?? []).filter((t: any) => !CLOSED.has(String(t.status))).length,
+  };
+}
