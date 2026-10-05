@@ -274,7 +274,7 @@ async function loadInspReservations(sb: any, day: string): Promise<{ reservation
   const key = "insp:res:" + day;
   const { data: row } = await sb.from("proxy_cache").select("payload, updated_at").eq("key", key).maybeSingle();
   if (row?.payload && Date.now() - new Date(row.updated_at).getTime() < INSP_RES_FRESH_MS) {
-    return { reservations: row.payload.reservations ?? [], cachedAt: row.updated_at };
+    return { reservations: row.payload.reservations ?? [], cachedAt: null };
   }
   try {
     const token = await getAccessToken();
@@ -1379,12 +1379,13 @@ Deno.serve(async (req: Request) => {
       if (!inspRoleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
       const day = todayDubai();
       if (action === "insp.today") {
+        let loaded: { reservations: InspReservation[]; cachedAt: string | null };
         try {
-          const { reservations, cachedAt } = await loadInspReservations(sb, day);
-          return jsonResp(await inspToday(sb, day, reservations, cachedAt));
+          loaded = await loadInspReservations(sb, day);
         } catch (e) {
           return jsonResp({ error: (e as Error).message }, 503);
         }
+        return jsonResp(await inspToday(sb, day, loaded.reservations, loaded.cachedAt));
       }
       if (action === "insp.overview") return jsonResp(await inspOverview(sb, day));
       if (action === "insp.history") {
