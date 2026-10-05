@@ -7,7 +7,7 @@ import { practiceActive, practiceMark } from '/v3/practice.js';
 import { toast } from '/v3/ui.js';
 
 const DB_NAME = 'hk-v3';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'queue';
 // Magasin mort : une action refusee definitivement par le proxy (4xx autre que
 // 429 et 409) ne peut pas rester dans la file, elle bloquerait tout ce qui la
@@ -19,6 +19,9 @@ const DEAD = 'dead';
 // branchement) : un rechargement au milieu d'un menage retrouve ses miniatures et
 // les fichiers du partage WhatsApp, qu'ils soient deja partis ou non.
 const FILES = 'files';
+// Etat des conversations du jour (reprise) : sessionStorage disparait quand iOS
+// ferme l'app installee, IndexedDB reste. Une seule ligne par cle.
+const ETAT = 'state';
 
 export function newIdem() {
   const c = globalThis.crypto;
@@ -44,6 +47,9 @@ function openDb() {
       }
       if (!db.objectStoreNames.contains(FILES)) {
         db.createObjectStore(FILES, { keyPath: 'idem' });
+      }
+      if (!db.objectStoreNames.contains(ETAT)) {
+        db.createObjectStore(ETAT, { keyPath: 'key' });
       }
     };
     req.onsuccess = function () { resolve(req.result); };
@@ -152,6 +158,20 @@ export function purgeFiles(ageMs) {
   }, FILES);
 }
 
+// ---- Etat des conversations (reprise apres fermeture forcee) ----
+export function putState(key, value) {
+  return tx('readwrite', function (store) { return store.put({ key: key, value: value, at: Date.now() }); }, ETAT);
+}
+
+export function getState(key) {
+  return tx('readonly', function (store) { return store.get(key); }, ETAT)
+    .then(function (r) { return r ? r.value : null; });
+}
+
+export function deleteState(key) {
+  return tx('readwrite', function (store) { return store.delete(key); }, ETAT);
+}
+
 export function clearFiles() {
   return tx('readwrite', function (store) { return store.clear(); }, FILES);
 }
@@ -236,6 +256,11 @@ const retirees = new Set();
 // « Still processing » ou un wifi sans internet laissaient la file en attente
 // jusqu'au prochain geste. Hors ligne declare, l'evenement « online » suffit.
 const RETRY_MS = 8000;
+// Erreur qui n'est pas une ApiError pendant un rejeu (multipart impossible a
+// batir, fichier illisible) : ce n'est pas le reseau. Au bout de MAX_ECHECS_LOCAUX
+// essais, l'entree part au magasin mort au lieu de bloquer la file pour toujours.
+export const MAX_ECHECS_LOCAUX = 5;
+const echecsLocaux = new Map();
 let relance = null;
 function relancerPlusTard() {
   if (relance || !navigator.onLine) return;
@@ -277,7 +302,18 @@ export async function flush() {
         });
       } catch (err) {
         enVol = null;
-        const kind = err instanceof ApiError ? err.kind : 'offline';
+        if (!(err instanceof ApiError)) {
+          const n = (echecsLocaux.get(e.seq) || 0) + 1;
+          echecsLocaux.set(e.seq, n);
+          if (n < MAX_ECHECS_LOCAUX) { relancerPlusTard(); return; }
+          echecsLocaux.delete(e.seq);
+          console.warn('[v3] geste illisible, mis de cote:', e.action, err);
+          await toDead(e, (err && err.message) ? err.message : 'local error');
+          await drop(e.seq);
+          toast('Not sent: could not read this action on the phone. Tell your manager.', 'err');
+          continue;
+        }
+        const kind = err.kind;
         if (kind === 'offline') { relancerPlusTard(); return; }   // on reessaiera
         if (kind === 'auth') return;   // le renouvellement de session relance
         if (err.status >= 500 || err.status === 429 || err.status === 409) { relancerPlusTard(); return; }

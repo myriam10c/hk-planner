@@ -8,7 +8,7 @@ import {
   createConversation, reply, addPhoto, startProblem, chooseKind, addFlowPhoto, flowReply, editProblem,
   removeProblem, removeArrivalOrEndPhoto, reopenProblem, currentStep, requireLinen,
 } from "../../v3/conv/conversation.js";
-import { syncPlan, finishPlan, ackSync, refreshTicks, finishAcked, PHOTO_OPTIONAL } from "../../v3/conv/sync.js";
+import { syncPlan, finishPlan, ackSync, refreshTicks, finishAcked, PHOTO_OPTIONAL, runActions } from "../../v3/conv/sync.js";
 
 const [oxford, creek, bloom] = APARTMENTS;
 const at = (h, m) => new Date(2026, 9, 2, h, m);
@@ -256,4 +256,65 @@ test("un problème en attente de photo garde ✓ même après finishJob", () => 
   ackSync(c, "idem0001", {}); ackSync(c, h.sent.at(-1).body.idem, {}); refreshTicks(c);
   const prob = c.messages.find(m => m.type === "problem");
   assert.equal(prob.status, "saved");
+});
+
+test("mise en file ratée une fois (stockage plein) : l'action et ses dépendantes sont défaites, puis réémises au geste suivant", async () => {
+  const h = harness(bloom);
+  const { c, sync, photo } = h;
+  const queued = [];
+  let fails = 1;
+  const run = async a => { if (fails > 0) { fails -= 1; throw new Error("QuotaExceededError"); } queued.push(a); };
+  const failed = new Set();
+  reply(c, "here", { now: at(10, 0) }); await runActions(c, sync(), run, failed);
+  assert.deepEqual(queued, []);
+  assert.equal(c.sync.started, null, "startJob défait");
+  startProblem(c); chooseKind(c, "Leak", { now: at(10, 1) });
+  addFlowPhoto(c, photo());
+  // startJob réémis, puis la photo et son signalement.
+  assert.equal(await runActions(c, sync(), run, failed), 0);
+  assert.deepEqual(queued.map(brief), ["startJob idem0002", "uploadPhoto problem idem0004", "reportProblem Leak idem0004 idem0003"]);
+  // Échec du téléversement de la 2e photo : son rattachement ne part pas.
+  fails = 1;
+  addFlowPhoto(c, photo());
+  assert.equal(await runActions(c, sync(), run, failed), 2);
+  assert.equal(queued.length, 3);
+  // Geste suivant : la photo repart avec une nouvelle clé, puis son rattachement.
+  flowReply(c, "photos-done");
+  await runActions(c, sync(), run, failed);
+  assert.deepEqual(queued.slice(3).map(brief), ["uploadPhoto problem idem0007", "addProblemPhoto idem0003 idem0007"]);
+});
+
+test("signalement dont la photo n'a pas pu entrer en file : le signalement ne part pas, la photo et lui repartent ensemble", async () => {
+  const h = harness(bloom);
+  const { c, sync, photo } = h;
+  const queued = [];
+  let fails = 0;
+  const run = async a => { if (a.action === "v3.uploadPhoto" && fails > 0) { fails -= 1; throw new Error("full"); } queued.push(a); };
+  const failed = new Set();
+  reply(c, "here", { now: at(10, 0) }); await runActions(c, sync(), run, failed);
+  startProblem(c); chooseKind(c, "Leak", { now: at(10, 1) });
+  fails = 1;
+  addFlowPhoto(c, photo());
+  assert.equal(await runActions(c, sync(), run, failed), 2);
+  assert.deepEqual(queued.map(brief), ["startJob idem0001"]);
+  flowReply(c, "photos-done");
+  await runActions(c, sync(), run, failed);
+  assert.deepEqual(queued.slice(1).map(brief), ["uploadPhoto problem idem0004", "reportProblem Leak idem0004 idem0002"]);
+});
+
+test("type à photo facultative choisi sur une tuile (hors Gas smell) : rien tant que l'écran de photos est ouvert ; Back n'envoie rien", () => {
+  const h = harness(bloom);
+  const { c, sync } = h;
+  reply(c, "here", { now: at(10, 0) }); sync();
+  // Aucune tuile de ce type aujourd'hui : on simule une tuile « Wi-Fi not working ».
+  startProblem(c); chooseKind(c, "Leak", { now: at(10, 1) }); c.problems[0].kind = "Wi-Fi not working";
+  assert.deepEqual(sync(), []);
+  flowReply(c, "back"); sync();
+  assert.equal(c.problems.length, 0);
+  assert.deepEqual(h.sent.map(brief), ["startJob idem0001"]);
+  // Même tuile, puis « No photo » : le signalement part en quittant l'écran de photos.
+  chooseKind(c, "Leak", { now: at(10, 2) }); c.problems[0].kind = "Wi-Fi not working";
+  assert.deepEqual(sync(), []);
+  flowReply(c, "no-photo");
+  assert.deepEqual(sync().map(brief), ["reportProblem Wi-Fi not working - idem0003"]);
 });

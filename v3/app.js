@@ -18,8 +18,8 @@
 // Aucun gestionnaire en ligne (CSP script-src 'self'), interface en anglais.
 import { api, ApiError, readSession } from '/v3/api.js';
 import {
-  flush, getFiles, newIdem, onQueueChange, onRefused, onSent, pendingCount, purgeFiles, putFile, submit,
-  unqueue, watchNetwork,
+  deleteState, flush, getFiles, getState, newIdem, onQueueChange, onRefused, onSent, pendingCount, purgeFiles,
+  putFile, putState, submit, unqueue, watchNetwork,
 } from '/v3/offline.js';
 import { onSessionRenewed } from '/v3/session.js';
 import { practiceActive, practiceDay, practiceOff, practiceOn } from '/v3/practice.js';
@@ -31,7 +31,7 @@ import {
   createConversation, currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
   addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto, requireLinen,
 } from '/v3/conv/conversation.js';
-import { syncPlan, finishPlan, ackSync, refreshTicks, PHOTO_OPTIONAL } from '/v3/conv/sync.js';
+import { syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL } from '/v3/conv/sync.js';
 import { serializeConversation, deserializeConversation, photoIdems } from '/v3/conv/persist.js';
 import { reportText, reportFiles } from '/v3/conv/report.js';
 import {
@@ -50,6 +50,7 @@ export const state = {
   error: '',
   dead: [],             // actions refusees par le proxy, lues par l'ecran Profile
   prepared: false,      // l'ecran courant a deja charge ce dont il a besoin
+  jourGarde: false,     // journee reprise de la copie hors ligne, a relire au retour du reseau
   viewAs: null,         // {id, name, viewerId, confirmed, practice}
   // Conversation (prototype). editIndex : page d'un probleme ouverte ; viewPhoto :
   // miniature de piece agrandie ; flowCam : camera ouverte pour l'ecran des photos
@@ -404,15 +405,19 @@ function writesActive() {
 }
 
 // Chaine unique : les actions entrent en file dans l'ordre ou sync.js les rend,
-// meme quand un televersement doit d'abord garder ses octets.
+// meme quand un televersement doit d'abord garder ses octets. Une action qui
+// n'entre pas en file (stockage plein) est defaite avec celles qui en dependent
+// (runActions) : le geste suivant la reemet, rien ne part vers une cle inconnue.
 let chaine = Promise.resolve();
-function dispatch(actions) {
-  for (const a of actions) {
-    chaine = chaine.then(() => runAction(a)).catch(err => {
-      console.warn('[v3] geste non garde', a.action, err);
-      toast('Could not save on this phone. Try again.', 'err');
-    });
-  }
+const defaites = new Set();
+function dispatch(c, actions) {
+  if (!actions.length) return chaine;
+  chaine = chaine.then(() => runActions(c, actions, runAction, defaites)).then(function (n) {
+    if (!n) return;
+    console.warn('[v3] gestes non gardes', n);
+    refreshTicks(c);
+    toast('Could not save on this phone. Try again.', 'err');
+  }).catch(function (err) { console.warn('[v3] file', err); });
   return chaine;
 }
 
@@ -428,7 +433,7 @@ function markSynced(c) {
   if (!c) return c;
   const actions = syncPlan(c, { newIdem, active: writesActive() });
   refreshTicks(c);
-  dispatch(actions);
+  dispatch(c, actions);
   persist();
   return c;
 }
@@ -437,7 +442,7 @@ function markSynced(c) {
 // encore en attente, et jamais attendue (le partage garde l'activation du geste).
 function finishNow(c) {
   markSynced(c);
-  dispatch(finishPlan(c, { newIdem, active: writesActive(), now: new Date() }));
+  dispatch(c, finishPlan(c, { newIdem, active: writesActive(), now: new Date() }));
   persist();
 }
 
@@ -475,38 +480,64 @@ function persist() {
   chaine = chaine.then(ecrireConvs);
 }
 
-function ecrireConvs() {
+// Gardee dans sessionStorage ET dans IndexedDB : iOS vide sessionStorage quand il
+// ferme l'app installee, la reprise lit alors IndexedDB. Une conversation dont la
+// fin est confirmee par le proxy n'est plus gardee : le serveur fait foi pour
+// elle. Plus rien a reprendre : les deux copies sont effacees.
+async function ecrireConvs() {
   if (!writesActive() || !state.day || !state.day.me) return;
+  const convs = {};
   try {
-    const convs = {};
-    for (const [id, c] of Object.entries(S.convs)) convs[id] = serializeConversation(c);
-    sessionStorage.setItem(CLE_CONVS, JSON.stringify({
-      me: String(state.day.me.id), date: state.day.date, activeId: S.activeId, screen: S.screen, convs,
-      // La journee elle-meme : un rechargement sans reseau reprend le menage en cours.
-      day: state.day,
-    }));
-  } catch (e) { /* stockage plein ou indisponible : la conversation vit le temps de la page */ }
+    for (const [id, c] of Object.entries(S.convs)) if (!finishAcked(c)) convs[id] = serializeConversation(c);
+  } catch (e) { return; }
+  if (!Object.keys(convs).length) { await oublierConvsGardees(); return; }
+  const blob = {
+    me: String(state.day.me.id), date: state.day.date, activeId: S.activeId, screen: S.screen, convs,
+    // La journee elle-meme : un rechargement sans reseau reprend le menage en cours.
+    day: state.day,
+  };
+  try { sessionStorage.setItem(CLE_CONVS, JSON.stringify(blob)); } catch (e) { /* stockage plein ou indisponible */ }
+  try { await putState(CLE_CONVS, blob); } catch (e) { /* idem */ }
 }
 
-// Reprise : conversations de la meme personne, du meme jour, sur des menages encore
-// dans la journee. Les gestes deja en file ne sont pas recrees (conv.sync les connait).
-function lireConvs() {
-  try { return JSON.parse(sessionStorage.getItem(CLE_CONVS) || 'null'); } catch (e) { return null; }
+async function oublierConvsGardees() {
+  try { sessionStorage.removeItem(CLE_CONVS); } catch (e) { /* stockage indisponible */ }
+  try { await deleteState(CLE_CONVS); } catch (e) { /* idem */ }
+}
+
+async function lireConvs() {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(CLE_CONVS) || 'null');
+    if (s) return s;
+  } catch (e) { /* illisible : on tente IndexedDB */ }
+  try { return await getState(CLE_CONVS); } catch (e) { return null; }
 }
 
 // Journee gardee avec les conversations, si elle est bien celle d'aujourd'hui a Dubai.
-function journeeGardee() {
-  const saved = lireConvs();
+async function journeeGardee() {
+  const saved = await lireConvs();
   const day = saved && saved.day;
   if (!day || !day.me || saved.me !== String(day.me.id) || day.date !== dubaiDate(new Date())) return null;
   return day;
 }
 
+// Le role (lead ou aide) vient du serveur : une conversation reprise suit la
+// journee fraiche (v3.myDay), pas la valeur gardee.
+function rafraichirRoles() {
+  for (const [id, c] of Object.entries(S.convs)) {
+    const frais = state.apartments.find(a => a.id === id);
+    if (frais && c.apt) { c.apt.lead = frais.lead; c.apt.role = frais.role; }
+  }
+}
+
+// Reprise : conversations de la meme personne, du meme jour, sur des menages encore
+// dans la journee. Les gestes deja en file ne sont pas recrees (conv.sync les connait).
 async function restoreConvs() {
-  const saved = lireConvs();
+  const saved = await lireConvs();
   const day = state.day;
-  if (!saved || !day || !day.me || saved.me !== String(day.me.id) || saved.date !== day.date) return;
-  const ids = Object.keys(saved.convs || {}).filter(id => S.apartments.some(a => a.id === id));
+  if (!saved || !day || !day.me) return;
+  if (saved.me !== String(day.me.id) || saved.date !== day.date) { await oublierConvsGardees(); return; }
+  const ids = Object.keys(saved.convs || {}).filter(id => state.apartments.some(a => a.id === id));
   let files = {};
   try { files = await getFiles(ids.flatMap(id => photoIdems(saved.convs[id]))); } catch (e) { files = {}; }
   const convs = {};
@@ -516,6 +547,7 @@ async function restoreConvs() {
     if (c) convs[id] = c;
   }
   S.convs = convs;
+  rafraichirRoles();
   if (saved.activeId && convs[saved.activeId]) { S.activeId = saved.activeId; S.screen = saved.screen === 'conv' ? 'conv' : 'list'; }
 }
 
@@ -831,12 +863,16 @@ function reponseConforme(data, vue) {
   return !!data.viewAs && !!data.me && String(data.me.id) === vue.id;
 }
 
-export async function loadDay() {
+// `silent` : rafraichissement au retour du reseau d'une journee reprise hors
+// ligne ; ni ecran de chargement (le viseur resterait ferme), ni erreur affichee.
+export async function loadDay({ silent = false } = {}) {
   const generation = ++generationJour;
   const vue = state.viewAs;
-  state.loading = true;
-  state.error = '';
-  render();
+  if (!silent) {
+    state.loading = true;
+    state.error = '';
+    render();
+  }
   try {
     const data = await api.get('v3.myDay', vue ? { as: vue.id } : {});
     if (generation !== generationJour) return;
@@ -859,17 +895,23 @@ export async function loadDay() {
     }
     state.day = data;
     state.apartments = toApartments(data, data.me, { now: new Date() });
+    state.jourGarde = false;
     if (!repris && writesActive()) {
       repris = true;
       await restoreConvs();
       if (generation !== generationJour) return;
-    }
+    } else rafraichirRoles();
     state.loading = false;
+    if (silent) { persist(); renderLater(); return; }
     render();
     await maybeAutoOpen();
   } catch (err) {
     if (generation !== generationJour) return;
+    if (silent) return;
     state.loading = false;
+    const garde = err instanceof ApiError && err.kind === 'offline' && !vue && !repris && writesActive()
+      ? await journeeGardee() : null;
+    if (generation !== generationJour) return;
     if (vue && state.viewAs === vue && err instanceof ApiError && err.kind === 'server' &&
         (err.status === 400 || err.status === 403)) {
       oublierViewAs();
@@ -880,10 +922,12 @@ export async function loadDay() {
     }
     if (err instanceof ApiError && err.kind === 'auth') {
       perdreSession();
-    } else if (err instanceof ApiError && err.kind === 'offline' && !vue && !repris && writesActive() && journeeGardee()) {
+    } else if (garde) {
       // Rechargement sans reseau au milieu d'un menage : la journee gardee suffit
-      // pour reprendre la conversation ; la file partira au retour du reseau.
-      state.day = journeeGardee();
+      // pour reprendre la conversation ; la file partira au retour du reseau, et
+      // la journee sera relue a ce moment-la (evenement online).
+      state.day = garde;
+      state.jourGarde = true;
       state.apartments = toApartments(state.day, state.day.me, { now: new Date() });
       repris = true;
       await restoreConvs();
@@ -899,6 +943,11 @@ export async function loadDay() {
     render();
   }
 }
+
+// Journee reprise de la copie hors ligne : relue des que le reseau revient.
+window.addEventListener('online', function () {
+  if (state.jourGarde && state.session && !state.loading) loadDay({ silent: true });
+});
 
 onQueueChange(function (n) {
   if (state.queued === n) return;

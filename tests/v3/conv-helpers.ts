@@ -90,3 +90,13 @@ export async function fileVide(page: Page) {
   }), { timeout: 15_000 }).toBe(0);
 }
 
+
+// Retour du reseau : la file se vide meme si le rejeu automatique attend son delai
+// (RETRY_MS) ; chaque tour de l'attente relance un rejeu et lit l'etat de la file.
+export async function fileVideApresRetour(page: Page) {
+  await expect.poll(async () => page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    await m.flush();
+    return (await m.pendingEntries()).length;
+  }), { timeout: 30_000 }).toBe(0);
+}

@@ -2,7 +2,7 @@
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
 import { CLE_VIEW_AS, leaveModeForSignOut, practicing, queueStrip, render, startPractice, startViewAs } from '/v3/app.js';
-import { clearDead, clearFiles, deadEntries, resetQueue } from '/v3/offline.js';
+import { clearDead, clearFiles, deadEntries, deleteState, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
 import { esc, icon } from '/v3/ui.js';
 
@@ -209,6 +209,7 @@ const actions = {
     // elles appartiennent a la personne qui sort, comme la file.
     try { await clearFiles(); } catch (e) { /* stockage indisponible */ }
     try { sessionStorage.removeItem('v3Convs'); } catch (e) { /* stockage indisponible */ }
+    try { await deleteState('v3Convs'); } catch (e) { /* stockage indisponible */ }
     location.replace('/#cleaner');
   },
 };

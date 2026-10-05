@@ -11,8 +11,11 @@
 // problème : uploadPhoto de la première photo (problem) puis reportProblem { photoIdem } ;
 // photos suivantes : uploadPhoto + addProblemPhoto { ticketIdem } ; note : setProblemNote ;
 // urgence / endroit : updateProblem ; suppression : deleteProblem ; fin : finishJob (finishPlan).
-// Un problème dont la photo est obligatoire attend sa première photo (sa note et son endroit
-// partent alors avec le signalement) : sans photo, il reste dans le rapport partagé seulement.
+// Note : celle déjà saisie au moment du signalement part dans reportProblem (champ note), toute
+// note saisie ou modifiée ensuite part par setProblemNote. Un problème dont la photo est
+// obligatoire attend sa première photo : sans photo, il reste dans le rapport partagé seulement.
+// Un type à photo facultative choisi sur une tuile (sauf Gas smell, immédiat) attend que la
+// cleaner quitte son écran de photos : une tuile touchée puis Back n'envoie rien.
 import { isHelper } from "./conversation.js";
 import { reportText } from "./report.js";
 import { LINEN_USUAL } from "./rules.js";
@@ -45,6 +48,9 @@ export function syncPlan(conv, { newIdem, active = true } = {}) {
     emit("v3.uploadPhoto", { jobId, itemName, idem: photo.idem }, { file: photo.file || null, fileName: photo.file && photo.file.name ? photo.file.name : "photo.jpg" });
     return photo.idem;
   };
+
+  // Photo déjà en file (son rattachement, lui, a été défait) : on ne la renvoie pas.
+  const queued = ph => (ph.idem && s.photos[ph.idem] ? ph.idem : null);
 
   // 1. Démarrage (I'm here / I'm in now). La bulle de la cleaner porte la clé, pour ✓ / ✓✓.
   if (conv.startedAt && !s.started) {
@@ -81,15 +87,16 @@ export function syncPlan(conv, { newIdem, active = true } = {}) {
     const photos = p.photos.filter(isObj);
     if (!rec.reported) {
       if (!PHOTO_OPTIONAL.includes(p.kind) && photos.length === 0) continue;
+      if (PHOTO_OPTIONAL.includes(p.kind) && p.kind !== "Gas smell" && conv.flow && conv.flow.problem === p && conv.flow.stage === "photos") continue;
       const body = { jobId, listingId: conv.apt.listingId, kind: p.kind, urgency: p.urgency, where: p.where, note: p.note || null };
-      if (photos[0]) { body.photoIdem = upload(photos[0], "problem"); rec.photos.push(photos[0].idem); }
+      if (photos[0]) { body.photoIdem = queued(photos[0]) || upload(photos[0], "problem"); rec.photos.push(photos[0].idem); }
       body.idem = p.idem;
       emit("v3.reportProblem", body);
       Object.assign(rec, { reported: true, note: p.note || null, urgency: p.urgency, where: p.where });
     }
     for (const ph of photos) {
       if (ph.idem && rec.photos.includes(ph.idem)) continue;
-      const photoIdem = upload(ph, "problem");
+      const photoIdem = queued(ph) || upload(ph, "problem");
       rec.photos.push(photoIdem);
       emit("v3.addProblemPhoto", { ...ticketRef(s, p.idem), photoIdem, idem: newIdem() });
     }
@@ -136,6 +143,65 @@ export function finishPlan(conv, { newIdem, active = true, now = new Date() } = 
   }
   s.idems[idem] = "v3.finishJob";
   return [{ action: "v3.finishJob", body }];
+}
+
+// Une action n'a pas pu entrer en file (stockage plein, IndexedDB refusé) : ce que syncPlan ou
+// finishPlan avait noté comme parti est défait, pour que le prochain syncPlan la réémette.
+export function rollbackSync(conv, a) {
+  const s = conv && conv.sync;
+  if (!s || !a || !a.body) return;
+  const b = a.body;
+  delete s.idems[b.idem];
+  const recOf = idem => s.problems[idem] || null;
+  switch (a.action) {
+    case "v3.startJob": if (s.started === b.idem) s.started = null; break;
+    case "v3.finishJob": if (s.finish === b.idem) s.finish = null; break;
+    case "v3.uploadPhoto": {
+      delete s.photos[b.idem];
+      const all = [...Object.values(conv.arrivalPhotos), ...Object.values(conv.endPhotos), ...conv.problems.map(p => p.photos)];
+      for (const list of all) for (const ph of list) if (isObj(ph) && ph.idem === b.idem) delete ph.idem;
+      for (const rec of Object.values(s.problems)) rec.photos = rec.photos.filter(x => x !== b.idem);
+      break;
+    }
+    case "v3.reportProblem": { const rec = recOf(b.idem); if (rec) rec.reported = false; break; }
+    case "v3.setProblemNote": { const rec = recOf(b.ticketIdem); if (rec) rec.note = undefined; break; }
+    case "v3.updateProblem": {
+      const rec = recOf(b.ticketIdem);
+      if (rec) { if ("urgency" in b) rec.urgency = undefined; if ("where" in b) rec.where = undefined; }
+      break;
+    }
+    case "v3.addProblemPhoto": {
+      const rec = recOf(b.ticketIdem);
+      if (rec) rec.photos = rec.photos.filter(x => x !== b.photoIdem);
+      break;
+    }
+    case "v3.deleteProblem": { const rec = recOf(b.ticketIdem); if (rec) rec.deleted = false; break; }
+    case "v3.deletePhoto": { const rec = s.photos[b.photoIdem]; if (rec) rec.deleted = false; break; }
+  }
+}
+
+// Met en file les actions dans l'ordre. `run(a)` rend une promesse (mise en file) ; un échec
+// défait l'action (rollbackSync) et toutes celles qui en dépendent dans la suite (un signalement
+// dont la photo n'est pas en file, une photo ou une note d'un signalement pas en file) : rien
+// ne part en référence à une clé que le proxy ne recevra jamais. `failed` garde les clés
+// défaites d'un appel à l'autre. Rend le nombre d'actions défaites.
+export async function runActions(conv, actions, run, failed = new Set()) {
+  let undone = 0;
+  for (const a of actions) {
+    const b = a.body || {};
+    const dependsOnFailed = [b.photoIdem, b.ticketIdem].some(x => x && failed.has(x));
+    let ok = !dependsOnFailed;
+    if (ok) {
+      try { await run(a); } catch (e) { ok = false; }
+    }
+    if (ok && b.idem) failed.delete(b.idem);
+    if (!ok) {
+      if (b.idem) failed.add(b.idem);
+      rollbackSync(conv, a);
+      undone += 1;
+    }
+  }
+  return undone;
 }
 
 // Réponse 2xx reçue pour une clé : rend true si la clé appartient à cette conversation.

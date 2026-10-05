@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { bootV3, fetchLog } from './helpers';
-import { BLOOM, demarrer, ecritures, fileVide, photo, piece } from './conv-helpers';
+import { BLOOM, demarrer, ecritures, fileVide, fileVideApresRetour, photo, piece } from './conv-helpers';
 
 // File hors ligne de la v3. Les premiers tests passent par sendOrQueue (chemin
 // direct, garde pour les actions hors conversation) et lisent le bandeau « Saved
@@ -203,7 +203,7 @@ test('reseau coupe au milieu d un signalement puis retabli : un seul ticket, ses
   await expect(page.locator('.msg.me.problem .ticks')).toHaveText('✓');
   await expect.poll(async () => page.evaluate(async () => (await (await import('/v3/offline.js')).pendingEntries()).length)).toBe(5);
   await page.evaluate(() => { localStorage.removeItem('v3TestOffline'); window.dispatchEvent(new Event('online')); });
-  await fileVide(page);
+  await fileVideApresRetour(page);
   const e = await ecritures(page);
   const reports = e.filter((x) => x.action === 'v3.reportProblem');
   expect(reports.length).toBe(1);
@@ -246,8 +246,13 @@ test('rechargement au milieu de l etape 4 : meme etape, photos retrouvees, aucun
   await page.waitForFunction(() => (window as any).__v3ready === true);
   await expect(page.locator('.vf-top b')).toHaveText(/^Step 4 · Bathroom /);
   await expect(page.locator('.vf .count')).toHaveText('1 photo');
+  const jours = async () => (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.myDay') !== -1).length;
+  const joursAvant = await jours();
   await page.evaluate(() => { localStorage.removeItem('v3TestOffline'); window.dispatchEvent(new Event('online')); });
-  await fileVide(page);
+  await fileVideApresRetour(page);
+  // Journee reprise de la copie hors ligne : relue au retour du reseau, sans quitter le viseur.
+  await expect.poll(jours).toBeGreaterThan(joursAvant);
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 4 · Bathroom /);
   const apres = await ecritures(page);
   expect(apres.length).toBe(6);
   const anciens = new Set(avant.map((x) => x.body.idem));
@@ -260,4 +265,75 @@ test('rechargement au milieu de l etape 4 : meme etape, photos retrouvees, aucun
   const fin = await ecritures(page);
   expect(fin.length).toBe(7);
   expect(fin[6].body.itemName).toBe('end:Kitchen');
+});
+
+test('fermeture forcee de l app (sessionStorage vide) : reprise depuis IndexedDB, rien n est repris apres la fin', async ({ page }) => {
+  await demarrer(page);
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  await piece(page, 1, 'Bed');
+  await fileVide(page);
+  // iOS ferme l'app installee : sessionStorage est perdu, IndexedDB reste.
+  await page.evaluate(() => sessionStorage.clear());
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true);
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Bathroom /);
+  expect((await ecritures(page)).length).toBe(2);
+  for (const r of ['Bathroom', 'Kitchen']) await piece(page, 1, r);
+  await page.locator('[data-reply="walls-ok"]').click();
+  await page.locator('[data-reply="no-damage"]').click();
+  await page.locator('[data-reply="linen-yes"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
+  for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
+  await page.locator('[data-reply="low-done"]').click();
+  await page.locator('[data-reply="send"]').click();
+  await fileVide(page);
+  // Fin confirmee par le proxy : plus rien a reprendre, les deux copies sont effacees.
+  await expect.poll(async () => page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    return { idb: await m.getState('v3Convs'), session: sessionStorage.getItem('v3Convs') };
+  })).toEqual({ idb: null, session: null });
+});
+
+test('reprise : le role (lead ou aide) vient de la journee fraiche, pas de la copie gardee', async ({ page }) => {
+  await demarrer(page);
+  await page.getByRole('button', { name: /1506 Emaar Creekside 18A/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  await fileVide(page);
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('v3Convs') !== null)).toBe(true);
+  // La copie gardee dit « lead » (le serveur le pensait au moment de la sauvegarde) ;
+  // la journee relue apres le rechargement dit « aide de Pionah ».
+  await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    const id = 'job_0000000000000crk1506';
+    const blob = JSON.parse(sessionStorage.getItem('v3Convs') || 'null');
+    blob.convs[id].apt.lead = null;
+    blob.convs[id].apt.role = 'lead';
+    sessionStorage.setItem('v3Convs', JSON.stringify(blob));
+    await m.putState('v3Convs', blob);
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true);
+  await expect.poll(async () => page.evaluate(() => {
+    const c = (window as any).__hk.convs['job_0000000000000crk1506'];
+    return c ? { lead: c.apt.lead && c.apt.lead.name, role: c.apt.role } : null;
+  })).toEqual({ lead: 'Pionah', role: 'helper' });
+});
+
+test('une entree illisible au rejeu (erreur locale) part au magasin mort au bout de 5 essais, la file continue', async ({ page }) => {
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin' });
+  await page.waitForFunction(() => (window as any).__v3ready === true);
+  const r = await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    // file: une chaine et non un Blob : le multipart ne peut pas etre bati (TypeError, pas une ApiError).
+    await m.enqueue({ action: 'v3.uploadPhoto', body: { jobId: 'job_aaaaaaaaaaaaaaaaaaaa', idem: m.newIdem() }, bytes: null, fileType: null, file: 'pas un blob', fileName: 'p.jpg', at: Date.now() });
+    await m.enqueue({ action: 'v3.tick', body: { jobId: 'job_aaaaaaaaaaaaaaaaaaaa', itemId: 'Bathroom', checked: true, idem: m.newIdem() }, bytes: null, fileType: null, file: null, fileName: null, at: Date.now() });
+    const etapes: number[] = [];
+    for (let i = 0; i < m.MAX_ECHECS_LOCAUX; i++) { await m.flush(); etapes.push((await m.pendingEntries()).length); }
+    return { etapes, morts: (await m.deadEntries()).map((d: any) => d.action) };
+  });
+  expect(r.etapes).toEqual([2, 2, 2, 2, 0]);
+  expect(r.morts).toEqual(['v3.uploadPhoto']);
+  const ticks = (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.tick') !== -1);
+  expect(ticks.length).toBe(1);
 });

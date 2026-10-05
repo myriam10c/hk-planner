@@ -109,3 +109,35 @@ test('finishJob refuse faute de linge (le serveur voit un lead) : l ecran demand
   expect(morts).toBe(0);
   await expect(page.getByText('Not sent:', { exact: false })).toHaveCount(0);
 });
+
+test('mise en file ratee une fois (stockage plein) : la photo et son signalement repartent au geste suivant, un seul ticket', async ({ page }) => {
+  await demarrer(page);
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
+  await page.locator('[data-reply="walls-ok"]').click();
+  await page.locator('[data-reply="some-damage"]').click();
+  await page.locator('[data-kind="Leak"]').click();
+  await fileVide(page);
+  // La prochaine mise en file echoue une fois, comme un stockage plein.
+  await page.evaluate(() => {
+    const add = IDBObjectStore.prototype.add;
+    let n = 1;
+    IDBObjectStore.prototype.add = function (v: any, k?: any) {
+      if (this.name === 'queue' && n-- > 0) throw new DOMException('full', 'QuotaExceededError');
+      return add.call(this, v, k);
+    };
+  });
+  await photo(page, 'flow-shutter');
+  await expect(page.getByText('Could not save on this phone. Try again.')).toBeVisible();
+  await photo(page, 'flow-shutter');
+  await page.locator('[data-flow="photos-done"]').click();
+  await page.locator('[data-flow="no-note"]').click();
+  await fileVide(page);
+  const e = (await ecritures(page)).slice(4);
+  expect(e.map(court)).toEqual(['uploadPhoto problem', 'reportProblem Leak', 'uploadPhoto problem', 'addProblemPhoto']);
+  expect(e[1].body.photoIdem).toBe(e[0].body.idem);
+  expect(e[3].body).toMatchObject({ ticketIdem: e[1].body.idem, photoIdem: e[2].body.idem });
+  expect(await page.evaluate(async () => (await (await import('/v3/offline.js')).deadEntries()).length)).toBe(0);
+  await expect(page.locator('.msg.me.problem .ticks')).toHaveText('✓✓');
+});
