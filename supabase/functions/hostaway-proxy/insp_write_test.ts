@@ -82,12 +82,107 @@ Deno.test("maintenance : un seul ticket meme sur double envoi", async () => {
   assertEquals((b.body as any).item.ticketId, t.id);
 });
 
-Deno.test("maintenance : ticket deja cree par une autre requete (23505) est rattache", async () => {
+// Fait echouer le premier insert de `table` en 23505 apres avoir pose `row`
+// (simule une requete concurrente qui gagne la course).
+function racing(db: any, table: string, row: any) {
+  const orig = db.from;
+  let done = false;
+  db.from = (t: string) => {
+    const q = orig(t);
+    if (t !== table) return q;
+    const ins = q.insert;
+    q.insert = (v: any) => {
+      if (done) return ins(v);
+      done = true;
+      db.tables[table].push({ id: 5000, ...row });
+      return { select: () => ({ single: async () => ({ data: null, error: { code: "23505", message: "duplicate" } }) }) };
+    };
+    return q;
+  };
+}
+
+Deno.test("maintenance : insert en 23505 (course), ticket relu par source_ref et rattache", async () => {
   const db = seed(); const id = await started(db);
-  db.tables.maintenance_tickets = [{ id: 77, source: "inspection", source_ref: "inspection:" + id + ":ac" }];
-  db.fail["maintenance_tickets.insert"] = { code: "23505", message: "duplicate" };
+  // Pre-lookup vide ; racing() pose le ticket concurrent a l'insert qui echoue en 23505.
+  racing(db, "maintenance_tickets", { source: "inspection", source_ref: "inspection:" + id + ":ac" });
   const r = await saveItem(db, FAIZA, { inspectionId: id, zone: "ac", status: "not_ok", note: "Leak", outcome: "maintenance" });
-  assertEquals((r.body as any).item.ticketId, 77);
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).item.ticketId, 5000);
+  assertEquals(db.tables.maintenance_tickets.length, 1);
+});
+
+Deno.test("ticket : titre = libelle + note tronquee a 80", async () => {
+  const db = seed(); const id = await started(db);
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "ac", status: "not_ok", note: "x".repeat(200), outcome: "maintenance" });
+  const t = db.tables.maintenance_tickets[0].title as string;
+  assertEquals(t, "AC: " + "x".repeat(80));
+});
+
+Deno.test("start : cle idem differente, index partiel (23505), rend l'inspection ouverte", async () => {
+  const db = seed();
+  const id = await started(db);
+  // Le lookup d'ouverture rate la premiere fois, l'insert viole l'index partiel.
+  const orig = db.from; let missed = false;
+  db.from = (t: string) => {
+    const q = orig(t);
+    if (t !== "inspections") return q;
+    const maybe = q.maybeSingle; const ins = q.insert;
+    const filters: string[] = [];
+    const is = q.is; q.is = (c: string, v: any) => { filters.push(c); return is(c, v); };
+    q.maybeSingle = async () => {
+      if (!missed && filters.includes("finished_at")) { missed = true; return { data: null, error: null }; }
+      return maybe();
+    };
+    q.insert = (v: any) => {
+      ins(v);
+      return { select: () => ({ single: async () => ({ data: null, error: { code: "23505", message: "uq_inspections_open" } }) }) };
+    };
+    return q;
+  };
+  const r = await startInspection(db, FAIZA, { listingId: "L1", eligibility: "checkout", idem: "idem-start-other" }, NOW);
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).inspection.id, id);
+});
+
+Deno.test("claim : deja pris par un autre, 409 par le chemin conditionnel", async () => {
+  const db = seed();
+  await claimProposal(db, FAIZA, { listingId: "L1" }, NOW);
+  const r = await claimProposal(db, WALTER, { listingId: "L1" }, NOW);
+  assertEquals(r.status, 409);
+  assertEquals(db.tables.inspection_proposals[0].claimed_by, 3);
+  // Reprise par le meme cleaner : ok.
+  assertEquals((await claimProposal(db, FAIZA, { listingId: "L1" }, NOW)).status, 200);
+});
+
+Deno.test("claim / unclaim / assign / setExcluded : entrees invalides", async () => {
+  const db = seed();
+  assertEquals((await unclaimProposal(db, WALTER, { listingId: "" }, NOW)).status, 400);
+  assertEquals((await claimProposal(db, FAIZA, { listingId: "ZZ" }, NOW)).status, 404);
+  assertEquals((await assignProposal(db, WALTER, { listingId: "ZZ", cleanerId: 3 }, NOW)).status, 404);
+  assertEquals((await setExcluded(db, WALTER, { listingId: "ZZ", excluded: true })).status, 404);
+});
+
+Deno.test("photo : course 23505 sans relecture, erreur (pas de photo null)", async () => {
+  const db = seed(); const id = await started(db);
+  db.fail["inspection_photos.insert"] = { code: "23505", message: "duplicate" };
+  let threw = false;
+  try { await uploadInspectionPhoto(db, FAIZA, photoForm(id, "ac", "idem-photo-9")); } catch { threw = true; }
+  assert(threw);
+});
+
+Deno.test("finish : mise a jour gardee a 0 ligne, rend le finished_at stocke", async () => {
+  const db = seed(); const id = await started(db);
+  for (const z of INSP_ZONES) await saveItem(db, FAIZA, { inspectionId: id, zone: z.key, status: "ok" });
+  const orig = db.from;
+  db.from = (t: string) => {
+    const q = orig(t);
+    if (t !== "inspections") return q;
+    const upd = q.update;
+    q.update = (v: any) => { db.tables.inspections[0].finished_at = "2026-10-06T07:00:00.000Z"; return upd(v); };
+    return q;
+  };
+  const r = await finishInspection(db, FAIZA, { inspectionId: id }, NOW);
+  assertEquals((r.body as any).inspection.finishedAt, "2026-10-06T07:00:00.000Z");
 });
 
 Deno.test("photo : stockee sous inspections/, rejeu idem sans doublon", async () => {

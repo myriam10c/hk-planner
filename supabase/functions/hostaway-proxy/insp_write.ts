@@ -42,11 +42,13 @@ export async function startInspection(sb: any, me: SessionUser, body: any, now =
   if (!listing) return bad(404, "Apartment not found.");
   const day = todayDubai(now);
   // Rejeu de la meme cle, ou reprise de l'inspection ouverte du jour.
-  const { data: byIdem } = await sb.from("inspections").select("*").eq("idem_key", body.idem).maybeSingle();
+  const { data: byIdem } = await sb.from("inspections").select("*").eq("idem_key", body.idem)
+    .eq("inspector_id", me.cleaner_id).maybeSingle();
   if (byIdem) return { status: 200, body: await snapshot(sb, byIdem) };
-  const { data: open } = await sb.from("inspections").select("*")
+  const findOpen = async () => (await sb.from("inspections").select("*")
     .eq("listing_id", listingId).eq("inspector_id", me.cleaner_id).eq("inspection_date", day).is("finished_at", null)
-    .maybeSingle();
+    .maybeSingle()).data;
+  const open = await findOpen();
   if (open) return { status: 200, body: await snapshot(sb, open) };
   const { data, error } = await sb.from("inspections").insert({
     listing_id: listingId, inspector_id: me.cleaner_id, inspection_date: day,
@@ -54,8 +56,12 @@ export async function startInspection(sb: any, me: SessionUser, body: any, now =
   }).select().single();
   if (error) {
     if (String(error.code) !== "23505") throw error;
-    const { data: race } = await sb.from("inspections").select("*").eq("idem_key", body.idem).maybeSingle();
+    const { data: race } = await sb.from("inspections").select("*").eq("idem_key", body.idem)
+      .eq("inspector_id", me.cleaner_id).maybeSingle();
     if (race) return { status: 200, body: await snapshot(sb, race) };
+    // Autre cle idem, meme inspection ouverte (index partiel uq_inspections_open).
+    const other = await findOpen();
+    if (other) return { status: 200, body: await snapshot(sb, other) };
     throw error;
   }
   return { status: 200, body: await snapshot(sb, data) };
@@ -70,7 +76,7 @@ async function ensureTicket(sb: any, me: SessionUser, insp: any, zone: string, n
   const hours = sla?.max_hours ?? 72;
   const { data, error } = await sb.from("maintenance_tickets").insert({
     listing_id: insp.listing_id,
-    title: (zoneLabel(zone) + ": " + note).slice(0, 80),
+    title: zoneLabel(zone) + ": " + note.slice(0, 80),
     description: note + "\n\nFound during inspection by " + me.name + ".",
     category: "general", priority: "medium", status: "open",
     reported_by: me.name, source: "inspection", source_ref: ref,
@@ -121,7 +127,8 @@ export async function uploadInspectionPhoto(sb: any, me: SessionUser, form: Form
   if (!INSP_ZONE_KEYS.has(zone)) return bad(400, "unknown zone");
   const kind = String(form.get("kind") ?? "");
   if (kind !== "issue" && kind !== "after") return bad(400, "invalid kind");
-  const { data: dup } = await sb.from("inspection_photos").select("id, zone, kind").eq("idem_key", String(idem)).maybeSingle();
+  const { data: dup } = await sb.from("inspection_photos").select("id, zone, kind").eq("idem_key", String(idem))
+    .eq("inspection_id", o.insp.id).maybeSingle();
   if (dup) return { status: 200, body: { photo: dup } };
   const file = form.get("file") as any;
   if (!file || typeof file.arrayBuffer !== "function") return bad(400, "file required");
@@ -140,6 +147,7 @@ export async function uploadInspectionPhoto(sb: any, me: SessionUser, form: Form
     await sb.storage.from(V3_PHOTO_BUCKET).remove([path]);
     if (String(error.code) !== "23505") throw error;
     const { data: race } = await sb.from("inspection_photos").select("id, zone, kind").eq("idem_key", String(idem)).maybeSingle();
+    if (!race) throw error;
     return { status: 200, body: { photo: race } };
   }
   return { status: 200, body: { photo: data } };
@@ -163,10 +171,14 @@ export async function finishInspection(sb: any, me: SessionUser, body: any, now 
   const noOutcome = notOk.filter((z) => !byZone[z.key].outcome).map((z) => z.label);
   if (noOutcome.length) return bad(400, "Choose fixed or maintenance for: " + noOutcome.join(", "));
   const finishedAt = new Date(now).toISOString();
-  const { error } = await sb.from("inspections")
+  const { data: updated, error } = await sb.from("inspections")
     .update({ finished_at: finishedAt, general_note: clean(body?.generalNote) || null })
-    .eq("id", insp.id).is("finished_at", null);
+    .eq("id", insp.id).is("finished_at", null).select("id");
   if (error) throw error;
+  if (!updated || updated.length === 0) {
+    const { data: cur } = await sb.from("inspections").select("finished_at").eq("id", insp.id).maybeSingle();
+    return { status: 200, body: { inspection: { id: insp.id, finishedAt: cur?.finished_at ?? finishedAt } } };
+  }
   return { status: 200, body: { inspection: { id: insp.id, finishedAt } } };
 }
 
@@ -180,23 +192,37 @@ async function nameOf(sb: any, id: number) {
   return data?.name ?? "someone";
 }
 
+async function listingExists(sb: any, listingId: string) {
+  const { data } = await sb.from("listing_config").select("listing_id").eq("listing_id", listingId).maybeSingle();
+  return !!data;
+}
+
 export async function claimProposal(sb: any, me: SessionUser, body: any, now = Date.now()): Promise<ActionResult> {
   const listingId = clean(body?.listingId, 40);
   if (!listingId) return bad(400, "listingId required");
+  if (!(await listingExists(sb, listingId))) return bad(404, "Apartment not found.");
   const day = todayDubai(now);
-  const p = await proposalRow(sb, listingId, day);
-  if (p?.claimed_by && Number(p.claimed_by) !== Number(me.cleaner_id)) {
-    return bad(409, "Already taken by " + (await nameOf(sb, p.claimed_by)) + ".");
-  }
-  const row = { proposal_date: day, listing_id: listingId, rank: p?.rank ?? 0,
-    claimed_by: me.cleaner_id, claimed_at: new Date(now).toISOString(), assigned_by: p?.assigned_by ?? null };
-  const { error } = await sb.from("inspection_proposals").upsert(row, { onConflict: "proposal_date,listing_id" });
+  // La ligne existe (rank 0 si absente), puis prise conditionnelle et atomique.
+  const ins = await sb.from("inspection_proposals")
+    .upsert({ proposal_date: day, listing_id: listingId, rank: 0 },
+      { onConflict: "proposal_date,listing_id", ignoreDuplicates: true });
+  if (ins.error) throw ins.error;
+  const { data: won, error } = await sb.from("inspection_proposals")
+    .update({ claimed_by: me.cleaner_id, claimed_at: new Date(now).toISOString() })
+    .eq("proposal_date", day).eq("listing_id", listingId)
+    .or("claimed_by.is.null,claimed_by.eq." + me.cleaner_id)
+    .select("listing_id");
   if (error) throw error;
+  if (!won || won.length === 0) {
+    const p = await proposalRow(sb, listingId, day);
+    return bad(409, "Already taken by " + (p?.claimed_by ? await nameOf(sb, p.claimed_by) : "someone") + ".");
+  }
   return { status: 200, body: { proposal: { listingId, claimedBy: me.cleaner_id, claimedByName: me.name } } };
 }
 
 export async function unclaimProposal(sb: any, me: SessionUser, body: any, now = Date.now()): Promise<ActionResult> {
   const listingId = clean(body?.listingId, 40);
+  if (!listingId) return bad(400, "listingId required");
   const day = todayDubai(now);
   const p = await proposalRow(sb, listingId, day);
   if (!p || !p.claimed_by) return { status: 200, body: { proposal: { listingId, claimedBy: null } } };
@@ -214,6 +240,7 @@ export async function assignProposal(sb: any, me: SessionUser, body: any, now = 
   if (!listingId || !Number.isInteger(cleanerId)) return bad(400, "listingId and cleanerId required");
   const { data: c } = await sb.from("cleaners").select("id, name, role, is_active").eq("id", cleanerId).maybeSingle();
   if (!c || !c.is_active || c.role === "subcontractor") return bad(400, "This person cannot do inspections.");
+  if (!(await listingExists(sb, listingId))) return bad(404, "Apartment not found.");
   const day = todayDubai(now);
   const p = await proposalRow(sb, listingId, day);
   const row = { proposal_date: day, listing_id: listingId, rank: p?.rank ?? 0,
@@ -226,6 +253,7 @@ export async function assignProposal(sb: any, me: SessionUser, body: any, now = 
 export async function setExcluded(sb: any, _me: SessionUser, body: any): Promise<ActionResult> {
   const listingId = clean(body?.listingId, 40);
   if (!listingId || typeof body?.excluded !== "boolean") return bad(400, "listingId and excluded required");
+  if (!(await listingExists(sb, listingId))) return bad(404, "Apartment not found.");
   const { error } = await sb.from("listing_config").update({ inspection_excluded: body.excluded }).eq("listing_id", listingId);
   if (error) throw error;
   return { status: 200, body: { listingId, excluded: body.excluded } };

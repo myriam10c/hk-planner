@@ -30,7 +30,7 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
   let nextId = 1000;
 
   function from(table: string) {
-    const filters: Array<{ col: string; val: any; kind: "eq" | "in" | "gte" | "lte" | "lt" | "gt" | "isnull" }> = [];
+    const filters: Array<{ col: string; val: any; kind: "eq" | "in" | "or" | "gte" | "lte" | "lt" | "gt" | "isnull" }> = [];
     let pending: { op: string; values: any; opts?: any } | null = null;
     const list = () => (tables[table] ??= []);
     // « payload->>listingId » : chemin JSON texte de PostgREST, un seul niveau.
@@ -46,7 +46,15 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
       : kind === "lt" ? String(a) < String(b) : String(a) > String(b);
     const match = (r: any) =>
       filters.every((f) =>
-        f.kind === "in"
+        f.kind === "or"
+          // PostgREST or("col.is.null,col.eq.v") : une des alternatives suffit.
+          ? String(f.val).split(",").some((alt) => {
+            const [c, op, ...rest] = alt.split(".");
+            const v = rest.join(".");
+            return op === "is" && v === "null" ? (lire(r, c) ?? null) === null
+              : op === "eq" && String(lire(r, c)) === v;
+          })
+          : f.kind === "in"
           ? (f.val as any[]).map(String).includes(String(lire(r, f.col)))
           : f.kind === "eq"
           ? String(lire(r, f.col)) === String(f.val)
@@ -110,6 +118,7 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
     const q: any = {
       select: () => q,
       eq: (col: string, val: any) => { filters.push({ col, val, kind: "eq" }); return q; },
+      or: (expr: string) => { filters.push({ col: "", val: expr, kind: "or" }); return q; },
       in: (col: string, val: any[]) => { filters.push({ col, val, kind: "in" }); return q; },
       order: () => q, limit: () => q, not: () => q,
       is: (col: string, val: any) => { if (val === null) filters.push({ col, val, kind: "isnull" }); return q; },
