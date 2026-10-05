@@ -1,0 +1,33 @@
+/* Module Inspections : tokens de /v3/styles/tokens.css uniquement. */
+.wrap { max-width: 720px; margin: 0 auto; padding: 16px 16px 40px; }
+h1 { font-family: var(--disp); font-size: 1.5rem; margin: 0 0 4px; line-height: 1.2; }
+h3 { margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+.mute { color: var(--mute); margin: 4px 0; }
+.pad { padding: 12px; }
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+.btn { min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--bone-hi); color: var(--ink); font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+.btn.primary { background: var(--terra); border-color: var(--terra); color: var(--bone-hi); }
+.btn.ghost { background: transparent; }
+.btn.block { width: 100%; margin-top: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 12px 0; }
+.card-top { display: flex; align-items: center; gap: 8px; }
+.reason { margin: 6px 0 2px; font-weight: 600; }
+.dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.dot-green { background: var(--moss); }
+.dot-orange { background: var(--amber-ink); }
+.dot-red { background: var(--ember-ink); }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.badge { font-size: .8rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--sand); color: var(--ink); }
+.badge.warn { color: var(--amber-ink); }
+.badge.bad { color: var(--ember-ink); }
+.actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.state { min-height: 44px; display: flex; align-items: center; color: var(--mute); font-weight: 600; }
+.notice { background: var(--sand); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.notice.bad { color: var(--ember-ink); }
+.also summary { min-height: 44px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
+.search { width: 100%; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bone-hi); margin: 12px 0; }
+.list { list-style: none; margin: 0; padding: 0; }
+.row { width: 100%; min-height: 48px; text-align: left; padding: 0 12px; background: var(--card); border: 0; border-bottom: 1px solid var(--line); color: var(--ink); cursor: pointer; }
+#toast-host { position: fixed; left: 0; right: 0; bottom: 16px; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; padding: 0 16px; }
+.toast { background: var(--ink); color: var(--bone-hi); padding: 10px 14px; border-radius: 10px; max-width: 100%; }
+@media (min-width: 640px) { .actions { flex-direction: row; flex-wrap: wrap; } }

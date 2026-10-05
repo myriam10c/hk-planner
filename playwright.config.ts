@@ -45,12 +45,12 @@ export default defineConfig({
       name: 'desktop',
       // tests/v3-node : tests node:test des modules purs de la v3, lances par
       // `npm run test:v3-node`, jamais par Playwright.
-      testIgnore: [/v3\//, /v3-node\//],
+      testIgnore: [/v3\//, /v3-node\//, /inspections\//],
       use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
     },
     {
       name: 'mobile',
-      testIgnore: [/v3\//, /v3-node\//],
+      testIgnore: [/v3\//, /v3-node\//, /inspections\//],
       use: { ...devices['iPhone 13'] },
     },
     {
@@ -61,6 +61,16 @@ export default defineConfig({
     {
       name: 'v3-desktop',
       testMatch: /v3\/.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 }, baseURL: V3_URL },
+    },
+    {
+      name: 'insp-mobile',
+      testMatch: /inspections\/.*\.spec\.ts/,
+      use: { ...devices['iPhone 13'], baseURL: V3_URL },
+    },
+    {
+      name: 'insp-desktop',
+      testMatch: /inspections\/.*\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 }, baseURL: V3_URL },
     },
   ],
