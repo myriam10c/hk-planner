@@ -282,6 +282,20 @@ test('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part', 
   await page.locator('#problem-note').fill('under the sink');
   await page.locator('[data-flow="save-text"]').click();
   await expect(page.locator('.msg.me.problem .ticks').first()).toHaveText('✓✓');
+  // Page du probleme : urgence changee (updateProblem).
+  await page.locator('.msg.me.problem').first().click();
+  await page.locator('[data-urgency="urgent"]').click();
+  await page.locator('.page-foot [data-act="edit-back"]').click();
+  // Un probleme signale puis supprime depuis sa page (deleteProblem).
+  await page.locator('[data-reply="another-problem"]').click();
+  await page.locator('[data-kind="Stain"]').click();
+  await photo(page, 'flow-shutter');
+  await page.locator('[data-flow="photos-done"]').click();
+  await page.locator('[data-flow="no-note"]').click();
+  await page.locator('.msg.me.problem', { hasText: 'Stain' }).click();
+  await page.locator('[data-act="delete-ask"]').click();
+  await page.locator('[data-act="delete"]').click();
+  await expect(page.locator('.msg.me.problem', { hasText: 'Stain' })).toHaveCount(0);
   // Un probleme sans photo : il reste dans le rapport, comme pour la cleaner.
   await page.locator('[data-reply="another-problem"]').click();
   await page.locator('[data-kind="Broken"]').click();
@@ -309,9 +323,16 @@ test('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part', 
   // Le simulateur a tout recu, dans les formes du proxy.
   const s = await seance(page);
   const tickets = Object.values(s.tickets).filter((t: any) => t.created).map((t: any) => [t.title, t.priority, t.status]);
-  expect(tickets).toEqual([['Leak · Whole apartment', 'medium', 'open'], ['AC not working · Whole apartment', 'medium', 'open']]);
-  expect((Object.values(s.tickets)[0] as any).note).toBe('under the sink');
-  expect(Object.keys(s.photos).length).toBe(8);
+  expect(tickets).toEqual([
+    ['Leak · Whole apartment', 'urgent', 'open'],
+    ['Stain · Whole apartment', 'medium', 'cancelled'],
+    ['AC not working · Whole apartment', 'medium', 'open'],
+  ]);
+  const [idFuite] = Object.keys(s.tickets).filter((id) => s.tickets[id].created);
+  expect((s.tickets[idFuite] as any).note).toBe('under the sink');
+  expect(Object.keys(s.photos).length).toBe(9);
+  // Les deux photos de la fuite sont rattachees a son ticket (la seconde par addProblemPhoto).
+  expect(Object.values(s.photos).filter((p: any) => String(p.ticketId) === idFuite).length).toBe(2);
   expect(s.jobs['job_bbbbbbbbbbbbbbbbbbbb']).toMatchObject({ state: 'done', report: true });
 
   // Rien n'est parti : ni ecriture, ni file, ni magasin mort, ni partage, ni sauvegarde reelle.
@@ -531,8 +552,7 @@ for (const horsLigne of [false, true]) {
     const chooser = page.waitForEvent('filechooser');
     await page.locator('[data-act="shutter"]').click();
     const fc = await chooser;
-    // Exit pendant l'attente (le viseur ferme pour atteindre le bandeau), puis la photo arrive.
-    await page.locator('[data-act="close-camera"]').click();
+    // Exit pendant l'attente (le bandeau reste au-dessus du viseur), puis la photo arrive.
     await page.getByRole('button', { name: 'Exit' }).click();
     await expect(page.locator('.practicebar')).toHaveCount(0);
     await fc.setFiles({ name: 'shot.png', mimeType: 'image/png', buffer: Buffer.from(PNG_1x1, 'base64') });
@@ -692,3 +712,89 @@ test('constat 4d : en Practice, une erreur locale n entre jamais en file', async
   expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
   expect(await appelsInterdits(page)).toEqual([]);
 });
+
+// ---------------------------------------------------------------------------
+// Revue tache 6, constat 1 : sortir de Practice ou de View as rend la vraie
+// conversation du manager, au meme endroit, sans rien recreer ni ecraser.
+// ---------------------------------------------------------------------------
+
+const STOP_HILLAL = {
+  ...STOP_FAIZA_2, jobId: 'job_cccccccccccccccccccc', listingId: '105', listingName: '1011C - Bloom Towers',
+  role: 'lead', leadId: null, myStartedAt: null, othersOnJob: [], rooms: ['Bed', 'Bathroom', 'Kitchen'],
+};
+const ROUTES_HILLAL = [
+  { match: 'action=v3.myDay&as=3', status: 200, body: JOUR_FAIZA },
+  { match: 'action=v3.myDay', status: 200, body: { ...JOUR_MANAGER, stops: [STOP_HILLAL] } },
+  { match: 'action=v3.startJob', status: 200, body: { status: 'success', startedAt: '2026-09-12T06:00:00Z' } },
+  { match: 'action=v3.uploadPhoto', status: 200, body: { status: 'success', photoId: 501, path: 'v3/x.jpg' } },
+  { match: 'action=v3.reportProblem', status: 200, body: { status: 'success', ticketId: 812, priority: 'medium' } },
+  ...ROUTES,
+];
+
+async function vraiesConvs(page: any) {
+  return await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    const s = JSON.parse(sessionStorage.getItem('v3Convs') || 'null');
+    const i = await m.getState('v3Convs');
+    const c = (x: any) => x && x.convs && x.convs['job_cccccccccccccccccccc'];
+    return {
+      session: c(s) ? { i: c(s).i, started: c(s).sync.started, problems: c(s).problems.length } : null,
+      idb: c(i) ? { i: c(i).i, started: c(i).sync.started, problems: c(i).problems.length } : null,
+    };
+  });
+}
+
+test('constat 1 de la revue : Practice puis View as, Exit rend la vraie conversation au meme endroit', async ({ page }) => {
+  await sansCamera(page);
+  await bootV3(page, ROUTES_HILLAL, { pinToken: 'jeton-manager' });
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
+  await page.locator('[data-reply="walls-ok"]').click();
+  await page.locator('[data-reply="some-damage"]').click();
+  await page.locator('[data-kind="Leak"]').click();
+  await photo(page, 'flow-shutter');
+  await page.locator('[data-flow="photos-done"]').click();
+  await page.locator('[data-flow="no-note"]').click();
+  await page.locator('[data-reply="damage-done"]').click();
+  await page.locator('[data-reply="linen-yes"]').click();
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 4 · Bed /);
+  await expect.poll(async () => (await vraiesConvs(page)).idb).not.toBeNull();
+  const avant = await vraiesConvs(page);
+  expect(avant.session).toEqual(avant.idb);
+  expect(avant.idb!.problems).toBe(1);
+
+  for (const entree of ['Practice as Faiza', "View Faiza's day"]) {
+    await page.locator('[data-act="close-camera"]').click();
+    await page.evaluate(() => { location.hash = '#/profile'; });
+    await page.getByRole('button', { name: entree }).click();
+    await expect(page.locator('.row-name').first()).toHaveText('623 Samana Park View');
+    if (entree.startsWith('Practice')) {
+      await page.getByRole('button', { name: /704 Golf Links/ }).click();
+      await page.locator('[data-reply="here"]').click();
+      await piece(page, 1, 'Bed');
+    } else {
+      await page.getByRole('button', { name: /623 Samana Park View/ }).click();
+      await expect(page.locator('.top .title span')).toHaveText('Read only · Not started yet');
+    }
+    await page.getByRole('button', { name: 'Exit' }).click();
+    await expect(page.locator('.practicebar, .viewas')).toHaveCount(0);
+    // La vraie conversation revient : meme menage, meme etape, son probleme.
+    await expect(page.locator('.vf-top b')).toHaveText(/^Step 4 · Bed /);
+    await expect(page.locator('.msg.me.problem')).toHaveCount(1);
+    expect(await vraiesConvs(page)).toEqual(avant);
+  }
+
+  // La suite du menage repart sans rien recreer : un seul startJob, une cle par geste.
+  await piece(page, 4, 'Bed');
+  await fileVideP(page);
+  const log = (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.startJob') !== -1);
+  expect(new Set(log.map((l) => JSON.parse(l.body).idem)).size).toBe(1);
+  expect(JSON.parse(log[0].body).idem).toBe(avant.idb!.started);
+  expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
+  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeConvs'))).toBeNull();
+});
+
+async function fileVideP(page: any) {
+  await expect.poll(async () => page.evaluate(async () => (await import('/v3/offline.js')).pendingCount()), { timeout: 15_000 }).toBe(0);
+}

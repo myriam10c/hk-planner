@@ -128,6 +128,10 @@ const dubaiHHMM = iso => {
 export function readOnlyConversation(apt, { me, now = new Date() } = {}) {
   const conv = createConversation(apt, { me, now });
   conv.readOnly = true;
+  // Fil du manager : ni consigne d'étape ni instruction adressée à la cleaner. Seulement le
+  // logement et ce que le serveur sait.
+  conv.messages = [{ from: "app", type: "text", text: aptLabel(apt) + " · " + apt.guest.label.toLowerCase(), photo: apt.photo }];
+  if (apt.lead) conv.messages.push({ from: "lead", type: "text", text: apt.lead.name + " started at " + apt.lead.startedAt + " and sends the report." });
   const tickets = (apt.openTickets || []).map(t => t.title).filter(Boolean);
   if (tickets.length) conv.messages.push({ from: "app", type: "text", text: "Open problems here: " + tickets.join(", ") + "." });
   const at = (apt.state === "running" || apt.state === "done") ? dubaiHHMM(apt.startedAt) : null;

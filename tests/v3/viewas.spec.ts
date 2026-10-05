@@ -225,7 +225,8 @@ test('en View as, un menage en cours ou fini se lit depuis la journee du serveur
 
   await page.getByRole('button', { name: /623 Samana Park View/ }).click();
   await expect(page.locator('.top .title span')).toHaveText('Read only · Started 10:05');
-  await expect(page.getByText('Pionah started at 10:00.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Pionah started at 10:00 and sends the report.')).toBeVisible();
+  await expect(page.getByText('Add your photos', { exact: false })).toHaveCount(0);
   await expect(page.getByText('Started at 10:05.')).toBeVisible();
   await expect(page.locator('[data-reply], [data-act="problem"], [data-act="shutter"]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Back' }).click();

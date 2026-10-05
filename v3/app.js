@@ -177,8 +177,12 @@ export function modeBar(mode) {
 
 // Une autre journee s'affiche : les conversations locales de la precedente ne
 // lui appartiennent pas.
+// S.convs est remplace (jamais vide en place) : une sauvegarde deja demandee
+// garde sa photo de l'ancienne journee (persist). Les vraies conversations
+// gardees seront relues au retour de la propre journee (repris = false).
 function oublierConversations() {
   closeCamera();
+  repris = false;
   S.screen = 'list'; S.activeId = null; S.convs = {};
   S.editIndex = null; S.viewPhoto = null; S.confirmDelete = false; S.flowCam = false; S.toastIndex = null;
 }
@@ -525,23 +529,29 @@ export const CLE_CONVS = 'v3Convs';
 // La sauvegarde passe apres les mises en file en cours : une conversation
 // sauvegardee ne dit jamais « parti » pour un geste qui n'est pas encore dans
 // IndexedDB (un rechargement le perdrait).
+// Le mode, la journee et les conversations sont pris a l'appel : une
+// sauvegarde demandee juste avant d'entrer en Practice ou en View as ecrit la
+// vraie conversation, jamais l'ecran vide qui la remplace (ni l'inverse).
 function persist() {
+  const snap = {
+    mode: mode(), mark: practiceMark(), day: state.day, convs: S.convs, activeId: S.activeId, screen: S.screen,
+  };
   chaine = chaine.then(function () {
-    const m = mode();
-    if (m === 'practice') return ecrirePractice();
-    if (m === 'real') return ecrireConvs();
+    if (snap.mode === 'practice') return ecrirePractice(snap);
+    if (snap.mode === 'real') return ecrireConvs(snap);
   });
 }
 
 // Practice : la seance garde ses conversations a part (practice.js), sans les
 // octets des photos ; jamais dans v3Convs ni dans IndexedDB.
-function ecrirePractice() {
-  if (!state.day || !state.day.me) return;
+function ecrirePractice(snap) {
+  // Seance finie (ou une autre ouverte) depuis l'appel : rien a garder.
+  if (!snap.day || !snap.day.me || !snap.mark || snap.mark !== practiceMark()) return;
   const convs = {};
   try {
-    for (const [id, c] of Object.entries(S.convs)) convs[id] = serializeConversation(c);
+    for (const [id, c] of Object.entries(snap.convs)) convs[id] = serializeConversation(c);
   } catch (e) { return; }
-  practiceSaveConvs({ me: String(state.day.me.id), date: state.day.date, activeId: S.activeId, screen: S.screen, convs });
+  practiceSaveConvs({ me: String(snap.day.me.id), date: snap.day.date, activeId: snap.activeId, screen: snap.screen, convs });
 }
 
 // Reprise d'une seance Practice apres un rechargement : une fois par seance.
@@ -568,17 +578,18 @@ function restorePractice() {
 // ferme l'app installee, la reprise lit alors IndexedDB. Une conversation dont la
 // fin est confirmee par le proxy n'est plus gardee : le serveur fait foi pour
 // elle. Plus rien a reprendre : les deux copies sont effacees.
-async function ecrireConvs() {
-  if (!writesActive() || !state.day || !state.day.me || state.day.viewAs) return;
+async function ecrireConvs(snap) {
+  const day = snap.day;
+  if (!day || !day.me || day.viewAs) return;
   const convs = {};
   try {
-    for (const [id, c] of Object.entries(S.convs)) if (!finishAcked(c)) convs[id] = serializeConversation(c);
+    for (const [id, c] of Object.entries(snap.convs)) if (!finishAcked(c)) convs[id] = serializeConversation(c);
   } catch (e) { return; }
   if (!Object.keys(convs).length) { await oublierConvsGardees(); return; }
   const blob = {
-    me: String(state.day.me.id), date: state.day.date, activeId: S.activeId, screen: S.screen, convs,
+    me: String(day.me.id), date: day.date, activeId: snap.activeId, screen: snap.screen, convs,
     // La journee elle-meme : un rechargement sans reseau reprend le menage en cours.
-    day: state.day,
+    day: day,
   };
   try { sessionStorage.setItem(CLE_CONVS, JSON.stringify(blob)); } catch (e) { /* stockage plein ou indisponible */ }
   try { await putState(CLE_CONVS, blob); } catch (e) { /* idem */ }
@@ -617,6 +628,8 @@ function rafraichirRoles() {
 // Reprise : conversations de la meme personne, du meme jour, sur des menages encore
 // dans la journee. Les gestes deja en file ne sont pas recrees (conv.sync les connait).
 async function restoreConvs() {
+  // Les sauvegardes deja demandees passent d'abord (retour de Practice / View as).
+  await chaine;
   const saved = await lireConvs();
   const day = state.day;
   if (!saved || !day || !day.me) return;
@@ -685,6 +698,8 @@ function renderConv() {
       // Une question par ecran, en plein ecran : pas de conversation dessous.
       html = renderFlow(c, { live: S.camera.live });
       showVideo = f.stage === 'photos';
+      // Ecran des photos d'un signalement : le bandeau du mode reste au-dessus du viseur.
+      if (showVideo) html = modeBar() + html;
     } else if (photoView) html = photoView;
     else if (S.editIndex !== null && c.problems[S.editIndex]) html = renderProblemPage(c, S.editIndex, { confirmDelete: S.confirmDelete });
     else {
@@ -708,6 +723,12 @@ function renderConv() {
     if (focus) { ta.focus(); try { ta.setSelectionRange(focus.start, focus.end); } catch (e) { /* champ sans selection */ } }
   }
   vfVideo.hidden = !(c && S.camera.open && S.camera.live && showVideo);
+  // Practice / View as : le viseur commence sous le bandeau du mode, Exit reste atteignable.
+  const mb = root.querySelector('.viewas, .practicebar'), vfEl = root.querySelector('.vf');
+  const off = mb && vfEl ? mb.offsetTop + mb.offsetHeight : 0;
+  if (vfEl && off) vfEl.style.top = off + 'px';
+  vfVideo.style.top = off ? off + 'px' : '';
+  vfVideo.style.height = off ? 'calc(100% - var(--cv-tb) - ' + off + 'px)' : '';
   const t = root.querySelector('.toast:not(.top)'), bar = root.querySelector('.bar');
   // Bandeau du viseur : sous la barre du haut reelle (libelle sur une ou deux lignes).
   const tt = root.querySelector('.toast.top'), vfTop = root.querySelector('.vf-top');

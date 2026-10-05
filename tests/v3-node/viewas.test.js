@@ -37,6 +37,7 @@ test("ménage pas commencé : la conversation dit seulement qu'il n'a pas démar
   assert.equal(c.startedAt, null);
   const html = renderConversation(c, { now: NOW });
   assert.match(html, /Not started yet/);
+  assert.doesNotMatch(html, /Step 1:|photo of each room/);
   assert.match(html, /Read only/);
   // Aucun bouton de réponse, de caméra ni de problème.
   assert.doesNotMatch(html, /data-reply=|data-act="camera"|data-act="problem"/);
@@ -49,7 +50,10 @@ test("ménage en cours : démarré à l'heure du serveur (Dubaï), tickets ouver
   assert.ok(c.startedAt instanceof Date);
   const html = renderConversation(c, { now: NOW });
   assert.match(html, /Started at 10:05/);
-  assert.match(html, /Pionah started at 10:05/);
+  assert.match(html, /Pionah started at 10:05 and sends the report\./);
+  // Fil du manager : aucune consigne adressée à la cleaner.
+  assert.doesNotMatch(html, /Add your photos|She sends the report|Step 1:|make it look like this/);
+  assert.equal(c.messages.filter(m => m.from === "me").length, 0);
   assert.doesNotMatch(html, /data-reply=|data-act="problem"/);
   // Le chrono suit l'heure du serveur.
   assert.match(html, /Read only · Started 10:05/);

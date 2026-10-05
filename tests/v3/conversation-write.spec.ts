@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { BLOOM, CREEK, WRITE_ROUTES, demarrer, ecritures, fileVide, photo, piece } from './conv-helpers';
+import { BLOOM, CREEK, PNG_1x1, WRITE_ROUTES, demarrer, ecritures, fileVide, photo, piece } from './conv-helpers';
 
 // Ecritures de la conversation (tache 5 du branchement 2026-10-05), observees sur le proxy
 // simule : chaque geste part dans la file (offline.js) puis au proxy, dans l'ordre, une seule
@@ -130,7 +130,15 @@ test('mise en file ratee une fois (stockage plein) : la photo et son signalement
   });
   await photo(page, 'flow-shutter');
   await expect(page.getByText('Could not save on this phone. Try again.')).toBeVisible();
-  await photo(page, 'flow-shutter');
+  // Le bandeau peut paraitre avant la fin du geste precedent (busy) : un appui pendant ce
+  // temps est ignore par conception. On reappuie jusqu'a l'ouverture du selecteur.
+  await expect(async () => {
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: 1000 }), page.locator('[data-act="flow-shutter"]').click(),
+    ]);
+    await chooser.setFiles({ name: 'p.png', mimeType: 'image/png', buffer: Buffer.from(PNG_1x1, 'base64') });
+  }).toPass({ timeout: 10_000 });
+  await expect(page.locator('.vf .count')).toHaveText('2 photos');
   await page.locator('[data-flow="photos-done"]').click();
   await page.locator('[data-flow="no-note"]').click();
   await fileVide(page);
