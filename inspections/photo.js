@@ -5,7 +5,9 @@ const MAX = 1600;
 export async function shrink(file) {
   if (!file) return null;
   try {
-    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    let bmp;
+    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (e) { bmp = await createImageBitmap(file); }
     const k = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
     const c = document.createElement('canvas');
     c.width = Math.max(1, Math.round(bmp.width * k));

@@ -82,7 +82,7 @@ export async function renderInspect(ctx) {
     let h = '<p class="sum">' + esc(it.note) + '</p>';
     if (it.outcome === 'fixed') h += '<p class="mute">Fixed on the spot: ' + esc(it.fixNote) + '</p>';
     else if (it.outcome === 'maintenance') h += '<p class="mute">Needs maintenance</p>';
-    if (it.ticketId) h += '<p class="badge bad">Ticket #' + esc(it.ticketId) + ' created</p>';
+    if (it.ticketId) h += '<p class="badge bad">Ticket #' + esc(it.ticketId) + (it.outcome === 'fixed' ? ' stays open' : ' created') + '</p>';
     return h;
   }
 
@@ -193,7 +193,7 @@ export async function renderInspect(ctx) {
       st.open = k; return paint();
     }
     if (a === 'edit') { const z = zoneOf(k); z.editing = true; return paint(); }
-    if (a === 'cancel') { st.open = null; return paint(); }
+    if (a === 'cancel') { st.open = null; zoneOf(k).editing = false; return paint(); }
     if (a === 'remove-photo') {
       const z = zoneOf(k), p = z.photos[Number(b.dataset.i)];
       if (p && p.state === 'fail') { z.photos.splice(z.photos.indexOf(p), 1); refreshZone(k); }

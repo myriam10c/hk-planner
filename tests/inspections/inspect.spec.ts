@@ -120,3 +120,18 @@ test('apres Finish : pas de toast parasite d un envoi en retard', async ({ page 
   await expect(page.getByText('Inspection saved')).toBeVisible();
   await expect(page.getByText("Today's inspections")).toBeVisible();
 });
+
+test('Cancel sur une zone deja enregistree : resume et Change reviennent', async ({ page }) => {
+  await bootInsp(page, [ME, START([{ zone: 'kitchen', status: 'ok' }])], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
+  const k = page.getByTestId('zone-kitchen');
+  await k.getByRole('button', { name: 'Change' }).click();
+  await k.getByRole('button', { name: 'Not OK' }).click();
+  await k.getByRole('button', { name: 'Cancel' }).click();
+  await expect(k.getByText('OK', { exact: true })).toBeVisible();
+  await expect(k.getByRole('button', { name: 'Change' })).toBeVisible();
+});
+
+test('ticket sur une zone corrigee : "stays open"', async ({ page }) => {
+  await bootInsp(page, [ME, START([{ zone: 'ac', status: 'not_ok', note: 'Noisy', outcome: 'fixed', fixNote: 'Cleaned', ticketId: 9 }])], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
+  await expect(page.getByTestId('zone-ac')).toContainText('Ticket #9 stays open');
+});
