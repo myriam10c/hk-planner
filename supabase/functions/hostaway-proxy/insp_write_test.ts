@@ -40,6 +40,12 @@ Deno.test("start puis reprise : meme inspection, zones deja saisies rendues", as
   assertEquals((again.body as any).items.map((i: any) => i.zone), ["ac"]);
 });
 
+Deno.test("start : le snapshot porte le nom du logement", async () => {
+  const db = seed();
+  const r = await startInspection(db, FAIZA, { listingId: "L1", eligibility: "checkout", idem: "idem-start-1" }, NOW);
+  assertEquals((r.body as any).inspection.name, "Apt 3207 · Sobha Waves");
+});
+
 Deno.test("start : rejeu de la meme cle idem rend la meme inspection", async () => {
   const db = seed();
   const id = await started(db);

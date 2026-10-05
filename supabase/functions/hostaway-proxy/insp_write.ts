@@ -2,7 +2,7 @@
 import type { ActionResult, SessionUser } from "./v3.ts";
 import { todayDubai, V3_PHOTO_BUCKET, validIdem } from "./v3.ts";
 import { V3_MAX_PHOTO_BYTES, V3_PHOTO_MIME } from "./v3_photos.ts";
-import { INSP_ZONE_KEYS, INSP_ZONES } from "./insp_rules.ts";
+import { INSP_ZONE_KEYS, INSP_ZONES, listingLabel } from "./insp_rules.ts";
 
 const ELIGIBILITIES = new Set(["checkout", "vacant", "adhoc"]);
 const zoneLabel = (k: string) => INSP_ZONES.find((z) => z.key === k)?.label ?? k;
@@ -26,8 +26,9 @@ async function loadOwned(sb: any, me: SessionUser, inspectionId: unknown) {
 async function snapshot(sb: any, insp: any) {
   const { data: items } = await sb.from("inspection_items").select("*").eq("inspection_id", insp.id);
   const { data: photos } = await sb.from("inspection_photos").select("id, zone, kind").eq("inspection_id", insp.id);
+  const { data: listing } = await sb.from("listing_config").select("internal_name, listing_name").eq("listing_id", insp.listing_id).maybeSingle();
   return {
-    inspection: { id: insp.id, listingId: insp.listing_id, eligibility: insp.eligibility, startedAt: insp.started_at },
+    inspection: { id: insp.id, listingId: insp.listing_id, name: listingLabel(listing ?? {}), eligibility: insp.eligibility, startedAt: insp.started_at },
     items: (items ?? []).map(itemOut),
     photos: (photos ?? []).map((p: any) => ({ id: p.id, zone: p.zone, kind: p.kind })),
   };

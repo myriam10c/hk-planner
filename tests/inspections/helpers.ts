@@ -31,7 +31,9 @@ export async function bootInsp(
         if (url.indexOf('hostaway-proxy') === -1) return real(input, init);
         (window as any).__logFetch({
           url,
-          body: init && init.body && typeof init.body === 'string' ? init.body : '',
+          body: init && init.body && typeof init.body === 'string' ? init.body
+            : init && init.body && typeof init.body.entries === 'function'
+              ? JSON.stringify(Object.fromEntries(Array.from(init.body.entries()).map((e: any) => [e[0], typeof e[1] === 'string' ? e[1] : 'file']))) : '',
           headers: init && init.headers ? JSON.parse(JSON.stringify(init.headers)) : {},
         });
         for (const r of cfg.routes) {

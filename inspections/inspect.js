@@ -1,0 +1,223 @@
+import { post, upload, newIdem } from '/inspections/api.js';
+import { shrink } from '/inspections/photo.js';
+
+// Jumeau volontaire de INSP_ZONES dans supabase/functions/hostaway-proxy/insp_rules.ts :
+// memes cles, memes libelles, meme ordre. A modifier des deux cotes.
+const ZONES = [
+  { key: 'entrance', label: 'Entrance, door & lock' },
+  { key: 'living', label: 'Living room' },
+  { key: 'kitchen', label: 'Kitchen & appliances' },
+  { key: 'bedrooms', label: 'Bedroom(s) & bedding' },
+  { key: 'bathrooms', label: 'Bathroom(s) & plumbing' },
+  { key: 'ac', label: 'AC' },
+  { key: 'wifi_tv', label: 'Wi-Fi & TV' },
+  { key: 'balcony', label: 'Balcony & windows' },
+  { key: 'inventory', label: 'Inventory & consumables' },
+  { key: 'cleanliness', label: 'General cleanliness' },
+];
+const clock = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Dubai' });
+
+export async function renderInspect(ctx) {
+  const { go, toast, render, esc } = ctx;
+  const isCurrent = ctx.isCurrent || (() => true);
+  const eligibility = ['checkout', 'vacant', 'adhoc'].includes(ctx.entry) ? ctx.entry : 'adhoc';
+  const startIdem = newIdem('istart'); // gardee jusqu'au succes : un nouvel essai la reutilise
+  let busy = false;
+  const st = { insp: null, z: {}, open: null, general: '', finishError: '', loadError: '' };
+  const view = document.getElementById('view');
+
+  const zoneOf = (k) => st.z[k] || (st.z[k] = { saved: null, editing: false, photos: [], draft: null });
+  const issuePhotos = (z) => z.photos.filter((p) => p.kind === 'issue');
+  const doneCount = () => ZONES.filter((zn) => st.z[zn.key] && st.z[zn.key].saved).length;
+
+  function load(snap) {
+    st.insp = snap.inspection;
+    for (const it of snap.items || []) zoneOf(it.zone).saved = it;
+    for (const p of snap.photos || []) zoneOf(p.zone).photos.push({ id: p.id, kind: p.kind, url: null, state: 'done' });
+  }
+  const canSave = (z) => {
+    const d = z.draft;
+    return !!(d && d.note.trim() && issuePhotos(z).some((p) => p.state === 'done') && d.outcome
+      && (d.outcome !== 'fixed' || d.fixNote.trim()));
+  };
+
+  function thumbs(z, kind, key) {
+    const list = z.photos.filter((p) => p.kind === kind);
+    return '<div class="thumbs">' + list.map((p, i) => {
+      const img = p.url ? '<img src="' + esc(p.url) + '" alt="' + esc(kind) + ' photo ' + (i + 1) + '">' : '<span class="nourl">Photo ' + (i + 1) + '</span>';
+      const extra = p.state === 'up' ? '<span class="tstate">Uploading…</span>'
+        : p.state === 'fail' ? '<button class="btn ghost small" data-act="retry-photo" data-z="' + esc(key) + '" data-i="' + z.photos.indexOf(p) + '">Retry upload</button>' : '';
+      return '<div class="thumb">' + img + extra + '</div>';
+    }).join('') + '</div>';
+  }
+  const addBtn = (key, kind, label) => '<label class="btn ghost addphoto">' + esc(label)
+    + '<input type="file" accept="image/*" capture="environment" class="filein" data-z="' + esc(key) + '" data-kind="' + kind + '"></label>';
+
+  function form(zn) {
+    const z = zoneOf(zn.key), d = z.draft, k = zn.key;
+    const pressed = (o) => (d.outcome === o ? 'true' : 'false');
+    let h = '<div class="zform">'
+      + '<label class="lbl" for="note-' + k + '">What is wrong?</label>'
+      + '<textarea id="note-' + k + '" class="ta" rows="3" data-f="note" data-z="' + k + '">' + esc(d.note) + '</textarea>'
+      + '<p class="lbl">Photos</p>' + thumbs(z, 'issue', k) + addBtn(k, 'issue', 'Add photo')
+      + '<p class="lbl">What happened?</p><div class="choices">'
+      + '<button class="btn choice" data-act="outcome" data-z="' + k + '" data-o="fixed" aria-pressed="' + pressed('fixed') + '">Fixed on the spot</button>'
+      + '<button class="btn choice" data-act="outcome" data-z="' + k + '" data-o="maintenance" aria-pressed="' + pressed('maintenance') + '">Needs maintenance</button></div>';
+    if (d.outcome === 'fixed') {
+      h += '<label class="lbl" for="fix-' + k + '">What did you do?</label>'
+        + '<textarea id="fix-' + k + '" class="ta" rows="2" data-f="fixNote" data-z="' + k + '">' + esc(d.fixNote) + '</textarea>'
+        + thumbs(z, 'after', k) + addBtn(k, 'after', 'Add after photo');
+    } else if (d.outcome === 'maintenance') {
+      h += '<p class="mute">A maintenance ticket will be created.</p>';
+    }
+    h += '<div class="actions"><button class="btn primary" data-act="save" data-z="' + k + '"' + (canSave(z) && !busy ? '' : ' disabled') + '>Save</button>'
+      + '<button class="btn ghost" data-act="cancel" data-z="' + k + '">Cancel</button></div></div>';
+    return h;
+  }
+
+  function summary(z) {
+    const it = z.saved;
+    if (it.status === 'ok') return '<p class="mute">OK</p>';
+    let h = '<p class="sum">' + esc(it.note) + '</p>';
+    if (it.outcome === 'fixed') h += '<p class="mute">Fixed on the spot: ' + esc(it.fixNote) + '</p>';
+    else if (it.outcome === 'maintenance') h += '<p class="mute">Needs maintenance</p>';
+    if (it.ticketId) h += '<p class="badge bad">Ticket #' + esc(it.ticketId) + ' created</p>';
+    return h;
+  }
+
+  function zoneHtml(zn) {
+    const z = zoneOf(zn.key), k = zn.key;
+    const open = st.open === k;
+    const cls = z.saved && !open && !z.editing ? (z.saved.status === 'ok' ? ' ok' : ' bad') : '';
+    let h = '<section class="card zone' + cls + '" data-testid="zone-' + k + '"><div class="card-top"><h3>' + esc(zn.label) + '</h3></div>';
+    if (open) h += form(zn);
+    else if (z.saved && !z.editing) {
+      h += summary(z) + '<button class="btn ghost" data-act="edit" data-z="' + k + '"' + (busy ? ' disabled' : '') + '>Change</button>';
+    } else {
+      h += '<div class="choices"><button class="btn okbtn" data-act="ok" data-z="' + k + '"' + (busy ? ' disabled' : '') + '>OK</button>'
+        + '<button class="btn notok" data-act="notok" data-z="' + k + '"' + (busy ? ' disabled' : '') + '>Not OK</button></div>';
+    }
+    return h + '</section>';
+  }
+
+  function paint() {
+    const a = document.activeElement;
+    const keep = a && a.dataset && a.dataset.f ? { f: a.dataset.f, z: a.dataset.z, s: a.selectionStart, e: a.selectionEnd } : null;
+    if (st.loadError) {
+      render('<main class="wrap"><button class="btn ghost" data-act="home">Back</button><h1>Inspection</h1><p class="notice bad" role="alert">' + esc(st.loadError) + '</p>'
+        + '<button class="btn primary" data-act="retry-start">Retry</button></main>');
+      return;
+    }
+    if (!st.insp) { render('<main class="wrap"><h1>Inspection</h1><p class="mute">Loading…</p></main>'); return; }
+    const n = doneCount();
+    render('<main class="wrap"><header class="top"><div><h1>' + esc(st.insp.name || 'Apartment') + '</h1><p class="mute">Started '
+      + esc(clock(st.insp.startedAt)) + '</p></div><button class="btn ghost" data-act="home">Back</button></header>'
+      + '<p class="count" aria-live="polite">' + n + ' / ' + ZONES.length + ' zones</p>'
+      + ZONES.map(zoneHtml).join('')
+      + '<label class="lbl" for="general">General note (optional)</label>'
+      + '<textarea id="general" class="ta" rows="3">' + esc(st.general) + '</textarea>'
+      + (st.finishError ? '<p class="notice bad" role="alert">' + esc(st.finishError) + '</p>' : '')
+      + '<button class="btn primary block" data-act="finish"' + (n === ZONES.length && !busy ? '' : ' disabled') + '>Finish inspection</button></main>');
+    if (keep) {
+      const el = view.querySelector('[data-f="' + keep.f + '"][data-z="' + keep.z + '"]');
+      if (el) { el.focus(); try { el.setSelectionRange(keep.s, keep.e); } catch (e) { /* ignore */ } }
+    }
+  }
+  const repaint = () => { if (isCurrent()) paint(); };
+
+  // Un seul geste d'ecriture a la fois ; apres un echec le message du serveur est affiche tel quel.
+  async function run(fn, onError) {
+    if (busy) return;
+    busy = true; paint();
+    try { await fn(); } catch (e) { (onError || toast)(e.message || 'Something went wrong.'); }
+    finally { busy = false; }
+    repaint();
+  }
+
+  async function sendPhoto(zoneKey, entry) {
+    entry.state = 'up';
+    const f = new FormData();
+    f.set('inspectionId', String(st.insp.id)); f.set('zone', zoneKey); f.set('kind', entry.kind);
+    f.set('idem', entry.idem); f.set('file', entry.blob, 'photo.jpg');
+    try {
+      const r = await upload('insp.uploadPhoto', f);
+      entry.id = r.photo && r.photo.id; entry.state = 'done';
+    } catch (e) { entry.state = 'fail'; throw e; }
+  }
+
+  // Envoi d'une photo : independant du verrou des ecritures (plusieurs photos peuvent partir),
+  // chaque photo garde sa cle idem tant qu'elle n'est pas envoyee.
+  async function upOne(k, entry) {
+    if (entry.state === 'up' && entry.sending) return;
+    entry.sending = true; repaint();
+    try { await sendPhoto(k, entry); } catch (e) { toast(e.message || 'Photo upload failed.'); }
+    entry.sending = false; repaint();
+  }
+
+  async function start() {
+    st.loadError = '';
+    try { load(await post('insp.start', { listingId: ctx.listingId, eligibility, idem: startIdem })); }
+    catch (e) { st.loadError = e.message || 'Could not start the inspection.'; }
+    repaint();
+  }
+
+  view.onclick = (ev) => {
+    const b = ev.target.closest('[data-act]');
+    if (!b || b.disabled) return;
+    const a = b.dataset.act, k = b.dataset.z;
+    if (a === 'home') return go('#/');
+    if (a === 'retry-start') { st.insp = null; paint(); return start(); }
+    if (a === 'notok') {
+      const z = zoneOf(k), s = z.saved;
+      z.draft = { note: s && s.note || '', outcome: s && s.outcome || null, fixNote: s && s.fixNote || '' };
+      st.open = k; return paint();
+    }
+    if (a === 'edit') { const z = zoneOf(k); z.editing = true; return paint(); }
+    if (a === 'cancel') { st.open = null; zoneOf(k).draft = null; zoneOf(k).editing = false; return paint(); }
+    if (a === 'outcome') { zoneOf(k).draft.outcome = b.dataset.o; return paint(); }
+    if (a === 'ok') return run(async () => {
+      const r = await post('insp.saveItem', { inspectionId: st.insp.id, zone: k, status: 'ok' });
+      const z = zoneOf(k); z.saved = r.item || { zone: k, status: 'ok' }; z.editing = false; st.open = null; z.draft = null;
+    });
+    if (a === 'save') return run(async () => {
+      const z = zoneOf(k), d = z.draft;
+      const body = { inspectionId: st.insp.id, zone: k, status: 'not_ok', note: d.note.trim(), outcome: d.outcome || null };
+      if (d.outcome === 'fixed') body.fixNote = d.fixNote.trim();
+      const r = await post('insp.saveItem', body);
+      z.saved = r.item || { zone: k, status: 'not_ok', ...body };
+      z.editing = false; st.open = null; z.draft = null;
+      if (z.saved.ticketId) toast('Ticket #' + z.saved.ticketId + ' created');
+    });
+    if (a === 'retry-photo') return upOne(k, zoneOf(k).photos[Number(b.dataset.i)]);
+    if (a === 'finish') return run(async () => {
+      st.finishError = '';
+      await post('insp.finish', { inspectionId: st.insp.id, generalNote: st.general.trim() || undefined });
+      toast('Inspection saved'); go('#/');
+    }, (m) => { st.finishError = m; });
+  };
+  // Saisie : on garde le brouillon en memoire sans repeindre (le focus reste en place).
+  view.oninput = async (ev) => {
+    const t = ev.target;
+    if (t.id === 'general') { st.general = t.value; return; }
+    if (t.dataset && t.dataset.f) {
+      const z = zoneOf(t.dataset.z);
+      if (z.draft) z.draft[t.dataset.f] = t.value;
+      const save = t.closest('.zone') && t.closest('.zone').querySelector('[data-act="save"]');
+      if (save) save.disabled = busy || !canSave(z);
+      return;
+    }
+    if (t.type === 'file') {
+      const file = t.files && t.files[0], k = t.dataset.z;
+      if (!file) return;
+      const blob = await shrink(file);
+      t.value = '';
+      if (!blob || !isCurrent()) return;
+      const entry = { id: null, kind: t.dataset.kind, url: URL.createObjectURL(blob), blob, idem: newIdem('iph'), state: 'up' };
+      zoneOf(k).photos.push(entry);
+      upOne(k, entry);
+    }
+  };
+
+  paint();
+  await start();
+}
