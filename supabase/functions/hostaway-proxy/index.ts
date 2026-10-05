@@ -21,6 +21,14 @@ import {
   checkTicket, reportProblem, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES, V3_PROBLEM_ACTIONS,
 } from "./v3_tickets.ts";
 
+import { inspRoleAllowed, type InspReservation } from "./insp_rules.ts";
+import { normalizeReservations } from "./insp_reservations.ts";
+import { inspHistory, inspOverview, inspToday } from "./insp_read.ts";
+import {
+  assignProposal, claimProposal, finishInspection, saveItem, setExcluded, startInspection,
+  unclaimProposal, uploadInspectionPhoto,
+} from "./insp_write.ts";
+
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
 
@@ -259,6 +267,30 @@ async function buildCheckoutsPayload(sb: any, startDate: string, endDate: string
     // plage. La clé miroir de keyFor() côté app : `${checkOut}_${guest||'Guest'}`.
     r.checkOut >= startDate || postKeys.has(r.checkOut + "_" + (r.guest || "Guest")));
   return { status: "success", count: reservations.length, reservations };
+}
+
+const INSP_RES_FRESH_MS = 10 * 60 * 1000;
+async function loadInspReservations(sb: any, day: string): Promise<{ reservations: InspReservation[]; cachedAt: string | null }> {
+  const key = "insp:res:" + day;
+  const { data: row } = await sb.from("proxy_cache").select("payload, updated_at").eq("key", key).maybeSingle();
+  if (row?.payload && Date.now() - new Date(row.updated_at).getTime() < INSP_RES_FRESH_MS) {
+    return { reservations: row.payload.reservations ?? [], cachedAt: row.updated_at };
+  }
+  try {
+    const token = await getAccessToken();
+    const h = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
+    const [touching, upcoming] = await Promise.all([
+      fetchAllPages(API_BASE + "/reservations?arrivalEndDate=" + day + "&departureStartDate=" + day, h),
+      fetchAllPages(API_BASE + "/reservations?arrivalStartDate=" + day + "&arrivalEndDate=" + plusDays(day, 21), h),
+    ]);
+    const reservations = normalizeReservations([...touching, ...upcoming]);
+    await sb.from("proxy_cache").upsert({ key, payload: { reservations }, updated_at: new Date().toISOString() });
+    return { reservations, cachedAt: null };
+  } catch (e) {
+    console.error("[insp] Hostaway reservations failed:", e);
+    if (row?.payload) return { reservations: row.payload.reservations ?? [], cachedAt: row.updated_at };
+    throw new Error("Bookings are unavailable right now. Try again in a few minutes.");
+  }
 }
 
 async function fetchAllPages(baseUrl: string, authHeaders: Record<string, string>, pageSize = 500): Promise<any[]> {
@@ -823,6 +855,10 @@ async function getPhotoUrl(sb: any, path: string | null): Promise<string | null>
 // Route registry — single source of truth for all 75 actions.
 // Used at request entry for 404 (unknown) + 405 (method mismatch) before reaching the dispatch logic below.
 const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
+  // ===== Inspections =====
+  ["insp.today", "GET"], ["insp.overview", "GET"], ["insp.history", "GET"],
+  ["insp.start", "POST"], ["insp.saveItem", "POST"], ["insp.uploadPhoto", "POST"], ["insp.finish", "POST"],
+  ["insp.claim", "POST"], ["insp.unclaim", "POST"], ["insp.assign", "POST"], ["insp.setExcluded", "POST"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1333,6 +1369,47 @@ Deno.serve(async (req: Request) => {
       const cleFin = await resolveJob(sb, String(body.jobId ?? ""));
       const ctx = await loadFinishContext(sb, cleFin ?? "");
       const r = await finishJob(sb, me, body, ctx);
+      return jsonResp(r.body, r.status);
+    }
+
+    // ==================== INSPECTIONS ====================
+    if (action !== null && action.startsWith("insp.")) {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!inspRoleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const day = todayDubai();
+      if (action === "insp.today") {
+        try {
+          const { reservations, cachedAt } = await loadInspReservations(sb, day);
+          return jsonResp(await inspToday(sb, day, reservations, cachedAt));
+        } catch (e) {
+          return jsonResp({ error: (e as Error).message }, 503);
+        }
+      }
+      if (action === "insp.overview") return jsonResp(await inspOverview(sb, day));
+      if (action === "insp.history") {
+        const lid = url.searchParams.get("listingId") ?? "";
+        if (!lid) return jsonResp({ error: "listingId required" }, 400);
+        return jsonResp(await inspHistory(sb, lid));
+      }
+      if (action === "insp.uploadPhoto") {
+        const annonce = Number(req.headers.get("content-length") ?? "");
+        if (Number.isFinite(annonce) && annonce > V3_MAX_UPLOAD_BODY_BYTES) return jsonResp({ error: "photo is too large" }, 413);
+        let form: FormData;
+        try { form = await req.formData(); } catch (_e) { return jsonResp({ error: "multipart body required" }, 400); }
+        const r = await uploadInspectionPhoto(sb, me, form);
+        return jsonResp(r.body, r.status);
+      }
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const handlers: Record<string, (sb: any, me: any, b: any) => Promise<{ status: number; body: any }>> = {
+        "insp.start": startInspection, "insp.saveItem": saveItem, "insp.finish": finishInspection,
+        "insp.claim": claimProposal, "insp.unclaim": unclaimProposal, "insp.assign": assignProposal,
+        "insp.setExcluded": setExcluded,
+      };
+      const hd = handlers[action];
+      if (!hd) return jsonResp({ error: "unknown action" }, 404);
+      const r = await hd(sb, me, body);
       return jsonResp(r.body, r.status);
     }
 
