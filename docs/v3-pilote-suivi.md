@@ -5,13 +5,15 @@ Document interne, pour Hillal. Le mode d'emploi des deux cleaners est
 
 ## Ce qui est en place
 
-- `/v3/` sert la nouvelle app cleaner (Today, Job, Report a problem, Profile)
+- `/v3/` sert la nouvelle app cleaner (conversation en 5 etapes : Arrival, Damage & problems, Dirty linen, Room by room, Leave & send ; Profile)
   sur `https://stunning-kleicha-f61101.netlify.app/v3/`.
-- Sept actions de proxy en plus : `v3.myDay`, `v3.startJob`, `v3.tick`,
-  `v3.uploadPhoto`, `v3.finishJob`, `v3.reportProblem`, `v3.checkTicket`.
+- Actions de proxy v3 : `v3.myDay`, `v3.startJob`, `v3.tick`,
+  `v3.uploadPhoto`, `v3.deletePhoto`, `v3.finishJob`, `v3.reportProblem`,
+  `v3.checkTicket`, plus photos, note et mise a jour d'un signalement.
+  Pas de vocal.
   Aucune action existante n'a change de contrat.
-- Quatre tables neuves : `job_events` (idempotence), `photos`, `on_duty`,
-  `v3_job_keys` (identifiants de menage opposes, aucun nom de guest).
+- Tables : `job_events` (idempotence), `photos` (`item_name`, `room`),
+  `cleaning_reports`, `on_duty`, `v3_job_keys` (identifiants de menage opposes, aucun nom de guest).
 - L'app actuelle est servie sans un seul changement de comportement, a la meme
   adresse. Les deux seules lignes touchees dans son `sw.js` la font laisser
   `/v3/` tranquille et bornent son menage de cache a ses propres cles.
@@ -67,7 +69,10 @@ en priorite), `unit_type` et `bedrooms`.
 
 ## A regarder chaque jour du pilote, dans cet ordre
 
-**1. Rien de perdu, rien de double.** Les deux colonnes doivent etre egales.
+**1. Rien de perdu, rien de double.** Compter les gestes du jour par type
+(`start_job`, `upload_photo`, `report_problem`, `add_problem_photo`,
+`set_problem_note`, `delete_photo`, `finish_job`, etc. ; il n'y a pas de vocal).
+Les deux colonnes doivent etre egales.
 
 ```sql
 SELECT event_type, count(*) AS evenements, count(DISTINCT idem_key) AS cles
@@ -78,6 +83,8 @@ GROUP BY 1 ORDER BY 1;
 
 Une difference veut dire qu'une cle d'idempotence a ete rejouee sans etre
 reconnue : c'est le seul chiffre qui justifie d'arreter le pilote le jour meme.
+`idem_key` est UNIQUE en base : un vrai doublon ne peut pas s'ecrire, la
+requete sert surtout a voir le volume par geste et a reperer un type absent.
 
 **1 bis. Aucune cle d'idempotence bloquee.** Le resultat doit etre zero.
 
@@ -113,15 +120,83 @@ WHERE finished_at > now() - interval '1 day'
 ORDER BY finished_at DESC;
 ```
 
-**3. Signalements crees par l'app.** L'objectif du pilote en compte au moins un
-sur la semaine.
+**3. Signalements crees par l'app.** Titre `type · piece` (par exemple
+`Broken · Sofa`), priorite `urgent` pour Gas smell et I can't get in, `soon`
+sinon. L'objectif du pilote en compte au moins un sur la semaine.
 
 ```sql
-SELECT id, listing_id, category, status, assigned_technician_id, created_at
-FROM public.maintenance_tickets
-WHERE source = 'hk_planner_v3'
+SELECT t.id, t.listing_id, t.title, t.priority, t.status,
+       t.assigned_technician_id, t.description AS note,
+       (SELECT count(*) FROM public.photos p WHERE p.ticket_id = t.id) AS nb_photos,
+       t.photo_path IS NOT NULL AS photo_principale, t.created_at
+FROM public.maintenance_tickets t
+WHERE t.source = 'hk_planner_v3'
+  AND t.created_at > now() - interval '1 day'
+ORDER BY t.created_at DESC;
+```
+
+**3 bis. Rapports de menage du jour** (un par menage, rendu par la premiere
+cleaner seulement).
+
+```sql
+SELECT job_id, cleaner_id, length(text) AS longueur_texte, created_at
+FROM public.cleaning_reports
+WHERE created_at > now() - interval '1 day'
 ORDER BY created_at DESC;
 ```
+
+**3 ter. Photos par menage et par famille** : `arrival:<piece>` (etape 1),
+`end:<piece>` (etape 4), `problem...` (signalements). Pour un studio sans
+probleme on attend au moins 3 arrival et 3 end.
+
+```sql
+SELECT job_id,
+  count(*) FILTER (WHERE item_name LIKE 'arrival:%') AS arrivee,
+  count(*) FILTER (WHERE item_name LIKE 'end:%')     AS fin,
+  count(*) FILTER (WHERE item_name LIKE 'problem%')  AS problemes
+FROM public.photos
+WHERE created_at > now() - interval '1 day'
+GROUP BY job_id ORDER BY job_id;
+```
+
+**3 quater. Gestes perdus ou en double.** Chaque requete doit rendre zero ligne
+(sauf la derniere, voir sa note).
+
+Signalement sans photo alors qu'elle est obligatoire (seuls gaz, porte, AC et
+Wi-Fi en panne peuvent ne pas en avoir) :
+
+```sql
+SELECT t.id, t.title, t.created_at
+FROM public.maintenance_tickets t
+WHERE t.source = 'hk_planner_v3'
+  AND t.created_at > now() - interval '1 day'
+  AND t.photo_path IS NULL
+  AND NOT EXISTS (SELECT 1 FROM public.photos p WHERE p.ticket_id = t.id)
+  AND t.title !~* '(gas not working|ac not working|wi-fi not working|get in)';
+```
+
+Photo d'arrivee envoyee deux fois pour la meme piece dans la meme minute :
+
+```sql
+SELECT job_id, item_name, count(*) FROM public.photos
+WHERE created_at > now() - interval '1 day' AND item_name LIKE 'arrival:%'
+GROUP BY job_id, item_name, date_trunc('minute', created_at)
+HAVING count(*) > 1;
+```
+
+Menage termine sans rapport pour la premiere cleaner :
+
+```sql
+SELECT e.job_id, e.cleaner_id, e.created_at
+FROM public.job_events e
+LEFT JOIN public.cleaning_reports r ON r.job_id = e.job_id
+WHERE e.event_type = 'finish_job' AND r.job_id IS NULL
+  AND e.created_at > now() - interval '1 day';
+```
+
+Une ligne est normale si ce `finish_job` vient d'une aide (deuxieme cleaner du
+meme menage, elle ne rend pas de rapport) : verifier que le `job_id` a un autre
+`finish_job` avec rapport. Sinon le rapport n'est pas arrive : le faire refaire.
 
 **4. Actions refusees par le serveur.** Elles ne laissent aucune trace en base,
 justement parce qu'elles n'ont rien ecrit : elles vivent sur le telephone de la

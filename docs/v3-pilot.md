@@ -1,98 +1,98 @@
-# HK Planner, new cleaner app (pilot)
+# HK Planner, the new cleaning app (pilot)
 
-Faiza and Pionah are trying a new version of HK Planner for one week. Your
-manager will tell you which day it starts.
+Faiza and Pionah are trying the new app for one week. Your manager will tell
+you which day it starts.
 
-Nothing is removed. The app you use today keeps working exactly as before, at
-the same address, with the same cleanings. You can go back to it at any time,
-in the middle of a cleaning if you want.
+Nothing is removed. The app you know keeps working at its usual address, with
+the same cleanings. You can go back to it at any time.
 
-## What does not change
+## Open it
 
-- **Your PIN does not change.** Same four digits, same screen.
-- **Your phone does not change.** Nothing to install from a store, nothing to
-  pay, no new account, no new password.
-- **Your cleanings do not change.** The same stops, the same checklist, the
-  same linen count. Both apps read and write the same place.
-- **Your notifications do not change.** They keep arriving from the app you
-  know, and tapping one opens the app you know, not the new one. That is
-  normal.
+1. Open this link: https://stunning-kleicha-f61101.netlify.app/v3/
+2. Sign in the way you always do.
+3. Tap the browser menu and choose "Add to Home Screen".
 
-## How to open it
+**Do this once with wifi or signal, before your first apartment.** That first
+visit is what lets the app keep working when you have no network.
 
-1. Open HK Planner the way you always do and sign in with your PIN.
-2. In the same browser, open this link:
-   https://stunning-kleicha-f61101.netlify.app/v3/
-3. Tap the browser menu and choose "Add to Home Screen". The icon is called
-   "HK v3".
+## Start
 
-You do not sign in twice. The new app uses the session you already opened.
+You see your apartments for the day. **Tap the apartment you are doing first.**
+It is your choice, the app does not pick for you.
 
-**Do this once at home or at the office, with wifi or signal, before you leave
-for your first stop.** That first visit is what puts the app on your phone for
-the times you have no network.
+The top of the screen always says "Step N of 5" and shows the timer.
 
-## What changes
+## The 5 steps
 
-**Today.** You only see your own stops, in the order of the deadlines, not in
-the order of the buildings. The same-day cleaning comes first, because a guest
-arrives that afternoon. The number at the top is your day: how many stops, and
-roughly how long.
+**Step 1 of 5 · Arrival**
+- Tap **I'm here**. The timer starts.
+- If you cannot enter, tap **I can't get in**. Your manager is told.
+- Then the app asks for photos, room by room. Take one or more photos of each
+  room as you find it. Tap **Several photos here** if you need more than one,
+  then **Next room**.
 
-**One cleaning at a time.** Tap Start. The timer runs on its own. There is no
-Pause and no Stop any more, and no separate Done button.
+**Step 2 of 5 · Damage & problems**
+- Walls: tap **Walls OK**, or **Marks or damage** to take photos.
+- "Anything damaged or wrong?" Tap **No, all good** or **Yes, report it**.
+- Tiles show the kind of problem. Tap one, take several photos if needed, and
+  type a short note. To speak your note, tap the microphone on your phone
+  keyboard and talk, the phone types for you. Then tap **Continue**.
 
-**The checklist.** Tap anywhere on a line to tick it. If a line needs a photo,
-the camera icon is on that same line.
+**Step 3 of 5 · Dirty linen**
+- The app shows the usual linen. "As usual?" Tap **Yes**, or **Change** to
+  correct the numbers.
 
-**Check while you are here.** If the apartment has an open maintenance ticket,
-it appears at the top of the cleaning. Take a photo and tap the line: the
-technician gets it for confirmation. You never close a ticket yourself.
+**Step 4 of 5 · Room by room**
+- For each room you see the listing photo: make the room look like it.
+- When it is clean, take the end photo (more than one if you want), then go to
+  the next room.
 
-**Report a problem.** Tap Report a problem, choose a category, take a photo,
-send. The ticket is created with the apartment and the cleaning attached, and
-goes to the technician on duty. No more WhatsApp for this.
+**Step 5 of 5 · Leave & send**
+- Tap each check, one by one:
+  - Gas works, now off, or **Gas not working**
+  - AC: the app tells you the rule for the month (on in Auto mode, or off).
+    Tap that choice, or **AC not working**
+  - Wi-Fi works, or **Wi-Fi not working**
+  - Lights off
+  - Windows and balcony closed
+  - Trash taken out
+  - Door locked, key back
+- "Running low?" Tap what is running low, or nothing.
+- Tap **Send to Housekeeping**. WhatsApp opens. Choose the group **Medini Homes
+  Housekeeping** and send. The photos go with the message.
 
-**One Finish.** Tap Finish at the end. It asks for the linen going out, then it
-is done. If some lines are not ticked, it tells you how many and you can still
-finish.
+## A problem at any time
 
-## If you have no network
+After you arrive, the red **Problem** button is always there. Tap it, choose
+the kind of problem, take photos, type a note if you want, send. The technician
+is told.
 
-Everything you tap is saved on your phone. A line appears at the top: "Saved on
-device, 2 to sync". When the signal comes back it sends everything on its own.
-Nothing is lost, and nothing is counted twice. You can close the app in
-between.
+## Two of you in one apartment
 
-If the server refuses something, the app tells you straight away: "Not sent:
-... Tell your manager." Tell your manager the same day, and do that one
-cleaning or that one report again in the app you know. The full list stays in
-Profile, under "Not sent", until someone clears it.
+The first one does everything above. The second one taps **I'm here**, then
+only does her own rooms in Step 4, and taps **Add to X's report** (X is the
+first cleaner's name). She does not do steps 2, 3 and 5.
+
+## Ticks
+
+- One tick (✓): saved on your phone.
+- Two ticks (✓✓): received by the server.
+
+## No network
+
+Keep working. Everything is saved on your phone and sent later, on its own,
+when the signal comes back. Nothing is lost and nothing is sent twice. Do not
+sign out while it still says "Saved on device".
+
+If the app says "Not sent", tell your manager the same day.
 
 ## If something looks wrong
 
-Do not try to fix it, and do not lose time on it.
-
-1. Go back to the app you know:
-   https://stunning-kleicha-f61101.netlify.app/
-   Your cleanings are the same in both, nothing is lost either way. Finish your
-   day there.
-2. Tell your manager the same day: the apartment name, the time, and what you
-   saw. A photo of the screen helps.
-
-Things worth telling us even if they look small: a stop you do not recognise, a
-stop missing, a name you cannot read, a button that does nothing, a photo that
-will not send, or a cleaning that took you longer than it should have because
-of the app.
+Do not lose time on it. Go back to the app you know:
+https://stunning-kleicha-f61101.netlify.app/
+Your cleanings are the same in both. Then tell your manager the apartment, the
+time and what you saw. A photo of the screen helps.
 
 ## Signing out
 
-Profile, then Sign out. Do this if you hand the phone to someone else. It
-closes the session on the phone and on the server, and it stops the
-notifications for your account on that phone.
-
-Sign out also clears anything still waiting on the phone, so that your work is
-never sent under someone else's name. If the top of the screen still says
-"Saved on device", wait for it to disappear before you sign out: sign out
-before handing the phone to someone else, or your last few actions on it may be
-lost.
+Profile, then Sign out, if you hand the phone to someone else.
