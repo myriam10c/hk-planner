@@ -12,7 +12,14 @@ const UNIQUE: Record<string, string[]> = {
   on_duty: ["duty_date"],
   v3_job_keys: ["job_id"],
   cleaning_reports: ["job_id"],
+  inspections: ["idem_key"],
+  inspection_items: ["inspection_id", "zone"],
+  inspection_photos: ["idem_key"],
+  inspection_proposals: ["proposal_date", "listing_id"],
 };
+
+// Tables dont created_at est rempli par la base a l'insertion.
+const DEFAULT_NOW = new Set(['job_events']);
 
 export function fakeDb(seed: Record<string, any[]> = {}) {
   const tables: Record<string, any[]> = {};
@@ -23,7 +30,7 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
   let nextId = 1000;
 
   function from(table: string) {
-    const filters: Array<{ col: string; val: any; kind: "eq" | "in" }> = [];
+    const filters: Array<{ col: string; val: any; kind: "eq" | "in" | "gte" | "lte" | "lt" | "gt" | "isnull" }> = [];
     let pending: { op: string; values: any; opts?: any } | null = null;
     const list = () => (tables[table] ??= []);
     // « payload->>listingId » : chemin JSON texte de PostgREST, un seul niveau.
@@ -33,11 +40,19 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
       const v = r[col.slice(0, i)]?.[col.slice(i + 3)];
       return v === undefined || v === null ? undefined : String(v);
     };
+    // Comparaisons par chaines : toutes les valeurs comparees sont des dates ISO.
+    const cmp = (kind: string, a: any, b: any) =>
+      kind === "gte" ? String(a) >= String(b) : kind === "lte" ? String(a) <= String(b)
+      : kind === "lt" ? String(a) < String(b) : String(a) > String(b);
     const match = (r: any) =>
       filters.every((f) =>
         f.kind === "in"
           ? (f.val as any[]).map(String).includes(String(lire(r, f.col)))
-          : String(lire(r, f.col)) === String(f.val)
+          : f.kind === "eq"
+          ? String(lire(r, f.col)) === String(f.val)
+          : f.kind === "isnull"
+          ? (lire(r, f.col) ?? null) === null
+          : (lire(r, f.col) !== undefined && lire(r, f.col) !== null && cmp(f.kind, lire(r, f.col), f.val))
       );
     const selected = () => list().filter(match);
     const sameUnique = (a: any, b: any) => {
@@ -56,7 +71,8 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
           if (list().some((r) => sameUnique(r, v))) {
             return { data: null, error: { code: "23505", message: "duplicate key" } };
           }
-          const row = { id: nextId++, ...v };
+          // Defaut de colonne created_at DEFAULT now() (les filtres de date le lisent).
+          const row = { id: nextId++, ...(DEFAULT_NOW.has(table) ? { created_at: new Date().toISOString() } : {}), ...v };
           list().push(row);
           out.push(row);
         }
@@ -95,8 +111,12 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
       select: () => q,
       eq: (col: string, val: any) => { filters.push({ col, val, kind: "eq" }); return q; },
       in: (col: string, val: any[]) => { filters.push({ col, val, kind: "in" }); return q; },
-      order: () => q, limit: () => q, not: () => q, is: () => q,
-      gte: () => q, lte: () => q, lt: () => q, gt: () => q,
+      order: () => q, limit: () => q, not: () => q,
+      is: (col: string, val: any) => { if (val === null) filters.push({ col, val, kind: "isnull" }); return q; },
+      gte: (col: string, val: any) => { filters.push({ col, val, kind: "gte" }); return q; },
+      lte: (col: string, val: any) => { filters.push({ col, val, kind: "lte" }); return q; },
+      lt: (col: string, val: any) => { filters.push({ col, val, kind: "lt" }); return q; },
+      gt: (col: string, val: any) => { filters.push({ col, val, kind: "gt" }); return q; },
       // `like` n'est pas simule : la lecture des instantanes rend toute la table,
       // ce qui suffit aux tests et rend `pickSnapshot` seul juge du choix.
       like: () => q,
