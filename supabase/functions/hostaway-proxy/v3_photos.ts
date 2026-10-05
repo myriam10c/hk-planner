@@ -194,7 +194,22 @@ export async function sansEchec(quoi: string, fn: () => Promise<unknown>): Promi
 export async function deletePhoto(sb: any, me: SessionUser, body: any): Promise<ActionResult> {
   const idem = body?.idem;
   if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
-  const brut = body?.photoId;
+  let brut = body?.photoId;
+  // Tache 5 du branchement : la photo peut etre designee par la cle de son
+  // televersement (photoIdem), quand le telephone l'efface avant d'avoir recu son
+  // id. La file rejoue dans l'ordre, donc le televersement est passe avant.
+  if ((brut === undefined || brut === null || brut === "") && validIdem(body?.photoIdem)) {
+    const { data: up, error: eUp } = await sb.from("job_events").select("result")
+      .eq("idem_key", String(body.photoIdem)).eq("event_type", "upload_photo")
+      .eq("cleaner_id", me.cleaner_id).maybeSingle();
+    if (eUp) throw eUp;
+    // Televersement jamais arrive (refuse, ou jamais parti) : rien a effacer.
+    if (!up) return { status: 200, body: { status: "success", photoId: null } };
+    if (!up.result || !(up.result as any).photoId) {
+      return { status: 409, body: { error: "Still processing. Retry." } };
+    }
+    brut = (up.result as any).photoId;
+  }
   const n = typeof brut === "number" || (typeof brut === "string" && brut !== "") ? Number(brut) : NaN;
   if (!Number.isInteger(n) || n <= 0) return { status: 400, body: { error: "Invalid photo id." } };
 

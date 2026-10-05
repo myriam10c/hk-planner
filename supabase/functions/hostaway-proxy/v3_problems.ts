@@ -161,15 +161,35 @@ async function surMonTicket(
 const FERME: ActionResult = { status: 400, body: { error: "ticket is already closed" } };
 const estFerme = (t: any) => FERMES.indexOf(String(t?.status ?? "")) !== -1;
 
-function entree(body: any): { ticketId: number; idem: string } | ActionResult {
-  const ticketId = readTicketId(body?.ticketId);
+// Le ticket est designe par son id, ou (tache 5 du branchement) par `ticketIdem`,
+// la cle d'idempotence du signalement qui l'a cree : la file hors ligne du
+// telephone rejoue dans l'ordre, donc le signalement passe avant ses photos et
+// sa note, qui le retrouvent ici sans connaitre son id. Meme principe que
+// photoIdem (resolvePhotoId). La cle n'est lue que sur un `report_problem` pose
+// par la session qui parle : celle d'une autre personne ne designe rien.
+// Resolu AVANT la pose de la cle du geste, pour qu'un refus ne la brule pas.
+// Signalement pose mais pas encore abouti : 409, le telephone rejouera.
+async function entree(
+  sb: any, me: SessionUser, body: any,
+): Promise<{ ticketId: number; idem: string } | ActionResult> {
+  let ticketId = readTicketId(body?.ticketId);
+  if (!ticketId && validIdem(body?.ticketIdem)) {
+    const { data, error } = await sb.from("job_events").select("result, cleaner_id, event_type")
+      .eq("idem_key", String(body.ticketIdem)).eq("event_type", "report_problem")
+      .eq("cleaner_id", me.cleaner_id).maybeSingle();
+    if (error) throw error;
+    if (!data) return { status: 400, body: { error: "ticket not found" } };
+    const tid = data.result ? readTicketId((data.result as any).ticketId) : null;
+    if (!tid) return { status: 409, body: { error: "Still processing. Retry." } };
+    ticketId = tid;
+  }
   if (!ticketId) return { status: 400, body: { error: "ticketId required" } };
   if (!validIdem(body?.idem)) return { status: 400, body: { error: "idem required" } };
   return { ticketId, idem: String(body.idem) };
 }
 
 export async function addProblemPhoto(sb: any, me: SessionUser, body: any): Promise<ActionResult> {
-  const e = entree(body);
+  const e = await entree(sb, me, body);
   if ("status" in e) return e;
   const photoId = await resolvePhotoId(sb, body);
   if (!photoId) return { status: 400, body: { error: "photo required" } };
@@ -193,7 +213,7 @@ export async function addProblemPhoto(sb: any, me: SessionUser, body: any): Prom
 }
 
 export async function setProblemNote(sb: any, me: SessionUser, body: any): Promise<ActionResult> {
-  const e = entree(body);
+  const e = await entree(sb, me, body);
   if ("status" in e) return e;
   if (body?.note === undefined || (body.note !== null && typeof body.note !== "string")) {
     return { status: 400, body: { error: "note required" } };
@@ -214,7 +234,7 @@ export async function updateProblem(
   sb: any, me: SessionUser, body: any, deps: { push?: PushFn } = {},
 ): Promise<ActionResult> {
   const push = deps.push ?? sendPush;
-  const e = entree(body);
+  const e = await entree(sb, me, body);
   if ("status" in e) return e;
   const aUrgence = body?.urgency !== undefined;
   const priority = aUrgence ? ownKey(V3_URGENCY_PRIORITY, body.urgency) : null;
@@ -261,7 +281,7 @@ export async function updateProblem(
 }
 
 export async function deleteProblem(sb: any, me: SessionUser, body: any): Promise<ActionResult> {
-  const e = entree(body);
+  const e = await entree(sb, me, body);
   if ("status" in e) return e;
   const { reponse, ticket } = await surMonTicket(sb, me, e.ticketId, e.idem, "delete_problem", {},
     async (t) => {

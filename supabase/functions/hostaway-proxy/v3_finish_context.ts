@@ -30,11 +30,24 @@ export async function jobRole(sb: any, jobId: string, meId: number): Promise<"le
   const { data, error } = await sb.from("job_events")
     .select("id, cleaner_id, created_at, result").eq("job_id", jobId).eq("event_type", "start_job");
   if (error) throw error;
-  const departs = (data ?? []).filter((d: any) => d.result)
+  return roleFromStarts(data ?? [], meId).role;
+}
+
+// Regle unique du role, partagee par jobRole (fin de menage) et v3.myDay (tache 5
+// du branchement) : apres un rechargement, le telephone doit savoir s'il est lead
+// ou aide exactement comme le serveur le jugera a la fin. `rows` : les
+// start_job d'UN menage. Rend aussi qui est le lead et mon premier demarrage.
+export function roleFromStarts(rows: any[], meId: number): {
+  role: "lead" | "helper"; leadId: number | null; myStartedAt: string | null;
+} {
+  const departs = (rows ?? []).filter((d: any) => d && d.result)
     .sort((a: any, b: any) =>
       String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || Number(a.id) - Number(b.id));
-  if (departs.length === 0) return "lead";
-  return Number(departs[0].cleaner_id) === Number(meId) ? "lead" : "helper";
+  const mien = departs.find((d: any) => Number(d.cleaner_id) === Number(meId));
+  const myStartedAt = mien && mien.created_at ? String(mien.created_at) : null;
+  if (departs.length === 0) return { role: "lead", leadId: null, myStartedAt };
+  const leadId = Number(departs[0].cleaner_id);
+  return { role: leadId === Number(meId) ? "lead" : "helper", leadId, myStartedAt };
 }
 
 // Rend le rapport valide, null s'il est absent, ou un message d'erreur.

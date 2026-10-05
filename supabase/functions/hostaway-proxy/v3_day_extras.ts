@@ -8,6 +8,7 @@
 // d'ouvrir sa journee. Le role lead / aide qui compte pour le linge est
 // recalcule cote serveur par v3.finishJob, jamais lu de cet affichage.
 import { V3_PHOTO_BUCKET } from "./v3.ts";
+import { roleFromStarts } from "./v3_finish_context.ts";
 
 // Duree des URL signees des references : une heure, comme getPhotoUrl d'index.ts.
 export const V3_REFERENCE_URL_SECONDS = 3600;
@@ -127,6 +128,38 @@ export async function loadOthersOnJob(
   } catch (e) {
     console.warn("[v3.myDay] binome indisponible: " + String((e as any)?.message ?? e));
     for (const cle of Object.keys(out)) out[cle] = [];
+  }
+  return out;
+}
+
+export interface JobRoleInfo {
+  role: "lead" | "helper";
+  leadId: number | null;
+  myStartedAt: string | null;
+}
+
+// Role lead / aide de la personne sur chaque menage du jour (tache 5 du
+// branchement), avec la regle de v3.finishJob (roleFromStarts) : apres un
+// rechargement, le telephone sait s'il est l'aide exactement comme le serveur le
+// jugera. Une seule lecture pour la journee. Une panne rend null partout : le
+// telephone retombe alors sur othersOnJob, et un refus « linge » de finishJob
+// lui fait demander le comptage.
+export async function loadRoles(
+  sb: any, jobIds: string[], meId: number,
+): Promise<Record<string, JobRoleInfo | null>> {
+  const out: Record<string, JobRoleInfo | null> = {};
+  for (const j of jobIds) out[j] = null;
+  if (jobIds.length === 0) return out;
+  try {
+    const departs = await parPaquets(jobIds, (p) =>
+      sb.from("job_events").select("id, job_id, cleaner_id, created_at, result")
+        .in("job_id", p).eq("event_type", "start_job"));
+    const parJob: Record<string, any[]> = {};
+    for (const d of departs) (parJob[String(d.job_id)] ||= []).push(d);
+    for (const j of jobIds) out[j] = roleFromStarts(parJob[j] ?? [], meId);
+  } catch (e) {
+    console.warn("[v3.myDay] roles indisponibles: " + String((e as any)?.message ?? e));
+    for (const j of jobIds) out[j] = null;
   }
   return out;
 }

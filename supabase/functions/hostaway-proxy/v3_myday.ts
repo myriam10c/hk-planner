@@ -19,7 +19,7 @@ import {
 import type { SessionUser } from "./v3.ts";
 import type { TeamMember } from "./v3_viewas.ts";
 import {
-  heroPhotoFrom, loadOthersOnJob, loadReferences, roomsFor,
+  heroPhotoFrom, loadOthersOnJob, loadReferences, loadRoles, roomsFor,
 } from "./v3_day_extras.ts";
 import type { OtherOnJob } from "./v3_day_extras.ts";
 
@@ -56,6 +56,11 @@ export interface V3Stop {
   heroPhotoUrl: string | null; // premiere image de l'annonce, cache seulement
   othersOnJob: OtherOnJob[];  // autres personnes du meme menage, par demarrage
   references: Record<string, string>; // piece -> URL signee 1 h, menage precedent
+  // Tache 5 : role sur ce menage selon la regle de v3.finishJob (roleFromStarts).
+  // null si la lecture a echoue (le telephone retombe sur othersOnJob).
+  role: "lead" | "helper" | null;
+  leadId: number | null;        // personne qui a demarre la premiere, sinon null
+  myStartedAt: string | null;   // mon premier start_job abouti, sinon null
 }
 
 export interface MyDayInput {
@@ -203,6 +208,9 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
       heroPhotoUrl: heroPhotoFrom(listing),
       othersOnJob: [],
       references: {},
+      role: null,
+      leadId: null,
+      myStartedAt: null,
     };
   };
 
@@ -272,6 +280,14 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
   const binomes = await loadOthersOnJob(input.sb,
     brut.map((b) => ({ cle: b.cle, jobId: b.stop.jobId })), input.me.cleaner_id);
   for (const b of brut) b.stop.othersOnJob = binomes[b.cle] ?? [];
+  const roles = await loadRoles(input.sb, brut.map((b) => b.stop.jobId), input.me.cleaner_id);
+  for (const b of brut) {
+    const r = roles[b.stop.jobId];
+    if (!r) continue;
+    b.stop.role = r.role;
+    b.stop.leadId = r.leadId;
+    b.stop.myStartedAt = r.myStartedAt;
+  }
   const refs = await loadReferences(input.sb, brut.map((b) => b.stop), input.date);
   brut.forEach((b, i) => { b.stop.references = refs[i] ?? {}; });
 
