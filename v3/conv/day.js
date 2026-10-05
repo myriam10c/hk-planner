@@ -90,17 +90,27 @@ export function splitName(name) {
 
 const PEST = { text: "Pest control was asked. Do you see insects?", ok: "No insects", see: "I see insects", kind: "Insects", reportLabel: "Insects seen" };
 
-// Personne qui a demarre le menage avant moi (regle du serveur, jobRole) : la
-// premiere des autres, si elle a demarre et que je n'ai pas demarre avant elle.
-function leadOf(stop, myStartedAt, meId) {
-  const o = (stop.othersOnJob || []).filter(x => String(x.id) !== meId)[0];
-  if (!o || !o.startedAt) return null;
-  if (myStartedAt && Date.parse(myStartedAt) <= Date.parse(o.startedAt)) return null;
+// Personne qui a demarre le menage avant moi. Regle du serveur (jobRole) : v3.myDay
+// rend role / leadId / myStartedAt calcules par la meme fonction que v3.finishJob
+// (roleFromStarts), le telephone suit donc le serveur apres un rechargement.
+// Role absent (lecture ratee cote serveur) : repli sur othersOnJob, la premiere des
+// autres si elle a demarre et que je n'ai pas demarre avant elle.
+function leadOf(stop, meId) {
+  const others = (stop.othersOnJob || []).filter(x => String(x.id) !== meId);
   // roomsDone : la journee ne dit pas encore quelles pieces la premiere a faites.
-  return { id: o.id, name: String(o.name || "Teammate"), startedAt: dubaiHHMM(o.startedAt) || "--:--", roomsDone: [] };
+  const asLead = o => ({ id: o.id, name: String(o.name || "Teammate"), startedAt: dubaiHHMM(o.startedAt) || "--:--", roomsDone: [] });
+  if (stop.role === "lead") return null;
+  if (stop.role === "helper") {
+    const o = others.find(x => String(x.id) === String(stop.leadId));
+    return asLead(o || { id: stop.leadId, name: "Teammate", startedAt: null });
+  }
+  const o = others[0];
+  if (!o || !o.startedAt) return null;
+  if (stop.myStartedAt && Date.parse(stop.myStartedAt) <= Date.parse(o.startedAt)) return null;
+  return asLead(o);
 }
 
-export function toApartments(payload, me, { now = new Date(), myStarts = {} } = {}) {
+export function toApartments(payload, me, { now = new Date() } = {}) {
   const stops = (payload && Array.isArray(payload.stops)) ? payload.stops : [];
   const meId = me && me.id !== undefined ? String(me.id) : null;
   return stops.map(s => {
@@ -119,7 +129,8 @@ export function toApartments(payload, me, { now = new Date(), myStarts = {} } = 
       roomPhotos: s.references && typeof s.references === "object" ? { ...s.references } : {},
       managerCheck: pest ? { ...PEST, ticketId: pest.id } : null,
       openTickets: tickets,
-      lead: leadOf(s, myStarts[s.jobId], meId),
+      lead: leadOf(s, meId),
+      role: s.role === "lead" || s.role === "helper" ? s.role : null,
       state: s.state || "todo",
       startedAt: s.startedAt || null,
     };

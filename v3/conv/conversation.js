@@ -56,6 +56,7 @@ function botMessage(conv) {
     case "leave": return { from: "app", type: "text", text: "Before you leave, check each one." };
     case "low": return { from: "app", type: "text", text: "Running low? Tap what is missing." };
     case "helper": return { from: "app", type: "text", text: "Your part is done. " + a.lead.name + " sends the report." };
+    case "linen-send": return { from: "app", type: "text", text: "Send the linen count to Housekeeping." };
     case "report": return { from: "app", type: "report" };
     default: return null;
   }
@@ -148,6 +149,7 @@ export function currentStep(conv) {
     case "low":
       return { ...st, ...base, camera: false, replies: SUPPLIES.map(x => R("low:" + x, (conv.low.includes(x) ? "✓ " : "") + x)).concat([R("low-done", conv.low.length ? "That's it" : "Nothing")]) };
     case "helper": return { ...st, ...base, camera: false, replies: [R("add-to-lead", "Add to " + a.lead.name + "'s report")] };
+    case "linen-send": return { ...st, ...base, camera: false, replies: [R("linen-send", "Send linen count")] };
     case "report": return { ...st, ...base, camera: false, replies: conv.sent ? [R("share-again", "Share again")] : [R("send", "Send to Housekeeping")] };
     default: return { ...st, ...base, camera: false, replies: [] };
   }
@@ -223,8 +225,25 @@ export function reply(conv, id, { now = new Date() } = {}) {
     case "linen-ok": conv.linenEditing = false; say(conv, "Linen: " + linenSummary(conv.linen)); advance(conv); break;
     case "low-done": say(conv, conv.low.length ? "Running low: " + conv.low.join(", ") : "Nothing is low"); advance(conv); break;
     case "add-to-lead": conv.endedAt = now; conv.sent = true; say(conv, r.label); advance(conv); break;
+    case "linen-send": conv.endedAt = now; conv.sent = true; say(conv, "Linen: " + linenSummary(conv.linen)); advance(conv); break;
     case "send": conv.endedAt = now; conv.sent = true; say(conv, "Report sent to the group"); break;
   }
+  return conv;
+}
+
+// Le serveur juge que cette personne est le lead (elle croyait aider) et refuse la fin sans
+// linge : la conversation demande le comptage, puis l'envoie (tâche 5 du branchement).
+// conv.sync.finish est oublié pour qu'une nouvelle fin, avec le linge, parte à l'envoi.
+export function requireLinen(conv) {
+  if (conv.linenNeeded) return conv;
+  conv.linenNeeded = true;
+  conv.sent = false;
+  conv.endedAt = null;
+  if (conv.sync) conv.sync.finish = null;
+  conv.messages.push({ from: "app", type: "text", text: "Housekeeping needs your linen count.", alert: true });
+  conv.steps.push({ id: "linen", n: 3 }, { id: "linen-send", n: 5 });
+  conv.i = conv.steps.length - 3;
+  advance(conv);
   return conv;
 }
 

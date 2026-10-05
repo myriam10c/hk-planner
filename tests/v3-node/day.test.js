@@ -92,13 +92,29 @@ test("binôme : lead = la première des autres si elle a démarré avant moi, si
   const pas = { ...STOP_CREEK, othersOnJob: [{ id: 7, name: "Pionah", startedAt: null }] };
   assert.equal(toApartments({ stops: [pas] }, ME, { now: NOW })[0].lead, null);
   // j'ai démarré avant elle : je suis la première
-  const avant = toApartments({ stops: [STOP_CREEK] }, ME, { now: NOW, myStarts: { [STOP_CREEK.jobId]: "2026-10-02T06:00:00Z" } })[0];
+  const avant = toApartments({ stops: [{ ...STOP_CREEK, myStartedAt: "2026-10-02T06:00:00Z" }] }, ME, { now: NOW })[0];
   assert.equal(avant.lead, null);
-  const apres = toApartments({ stops: [STOP_CREEK] }, ME, { now: NOW, myStarts: { [STOP_CREEK.jobId]: "2026-10-02T06:30:00Z" } })[0];
+  const apres = toApartments({ stops: [{ ...STOP_CREEK, myStartedAt: "2026-10-02T06:30:00Z" }] }, ME, { now: NOW })[0];
   assert.equal(apres.lead.name, "Pionah");
   // moi-même dans othersOnJob (jamais rendu par le serveur) : ignorée
   const moi = { ...STOP_CREEK, othersOnJob: [{ id: 4, name: "Faiza", startedAt: "2026-10-02T05:00:00Z" }] };
   assert.equal(toApartments({ stops: [moi] }, ME, { now: NOW })[0].lead, null);
+});
+
+test("binôme : le rôle rendu par v3.myDay (règle de jobRole) gagne sur othersOnJob", () => {
+  // Serveur : lead. Même si Pionah apparaît démarrée avant (horloges), le téléphone suit le serveur.
+  const lead = toApartments({ stops: [{ ...STOP_CREEK, role: "lead", leadId: 4, myStartedAt: "2026-10-02T06:30:00Z" }] }, ME, { now: NOW })[0];
+  assert.equal(lead.lead, null);
+  assert.equal(lead.role, "lead");
+  // Serveur : aide, lead = une personne de othersOnJob : son nom et son heure de démarrage.
+  const aide = toApartments({ stops: [{ ...STOP_CREEK, role: "helper", leadId: 7, myStartedAt: null }] }, ME, { now: NOW })[0];
+  assert.deepEqual(aide.lead, { id: 7, name: "Pionah", startedAt: "10:05", roomsDone: [] });
+  // Serveur : aide, lead hors de othersOnJob (non assignée) : « Teammate », heure inconnue.
+  const autre = toApartments({ stops: [{ ...STOP_CREEK, othersOnJob: [], role: "helper", leadId: 9, myStartedAt: null }] }, ME, { now: NOW })[0];
+  assert.deepEqual(autre.lead, { id: 9, name: "Teammate", startedAt: "--:--", roomsDone: [] });
+  // Rôle absent (lecture ratée côté serveur) : repli sur othersOnJob et myStartedAt.
+  const repli = toApartments({ stops: [{ ...STOP_CREEK, role: null }] }, ME, { now: NOW })[0];
+  assert.equal(repli.lead.name, "Pionah");
 });
 
 test("payload sans stops, champs absents : aucune exception, valeurs prudentes", () => {

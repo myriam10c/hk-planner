@@ -2,7 +2,7 @@
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
 import { CLE_VIEW_AS, leaveModeForSignOut, practicing, queueStrip, render, startPractice, startViewAs } from '/v3/app.js';
-import { clearDead, deadEntries, resetQueue } from '/v3/offline.js';
+import { clearDead, clearFiles, deadEntries, deleteState, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
 import { esc, icon } from '/v3/ui.js';
 
@@ -205,6 +205,11 @@ const actions = {
     // laisserait sinon la cleaner enfermee dans une session qu'elle veut quitter.
     try { await resetQueue(); } catch (e) { /* stockage indisponible */ }
     try { await clearDead(); } catch (e) { /* stockage indisponible */ }
+    // Photos et conversations gardees pour la reprise (tache 5 du branchement) :
+    // elles appartiennent a la personne qui sort, comme la file.
+    try { await clearFiles(); } catch (e) { /* stockage indisponible */ }
+    try { sessionStorage.removeItem('v3Convs'); } catch (e) { /* stockage indisponible */ }
+    try { await deleteState('v3Convs'); } catch (e) { /* stockage indisponible */ }
     location.replace('/#cleaner');
   },
 };
