@@ -3171,7 +3171,7 @@ function getFiltered(){
 
 function countByDate(d){return RESERVATIONS.filter(r=>r.co===d&&!cancelled[keyFor(r)]).length;}
 function countDoneForDate(d){return RESERVATIONS.filter(r=>r.co===d&&done[keyFor(r)]&&!cancelled[keyFor(r)]).length;}
-function setTab(t){if(t==='__more'){openMoreMenu();return;}currentTab=t;if(t!=='laundry'&&laundryMoveKind){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();if(t==='laundry'&&laundryData===null&&!laundryLoading)loadLaundry();if(t==='hr'&&typeof loadHR==='function'&&hrData===null&&!hrLoading&&!hrError)loadHR();if(t==='security'&&securityData===null&&!securityLoading)loadSecurity();}
+function setTab(t){if(t==='inspections'){location.href='/inspections/';return;}if(t==='__more'){openMoreMenu();return;}currentTab=t;if(t!=='laundry'&&laundryMoveKind){laundryMoveKind=null;laundryMoveSubmitting=false;renderLaundryMoveForm();}render();if(t==='dashboard'){if(!dashData)loadDashMonth();if(!dashKPIs)loadDashKPIs();}if(t==='maintenance')ensureMtFresh();if(t==='laundry'&&laundryData===null&&!laundryLoading)loadLaundry();if(t==='hr'&&typeof loadHR==='function'&&hrData===null&&!hrLoading&&!hrError)loadHR();if(t==='security'&&securityData===null&&!securityLoading)loadSecurity();}
 let moreOpen=false;
 function openMoreMenu(){ moreOpen=true; renderMoreMenu(); }
 function closeMoreMenu(){ moreOpen=false; renderMoreMenu(); }
@@ -3189,6 +3189,7 @@ function renderMoreMenu(){
     {id:'calendar',icon:icon('calendar',22),label:'Calendar',color:'#0891b2'},
     {id:'stats',icon:icon('trending',22),label:'Stats',color:'#be185d'},
     {id:'security',icon:icon('shield',22),label:'Security',color:'#1d4ed8'},
+    {id:'inspections',icon:icon('clipboard',22),label:'Inspections',color:'#b45309'},
   ];
   el.innerHTML=`
   <div class="more-overlay" data-action="__closeMoreMenuBackdrop" data-pass-event="1">
@@ -4628,11 +4629,12 @@ function renderBottomNav(){
     ];
   }else if(cleanerMode.role==='maintenance'){
     // Maintenance view
-    tabs=[{id:'maintenance',icon:icon('wrench',22),label:'Maintenance'},{id:'laundry',icon:icon('wave',22),label:'Laundry'},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'history',icon:icon('history',22),label:t('history')},{id:'security',icon:icon('shield',22),label:'Security'}];
+    tabs=[{id:'maintenance',icon:icon('wrench',22),label:'Maintenance'},{id:'laundry',icon:icon('wave',22),label:'Laundry'},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'history',icon:icon('history',22),label:t('history')},{id:'security',icon:icon('shield',22),label:'Security'},{id:'inspections',icon:icon('clipboard',22),label:'Inspections'}];
   }else{
     // Cleaner view (default)
-    tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')},{id:'security',icon:icon('shield',22),label:'Security'}];
+    tabs=[{id:'planner',icon:icon('clipboard',22),label:t('myTasks')},{id:'hr',icon:icon('user',22),label:'Leave'},{id:'stats',icon:icon('trending',22),label:t('stats')},{id:'history',icon:icon('history',22),label:t('history')},{id:'security',icon:icon('shield',22),label:'Security'},{id:'inspections',icon:icon('clipboard',22),label:'Inspections'}];
     // Le staff au local enregistre pickups/retours ; pas les sous-traitants.
+    if(cleanerMode.role==='subcontractor')tabs=tabs.filter(tb=>tb.id!=='inspections');
     if(cleanerMode.role!=='subcontractor')tabs.splice(1,0,{id:'laundry',icon:icon('wave',22),label:'Laundry'});
   }
   const mainIds=tabs.map(tb=>tb.id);
