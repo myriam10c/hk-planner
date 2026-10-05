@@ -218,3 +218,11 @@ Deno.test("resolveJob leve quand la lecture echoue, sans rendre null", async () 
   // qui existe : la cleaner croirait son geste refuse alors que la base a toussote.
   await assertRejects(() => resolveJob(sb, id));
 });
+
+Deno.test("ensureJobKeys ne reecrit jamais une ligne existante quand le logement est inconnu", async () => {
+  const id = await jobKeyFor("2026-09-12_Marc Lefevre");
+  const sb = fakeDb({ v3_job_keys: [{ job_id: id, reservation_key: "2026-09-12_Marc Lefevre", listing_id: "102" }] });
+  await ensureJobKeys(sb, ["2026-09-12_Marc Lefevre", "2026-09-12_Anna Weber"], { "2026-09-12_Anna Weber": "" });
+  assertEquals(sb.tables.v3_job_keys.find((l: any) => l.job_id === id).listing_id, "102");
+  assertEquals(sb.tables.v3_job_keys.length, 2);
+});

@@ -65,18 +65,46 @@ Deno.test("deletePhoto garde une photo deja preuve d'un probleme (409)", async (
   assertEquals(sb.tables.job_events.length, 0);
 });
 
-Deno.test("deletePhoto libere la cle quand le retrait du bucket echoue", async () => {
+Deno.test("deletePhoto retire la ligne d'abord ; un retrait du bucket rate ne l'annule pas", async () => {
   const sb = base();
   sb.fail["storage.remove"] = { message: "boom" };
+  const r = await deletePhoto(sb, FAIZA as any, { photoId: 55, idem: "idem-del-0008" });
+  assertEquals(r.status, 200);
+  assertEquals(sb.tables.photos.length, 0);
+  assertEquals(sb.tables.job_events[0].result, { status: "success", photoId: 55 });
+});
+
+Deno.test("deletePhoto libere la cle et garde l'objet quand la base refuse", async () => {
+  const sb = base();
+  sb.fail["photos.delete"] = { message: "boom" };
   let leve = false;
   try {
-    await deletePhoto(sb, FAIZA as any, { photoId: 55, idem: "idem-del-0008" });
+    await deletePhoto(sb, FAIZA as any, { photoId: 55, idem: "idem-del-0009" });
   } catch (_e) {
     leve = true;
   }
   assertEquals(leve, true);
   assertEquals(sb.tables.photos.length, 1);
+  assertEquals(sb.storage.removals.length, 0);
   assertEquals(sb.tables.job_events.length, 0);
+});
+
+Deno.test("deletePhoto : le rejeu ne rend que le resultat d'un delete_photo de la meme personne", async () => {
+  const sb = base();
+  sb.tables.photos = [];
+  sb.tables.job_events.push(
+    { id: 1, idem_key: "idem-del-0010", event_type: "delete_photo", cleaner_id: 8,
+      result: { status: "success", photoId: 55 } },
+    { id: 2, idem_key: "idem-del-0011", event_type: "upload_photo", cleaner_id: 3,
+      result: { status: "success", photoId: 55, path: CHEMIN } },
+    { id: 3, idem_key: "idem-del-0012", event_type: "delete_photo", cleaner_id: 3,
+      result: { status: "success", photoId: 55 } },
+  );
+  assertEquals((await deletePhoto(sb, FAIZA as any, { photoId: 55, idem: "idem-del-0010" })).status, 404);
+  assertEquals((await deletePhoto(sb, FAIZA as any, { photoId: 55, idem: "idem-del-0011" })).status, 404);
+  const ok = await deletePhoto(sb, FAIZA as any, { photoId: 55, idem: "idem-del-0012" });
+  assertEquals(ok.status, 200);
+  assertEquals(ok.body, { status: "success", photoId: 55 });
 });
 
 Deno.test("v3.deletePhoto est ouverte a ceux qui televersent, jamais a un manager", () => {

@@ -210,19 +210,40 @@ export async function ensureJobKey(sb: any, reservationKey: string): Promise<str
 // a supprimer. Le hachage est local, seule l'ecriture part au reseau, et elle part
 // une seule fois.
 export async function ensureJobKeys(
-  sb: any, reservationKeys: string[],
+  sb: any, reservationKeys: string[], listingOf: Record<string, string> = {},
 ): Promise<Record<string, string>> {
   const uniq = [...new Set((reservationKeys ?? []).map(String).filter((k) => !!k))];
   const map: Record<string, string> = {};
   for (const cle of uniq) map[cle] = await jobKeyFor(cle);
   if (uniq.length === 0) return map;
-  // ignoreDuplicates : une correspondance existante n'est jamais reecrite, donc
-  // created_at garde la date de la premiere apparition du menage.
-  const { error } = await sb.from("v3_job_keys").upsert(
-    uniq.map((cle) => ({ job_id: map[cle], reservation_key: cle })),
-    { onConflict: "job_id", ignoreDuplicates: true },
-  );
-  if (error) throw error;
+  // Deux lots, jamais melanges : PostgREST prend l'union des colonnes d'un lot
+  // et mettrait listing_id a NULL sur les lignes qui n'en portent pas.
+  //   - logement connu : upsert fusionnant, qui pose ou complete listing_id
+  //     (rattrapage des lignes d'avant la colonne) sans toucher created_at ;
+  //   - logement inconnu : ignoreDuplicates, une correspondance existante n'est
+  //     jamais reecrite (created_at garde la premiere apparition du menage).
+  // Une reservation_key ne designe qu'un logement : reecrire la valeur est sans
+  // risque. Le cas courant (tous les arrets ont un logement) reste une ecriture.
+  const lid = (cle: string) => {
+    const v = listingOf[cle];
+    return v === undefined || v === null ? "" : String(v).trim();
+  };
+  const avec = uniq.filter((cle) => !!lid(cle));
+  const sans = uniq.filter((cle) => !lid(cle));
+  if (avec.length > 0) {
+    const { error } = await sb.from("v3_job_keys").upsert(
+      avec.map((cle) => ({ job_id: map[cle], reservation_key: cle, listing_id: lid(cle) })),
+      { onConflict: "job_id" },
+    );
+    if (error) throw error;
+  }
+  if (sans.length > 0) {
+    const { error } = await sb.from("v3_job_keys").upsert(
+      sans.map((cle) => ({ job_id: map[cle], reservation_key: cle })),
+      { onConflict: "job_id", ignoreDuplicates: true },
+    );
+    if (error) throw error;
+  }
   return map;
 }
 

@@ -24,7 +24,7 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
 
   function from(table: string) {
     const filters: Array<{ col: string; val: any; kind: "eq" | "in" }> = [];
-    let pending: { op: string; values: any } | null = null;
+    let pending: { op: string; values: any; opts?: any } | null = null;
     const list = () => (tables[table] ??= []);
     // « payload->>listingId » : chemin JSON texte de PostgREST, un seul niveau.
     const lire = (r: any, col: string) => {
@@ -67,6 +67,8 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
         const out: any[] = [];
         for (const v of rows) {
           const i = list().findIndex((r) => sameUnique(r, v));
+          // ignoreDuplicates : ON CONFLICT DO NOTHING, la ligne existante reste.
+          if (i >= 0 && pending.opts?.ignoreDuplicates) continue;
           if (i >= 0) list()[i] = { ...list()[i], ...v };
           else list().push({ id: nextId++, ...v });
           out.push(v);
@@ -99,7 +101,7 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
       // ce qui suffit aux tests et rend `pickSnapshot` seul juge du choix.
       like: () => q,
       insert: (values: any) => { pending = { op: "insert", values }; return q; },
-      upsert: (values: any) => { pending = { op: "upsert", values }; return q; },
+      upsert: (values: any, opts?: any) => { pending = { op: "upsert", values, opts }; return q; },
       update: (values: any) => { pending = { op: "update", values }; return q; },
       delete: () => { pending = { op: "delete", values: null }; return q; },
       maybeSingle: async () => {
@@ -123,9 +125,12 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
   // sort l'objet), `removals` garde la trace de l'appel pour qu'un test puisse
   // affirmer que le nettoyage a bien vise le bon chemin.
   const removals: Array<{ bucket: string; paths: string[] }> = [];
+  // Appels de signature par lot, pour verifier qu'une journee ne signe qu'une fois.
+  const signBatches: Array<{ bucket: string; paths: string[]; seconds: number }> = [];
   const storage = {
     uploads,
     removals,
+    signBatches,
     from(bucket: string) {
       return {
         async upload(path: string, body: any, opts: any) {
@@ -144,6 +149,16 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
             if (i >= 0) uploads.splice(i, 1);
           }
           return { data: paths.map((chemin) => ({ name: chemin })), error: null };
+        },
+        async createSignedUrls(paths: string[], seconds: number) {
+          if (fail["storage.sign"]) return { data: null, error: fail["storage.sign"] };
+          signBatches.push({ bucket, paths: [...paths], seconds });
+          return {
+            data: paths.map((p) => ({
+              path: p, error: null, signedUrl: "https://signed.test/" + p + "?exp=" + seconds,
+            })),
+            error: null,
+          };
         },
         async createSignedUrl(path: string, seconds: number) {
           if (fail["storage.sign"]) return { data: null, error: fail["storage.sign"] };

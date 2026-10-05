@@ -13,6 +13,7 @@ import {
   todayDubai, validMyDayDate, V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
 } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
+import { heroPhotoFromHostaway } from "./v3_day_extras.ts";
 import { loadTeam, resolveViewAs } from "./v3_viewas.ts";
 import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
 import { deletePhoto } from "./v3_photos.ts";
@@ -1145,7 +1146,7 @@ Deno.serve(async (req: Request) => {
         reportesVersLeJour.length > 0
           ? sb.from("extra_cleanings").select("*").in("reservation_key", reportesVersLeJour.slice(0, 100))
           : Promise.resolve({ data: [], error: null }),
-        sb.from("listing_config").select("listing_id, listing_name, bedrooms, unit_type, apt_number, internal_name"),
+        sb.from("listing_config").select("listing_id, listing_name, bedrooms, unit_type, apt_number, internal_name, hero_photo_url"),
         sb.from("checklist_templates").select("*"),
         sb.from("maintenance_tickets")
           .select("id, listing_id, title, category, priority, status")
@@ -1397,9 +1398,13 @@ Deno.serve(async (req: Request) => {
         const internalName = l.internalListingName || null;
         const aptNumber = extractAptNumber(internalName) || extractAptNumber(l.name) || extractAptNumber(l.address) || null;
         const isLocked = lockedIds.has(lid);
+        // v3 (tache 3) : premiere image de l'annonce, deja presente dans la reponse
+        // /listings ci-dessus. Seul ajout a ces ecritures, sur les deux branches :
+        // c'est une metadonnee, pas un reglage verrouillable.
+        const heroPhotoUrl = heroPhotoFromHostaway(l);
         const payload: any = isLocked
-          ? { listing_id: lid, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString() }
-          : { listing_id: lid, listing_name: l.name || "", bedrooms, price, unit_type: unitType, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString() };
+          ? { listing_id: lid, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString(), hero_photo_url: heroPhotoUrl }
+          : { listing_id: lid, listing_name: l.name || "", bedrooms, price, unit_type: unitType, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString(), hero_photo_url: heroPhotoUrl };
         const { error } = await sb.from("listing_config").upsert(payload, { onConflict: "listing_id" });
         if (!error) { synced++; if (isLocked) lockedSkipped++; }
       }

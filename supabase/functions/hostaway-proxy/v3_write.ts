@@ -231,7 +231,11 @@ export async function finishJob(
       await v3Log(sb, reservationKey, "laundry_counted", me.name, linen);
     }
     if (report) {
-      const texte = String(report.text ?? "").trim().slice(0, V3_REPORT_TEXT_MAX);
+      // Le texte n'est pris que s'il est une chaine : un objet ou un nombre
+      // donnerait « [object Object] » ou « 42 » dans les notes de l'app racine.
+      const texte = typeof report.text === "string"
+        ? report.text.trim().slice(0, V3_REPORT_TEXT_MAX)
+        : "";
       const { error } = await sb.from("cleaning_reports").upsert({
         job_id: jobId, reservation_key: reservationKey, cleaner_id: me.cleaner_id,
         // listingId vient du serveur et ecrase toute valeur envoyee.

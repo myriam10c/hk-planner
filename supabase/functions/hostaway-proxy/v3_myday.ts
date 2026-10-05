@@ -259,7 +259,11 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
   // Pose des identifiants opposes : une seule ecriture pour toute la journee. Elle
   // leve si elle echoue, et c'est voulu : un id sans sa correspondance serait un
   // arret sur lequel aucune action d'ecriture ne fonctionnerait ensuite.
-  const ids = await ensureJobKeys(input.sb, brut.map((b) => b.cle));
+  // Le logement de chaque arret part avec sa correspondance : c'est lui qui
+  // permet de retrouver le menage precedent d'un logement (references).
+  const logementDe: Record<string, string> = {};
+  for (const b of brut) if (b.stop.listingId) logementDe[b.cle] = b.stop.listingId;
+  const ids = await ensureJobKeys(input.sb, brut.map((b) => b.cle), logementDe);
   for (const b of brut) b.stop.jobId = ids[b.cle];
 
   // Binome et references : lectures de confort, jamais bloquantes (voir
@@ -268,7 +272,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
   const binomes = await loadOthersOnJob(input.sb,
     brut.map((b) => ({ cle: b.cle, jobId: b.stop.jobId })), input.me.cleaner_id);
   for (const b of brut) b.stop.othersOnJob = binomes[b.cle] ?? [];
-  const refs = await loadReferences(input.sb, brut.map((b) => b.stop));
+  const refs = await loadReferences(input.sb, brut.map((b) => b.stop), input.date);
   brut.forEach((b, i) => { b.stop.references = refs[i] ?? {}; });
 
   const ordered = orderStops(brut.map((b) => b.stop));

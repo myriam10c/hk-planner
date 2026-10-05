@@ -204,8 +204,11 @@ export async function deletePhoto(sb: any, me: SessionUser, body: any): Promise<
   if (!photo) {
     // Rejeu apres une suppression reussie : la ligne n'existe plus, mais le
     // resultat memorise sous la meme cle fait foi.
+    // Borne a la meme personne et au meme geste : une cle d'un autre geste ou
+    // d'un autre compte ne rend jamais son resultat ici.
     const { data: ev } = await sb.from("job_events")
-      .select("result").eq("idem_key", String(idem)).maybeSingle();
+      .select("result").eq("idem_key", String(idem)).eq("event_type", "delete_photo")
+      .eq("cleaner_id", me.cleaner_id).maybeSingle();
     if (ev && ev.result) return { status: 200, body: ev.result };
     return { status: 404, body: { error: "Photo not found." } };
   }
@@ -219,18 +222,23 @@ export async function deletePhoto(sb: any, me: SessionUser, body: any): Promise<
   const claim = await claimEvent(sb, String(idem), "delete_photo", null, me.cleaner_id, { photoId: n });
   const rejeu = replayResponse(claim);
   if (rejeu) return rejeu;
+  // La ligne d'abord : c'est elle qui fait exister la photo pour l'app. Une fois
+  // partie, plus rien ne la montre ; l'objet du bucket est retire ensuite, au
+  // mieux. L'ordre inverse laissait, sur une panne de la base, une ligne qui
+  // pointe vers un objet disparu (miniature cassee, preuve perdue).
   try {
-    const { error: rmErr } = await sb.storage.from(V3_PHOTO_BUCKET).remove([String(photo.storage_path)]);
-    if (rmErr) throw rmErr;
     const { error } = await sb.from("photos").delete().eq("id", n).eq("cleaner_id", me.cleaner_id);
     if (error) throw error;
-    const result = { status: "success", photoId: n };
-    await recordResult(sb, String(idem), result);
-    return { status: 200, body: result };
   } catch (e) {
     await releaseEvent(sb, String(idem));
     throw e;
   }
+  // Passe ce point, la suppression est faite : un objet orphelin est journalise
+  // par removeQuietly, jamais propage.
+  await removeQuietly(sb, String(photo.storage_path));
+  const result = { status: "success", photoId: n };
+  await sansEchec("resultat de delete_photo non memorise", () => recordResult(sb, String(idem), result));
+  return { status: 200, body: result };
 }
 
 // Retrait best-effort d'un objet du bucket. Ne leve jamais : l'appelant est deja

@@ -6,7 +6,7 @@ import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import { jobKeyFor } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
-import { heroPhotoFrom, roomsFor } from "./v3_day_extras.ts";
+import { heroPhotoFrom, heroPhotoFromHostaway, roomsFor } from "./v3_day_extras.ts";
 
 const CLE_MARC = "2026-09-12_Marc Lefevre";
 const CLE_SOFIA = "2026-09-12_Sofia Marchetti";
@@ -208,4 +208,127 @@ Deno.test("references : un manager en View as voit celles de la cleaner regardee
   assertEquals(out.viewAs, true);
   assertEquals(Object.keys(stopDe(out, "623 Samana Park View").references).sort(),
     ["Bedroom", "Kitchen"]);
+});
+
+// ---------------------------------------------------------------------------
+// References par v3_job_keys.listing_id (revue tache 3, correctif 1)
+// ---------------------------------------------------------------------------
+
+function avecCles(extra: Record<string, any[]> = {}) {
+  return jour({
+    v3_job_keys: [
+      // Menage precedent du 623, sans rapport : compte quand meme.
+      { job_id: "job_prec0000000000000a", reservation_key: "2026-09-10_A", listing_id: "102" },
+      // Plus ancien : jamais lu, meme s'il a une piece que le precedent n'a pas.
+      { job_id: "job_vieux000000000000b", reservation_key: "2026-09-01_B", listing_id: "102" },
+      // Apres la date demandee : jamais une reference.
+      { job_id: "job_futur000000000000c", reservation_key: "2026-09-20_C", listing_id: "102" },
+      // Menage precedent du 704.
+      { job_id: "job_prec0000000000000d", reservation_key: "2026-09-08_D", listing_id: "101" },
+    ],
+    photos: [
+      { id: 1, storage_path: "v3/a-kitchen.jpg", job_id: "job_prec0000000000000a",
+        item_name: "end:Kitchen", cleaner_id: 4, kind: "photo", created_at: "2026-09-10T11:00:00Z" },
+      { id: 2, storage_path: "v3/b-bathroom.jpg", job_id: "job_vieux000000000000b",
+        item_name: "end:Bathroom", cleaner_id: 4, kind: "photo", created_at: "2026-09-01T11:00:00Z" },
+      { id: 3, storage_path: "v3/c-kitchen.jpg", job_id: "job_futur000000000000c",
+        item_name: "end:Kitchen", cleaner_id: 4, kind: "photo", created_at: "2026-09-20T11:00:00Z" },
+      { id: 4, storage_path: "v3/d-bed.jpg", job_id: "job_prec0000000000000d",
+        item_name: "end:Bed", cleaner_id: 6, kind: "photo", created_at: "2026-09-08T11:00:00Z" },
+      // Deux photos de la meme piece : la plus recente gagne.
+      { id: 5, storage_path: "v3/a-kitchen-2.jpg", job_id: "job_prec0000000000000a",
+        item_name: "end:Kitchen", cleaner_id: 4, kind: "photo", created_at: "2026-09-10T11:30:00Z" },
+    ],
+    ...extra,
+  });
+}
+
+Deno.test("references : le menage precedent par listing_id, sans rapport", async () => {
+  const out = await buildMyDay(avecCles() as any);
+  assertEquals(stopDe(out, "623 Samana Park View").references, {
+    "Kitchen": "https://signed.test/v3/a-kitchen-2.jpg?exp=3600",
+  });
+  assertEquals(stopDe(out, "704 Golf Links").references, {
+    "Bed": "https://signed.test/v3/d-bed.jpg?exp=3600",
+  });
+});
+
+Deno.test("references : un seul appel de signature pour toute la journee", async () => {
+  const base = avecCles();
+  await buildMyDay(base as any);
+  const lots = (base.sb as any).storage.signBatches;
+  assertEquals(lots.length, 1);
+  assertEquals(lots[0].seconds, 3600);
+  assertEquals(lots[0].paths.sort(), ["v3/a-kitchen-2.jpg", "v3/d-bed.jpg"]);
+});
+
+Deno.test("references : photos lues pour le seul menage precedent de chaque logement", async () => {
+  const base = avecCles();
+  const lus: string[][] = [];
+  const sb: any = base.sb;
+  const from = sb.from;
+  sb.from = (t: string) => {
+    const q = from(t);
+    if (t !== "photos") return q;
+    const inOrig = q.in;
+    q.in = (col: string, val: any[]) => { if (col === "job_id") lus.push([...val]); return inOrig(col, val); };
+    return q;
+  };
+  await buildMyDay(base as any);
+  assertEquals(lus.flat().sort(), ["job_prec0000000000000a", "job_prec0000000000000d"]);
+});
+
+Deno.test("myDay pose listing_id sur les correspondances, et rattrape une ligne sans logement", async () => {
+  const jobMarc = await jobKeyFor(CLE_MARC);
+  const base = jour({
+    v3_job_keys: [{ job_id: jobMarc, reservation_key: CLE_MARC, listing_id: null, created_at: "2026-09-01T00:00:00Z" }],
+  });
+  await buildMyDay(base as any);
+  const lignes = (base.sb as any).tables.v3_job_keys;
+  const marc = lignes.find((l: any) => l.job_id === jobMarc);
+  assertEquals(marc.listing_id, "102");
+  assertEquals(marc.created_at, "2026-09-01T00:00:00Z");
+  const sofia = lignes.find((l: any) => l.reservation_key === CLE_SOFIA);
+  assertEquals(sofia.listing_id, "101");
+});
+
+// ---------------------------------------------------------------------------
+// Photo d'annonce : syncListings -> listing_config.hero_photo_url -> myDay
+// ---------------------------------------------------------------------------
+
+Deno.test("heroPhotoFromHostaway prend listingImages[0].url, https seulement", () => {
+  assertEquals(heroPhotoFromHostaway({ listingImages: [{ url: "https://img.hostaway.test/1.jpg" },
+    { url: "https://img.hostaway.test/2.jpg" }] }), "https://img.hostaway.test/1.jpg");
+  assertEquals(heroPhotoFromHostaway({ listingImages: [{ url: "http://img.test/1.jpg" }] }), null);
+  assertEquals(heroPhotoFromHostaway({ listingImages: [] }), null);
+  assertEquals(heroPhotoFromHostaway({}), null);
+  assertEquals(heroPhotoFromHostaway(null), null);
+});
+
+Deno.test("buildMyDay rend heroPhotoUrl depuis listing_config", async () => {
+  const base = jour();
+  (base.listings as any)["102"].hero_photo_url = "https://img.hostaway.test/623.jpg";
+  const out = await buildMyDay(base as any);
+  assertEquals(stopDe(out, "623 Samana Park View").heroPhotoUrl, "https://img.hostaway.test/623.jpg");
+  assertEquals(stopDe(out, "704 Golf Links").heroPhotoUrl, null);
+});
+
+Deno.test("index.ts : syncListings n'ajoute que hero_photo_url, myDay lit la colonne", async () => {
+  const src = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  // Ecritures d'avant le correctif, mot pour mot, suivies du seul champ ajoute.
+  const verrouille = "{ listing_id: lid, internal_name: internalName, apt_number: aptNumber, " +
+    "updated_at: new Date().toISOString(), hero_photo_url: heroPhotoUrl }";
+  const libre = "{ listing_id: lid, listing_name: l.name || \"\", bedrooms, price, unit_type: unitType, " +
+    "internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString(), " +
+    "hero_photo_url: heroPhotoUrl }";
+  assertEquals(src.includes("? " + verrouille), true);
+  assertEquals(src.includes(": " + libre), true);
+  assertEquals(src.includes("const heroPhotoUrl = heroPhotoFromHostaway(l);"), true);
+  // Toujours une seule lecture Hostaway dans syncListings.
+  const bloc = src.slice(src.indexOf('if (action === "syncListings")'),
+    src.indexOf("// ==================== DONE STATES"));
+  assertEquals(bloc.split("fetchAllPages(").length - 1, 1);
+  assertEquals(bloc.split("fetch(").length - 1, 0);
+  assertEquals(src.includes(
+    'select("listing_id, listing_name, bedrooms, unit_type, apt_number, internal_name, hero_photo_url")'), true);
 });

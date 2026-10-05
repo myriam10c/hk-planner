@@ -811,3 +811,16 @@ Deno.test("loadFinishContext rend le logement, y compris d'un menage hors Hostaw
   const ctx = await loadFinishContext(sb, "extra_2026-09-12_Deep clean");
   assertEquals(ctx.listingId, "205");
 });
+
+Deno.test("finishJob ne prend le texte du rapport que s'il est une chaine", async () => {
+  for (const [text, i] of [[{ a: 1 }, 1], [42, 2], [["x"], 3]] as Array<[unknown, number]>) {
+    const sb = baseBinome();
+    const r = await finishJob(sb, FAIZA as any, {
+      jobId: JOB_ID, linen: lingePlein(), report: { walls: "ok", text },
+      idem: "idem-finish-t00" + String(i),
+    }, CONTEXTE, { push: espionPushFin().push });
+    assertEquals(r.status, 200);
+    assertEquals(sb.tables.cleaning_reports[0].text, "");
+    assertEquals(sb.tables.cleaning_notes.length, 0);
+  }
+});
