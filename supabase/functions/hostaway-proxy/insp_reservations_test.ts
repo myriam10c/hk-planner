@@ -1,8 +1,9 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { loadReservationsCached, normalizeReservations } from "./insp_reservations.ts";
+import { _resetInflightForTests, loadReservationsCached, normalizeReservations } from "./insp_reservations.ts";
 
 Deno.test("normalise, dedoublonne, ignore l'incomplet", () => {
+  _resetInflightForTests();
   const raw = [
     { id: 1, listingMapId: 55, arrivalDate: "2026-10-01", departureDate: "2026-10-06", status: "confirmed", checkInTime: 15, checkOutTime: 0 },
     { id: 1, listingMapId: 55, arrivalDate: "2026-10-01", departureDate: "2026-10-06", status: "confirmed" },
@@ -22,6 +23,7 @@ const seed = (m: number | null) => fakeDb({ proxy_cache: m == null ? [] : [{ key
 const cached = (sb: any) => sb.tables.proxy_cache.find((r: any) => r.key === "insp:res:" + DAY);
 
 Deno.test("cache frais (< 2 min) : servi, aucun fetch", async () => {
+  _resetInflightForTests();
   const sb = seed(1); let n = 0;
   const out = await loadReservationsCached(sb, DAY, { fetchHostaway: async () => { n++; return [R("new")]; }, now: () => NOW, waitUntil: () => { n += 100; } });
   assertEquals(out, { reservations: [R("old")], cachedAt: null });
@@ -29,6 +31,7 @@ Deno.test("cache frais (< 2 min) : servi, aucun fetch", async () => {
 });
 
 Deno.test("cache de 5 min : servi tout de suite, revalidation en arriere-plan", async () => {
+  _resetInflightForTests();
   const sb = seed(5); let n = 0; const ps: Promise<unknown>[] = [];
   const out = await loadReservationsCached(sb, DAY, { fetchHostaway: async () => { n++; return [R("new")]; }, now: () => NOW, waitUntil: (p) => { ps.push(p); } });
   assertEquals(out, { reservations: [R("old")], cachedAt: null });
@@ -40,6 +43,7 @@ Deno.test("cache de 5 min : servi tout de suite, revalidation en arriere-plan", 
 });
 
 Deno.test("deux appels rapproches a 5 min : une seule revalidation en vol", async () => {
+  _resetInflightForTests();
   const sb = seed(5); let n = 0; const ps: Promise<unknown>[] = [];
   let release: () => void = () => {};
   const gate = new Promise<void>((r) => { release = r; });
@@ -54,14 +58,18 @@ Deno.test("deux appels rapproches a 5 min : une seule revalidation en vol", asyn
   assertEquals(n, 2);
 });
 
-Deno.test("cache de 40 min : servi avec cachedAt = updated_at", async () => {
-  const sb = seed(40); const ps: Promise<unknown>[] = [];
-  const out = await loadReservationsCached(sb, DAY, { fetchHostaway: async () => [R("new")], now: () => NOW, waitUntil: (p) => { ps.push(p); } });
-  assertEquals(out, { reservations: [R("old")], cachedAt: minAgo(40) });
+Deno.test("cache sain de 2 h : servi, cachedAt null, une seule revalidation lancee", async () => {
+  _resetInflightForTests();
+  const sb = seed(120); const ps: Promise<unknown>[] = []; let n = 0;
+  const out = await loadReservationsCached(sb, DAY, { fetchHostaway: async () => { n++; return [R("new")]; }, now: () => NOW, waitUntil: (p) => { ps.push(p); } });
+  assertEquals(out, { reservations: [R("old")], cachedAt: null });
+  assertEquals(ps.length, 1);
   await Promise.all(ps);
+  assertEquals(n, 1);
 });
 
 Deno.test("pas de cache : fetch synchrone puis upsert", async () => {
+  _resetInflightForTests();
   const sb = seed(null);
   const out = await loadReservationsCached(sb, DAY, { fetchHostaway: async () => [R("new")], now: () => NOW });
   assertEquals(out, { reservations: [R("new")], cachedAt: null });
@@ -69,6 +77,7 @@ Deno.test("pas de cache : fetch synchrone puis upsert", async () => {
 });
 
 Deno.test("pas de cache + fetch en echec : erreur au message exact", async () => {
+  _resetInflightForTests();
   const sb = seed(null);
   const err = console.error; console.error = () => {};
   try {
@@ -78,14 +87,43 @@ Deno.test("pas de cache + fetch en echec : erreur au message exact", async () =>
   } finally { console.error = err; }
 });
 
-Deno.test("revalidation en echec : pas d'exception, console.error, cache intact", async () => {
+Deno.test("revalidation en echec : marque failedAt sans toucher updated_at, bandeau puis effacement au succes", async () => {
+  _resetInflightForTests();
   const sb = seed(5); const ps: Promise<unknown>[] = []; const logs: unknown[][] = [];
   const err = console.error; console.error = (...a: unknown[]) => { logs.push(a); };
+  let fail = true;
+  const deps = { fetchHostaway: async () => { if (fail) throw new Error("boom"); return [R("new")]; }, now: () => NOW, waitUntil: (p: Promise<unknown>) => { ps.push(p); } };
   try {
-    const out = await loadReservationsCached(sb, DAY, { fetchHostaway: async () => { throw new Error("boom"); }, now: () => NOW, waitUntil: (p) => { ps.push(p); } });
-    assertEquals(out.reservations, [R("old")]);
+    const out = await loadReservationsCached(sb, DAY, deps);
+    assertEquals(out, { reservations: [R("old")], cachedAt: null });
+    await Promise.all(ps);
+    assertEquals(logs.length, 1);
+    assertEquals(cached(sb).updated_at, minAgo(5));
+    assertEquals(cached(sb).payload.reservations, [R("old")]);
+    assertEquals(typeof cached(sb).payload.failedAt, "string");
+    // appel suivant : toujours servi, bandeau avec l'updated_at d'origine
+    ps.length = 0;
+    const out2 = await loadReservationsCached(sb, DAY, deps);
+    assertEquals(out2, { reservations: [R("old")], cachedAt: minAgo(5) });
+    // Hostaway revient : la revalidation reussit, le bandeau disparait
+    fail = false;
+    await Promise.all(ps); ps.length = 0;
+    await loadReservationsCached(sb, DAY, deps);
+    await Promise.all(ps);
+    assertEquals(cached(sb).payload, { reservations: [R("new")] });
+    const out3 = await loadReservationsCached(sb, DAY, deps);
+    assertEquals(out3, { reservations: [R("new")], cachedAt: null });
+  } finally { console.error = err; }
+});
+
+Deno.test("upsert en erreur dans la revalidation : console.error, pas d'exception", async () => {
+  _resetInflightForTests();
+  const sb = seed(5); const ps: Promise<unknown>[] = []; const logs: unknown[][] = [];
+  sb.fail["proxy_cache.upsert"] = { message: "db down" };
+  const err = console.error; console.error = (...a: unknown[]) => { logs.push(a); };
+  try {
+    await loadReservationsCached(sb, DAY, { fetchHostaway: async () => [R("new")], now: () => NOW, waitUntil: (p) => { ps.push(p); } });
     await Promise.all(ps);
   } finally { console.error = err; }
   assertEquals(logs.length, 1);
-  assertEquals(cached(sb).payload, { reservations: [R("old")] });
 });
