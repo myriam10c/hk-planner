@@ -22,7 +22,7 @@ import {
 } from "./v3_tickets.ts";
 
 import { inspRoleAllowed, type InspReservation } from "./insp_rules.ts";
-import { normalizeReservations } from "./insp_reservations.ts";
+import { loadReservationsCached, normalizeReservations } from "./insp_reservations.ts";
 import { inspHistory, inspOverview, inspToday } from "./insp_read.ts";
 import {
   assignProposal, claimProposal, finishInspection, saveItem, setExcluded, startInspection,
@@ -269,28 +269,19 @@ async function buildCheckoutsPayload(sb: any, startDate: string, endDate: string
   return { status: "success", count: reservations.length, reservations };
 }
 
-const INSP_RES_FRESH_MS = 10 * 60 * 1000;
 async function loadInspReservations(sb: any, day: string): Promise<{ reservations: InspReservation[]; cachedAt: string | null }> {
-  const key = "insp:res:" + day;
-  const { data: row } = await sb.from("proxy_cache").select("payload, updated_at").eq("key", key).maybeSingle();
-  if (row?.payload && Date.now() - new Date(row.updated_at).getTime() < INSP_RES_FRESH_MS) {
-    return { reservations: row.payload.reservations ?? [], cachedAt: null };
-  }
-  try {
-    const token = await getAccessToken();
-    const h = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
-    const [touching, upcoming] = await Promise.all([
-      fetchAllPages(API_BASE + "/reservations?arrivalEndDate=" + day + "&departureStartDate=" + day, h),
-      fetchAllPages(API_BASE + "/reservations?arrivalStartDate=" + day + "&arrivalEndDate=" + plusDays(day, 21), h),
-    ]);
-    const reservations = normalizeReservations([...touching, ...upcoming]);
-    await sb.from("proxy_cache").upsert({ key, payload: { reservations }, updated_at: new Date().toISOString() });
-    return { reservations, cachedAt: null };
-  } catch (e) {
-    console.error("[insp] Hostaway reservations failed:", e);
-    if (row?.payload) return { reservations: row.payload.reservations ?? [], cachedAt: row.updated_at };
-    throw new Error("Bookings are unavailable right now. Try again in a few minutes.");
-  }
+  return loadReservationsCached(sb, day, {
+    fetchHostaway: async (d) => {
+      const token = await getAccessToken();
+      const h = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
+      const [touching, upcoming] = await Promise.all([
+        fetchAllPages(API_BASE + "/reservations?arrivalEndDate=" + d + "&departureStartDate=" + d, h),
+        fetchAllPages(API_BASE + "/reservations?arrivalStartDate=" + d + "&arrivalEndDate=" + plusDays(d, 21), h),
+      ]);
+      return normalizeReservations([...touching, ...upcoming]);
+    },
+    waitUntil: (p) => { try { (globalThis as any).EdgeRuntime?.waitUntil?.(p); } catch (_e) {} },
+  });
 }
 
 async function fetchAllPages(baseUrl: string, authHeaders: Record<string, string>, pageSize = 500): Promise<any[]> {
