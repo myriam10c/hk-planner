@@ -128,7 +128,7 @@ export async function renderInspect(ctx) {
       + '<button class="btn primary block" data-act="finish"' + (n === ZONES.length && !busy ? '' : ' disabled') + '>Finish inspection</button></main>');
     const slot = view.querySelector('[data-slot="count"]');
     const txt = n + ' / ' + ZONES.length + ' zones';
-    if (slot) { if (countEl.textContent !== txt) countEl.textContent = txt; slot.replaceWith(countEl); }
+    if (slot) { slot.replaceWith(countEl); if (countEl.textContent !== txt) countEl.textContent = txt; } // connecte d'abord, puis texte : annonce par les lecteurs d'ecran
     if (keep) {
       const el = keep.g ? document.getElementById('general') : view.querySelector('[data-f="' + keep.f + '"][data-z="' + keep.z + '"]');
       if (el) { el.focus(); try { el.setSelectionRange(keep.s, keep.e); } catch (e) { /* ignore */ } }

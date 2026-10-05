@@ -41,6 +41,7 @@ export async function renderToday(ctx) {
     const unavail = !!(c.eligibility && c.eligibility.kind === 'unavailable') && !c.doneToday && !c.inProgressBy;
     if (unavail) {
       // Plus libre : ni prise, ni demarrage, ni assignation ; seul un relachement reste possible.
+      if (c.claimedBy != null && !mine) actions += '<span class="state">Taken by ' + esc(c.claimedByName || 'a teammate') + '</span>';
       if (c.claimedBy != null && (mine || isMgr)) actions += '<button class="btn ghost" data-act="release" data-id="' + esc(c.listingId) + '">Release</button>';
     } else if (c.doneToday) actions += '<span class="state">Done by ' + esc(c.doneToday.by) + ' at ' + esc(clock(c.doneToday.at)) + '</span>';
     else if (c.inProgressBy && c.inProgressById != null && c.inProgressById === me.cleaner_id) {

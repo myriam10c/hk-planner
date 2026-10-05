@@ -141,8 +141,14 @@ test('accessibilite : zones nommees, boutons OK/Not OK explicites, compteur aria
   await expect(page.getByRole('region', { name: 'Kitchen & appliances' })).toHaveAttribute('data-testid', 'zone-kitchen');
   await expect(page.locator('#view [aria-live]')).toHaveCount(1);
   await page.evaluate(() => { (window as any).__cnt = document.querySelector('.count'); });
+  await page.evaluate(() => {
+    const w = window as any; w.__mut = [];
+    new MutationObserver((ms) => { for (const m of ms) if (m.target.isConnected && ((m.target as any).closest?.('.count') || (m.target.parentElement && m.target.parentElement.closest('.count')))) w.__mut.push(m.type); })
+      .observe(document.getElementById('view')!, { subtree: true, childList: true, characterData: true });
+  });
   await page.getByTestId('zone-kitchen').getByRole('button', { name: 'OK: Kitchen & appliances', exact: true }).click();
   await expect(page.getByText('1 / 10 zones')).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__mut.includes('characterData') || (window as any).__mut.includes('childList'))).toBe(true);
   expect(await page.evaluate(() => (window as any).__cnt === document.querySelector('.count') && document.querySelectorAll('#view [aria-live]').length)).toBe(1);
 });
 

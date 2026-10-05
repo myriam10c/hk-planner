@@ -186,3 +186,11 @@ test('carte "Not free today" : raison attenuee, ni I\'ll take it, ni Start inspe
   await expect(page.getByRole('button', { name: 'Assign' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Release' })).toHaveCount(1);
 });
+
+test('carte "Not free today" prise par un collegue : Taken by, sans bouton', async ({ page }) => {
+  const t = JSON.parse(JSON.stringify(TODAY.body));
+  t.today = [card({ eligibility: { kind: 'unavailable' }, claimedBy: 9, claimedByName: 'Walter' })]; t.also = [];
+  await bootInsp(page, [ME, { ...TODAY, body: t }], { pinToken: 'tok' });
+  await expect(page.getByText('Taken by Walter', { exact: true })).toBeVisible();
+  await expect(page.locator('.card .actions button')).toHaveCount(0);
+});
