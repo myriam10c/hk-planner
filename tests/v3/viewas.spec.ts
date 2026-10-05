@@ -3,6 +3,12 @@ import { bootV3, fetchLog, noHorizontalScroll } from './helpers';
 
 // Mode « View as » (plan 2026-10-02) : un manager choisit une cleaner dans
 // Profile et voit sa vraie journee, en lecture seule.
+//
+// Depuis le portage de l'interface conversation (tache 4 du plan 2026-10-05),
+// la journee est la liste du prototype : le nom de la personne est dans
+// l'en-tete « Hi <nom> » (.list-top b), les menages dans les lignes (.row-name).
+// La conversation en lecture seule (etape en cours, photos, problemes) est
+// l'objet de la tache 6 ; ici, on garde que rien n'ecrit.
 const TEAM = [
   { id: 4, name: 'Amina', role: 'cleaner' },
   { id: 6, name: 'Elite', role: 'subcontractor' },
@@ -68,7 +74,7 @@ async function voirFaiza(page: any) {
   await page.getByRole('button', { name: "View Faiza's day" }).click();
   await expect(page.locator('.viewas')).toContainText("Viewing Faiza's day · read only");
   // Le bandeau est deja la pendant le chargement : on attend la journee rendue.
-  await expect(page.locator('.nextup .n')).toHaveText('623 Samana Park View');
+  await expect(page.locator('.row-name').first()).toHaveText('623 Samana Park View');
 }
 
 test('Profile d un manager : le selecteur liste l equipe et ouvre la journee de la cleaner', async ({ page }) => {
@@ -84,9 +90,9 @@ test('Profile d un manager : le selecteur liste l equipe et ouvre la journee de 
   await page.getByRole('button', { name: "View Faiza's day" }).click();
   await expect(page).toHaveURL(/#\/today$/);
   await expect(page.locator('.viewas')).toContainText("Viewing Faiza's day · read only");
-  await expect(page.locator('.drench .dr-top')).toContainText('Faiza');
-  await expect(page.locator('.nextup .n')).toHaveText('623 Samana Park View');
-  await expect(page.getByRole('button', { name: '704 Golf Links' })).toBeVisible();
+  await expect(page.locator('.list-top b')).toContainText('Faiza');
+  await expect(page.locator('.row-name').first()).toHaveText('623 Samana Park View');
+  await expect(page.getByRole('button', { name: /704 Golf Links/ })).toBeVisible();
   const myDays = (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.myDay') !== -1);
   expect(myDays[myDays.length - 1].url).toContain('&as=3');
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toContain('"3"');
@@ -94,9 +100,10 @@ test('Profile d un manager : le selecteur liste l equipe et ouvre la journee de 
 
 test('le bandeau suit tous les ecrans, et Exit rend la journee du manager', async ({ page }) => {
   await voirFaiza(page);
-  await page.getByRole('button', { name: 'View this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
+  await page.getByRole('button', { name: /623 Samana Park View/ }).click();
+  await expect(page.locator('.top .title b')).toHaveText('623 Samana Park View');
   await expect(page.locator('.viewas')).toBeVisible();
+  await page.getByRole('button', { name: 'Back' }).click();
   await page.evaluate(() => { location.hash = '#/profile'; });
   await expect(page.locator('.viewas')).toBeVisible();
   await expect(page.locator('[data-act="viewas"][aria-current="true"]')).toHaveAttribute('data-name', 'Faiza');
@@ -104,52 +111,23 @@ test('le bandeau suit tous les ecrans, et Exit rend la journee du manager', asyn
   await page.getByRole('button', { name: 'Exit' }).click();
   await expect(page).toHaveURL(/#\/today$/);
   await expect(page.locator('.viewas')).toHaveCount(0);
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
   const myDays = (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.myDay') !== -1);
   expect(myDays[myDays.length - 1].url).not.toContain('as=');
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
 });
 
-test('en View as, le menage montre l avancement reel et aucun geste n ecrit', async ({ page }) => {
+test('en View as, ouvrir et parcourir un menage n ecrit rien', async ({ page }) => {
   await voirFaiza(page);
-  // Today : Start visible mais inerte, meme force.
-  const start = page.locator('.btn-start');
-  await expect(start).toHaveText('Start this cleaning');
-  await expect(start).toBeDisabled();
-  await start.click({ force: true });
-  await expect(page).toHaveURL(/#\/today$/);
-
-  await page.getByRole('button', { name: 'View this cleaning' }).click();
-  await expect(page.getByText('Checklist, 1 Bedroom')).toBeVisible();
-  await expect(page.locator('.checkhead .pr').last()).toHaveText('1/3');
-  const bain = page.getByRole('button', { name: 'Bathroom' });
-  await expect(bain).toHaveAttribute('aria-pressed', 'true');
-  await expect(bain).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Final Check' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Photo of the DEWA bill' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Report a problem' })).toBeDisabled();
-  await expect(page.locator('.btn-finish')).toBeDisabled();
-  // Aucun appareil photo actionnable.
-  await expect(page.locator('[data-act="shoot"], [data-act="shoot-ticket"]')).toHaveCount(0);
-
-  await page.getByRole('button', { name: 'Final Check' }).click({ force: true });
-  await bain.click({ force: true });
-  await page.locator('.btn-finish').click({ force: true });
-  await page.getByRole('button', { name: 'Report a problem' }).click({ force: true });
-  // Les cases n'ont pas bouge, aucune feuille ne s'est ouverte.
-  await expect(bain).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'Final Check' })).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('#sheet-host [data-sheet]')).toHaveCount(0);
-
-  // Meme si un geste passait le disabled (clic synthetique), la delegation
-  // l'avale : rien ne part, rien n'entre en file.
-  await page.evaluate(() => {
-    const b = document.querySelector('[data-act="tick"]') as HTMLButtonElement;
-    b.disabled = false;
-    b.click();
-  });
-  await expect(page.locator('.toast', { hasText: 'Read only' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Master Bed & Linens' })).toHaveAttribute('aria-pressed', 'false');
+  await page.getByRole('button', { name: /623 Samana Park View/ }).click();
+  await expect(page.locator('.top .title b')).toHaveText('623 Samana Park View');
+  await page.locator('[data-reply="here"]').click();
+  await expect(page.locator('.vf')).toBeVisible();
+  await page.locator('[data-act="close-camera"]').click();
+  await page.locator('.bar [data-act="problem"]').click();
+  await page.locator('[data-kind="Leak"]').click();
+  await page.locator('[data-flow="no-photo"]').click();
+  await page.locator('[data-flow="no-note"]').click();
   expect(await ecrituresEnvoyees(page)).toEqual([]);
   expect(await fileHorsLigne(page)).toBe(0);
   await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);
@@ -160,7 +138,7 @@ test('le View as survit au rechargement de l onglet, et Sign out l efface', asyn
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
   await expect(page.locator('.viewas')).toContainText("Viewing Faiza's day · read only");
-  await expect(page.locator('.nextup .n')).toHaveText('623 Samana Park View');
+  await expect(page.locator('.row-name').first()).toHaveText('623 Samana Park View');
 
   await page.route((url) => url.pathname === '/', (route) => route.fulfill({
     status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title><p>stub</p>',
@@ -182,7 +160,7 @@ test('une cible qui n est plus dans l equipe sort du View as sur la journee du m
   await page.getByRole('button', { name: "View Amina's day" }).click();
   await expect(page.getByText('This view is no longer available')).toBeVisible();
   await expect(page.locator('.viewas')).toHaveCount(0);
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
 });
 
@@ -197,7 +175,7 @@ test('un mode relu au demarrage et refuse sort en silence, sans bandeau', async 
   // Pendant le chargement : pas encore confirme, donc pas de bandeau.
   await expect(page.getByText('Loading your day.')).toBeVisible();
   await expect(page.locator('.viewas')).toHaveCount(0);
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
   await expect(page.locator('.viewas')).toHaveCount(0);
   await expect(page.getByText('This view is no longer available')).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
@@ -217,12 +195,12 @@ test('Exit pendant un chargement lent : la reponse en retard est ignoree', async
   await page.getByRole('button', { name: "View Faiza's day" }).click();
   await expect(page.getByText('Loading your day.')).toBeVisible();
   await page.getByRole('button', { name: 'Exit' }).click();
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
   // La reponse de Faiza arrive maintenant : rien ne doit bouger.
   await page.waitForTimeout(2000);
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
   await expect(page.locator('.viewas')).toHaveCount(0);
-  await expect(page.locator('.nextup')).toHaveCount(0);
+  await expect(page.locator('.row')).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
 });
 
@@ -233,9 +211,9 @@ test('Exit pendant un chargement lent : une erreur en retard n ecrase pas la jou
   ], { pinToken: 'jeton-manager', hash: '#/profile' });
   await page.getByRole('button', { name: "View Amina's day" }).click();
   await page.getByRole('button', { name: 'Exit' }).click();
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
   await page.waitForTimeout(2000);
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
   await expect(page.getByText('unknown team member')).toHaveCount(0);
   await expect(page.getByText('This view is no longer available')).toHaveCount(0);
 });
@@ -249,15 +227,15 @@ test('changement de personne pendant un chargement lent : seule la derniere dema
   // Par l'interface : Faiza (lente), Exit, Profile, Amina, avant le retour de Faiza.
   await page.getByRole('button', { name: "View Faiza's day" }).click();
   await page.getByRole('button', { name: 'Exit' }).click();
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
   await page.evaluate(() => { location.hash = '#/profile'; });
   await page.getByRole('button', { name: "View Amina's day" }).click();
   await expect(page.locator('.viewas')).toContainText("Viewing Amina's day · read only");
-  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
+  await expect(page.locator('.row-name').first()).toHaveText('704 Golf Links');
   await page.waitForTimeout(2500);
   await expect(page.locator('.viewas')).toContainText("Viewing Amina's day · read only");
-  await expect(page.locator('.drench .dr-top')).toContainText('Amina');
-  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
+  await expect(page.locator('.list-top b')).toContainText('Amina');
+  await expect(page.locator('.row-name').first()).toHaveText('704 Golf Links');
 });
 
 test('changement direct de personne pendant le chargement : la reponse de la premiere est jetee', async ({ page }) => {
@@ -273,10 +251,10 @@ test('changement direct de personne pendant le chargement : la reponse de la pre
     const m = await import('/v3/app.js');
     m.startViewAs({ id: 4, name: 'Amina' });
   });
-  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
+  await expect(page.locator('.row-name').first()).toHaveText('704 Golf Links');
   await page.waitForTimeout(1800);
   await expect(page.locator('.viewas')).toContainText("Viewing Amina's day · read only");
-  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
+  await expect(page.locator('.row-name').first()).toHaveText('704 Golf Links');
 });
 
 // Revue tache 1, constat 2 : le mode appartient a la personne qui l'a choisi.
@@ -292,9 +270,9 @@ test('une cleaner connectee dans la meme fenetre n herite pas du View as', async
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByText('Loading your day.')).toBeVisible();
   await expect(page.locator('.viewas')).toHaveCount(0);
-  await expect(page.locator('.drench .dr-top')).toContainText('Faiza');
+  await expect(page.locator('.list-top b')).toContainText('Faiza');
   await expect(page.locator('.viewas')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Start this cleaning' })).toBeEnabled();
+  await expect(page.locator('.row').first()).toBeEnabled();
   expect((await fetchLog(page)).some((l) => l.url.indexOf('as=') !== -1)).toBe(false);
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
 });
@@ -310,7 +288,7 @@ test('un autre manager, identite inconnue de l appareil : la reponse le trahit e
     JSON.stringify({ id: '3', name: 'Faiza', viewerId: '1' })));
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('.viewas')).toHaveCount(0);
-  await expect(page.locator('.drench .dr-top')).toContainText('Ismael');
+  await expect(page.locator('.list-top b')).toContainText('Ismael');
   await expect(page.locator('.viewas')).toHaveCount(0);
   await expect(page.getByText('This view is no longer available')).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
@@ -330,7 +308,7 @@ test('une session perdue emporte le View as', async ({ page }) => {
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
 });
 
-test('une cleaner ne voit ni selecteur ni bandeau, et ses gestes ecrivent toujours', async ({ page }) => {
+test('une cleaner ne voit ni selecteur ni bandeau, et sa journee part sans as=', async ({ page }) => {
   await bootV3(page, [
     { match: 'action=v3.myDay', status: 200, body: JOUR_CLEANER },
     { match: 'action=v3.startJob', status: 200, body: { status: 'success', startedAt: new Date().toISOString() } },
@@ -340,10 +318,9 @@ test('une cleaner ne voit ni selecteur ni bandeau, et ses gestes ecrivent toujou
   await expect(page.locator('.viewas')).toHaveCount(0);
   await page.evaluate(() => { location.hash = '#/today'; });
   await expect(page.locator('.viewas')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'View this cleaning' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
-  expect((await fetchLog(page)).some((l) => l.url.indexOf('action=v3.startJob') !== -1)).toBe(true);
+  await page.getByRole('button', { name: /623 Samana Park View/ }).click();
+  await expect(page.locator('.top .title b')).toHaveText('623 Samana Park View');
+  // Les ecritures (startJob et suivantes) sont branchees a la tache 5.
   expect((await fetchLog(page)).some((l) => l.url.indexOf('as=') !== -1)).toBe(false);
 });
 
@@ -360,16 +337,16 @@ function contraste(a: number[], b: number[]) {
   return (x + 0.05) / (y + 0.05);
 }
 
-test('le bandeau est lisible sur Today et ne recouvre ni la barre du bas ni le contenu', async ({ page }) => {
+test('le bandeau est lisible sur la liste et ne recouvre ni l en-tete ni les menages', async ({ page }) => {
   await voirFaiza(page);
   const mesure = await page.evaluate(() => {
     const rgb = (s: string) => (s.match(/\d+(\.\d+)?/g) || []).slice(0, 3).map(Number);
     const bar = document.querySelector('.viewas') as HTMLElement;
     const exit = bar.querySelector('button') as HTMLElement;
-    const nav = document.querySelector('.cl-bar') as HTMLElement;
-    const head = document.querySelector('.drench') as HTMLElement;
+    const row = document.querySelector('.row') as HTMLElement;
+    const head = document.querySelector('.list-top') as HTMLElement;
     const b = bar.getBoundingClientRect();
-    const n = nav.getBoundingClientRect();
+    const n = row.getBoundingClientRect();
     const h = head.getBoundingClientRect();
     return {
       fond: rgb(getComputedStyle(bar).backgroundColor),

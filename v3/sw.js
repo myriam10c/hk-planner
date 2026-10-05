@@ -14,8 +14,9 @@
 // second abonnement lui en ferait deux pour chaque affectation (spec, phase A).
 const VERSION = 'v3-dev';
 const CACHE = 'hk-v3-' + VERSION;
-// Tout ce que /v3/ sert : la coquille, les huit modules, les cinq ecrans, les
-// deux feuilles de style, les deux polices auto-hebergees et leurs licences
+// Tout ce que /v3/ sert : la coquille, les modules, l'ecran Profile, les
+// modules de la conversation (/v3/conv/), les trois feuilles de style, les trois
+// polices auto-hebergees et leurs licences
 // (l'OFL demande que la licence voyage avec la police). Plus le client de
 // session supabase-js charge par index.html, seul fichier hors de /v3/ : le
 // gestionnaire fetch le sert aussi. Aucun commentaire DANS la liste, le test
@@ -31,15 +32,23 @@ const PRECACHE = [
   '/v3/practice.js',
   '/v3/proxy-config.js',
   '/v3/session.js',
-  '/v3/screens/today.js',
-  '/v3/screens/job.js',
-  '/v3/screens/finish.js',
-  '/v3/screens/report.js',
   '/v3/screens/profile.js',
+  '/v3/conv/camera.js',
+  '/v3/conv/conversation.js',
+  '/v3/conv/day.js',
+  '/v3/conv/problems.js',
+  '/v3/conv/report.js',
+  '/v3/conv/rules.js',
+  '/v3/conv/share.js',
+  '/v3/conv/stamp.js',
+  '/v3/conv/ui.js',
   '/v3/styles/tokens.css',
   '/v3/styles/cleaner.css',
+  '/v3/conv.css',
+  '/v3/fonts/atkinson-hyperlegible-next-latin.woff2',
   '/v3/fonts/bricolage-grotesque-latin.woff2',
   '/v3/fonts/instrument-sans-latin.woff2',
+  '/v3/fonts/OFL-AtkinsonHyperlegibleNext.txt',
   '/v3/fonts/OFL-BricolageGrotesque.txt',
   '/v3/fonts/OFL-InstrumentSans.txt',
   '/v3/manifest.webmanifest',

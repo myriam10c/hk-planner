@@ -5,6 +5,7 @@
   "description": "HK Planner — housekeeping & maintenance scheduler. Single-file vanilla-JS frontend deployed to Netlify, backed by Supabase edge functions.",
   "scripts": {
     "test": "playwright test",
+    "test:v3-node": "node --test tests/v3-node/*.test.js",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",
     "test:install": "playwright install chromium",

@@ -8,16 +8,18 @@ import { bootV3, fetchLog } from './helpers';
 // donc le contenu servi, jamais l'installation. L'installation reelle, le
 // controleur de la page et la cohabitation avec le service worker de la racine
 // sont verifies a la main (rapport de la tache 13) puis en production (tache 14).
-test('le service worker v3 precache la coquille, les modules et les polices', async ({ page }) => {
+test('le service worker v3 precache la coquille, les modules, la conversation et les polices', async ({ page }) => {
   const r = await page.request.get('/v3/sw.js');
   expect(r.status()).toBe(200);
   const source = await r.text();
   for (const chemin of [
     '/v3/', '/v3/index.html', '/v3/app.js', '/v3/api.js', '/v3/offline.js', '/v3/ui.js',
-    '/v3/photo.js', '/v3/practice.js',
-    '/v3/screens/today.js', '/v3/screens/job.js', '/v3/screens/finish.js',
-    '/v3/screens/report.js', '/v3/screens/profile.js',
-    '/v3/styles/tokens.css', '/v3/styles/cleaner.css',
+    '/v3/photo.js', '/v3/practice.js', '/v3/screens/profile.js',
+    // Interface conversation (branchement 2026-10-05) : modules purs, styles, police.
+    '/v3/conv/camera.js', '/v3/conv/conversation.js', '/v3/conv/day.js', '/v3/conv/problems.js',
+    '/v3/conv/report.js', '/v3/conv/rules.js', '/v3/conv/share.js', '/v3/conv/stamp.js', '/v3/conv/ui.js',
+    '/v3/styles/tokens.css', '/v3/styles/cleaner.css', '/v3/conv.css',
+    '/v3/fonts/atkinson-hyperlegible-next-latin.woff2', '/v3/fonts/OFL-AtkinsonHyperlegibleNext.txt',
     '/v3/fonts/bricolage-grotesque-latin.woff2', '/v3/fonts/instrument-sans-latin.woff2',
     '/v3/fonts/OFL-BricolageGrotesque.txt', '/v3/fonts/OFL-InstrumentSans.txt',
     '/v3/manifest.webmanifest', '/v3/proxy-config.js',
@@ -26,6 +28,10 @@ test('le service worker v3 precache la coquille, les modules et les polices', as
     '/vendor/supabase-js-2.116.0.umd.js', '/v3/session.js',
   ]) {
     expect(source).toContain("'" + chemin + "'");
+  }
+  // Les ecrans retires (Today, Job, Finish, Report) ne sont plus precaches.
+  for (const ancien of ['today', 'job', 'finish', 'report']) {
+    expect(source).not.toContain("'/v3/screens/" + ancien + ".js'");
   }
   // Les appels au proxy ne passent jamais par le cache.
   expect(source).toContain('supabase.co');

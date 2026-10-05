@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#A85432">
+<meta name="theme-color" content="#0B5D52">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="HK Planner">
@@ -11,16 +11,19 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <title>HK Planner</title>
+<link rel="preload" href="/v3/fonts/atkinson-hyperlegible-next-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/v3/fonts/instrument-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/v3/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/v3/styles/tokens.css">
 <link rel="stylesheet" href="/v3/styles/cleaner.css">
+<link rel="stylesheet" href="/v3/conv.css">
 </head>
 <body>
-<main id="app" tabindex="-1"></main>
-<div id="sheet-host"></div>
+<!-- #view est le seul conteneur reecrit a chaque rendu ; la video du viseur est
+     permanente (jamais recreee par un rendu, le flux n'est branche qu'une fois). -->
+<div id="app" tabindex="-1"><div id="view"></div><video id="vf" autoplay playsinline muted hidden></video></div>
 <div id="toast-host" aria-live="polite" role="status"></div>
-<input type="file" id="v3-cam" accept="image/*" capture="environment" hidden>
+<input id="cam-fallback" type="file" accept="image/*" capture="environment" hidden>
 <!-- supabase-js avant le module : la v3 partage le client de session de l'app
      actuelle (renouvellement du jeton email). Balise classique, non bloquante
      pour l'app : sans elle, /v3/session.js retombe sur la lecture directe. -->

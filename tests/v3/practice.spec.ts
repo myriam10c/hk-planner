@@ -5,6 +5,13 @@ import { bootV3, fetchLog, noHorizontalScroll } from './helpers';
 // d'une cleaner et fait tous ses gestes, rien n'est enregistre. Le simulateur
 // (v3/practice.js) repond a la place du proxy, au point de passage unique
 // d'api.js : aucune ecriture ne part, rien n'entre dans la file hors ligne.
+//
+// Depuis le portage de l'interface conversation (tache 4 du plan 2026-10-05),
+// la journee est la liste du prototype et aucun geste de l'ecran n'ecrit encore.
+// Les parcours qui passaient par l'ancien ecran Job (Start, cases, photos de
+// ligne, Finish) sont marques fixme : la tache 6 les reecrit sur la
+// conversation (gestes simules, avancement qui survit au rechargement). Les
+// gardes du simulateur et de la file, appelees par les modules, restent testees.
 const TEAM = [
   { id: 4, name: 'Amina', role: 'cleaner' },
   { id: 6, name: 'Elite', role: 'subcontractor' },
@@ -76,7 +83,7 @@ async function practiceFaiza(page: any, opts: { hash?: string; routes?: any[] } 
   await expect(page.getByText('Try the cleaner app')).toBeVisible();
   await page.getByRole('button', { name: 'Practice as Faiza' }).click();
   await expect(page.locator('.practicebar')).toContainText('Practice as Faiza · nothing is saved');
-  await expect(page.locator('.nextup .n')).toHaveText('623 Samana Park View');
+  await expect(page.locator('.row-name').first()).toHaveText('623 Samana Park View');
 }
 
 async function photo(page: any, cible: any, nom = 'shot.png', type = 'image/png', octets?: Buffer) {
@@ -98,10 +105,8 @@ test('1. entree : Profile propose Practice et View pour chaque membre', async ({
   await expect(page).toHaveURL(/#\/today$/);
   await expect(page.locator('.practicebar')).toContainText('Practice as Faiza · nothing is saved');
   await expect(page.locator('.viewas')).toHaveCount(0);
-  await expect(page.locator('.drench .dr-top')).toContainText('Faiza');
-  // Les gestes sont ceux de la cleaner : Start actif, pas de bouton de lecture.
-  await expect(page.getByRole('button', { name: 'Start this cleaning' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'View this cleaning' })).toHaveCount(0);
+  await expect(page.locator('.list-top b')).toContainText('Faiza');
+  await expect(page.locator('.row').first()).toBeEnabled();
   const myDays = (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.myDay') !== -1);
   expect(myDays[myDays.length - 1].url).toContain('&as=3');
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toContain('"practice":true');
@@ -112,7 +117,6 @@ test('1b. View reste la lecture seule de la tache 1', async ({ page }) => {
   await page.getByRole('button', { name: "View Faiza's day" }).click();
   await expect(page.locator('.viewas')).toContainText("Viewing Faiza's day · read only");
   await expect(page.locator('.practicebar')).toHaveCount(0);
-  await expect(page.locator('.btn-start')).toBeDisabled();
 });
 
 // Rapport de contraste WCAG, calcule sur les couleurs reellement rendues.
@@ -133,7 +137,7 @@ async function mesureBandeau(page: any, sel: string) {
     const rgb = (v: string) => (v.match(/\d+(\.\d+)?/g) || []).slice(0, 3).map(Number);
     const bar = document.querySelector(s) as HTMLElement;
     const exit = bar.querySelector('button') as HTMLElement;
-    const nav = document.querySelector('.cl-bar, .jobactions') as HTMLElement;
+    const nav = document.querySelector('.list-top, .top') as HTMLElement;
     const b = bar.getBoundingClientRect();
     const n = nav.getBoundingClientRect();
     const fond = rgb(getComputedStyle(bar).backgroundColor);
@@ -162,12 +166,13 @@ test('2. bandeau : sur tous les ecrans, lisible, distinct de la lecture seule, E
   const { scrollWidth, clientWidth } = await noHorizontalScroll(page);
   expect(scrollWidth).toBe(clientWidth);
 
-  // Le Job : le bandeau en tete, la barre d'actions intacte.
-  await page.getByRole('button', { name: '704 Golf Links' }).click();
-  await expect(page.getByRole('heading', { name: '704 Golf Links' })).toBeVisible();
+  // La conversation : le bandeau au-dessus de l'en-tete, sans le recouvrir.
+  await page.getByRole('button', { name: /704 Golf Links/ }).click();
+  await expect(page.locator('.top .title b')).toHaveText('704 Golf Links');
   await expect(page.locator('.practicebar')).toBeVisible();
   const job = await mesureBandeau(page, '.practicebar');
   expect(job.chevauche).toBe(false);
+  await page.getByRole('button', { name: 'Back' }).click();
   await page.evaluate(() => { location.hash = '#/profile'; });
   await expect(page.locator('.practicebar')).toContainText('Practice as Faiza · nothing is saved');
   await expect(page.getByRole('button', { name: 'Practice as Faiza' })).toHaveAttribute('aria-current', 'true');
@@ -186,7 +191,7 @@ test('2. bandeau : sur tous les ecrans, lisible, distinct de la lecture seule, E
   await page.getByRole('button', { name: 'Exit' }).click();
   await expect(page).toHaveURL(/#\/today$/);
   await expect(page.locator('.practicebar')).toHaveCount(0);
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+  await expect(page.locator('.list-top b')).toContainText('Hillal');
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
   expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toBeNull();
 
@@ -194,88 +199,32 @@ test('2. bandeau : sur tous les ecrans, lisible, distinct de la lecture seule, E
   await page.getByRole('button', { name: "View Faiza's day" }).click();
   await expect(page.locator('.viewas')).toBeVisible();
   // Le bandeau View parait des le chargement : on mesure sur la journee rendue.
-  await expect(page.locator('.nextup .n')).toHaveText('623 Samana Park View');
+  await expect(page.locator('.row-name').first()).toHaveText('623 Samana Park View');
   const vue = await mesureBandeau(page, '.viewas');
   expect(vue.fond.join(',')).not.toBe(fondPractice);
 });
 
-test('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part', async ({ page }) => {
+test('3. parcourir un menage en Practice ne fait partir rien', async ({ page }) => {
   await practiceFaiza(page);
-  // Start : le chrono demarre.
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
-  await expect(page.locator('#c-timer')).not.toHaveText('00:00', { timeout: 4000 });
+  await page.getByRole('button', { name: /623 Samana Park View/ }).click();
   await expect(page.locator('.practicebar')).toBeVisible();
-
-  // Cases : l'avancement reel de Faiza, puis cocher et decocher.
-  await expect(page.locator('.checkhead .pr').last()).toHaveText('1/3');
-  const lit = page.getByRole('button', { name: 'Master Bed & Linens' });
-  await lit.click();
-  await expect(lit).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('.checkhead .pr').last()).toHaveText('2/3');
-  await lit.click();
-  await expect(lit).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('.checkhead .pr').last()).toHaveText('1/3');
-  await lit.click();
-
-  // Photo d'une ligne : la camera passe a « done », comme d'habitude.
-  await photo(page, page.locator('[data-act="shoot"][data-item="Final Check"]'));
-  await expect(page.locator('[data-act="shoot"][data-item="Final Check"]')).toHaveClass(/done/);
-  await page.getByRole('button', { name: 'Final Check' }).click();
-  await expect(page.getByRole('button', { name: 'Final Check' })).toHaveAttribute('aria-pressed', 'true');
-
-  // Check ticket : la meme validation front, puis la meme confirmation.
-  await page.getByRole('button', { name: 'Photo of the DEWA bill' }).click();
-  await expect(page.getByText('Take a photo first')).toBeVisible();
-  await photo(page, page.locator('[data-act="shoot-ticket"][data-ticket="71"]'));
-  await expect(page.locator('[data-act="shoot-ticket"][data-ticket="71"]')).toHaveClass(/done/);
-  await page.getByRole('button', { name: 'Photo of the DEWA bill' }).click();
-  await expect(page.getByText('Sent for confirmation')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Photo of the DEWA bill' })).toHaveAttribute('aria-pressed', 'true');
-
-  // Report a problem : la feuille se ferme avec le meme message.
-  await page.getByRole('button', { name: 'Report a problem' }).click();
-  await page.getByRole('button', { name: 'Plumbing' }).click();
-  await expect(page.locator('[data-act="report-send"]')).toBeDisabled();
-  await photo(page, page.locator('[data-act="report-shot"]'));
-  await expect(page.locator('[data-act="report-shot"]')).toHaveText('Photo taken');
-  await page.getByRole('button', { name: 'Send to the technician on duty' }).click();
-  await expect(page.getByText('Sent. The technician on duty is notified.')).toBeVisible();
-  await expect(page.locator('#sheet-host [data-sheet]')).toHaveCount(0);
-
-  // Finish : linge compte, ecran de fin, le menage passe a « done » dans Today.
-  await page.getByRole('button', { name: 'Finish', exact: true }).click();
-  await expect(page.getByText('Linen going out')).toBeVisible();
-  await page.locator('[data-act="linen-plus"][data-field="bed_sheets"]').click();
-  await page.locator('[data-act="linen-plus"][data-field="bed_sheets"]').click();
-  await expect(page.locator('[data-linen="bed_sheets"]')).toHaveText('2');
-  await page.locator('[data-act="linen-minus"][data-field="bed_sheets"]').click();
-  await expect(page.locator('[data-linen="bed_sheets"]')).toHaveText('1');
-  await page.getByRole('button', { name: 'Finish this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: 'Cleaning finished' })).toBeVisible();
-  await expect(page.locator('.reco')).toContainText('3/3');
-  await expect(page.locator('.reco')).toContainText('Photos');
-  await expect(page.getByText('Saved on your phone')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Back to my day' }).click();
-  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
-  await expect(page.getByRole('button', { name: /623 Samana Park View/ }).locator('.pill')).toHaveText('Done');
-
-  // Rien n'est parti : ni ecriture, ni photo, ni file, ni magasin mort.
+  await page.locator('[data-reply="here"]').click();
+  await expect(page.locator('.vf')).toBeVisible();
+  await page.locator('[data-act="close-camera"]').click();
+  await page.locator('.bar [data-act="problem"]').click();
+  await page.locator('[data-kind="Leak"]').click();
+  await page.locator('[data-flow="no-photo"]').click();
+  await page.locator('[data-flow="no-note"]').click();
   expect(await appelsInterdits(page)).toEqual([]);
   expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
-  await expect(page.getByText('forbidden')).toHaveCount(0);
   await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);
 });
 
+test.fixme('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part (tache 6 : gestes de la conversation)', async () => {});
+
 test('3b. le simulateur rend les refus du serveur avec le meme texte', async ({ page }) => {
   await practiceFaiza(page);
-  await page.getByRole('button', { name: '704 Golf Links' }).click();
-  // Un fichier qui n'est pas une image : le proxy refuserait « unsupported image type ».
-  await photo(page, page.locator('[data-act="shoot"][data-item="Final Check"]'), 'note.txt', 'text/plain', Buffer.from('hello'));
-  await expect(page.getByText('unsupported image type')).toBeVisible();
-  await expect(page.locator('[data-act="shoot"][data-item="Final Check"]')).not.toHaveClass(/done/);
-
-  // Les autres refus, au point de passage unique : memes messages, memes codes.
+  // Les refus, au point de passage unique : memes messages, memes codes.
   const refus = await page.evaluate(async () => {
     const { api } = await import('/v3/api.js');
     const essai = async (action: string, corps: any) => {
@@ -307,62 +256,15 @@ test('3b. le simulateur rend les refus du serveur avec le meme texte', async ({ 
   expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
 });
 
-test('5. l avancement survit a la navigation et au rechargement, Exit et Re-entrer repartent du reel', async ({ page }) => {
-  await practiceFaiza(page);
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await page.getByRole('button', { name: 'Master Bed & Linens' }).click();
-  await expect(page.locator('.checkhead .pr').last()).toHaveText('2/3');
-
-  // Navigation : Today puis retour.
-  await page.getByRole('button', { name: 'Back' }).click();
-  await expect(page.getByRole('button', { name: 'Continue this cleaning' })).toBeVisible();
-  await page.getByRole('button', { name: 'Continue this cleaning' }).click();
-  await expect(page.locator('.checkhead .pr').last()).toHaveText('2/3');
-
-  // Rechargement de l'onglet, au milieu du menage.
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
-  await expect(page.locator('.practicebar')).toContainText('Practice as Faiza · nothing is saved');
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
-  await expect(page.locator('.checkhead .pr').last()).toHaveText('2/3');
-  await expect(page.locator('#c-timer')).not.toHaveText('00:00', { timeout: 4000 });
-  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toContain('job_aaaaaaaaaaaaaaaaaaaa');
-
-  // Exit puis Practice a nouveau : la journee reelle, sans rien de simule.
-  await page.getByRole('button', { name: 'Exit' }).click();
-  await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
-  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toBeNull();
-  await page.evaluate(() => { location.hash = '#/profile'; });
-  await page.getByRole('button', { name: 'Practice as Faiza' }).click();
-  await expect(page.getByRole('button', { name: 'Start this cleaning' })).toBeVisible();
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await expect(page.locator('.checkhead .pr').last()).toHaveText('1/3');
-  expect(await appelsInterdits(page)).toEqual([]);
-});
+test.fixme('5. l avancement survit a la navigation et au rechargement, Exit et Re-entrer repartent du reel (tache 6)', async () => {});
 
 test('5b. changer de membre et Sign out effacent la seance', async ({ page }) => {
   await practiceFaiza(page);
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
-  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toContain('running');
-
   await page.evaluate(() => { location.hash = '#/profile'; });
   await page.getByRole('button', { name: 'Practice as Amina' }).click();
   await expect(page.locator('.practicebar')).toContainText('Practice as Amina · nothing is saved');
-  await expect(page.locator('.nextup .n')).toHaveText('704 Golf Links');
-  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState') || '')).not.toContain('running');
+  await expect(page.locator('.row-name').first()).toHaveText('704 Golf Links');
 
-  await page.evaluate(() => { location.hash = '#/profile'; });
-  await page.getByRole('button', { name: 'Practice as Faiza' }).click();
-  await expect(page.locator('.practicebar')).toContainText('Practice as Faiza · nothing is saved');
-  await expect(page.locator('.nextup .n')).toHaveText('623 Samana Park View');
-  await expect(page.getByRole('button', { name: 'Start this cleaning' })).toBeVisible();
-
-  // View d'un autre membre efface aussi la seance. On attend l'ecran du Job :
-  // Start navigue apres la reponse simulee, un changement d'ecran plus tot
-  // serait ecrase par cette navigation.
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
   await page.evaluate(() => { location.hash = '#/profile'; });
   await page.getByRole('button', { name: "View Amina's day" }).click();
   await expect(page.locator('.viewas')).toBeVisible();
@@ -370,10 +272,7 @@ test('5b. changer de membre et Sign out effacent la seance', async ({ page }) =>
 
   await page.evaluate(() => { location.hash = '#/profile'; });
   await page.getByRole('button', { name: 'Practice as Faiza' }).click();
-  await expect(page.locator('.nextup .n')).toHaveText('623 Samana Park View');
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
-  expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toContain('running');
+  await expect(page.locator('.row-name').first()).toHaveText('623 Samana Park View');
   await page.route((url) => url.pathname === '/', (route) => route.fulfill({
     status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title><p>stub</p>',
   }));
@@ -390,31 +289,7 @@ test('5b. changer de membre et Sign out effacent la seance', async ({ page }) =>
   expect(log.filter((l) => /action=v3\.(startJob|tick|uploadPhoto|finishJob|reportProblem|checkTicket)/.test(l.url))).toEqual([]);
 });
 
-test('6. hors ligne, les gestes marchent et aucun bandeau Saved on device', async ({ page }) => {
-  await practiceFaiza(page);
-  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
-  await page.getByRole('button', { name: 'Master Bed & Linens' }).click();
-  await expect(page.getByRole('button', { name: 'Master Bed & Linens' })).toHaveAttribute('aria-pressed', 'true');
-  await photo(page, page.locator('[data-act="shoot"][data-item="Final Check"]'));
-  await expect(page.locator('[data-act="shoot"][data-item="Final Check"]')).toHaveClass(/done/);
-  await page.getByRole('button', { name: 'Final Check' }).click();
-  await page.getByRole('button', { name: 'Finish', exact: true }).click();
-  await page.getByRole('button', { name: 'Finish this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: 'Cleaning finished' })).toBeVisible();
-  await expect(page.getByText('Saved on your phone')).toHaveCount(0);
-  await expect(page.getByText('Photo saved on your phone')).toHaveCount(0);
-  await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);
-  expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
-  // Retour du reseau : aucun rejeu, rien a rejouer.
-  await page.evaluate(() => {
-    localStorage.removeItem('v3TestOffline');
-    window.dispatchEvent(new Event('online'));
-  });
-  await page.waitForTimeout(400);
-  expect(await appelsInterdits(page)).toEqual([]);
-});
+test.fixme('6. hors ligne, les gestes marchent et aucun bandeau Saved on device (tache 6)', async () => {});
 
 test('6b. Practice ne rejoue pas la file reelle, et sendOrQueue n y met rien', async ({ page }) => {
   await practiceFaiza(page);
@@ -454,35 +329,14 @@ const JOUR_CLEANER = {
 const ECRITURES = /action=v3\.(startJob|tick|uploadPhoto|finishJob|reportProblem|checkTicket)/;
 
 for (const horsLigne of [false, true]) {
-  test('constat 1 : Exit pendant la prise de photo, la photo ne part pas' + (horsLigne ? ' (hors ligne)' : ''), async ({ page }) => {
-    await practiceFaiza(page);
-    await page.getByRole('button', { name: 'Start this cleaning' }).click();
-    await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
-    if (horsLigne) await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
-    // Le selecteur de fichier est ouvert : la photo n'est pas encore choisie.
-    const chooser = page.waitForEvent('filechooser');
-    await page.locator('[data-act="shoot"][data-item="Final Check"]').click();
-    const fc = await chooser;
-    // Exit pendant l'attente, puis la photo arrive.
-    await page.getByRole('button', { name: 'Exit' }).click();
-    await expect(page.locator('.practicebar')).toHaveCount(0);
-    await fc.setFiles({ name: 'shot.png', mimeType: 'image/png', buffer: Buffer.from(PNG_1x1, 'base64') });
-    await page.waitForTimeout(1200);
-    const log = await fetchLog(page);
-    expect(log.filter((l) => l.url.indexOf('action=v3.uploadPhoto') !== -1)).toEqual([]);
-    expect(log.filter((l) => ECRITURES.test(l.url))).toEqual([]);
-    expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
-    await expect(page.getByText('forbidden')).toHaveCount(0);
-    await expect(page.getByText('Photo saved on your phone')).toHaveCount(0);
-    await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);
-  });
+  test.fixme('constat 1 : Exit pendant la prise de photo, la photo ne part pas' + (horsLigne ? ' (hors ligne)' : '') + ' (tache 6)', async () => {});
 
   test('constat 1 : api.js refuse une ecriture nee d une seance Practice finie' + (horsLigne ? ' (hors ligne)' : ''), async ({ page }) => {
     await practiceFaiza(page);
     const marque = await page.evaluate(async () => (await import('/v3/practice.js')).practiceMark());
     expect(marque).toBeGreaterThan(0);
     await page.getByRole('button', { name: 'Exit' }).click();
-    await expect(page.locator('.drench .dr-top')).toContainText('Hillal');
+    await expect(page.locator('.list-top b')).toContainText('Hillal');
     if (horsLigne) await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
     const r = await page.evaluate(async (m: number) => {
       const o = await import('/v3/offline.js');
@@ -570,14 +424,14 @@ test('constat 3 : Practice relu puis refuse par le proxy, la vraie file repart',
   expect(await page.evaluate(async () => (await import('/v3/offline.js')).pendingCount())).toBe(1);
   // Try again : le proxy refuse as=, le mode tombe, et la vraie file repart.
   await page.getByRole('button', { name: 'Try again' }).click();
-  await expect(page.locator('.drench .dr-top')).toContainText('Faiza');
+  await expect(page.locator('.list-top b')).toContainText('Faiza');
   await expect(page.locator('.practicebar')).toHaveCount(0);
   await expect.poll(async () => page.evaluate(async () => (await import('/v3/offline.js')).pendingCount())).toBe(0);
   expect((await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.tick') !== -1).length).toBe(1);
   expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toBeNull();
 });
 
-test('constat 4c : une cleaner qui ouvre l app avec un Practice residuel ecrit pour de vrai', async ({ page }) => {
+test('constat 4c : une cleaner qui ouvre l app avec un Practice residuel retrouve sa propre journee', async ({ page }) => {
   await bootV3(page, [
     { match: 'as=', status: 200, body: JOUR_AMINA },
     { match: 'action=v3.myDay', status: 200, body: JOUR_CLEANER },
@@ -590,17 +444,17 @@ test('constat 4c : une cleaner qui ouvre l app avec un Practice residuel ecrit p
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
-  await expect(page.locator('.drench .dr-top')).toContainText('Faiza');
+  await expect(page.locator('.list-top b')).toContainText('Faiza');
   await expect(page.locator('.practicebar')).toHaveCount(0);
   await expect(page.locator('.viewas')).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem('v3PracticeState'))).toBeNull();
   expect(await page.evaluate(() => sessionStorage.getItem('v3ViewAs'))).toBeNull();
   expect(await page.evaluate(async () => (await import('/v3/practice.js')).practiceActive())).toBe(false);
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
+  await page.getByRole('button', { name: /623 Samana Park View/ }).click();
+  await expect(page.locator('.top .title b')).toHaveText('623 Samana Park View');
+  // L'ecriture reelle (startJob) est branchee a la tache 5.
   const log = await fetchLog(page);
   expect(log.some((l) => l.url.indexOf('as=') !== -1)).toBe(false);
-  expect(log.filter((l) => l.url.indexOf('action=v3.startJob') !== -1).length).toBe(1);
 });
 
 test('constat 4d : en Practice, une erreur locale n entre jamais en file', async ({ page }) => {

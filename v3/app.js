@@ -1,52 +1,64 @@
-// Application cleaner v3 : etat, routeur de hash, delegation des evenements.
-// Aucun gestionnaire en ligne (CSP script-src 'self'), aucun emoji, interface en
-// anglais. Les ecrans vivent dans /v3/screens/ et exposent view/actions/mount.
+// Application cleaner v3 : coquille de l'interface « conversation » portee du
+// prototype (hk-cleaner-proto, commit 875ea4e), branchee sur la journee reelle.
+//
+// Ce qui vient de la v3 : session (email ou PIN partagee avec la racine), lecture
+// de v3.myDay, file hors ligne et son bandeau, View as / Practice, Profile.
+// Ce qui vient du prototype : la liste, la conversation, le viseur integre, le
+// signalement en ecrans pleins, le rapport et le partage, avec leurs gardes
+// (busy, generation camera et relance au retour visible, <video> permanent,
+// repli appareil photo du telephone, rendus differes pendant la saisie, retour
+// Android). Toute la logique metier vit dans les modules purs de /v3/conv/.
+//
+// Lecture seule (tache 4) : la liste vient de v3.myDay, ouvrir un appartement
+// cree la conversation locale ; aucune ecriture n'est encore branchee (tache 5).
+// Aucun gestionnaire en ligne (CSP script-src 'self'), interface en anglais.
 import { api, ApiError, readSession } from '/v3/api.js';
 import { flush, onQueueChange, pendingCount, watchNetwork } from '/v3/offline.js';
 import { onSessionRenewed } from '/v3/session.js';
 import { practiceActive, practiceDay, practiceOff, practiceOn } from '/v3/practice.js';
-import { closeSheet, esc, icon, sheetIsOpen, toast } from '/v3/ui.js';
-import today from '/v3/screens/today.js';
-import job from '/v3/screens/job.js';
+import { esc, icon, toast } from '/v3/ui.js';
 import profile from '/v3/screens/profile.js';
+import { toApartments } from '/v3/conv/day.js';
+import { stampText } from '/v3/conv/stamp.js';
+import {
+  createConversation, currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
+  addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto,
+} from '/v3/conv/conversation.js';
+import { reportText, reportFiles } from '/v3/conv/report.js';
+import {
+  renderList, renderConversation, renderViewfinder, renderToast, renderFlow, renderPhotoView, renderProblemPage,
+  escapeHtml,
+} from '/v3/conv/ui.js';
+import { startCameraIfCurrent, stopCamera, streamLive, captureFrame, pickPhoto } from '/v3/conv/camera.js';
+import { shareReport } from '/v3/conv/share.js';
 
 export const state = {
   session: null,
-  day: null,          // charge de v3.myDay
-  jobId: null,        // arret ouvert
-  queued: 0,          // gestes en attente de synchronisation
+  day: null,            // charge de v3.myDay
+  apartments: [],       // la journee, adaptee pour la conversation (day.js)
+  queued: 0,            // gestes en attente de synchronisation
   loading: true,
   error: '',
-  // Etat de travail d'un menage, remis a zero a chaque ouverture d'un arret
-  // (openJob) pour ne jamais heriter du menage precedent.
-  ticks: {},            // item -> coche
-  itemPhotos: {},       // item -> {photoId, photoIdem}
-  ticketPhotos: {},     // ticketId -> {photoId, photoIdem}
-  checkedTickets: {},   // ticketId -> true
-  photoIds: [],         // identifiants a rattacher au menage a la fin
-  linen: {},            // sept postes de linge
-  jobNote: '',
-  finished: null,       // resume affiche apres la fin
-  report: null,         // feuille de signalement ouverte : categorie, photo, envoi
-  reportStop: null,     // l'arret que ce signalement concerne
   dead: [],             // actions refusees par le proxy, lues par l'ecran Profile
   prepared: false,      // l'ecran courant a deja charge ce dont il a besoin
-  viewAs: null,         // {id, name, viewerId, confirmed, practice} : un manager
-                        // regarde (ou, en Practice, rejoue) la journee de quelqu'un
+  viewAs: null,         // {id, name, viewerId, confirmed, practice}
+  // Conversation (prototype). editIndex : page d'un probleme ouverte ; viewPhoto :
+  // miniature de piece agrandie ; flowCam : camera ouverte pour l'ecran des photos
+  // d'un signalement (refermee en le quittant).
+  screen: 'list', activeId: null, convs: {},
+  camera: { open: false, stream: null, live: false },
+  toastIndex: null, note: null, autoOpenedAt: null,
+  editIndex: null, confirmDelete: false, viewPhoto: null, flowCam: false,
 };
+// Etat lisible par les tests de bout en bout (comme window.__hk du prototype).
+window.__hk = state;
+const S = state;
 
-// Mode « View as » : un manager regarde la journee d'une cleaner, en lecture
-// seule. Il vit dans sessionStorage, jamais dans localStorage : il ne survit ni
-// a la fermeture de l'onglet ni a Sign out, et ce n'est jamais une identite (le
-// proxy relit le role de la session a chaque appel, et refuse `as` a quiconque
-// n'est pas manager).
-//
-// Il est lie a la personne qui l'a choisi (`viewerId`, revue tache 1, constat
-// 2) : si une autre personne se connecte dans la meme fenetre, le mode est
-// jete avant tout appel quand l'identite est connue sur l'appareil
-// (hkSessionCleanerId, pose par les deux connexions de l'app racine), sinon des
-// la reponse du proxy, qui dit qui regarde. Un mode relu au demarrage n'affiche
-// son bandeau qu'une fois confirme par cette reponse.
+// ---------------------------------------------------------------------------
+// Mode « View as » / Practice (inchange depuis la tache 2 du plan 2026-10-02).
+// Il vit dans sessionStorage, est lie a la personne qui l'a choisi, et n'est
+// jamais une identite : le proxy relit le role de la session a chaque appel.
+// ---------------------------------------------------------------------------
 export const CLE_VIEW_AS = 'v3ViewAs';
 const CLE_IDENTITE = 'hkSessionCleanerId';
 
@@ -69,8 +81,7 @@ function ecrireViewAs(v) {
       sessionStorage.setItem(CLE_VIEW_AS, JSON.stringify({
         id: v.id, name: v.name, viewerId: v.viewerId, practice: v.practice === true,
       }));
-    }
-    else sessionStorage.removeItem(CLE_VIEW_AS);
+    } else sessionStorage.removeItem(CLE_VIEW_AS);
   } catch (e) { /* stockage indisponible : le mode vit le temps de la page */ }
 }
 
@@ -83,12 +94,8 @@ function identiteLocale() {
   }
 }
 
-// Toute sortie du mode emporte la seance Practice et ce qu'elle a simule :
-// Exit, Sign out, perte de session, changement de personne, refus du proxy.
-// Pendant la seance, flush est muet (une vraie entree serait servie par le
-// simulateur puis effacee) : a sa fin, quelle qu'en soit la cause, la vraie file
-// reprend son rejeu (revue tache 2, constat 3). `sansRejeu` : Sign out, qui
-// vide la file juste apres.
+// Toute sortie du mode emporte la seance Practice : a sa fin, la vraie file
+// reprend son rejeu. `sansRejeu` : Sign out, qui vide la file juste apres.
 function oublierViewAs(sansRejeu) {
   const enPractice = practiceActive();
   state.viewAs = null;
@@ -97,51 +104,27 @@ function oublierViewAs(sansRejeu) {
   if (enPractice && !sansRejeu && navigator.onLine) flush();
 }
 
-// Sign out depuis Practice : on quitte le mode AVANT la deconnexion reseau, pour
-// que le bandeau disparaisse et que les gestes ne soient plus servis par le
-// simulateur pendant la sortie (revue tache 2, constat 2). La journee affichee
-// reste celle de la cleaner (payload viewAs), donc en lecture seule.
 export function leaveModeForSignOut() {
   oublierViewAs(true);
   render();
 }
 
-// Mode Practice (tache 2) : meme journee que « View as » (v3.myDay?as=<id>),
-// mais tous les gestes de la cleaner, servis par le simulateur de
-// /v3/practice.js au point de passage unique d'api.js. Rien n'est enregistre.
 export function practicing(st) {
   const s = st || state;
   return !!(s.viewAs && s.viewAs.practice);
 }
 
-// Toute perte de session emporte le mode : il n'appartient qu'a elle.
 function perdreSession() {
   state.session = null;
-  // Sans session, un rejeu ne ferait que revenir en 401 : il repartira au
-  // renouvellement de la session.
   oublierViewAs(true);
 }
 
-// Vrai des que l'une des deux sources le dit : le choix local (avant meme la
-// reponse du proxy) ou le payload. Les deux gardes vont dans le sens ferme.
-// En Practice, les gestes sont rendus : ils ne quittent jamais le telephone.
 export function readOnly(st) {
   const s = st || state;
-  // Une seance fermee (Exit, Sign out en cours) redevient lecture seule : les
-  // gestes ne sont rendus que tant que le simulateur les sert.
   if (s.viewAs && s.viewAs.practice) return !practiceActive();
   return !!s.viewAs || !!(s.day && s.day.viewAs);
 }
 
-// Gestes d'ecriture des ecrans Job, Today et des feuilles. En « View as », la
-// delegation les avale avant meme l'ecran : rien ne part, rien n'entre en file.
-const GESTES_ECRITURE = new Set([
-  'start', 'tick', 'shoot', 'shoot-ticket', 'checkTicket', 'report', 'finish',
-  'finish-confirm', 'report-cat', 'report-shot', 'report-send', 'linen-plus', 'linen-minus',
-]);
-
-// Mode d'affichage courant, ou null : une seule source pour le bandeau. Un mode
-// futur s'ajoute ici et dans BANDEAUX, sans toucher aux ecrans.
 export function currentMode() {
   if (state.viewAs && state.viewAs.confirmed) {
     const jour = state.day && state.day.viewAs ? state.day : null;
@@ -162,8 +145,7 @@ const BANDEAUX = {
   },
 };
 
-// Bandeau permanent, en tete de chaque ecran. Dans le flux et non en position
-// fixe : il ne recouvre jamais la barre du bas ni les actions du Job.
+// Bandeau permanent, en tete de chaque ecran, dans le flux (jamais en position fixe).
 export function modeBar(mode) {
   const m = mode === undefined ? currentMode() : mode;
   const b = m && BANDEAUX[m.kind] ? BANDEAUX[m.kind](m) : null;
@@ -172,17 +154,20 @@ export function modeBar(mode) {
     '<button type="button" data-act="' + esc(b.act) + '">' + esc(b.label) + '</button></div>';
 }
 
-// `practice` : Practice plutot que la lecture seule. Choisir un membre, dans un
-// mode ou dans l'autre, repart toujours de sa journee reelle.
+// Une autre journee s'affiche : les conversations locales de la precedente ne
+// lui appartiennent pas.
+function oublierConversations() {
+  closeCamera();
+  S.screen = 'list'; S.activeId = null; S.convs = {};
+  S.editIndex = null; S.viewPhoto = null; S.confirmDelete = false; S.flowCam = false; S.toastIndex = null;
+}
+
 export function startViewAs(membre, practice) {
   const jour = state.day || {};
-  // Le manager qui choisit : lui-meme sur sa journee, ou celui qui regarde deja.
   const viewer = jour.viewAs && jour.viewer ? jour.viewer.id : (jour.me && jour.me.id);
   if (viewer === undefined || viewer === null) return;
   state.viewAs = {
     id: String(membre.id), name: String(membre.name || ''), viewerId: String(viewer),
-    // Choisi a l'instant dans cette page : l'identite est celle de la journee
-    // affichee, le bandeau peut paraitre des le chargement.
     confirmed: true,
     practice: practice === true,
   };
@@ -190,10 +175,8 @@ export function startViewAs(membre, practice) {
   const etaitPractice = practiceActive();
   practiceOff();
   if (state.viewAs.practice) practiceOn(state.viewAs, false);
-  // De Practice vers View : la seance est finie, la vraie file reprend.
   else if (etaitPractice && navigator.onLine) flush();
-  state.jobId = null;
-  state.finished = null;
+  oublierConversations();
   if (location.hash !== '#/today') location.hash = '#/today';
   return loadDay();
 }
@@ -204,28 +187,17 @@ export function startPractice(membre) {
 
 export function exitViewAs() {
   oublierViewAs();
-  state.jobId = null;
-  state.finished = null;
+  oublierConversations();
   if (location.hash !== '#/today') location.hash = '#/today';
   return loadDay();
 }
 
-const screens = {};
-export function registerScreen(name, screen) { screens[name] = screen; }
-
-// L'enregistrement vient apres la declaration de `screens` et non en tete de
-// fichier : l'import de l'ecran est circulaire (today.js importe app.js), donc
-// appeler registerScreen avant `const screens = {}` leverait sur la zone morte
-// temporelle du const et casserait le boot.
-registerScreen('today', today);
-registerScreen('job', job);
-registerScreen('profile', profile);
-
+// ---------------------------------------------------------------------------
+// Routes : « #/profile » ouvre Profile ; tout le reste (« #/today », vide, et les
+// anciennes adresses « #/job/... ») ouvre la liste ou la conversation.
+// ---------------------------------------------------------------------------
 function routeName() {
-  const h = String(location.hash || '');
-  if (h.indexOf('#/job/') === 0) return 'job';
-  if (h === '#/profile') return 'profile';
-  return 'today';
+  return String(location.hash || '') === '#/profile' ? 'profile' : 'cv';
 }
 
 export function navigate(hash) {
@@ -234,90 +206,486 @@ export function navigate(hash) {
   else location.hash = hash;
 }
 
-// Vue d'attente : la coquille quand il n'y a rien de plus a montrer. Sert aussi
-// de filet tant qu'aucun ecran n'est enregistre (les ecrans arrivent aux taches
-// 10 a 12), pour qu'un rendu sans ecran ne casse jamais le boot.
+const appEl = document.getElementById('app');
+const root = document.getElementById('view');   // seul ce conteneur est reecrit a chaque rendu
+const vfVideo = document.getElementById('vf');  // permanent : le flux n'est branche qu'une fois
+const fallbackInput = document.getElementById('cam-fallback');
+const conv = () => S.convs[S.activeId];
+const me = () => (state.day && state.day.me) || { id: null, name: '' };
+let toastTimer, noteTimer;
+
+function porte(contenu) {
+  appEl.className = '';
+  vfVideo.hidden = true;
+  root.innerHTML = contenu;
+}
+
 function vueAttente(texte) {
   return '<div class="gate">' + icon('clock', 28) + '<h1>HK Planner</h1>' +
     '<p class="muted">' + esc(texte) + '</p></div>';
 }
 
+// Bandeau « Saved on device » : une seule formulation, celle de la maquette.
+export function queueStrip() {
+  if (!state.queued || practicing()) return '';
+  return '<div class="offstrip"><i></i><span>Saved on device, ' + state.queued + ' to sync</span></div>';
+}
+
 export function render() {
-  const app = document.getElementById('app');
+  renderDeferred = false;
   if (!state.session) {
-    app.innerHTML =
-      '<div class="gate">' + icon('clock', 28) + '<h1>HK Planner</h1>' +
+    closeCamera();
+    porte('<div class="gate">' + icon('clock', 28) + '<h1>HK Planner</h1>' +
       '<p class="muted">Sign in on HK Planner to see your day.</p>' +
-      '<a href="/#cleaner">Sign in</a></div>';
+      '<a href="/#cleaner">Sign in</a></div>');
     return;
   }
   // Le bandeau de file accompagne aussi l'attente et l'erreur : rouvrir l'app
   // hors ligne au milieu d'un menage echoue sur v3.myDay, et la cleaner doit
-  // voir la que ses gestes sont gardes, pas seulement une panne de reseau.
+  // voir que ses gestes sont gardes, pas seulement une panne de reseau.
   if (state.loading) {
-    app.innerHTML = modeBar() + queueStrip() +
-      '<div class="gate"><h1>HK Planner</h1><p class="muted">Loading your day.</p></div>';
+    closeCamera();
+    porte(modeBar() + queueStrip() + '<div class="gate"><h1>HK Planner</h1><p class="muted">Loading your day.</p></div>');
     return;
   }
   if (state.error) {
-    app.innerHTML = modeBar() + queueStrip() +
-      '<div class="gate"><h1>HK Planner</h1><p class="muted">' + esc(state.error) +
-      '</p><button class="btn-primary" data-act="reload">Try again</button></div>';
+    closeCamera();
+    porte(modeBar() + queueStrip() + '<div class="gate"><h1>HK Planner</h1><p class="muted">' + esc(state.error) +
+      '</p><button class="btn-primary" data-act="reload">Try again</button></div>');
     return;
   }
-  const screen = screens[routeName()] || screens.today;
-  if (!screen) {
-    app.innerHTML = queueStrip() + vueAttente('Loading your day.');
+  if (routeName() === 'profile') {
+    closeCamera();
+    // Une seule passe : prepare() lit le magasin des actions refusees, puis redessine.
+    if (profile.prepare && !state.prepared) {
+      state.prepared = true;
+      Promise.resolve(profile.prepare(state)).catch(function () { /* l'ecran gere */ })
+        .then(function () { render(); });
+    }
+    porte(modeBar() + profile.view(state));
     return;
   }
-  // Une seule passe : prepare() charge ce dont l'ecran a besoin (le magasin des
-  // actions refusees, pour Profile) puis redessine. Le drapeau est pose AVANT
-  // l'appel, sinon le redessin relancerait prepare() a l'infini ; il est remis a
-  // zero a chaque changement de route, pour qu'un retour sur l'ecran relise.
-  if (screen.prepare && !state.prepared) {
-    state.prepared = true;
-    Promise.resolve(screen.prepare(state)).catch(function () { /* l'ecran gere */ })
-      .then(function () { render(); });
+  renderConv();
+}
+
+// ---------------------------------------------------------------------------
+// Conversation (app.js du prototype, a l'identique sauf la journee reelle).
+// ---------------------------------------------------------------------------
+
+// La note prend la place du bandeau en bas (jamais l'un sur l'autre).
+function note(text) {
+  S.note = text; S.toastIndex = null; clearTimeout(toastTimer); clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => { S.note = null; renderLater(); }, 6000);
+}
+
+function stepKey(c) { const st = currentStep(c); return c.i + ':' + st.id; }
+
+async function maybeAutoOpen() {
+  const c = conv();
+  if (!c || S.screen !== 'conv' || routeName() !== 'cv' || S.camera.open || c.flow) return;
+  const st = currentStep(c);
+  const key = stepKey(c);
+  if (st.camera && S.autoOpenedAt !== key) { S.autoOpenedAt = key; await openCamera(); }
+}
+
+let camGen = 0; // generation de la demande de flux : une demande depassee arrete son flux
+
+async function openCamera() {
+  // Le viseur s'affiche tout de suite (video permanente), puis on demande le flux.
+  // Refus = viseur garde ouvert en image fixe (live:false) ; declencheur et tuiles passent par le champ fichier.
+  if (S.camera.open) return;
+  const c0 = conv();
+  const gen = ++camGen;
+  S.camera = { open: true, stream: null, live: true };
+  render();
+  const { stream, stale } = await startCameraIfCurrent(vfVideo,
+    () => gen === camGen && S.camera.open && conv() === c0 && S.screen === 'conv');
+  if (stale) {
+    // Une demande plus recente a peut-etre deja branche son flux : on le remet.
+    if (S.camera.stream && vfVideo.srcObject !== S.camera.stream) { vfVideo.srcObject = S.camera.stream; vfVideo.play().catch(() => {}); }
+    return;
   }
-  app.innerHTML = modeBar() + screen.view(state);
-  if (screen.mount) screen.mount(state);
+  if (!stream) { S.camera = { open: true, stream: null, live: false }; render(); return; }
+  S.camera.stream = stream;
+  render();
 }
 
-// Bandeau « Saved on device » : une seule formulation, celle de la maquette.
-export function queueStrip() {
-  // En Practice, rien n'entre en file : le bandeau ferait croire le contraire.
-  if (!state.queued || practicing()) return '';
-  return '<div class="offstrip"><i></i><span>Saved on device, ' + state.queued +
-    ' to sync</span></div>';
+function closeCamera() {
+  if (!S.camera.open && !S.camera.stream) return;
+  camGen++;
+  stopCamera(S.camera.stream);
+  vfVideo.srcObject = null;
+  S.camera = { open: false, stream: null, live: false };
 }
 
-// Ouvrir un arret remet a zero l'etat de travail et repart de la progression
-// deja enregistree cote serveur : rouvrir un menage ne perd jamais les cases
-// deja cochees, et n'herite jamais de celles du menage precedent.
-export function openJob(state, stop) {
-  state.jobId = stop.jobId;
-  state.finished = null;
-  state.ticks = Object.assign({}, stop.progress || {});
-  state.itemPhotos = {};
-  state.ticketPhotos = {};
-  state.checkedTickets = {};
-  state.photoIds = [];
-  state.linen = {};
-  state.jobNote = '';
-  state.report = null;
-  state.reportStop = null;
-  navigate('#/job/' + encodeURIComponent(stop.jobId));
+// Viseur ouvert sur un flux mort (ecran verrouille pendant le menage d'une piece) : on redemande un flux.
+// Seulement en mode camera en direct : en repli sans camera, on ne relance pas la demande d'autorisation.
+async function reviveCamera() {
+  if (!S.camera.open || !S.camera.live || S.screen !== 'conv') return;
+  if (!S.camera.stream || streamLive(S.camera.stream)) return;
+  closeCamera();
+  await openCamera();
 }
 
-// Generation de la demande de journee (revue tache 1, constat 1). Depuis le
-// mode « View as », deux appels successifs ne demandent plus la meme journee :
-// sans ce numero, la reponse arrivee la DERNIERE gagnait, et un Exit ou un
-// changement de cleaner pendant un chargement lent affichait la journee de
-// quelqu'un d'autre sans bandeau. Seule la reponse de la demande la plus
-// recente est appliquee, succes comme erreur.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') reviveCamera();
+});
+
+let busy = false;
+let flashUntil = 0; // l'eclair survit au rendu qui suit la photo (le viseur est reecrit)
+
+function flash() {
+  flashUntil = Date.now() + 150;
+  applyFlash();
+  if (navigator.vibrate) navigator.vibrate(30);
+}
+
+function applyFlash() {
+  const fl = root.querySelector('.flash');
+  const left = flashUntil - Date.now();
+  if (!fl || left <= 0) return;
+  fl.classList.add('on');
+  setTimeout(() => fl.classList.remove('on'), left);
+}
+
+// Toute photo porte l'horodatage incruste (appartement, date, heure, prenom) : la preuve survit a WhatsApp.
+async function takePhoto(c) {
+  if (S.camera.live) {
+    flash();
+    return captureFrame(vfVideo, { stamp: stampText(c.apt, me(), new Date()) });
+  }
+  // Repli : l'heure est celle du retour de la photo, pas celle de l'ouverture du selecteur.
+  return pickPhoto(fallbackInput, { stamp: () => stampText(c.apt, me(), new Date()) });
+}
+
+// Attend que le navigateur ait peint le dernier rendu (nouvelle piece affichee) avant de relacher `busy`.
+const painted = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+// Prise de photo gardee : pas de double capture, rien tant que le flux n'est pas pret.
+// `busy` n'est relache qu'apres le rendu (et la peinture) de la piece suivante.
+// Repli champ fichier : on n'occupe `busy` qu'une fois la photo recue (l'annulation du selecteur ne resout jamais).
+async function capture(c, handle) {
+  if (busy) return;
+  let p;
+  if (S.camera.live) {
+    if (!S.camera.stream || !vfVideo.videoWidth) return;
+    if (!streamLive(S.camera.stream)) { reviveCamera(); return; }
+    busy = true;
+    try {
+      p = await takePhoto(c);
+      if (!p || c !== conv()) return;
+      await handle(p);
+      await painted();
+    } finally { busy = false; }
+    return;
+  }
+  p = await takePhoto(c);
+  if (!p || busy || c !== conv()) return;
+  busy = true;
+  try { await handle(p); await painted(); } finally { busy = false; }
+}
+
+// Lecture seule (tache 4) : rien ne part encore au serveur, le fil garde ✓ (enregistre
+// sur le telephone). La tache 5 passera a ✓✓ depuis l'etat reel de la file.
+function markSynced(c) { return c; }
+
+// Bandeau « Saved: <Type> · <endroit> » (sans bouton), 4 s.
+function showToast(index) {
+  S.toastIndex = index; clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { S.toastIndex = null; renderLater(); }, 4000);
+}
+
+// Texte en cours de frappe (ecran « What happened? ») : survit aux rendus des minuteurs.
+function noteDraft() {
+  const ta = root.querySelector('#problem-note');
+  return ta ? { index: Number(ta.dataset.index), value: ta.value } : null;
+}
+
+// Note en cours de frappe ou de dictee : un rendu remplacerait la zone de texte (focus perdu,
+// clavier ferme, dictee coupee). Les rendus des minuteurs attendent donc la sortie du champ.
+const typingNote = () => !!document.activeElement && document.activeElement.id === 'problem-note';
+let renderDeferred = false;
+function renderLater() {
+  if (typingNote()) { renderDeferred = true; return; }
+  render();
+}
+
+function journeeVide() {
+  return readOnly() && state.day && state.day.me
+    ? 'Nothing assigned to ' + state.day.me.name + ' today.'
+    : 'Nothing assigned to you today.';
+}
+
+function renderConv() {
+  appEl.className = 'cv';
+  if (S.screen === 'conv' && !conv()) S.screen = 'list';
+  const c = S.screen === 'conv' ? conv() : null;
+  const draft = noteDraft();
+  const focus = typingNote() ? { start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : null;
+  let html = '';
+  let showVideo = false;
+  if (!c) {
+    closeCamera();
+    html = renderList({
+      me: me(), apartments: S.apartments, convs: S.convs, activeId: S.activeId, now: new Date(),
+      before: modeBar(), after: queueStrip(), empty: journeeVide(),
+    });
+  } else {
+    const f = currentFlow(c);
+    if (c.flow && !f) c.flow = null; // probleme supprime pendant le signalement
+    const photoView = !f && S.viewPhoto !== null ? renderPhotoView(c, S.viewPhoto) : '';
+    if (!photoView) S.viewPhoto = null;
+    if (f) {
+      // Une question par ecran, en plein ecran : pas de conversation dessous.
+      html = renderFlow(c, { live: S.camera.live });
+      showVideo = f.stage === 'photos';
+    } else if (photoView) html = photoView;
+    else if (S.editIndex !== null && c.problems[S.editIndex]) html = renderProblemPage(c, S.editIndex, { confirmDelete: S.confirmDelete });
+    else {
+      S.editIndex = null;
+      html = renderConversation(c, { now: new Date(), before: modeBar() });
+      const vf = S.camera.open ? renderViewfinder(c, { live: S.camera.live }) : '';
+      html += vf;
+      showVideo = !!vf;
+      if (S.toastIndex !== null && c.problems[S.toastIndex]) {
+        const t = renderToast(c.problems[S.toastIndex]);
+        html += vf ? t.replace('class="toast', 'class="toast top') : t; // sous la barre du viseur, jamais sur le declencheur
+      }
+    }
+  }
+  if (S.note) html += '<div class="note">' + escapeHtml(S.note) + '</div>';
+  root.innerHTML = html;
+  const ta = root.querySelector('#problem-note');
+  if (ta && draft && draft.index === Number(ta.dataset.index)) {
+    ta.value = draft.value;
+    // Filet de securite : rendu pendant la frappe, le focus et le curseur reviennent.
+    if (focus) { ta.focus(); try { ta.setSelectionRange(focus.start, focus.end); } catch (e) { /* champ sans selection */ } }
+  }
+  vfVideo.hidden = !(c && S.camera.open && S.camera.live && showVideo);
+  const t = root.querySelector('.toast:not(.top)'), bar = root.querySelector('.bar');
+  // Bandeau du viseur : sous la barre du haut reelle (libelle sur une ou deux lignes).
+  const tt = root.querySelector('.toast.top'), vfTop = root.querySelector('.vf-top');
+  if (tt && vfTop) tt.style.top = (vfTop.offsetTop + vfTop.offsetHeight + 8) + 'px';
+  // Note (partage) : en bas, juste au-dessus de la barre, jamais sur Send / Share again.
+  const nt = root.querySelector('.note');
+  const pageTitle = root.querySelector('.page h1');
+  if (nt && pageTitle) { nt.style.bottom = 'auto'; nt.style.top = (pageTitle.getBoundingClientRect().bottom - appEl.getBoundingClientRect().top + 8) + 'px'; }
+  else if (nt && bar) nt.style.bottom = (appEl.clientHeight - bar.offsetTop + 8) + 'px';
+  // Bandeau « Saved » de la conversation : sous l'en-tete, jamais sur la question qui suit.
+  const head = root.querySelector('.top');
+  if (t && head) { t.style.bottom = 'auto'; t.style.top = (head.offsetTop + head.offsetHeight + 8) + 'px'; }
+  const th = document.getElementById('thread');
+  if (th) th.scrollTop = th.scrollHeight;
+  applyFlash();
+  syncHistory();
+}
+
+// ---- Retour systeme (Android, geste iPhone) : une entree d'historique « garde » tant qu'on est
+// dans un appartement. Le retour systeme fait le retour de l'ecran en cours, puis la garde est
+// reposee ; depuis la conversation, il ramene a la liste au lieu de quitter l'app.
+let guard = false, ignorePop = 0;
+function syncHistory() {
+  const inside = S.screen === 'conv' && !!conv() && routeName() === 'cv';
+  if (inside && !guard) { history.pushState({ hk: 1 }, ''); guard = true; }
+  else if (!inside && guard) { guard = false; ignorePop++; history.back(); }
+}
+
+window.addEventListener('popstate', async () => {
+  if (ignorePop) { ignorePop--; return; }
+  guard = false;
+  const c = conv();
+  if (S.screen !== 'conv' || !c || routeName() !== 'cv') { render(); return; }
+  if (c.flow) { await flowStep(c, 'system-back'); return; }
+  if (S.viewPhoto !== null) { S.viewPhoto = null; render(); return; }
+  if (S.editIndex !== null) { S.editIndex = null; S.confirmDelete = false; render(); return; }
+  await toList(c);
+});
+
+// Camera de l'ecran des photos d'un signalement : ouverte s'il le faut, refermee en quittant
+// cet ecran si c'est lui qui l'a ouverte (depuis le viseur d'une piece, elle reste ouverte).
+async function syncFlowCamera(c) {
+  const f = currentFlow(c);
+  const need = !!f && f.stage === 'photos';
+  if (need && !S.camera.open) { S.flowCam = true; await openCamera(); return; }
+  if (!need && S.flowCam) { S.flowCam = false; closeCamera(); }
+}
+
+async function after(c) {
+  markSynced(c);
+  await syncFlowCamera(c);
+  const st = currentStep(c), f = currentFlow(c);
+  if (S.camera.open && !st.camera && !(f && f.stage === 'photos')) closeCamera();
+  render();
+  await maybeAutoOpen();
+}
+
+// Retour a la liste (bouton ‹ de l'en-tete ou retour systeme depuis la conversation).
+async function toList() {
+  closeCamera(); S.flowCam = false;
+  S.editIndex = null; S.viewPhoto = null; S.confirmDelete = false;
+  S.screen = 'list'; render();
+}
+
+let gasAt = 0; // ecran rouge du gaz affiche : un double appui sur la tuile ne doit pas valider OK aussitot
+
+// Fin d'un signalement : bandeau « Saved », retour a l'ecran d'origine.
+async function flowStep(c, id) {
+  const before = currentFlow(c);
+  if (!before) { c.flow = null; render(); return; }
+  // Ecran du gaz : OK et retour systeme passent par la meme garde (ignores pendant 500 ms, puis valent OK).
+  if ((id === 'gas-ok' || (id === 'system-back' && before.stage === 'gas')) && Date.now() - gasAt < 500) { render(); return; }
+  const ta = root.querySelector('#problem-note');
+  if (id === 'system-back') flowBack(c);
+  else flowReply(c, id, { text: ta ? ta.value : '' });
+  if (!c.flow) {
+    const i = c.problems.indexOf(before.problem);
+    if (i >= 0 && before.from !== 'edit') showToast(i);
+    await after(c);
+    return;
+  }
+  // Ecran de note : pas de focus automatique, le clavier couvrirait No note.
+  await syncFlowCamera(c);
+  render();
+}
+
+async function convClick(b) {
+  const d = b.dataset;
+  const c = conv();
+  if (d.act === 'open') {
+    const apt = S.apartments.find(a => a.id === d.id);
+    if (!apt) return;
+    S.activeId = d.id;
+    if (!S.convs[d.id]) S.convs[d.id] = createConversation(apt, { me: me() });
+    S.screen = 'conv'; S.autoOpenedAt = null; render(); await maybeAutoOpen(); return;
+  }
+  if (!c) return;
+  if (d.act === 'back') { await toList(c); return; }
+  if (d.act === 'close-camera') { closeCamera(); render(); return; }
+  if (d.act === 'camera') { await openCamera(); return; }
+  if (d.act === 'problem') {
+    if (busy) return;
+    startProblem(c);
+    S.toastIndex = null; clearTimeout(toastTimer);
+    render(); return;
+  }
+  if (d.kind) {
+    chooseKind(c, d.kind);
+    const f = currentFlow(c);
+    if (f && f.stage === 'gas') { gasAt = Date.now(); markSynced(c); if (navigator.vibrate) navigator.vibrate([200, 100, 200]); }
+    await syncFlowCamera(c);
+    render(); return;
+  }
+  if (d.flow) { await flowStep(c, d.flow); return; }
+  if (d.act === 'flow-shutter') {
+    await capture(c, async p => {
+      if (!currentFlow(c)) return;
+      addFlowPhoto(c, p);
+      markSynced(c);
+      render();
+      await painted();
+    });
+    return;
+  }
+  if (d.act === 'shutter') {
+    // addPhoto enregistre la photo sans changer de piece (Next room la termine).
+    await capture(c, async p => { addPhoto(c, p); await after(c); });
+    return;
+  }
+  if (d.act === 'thumb') { S.viewPhoto = Number(d.i); render(); return; }
+  if (d.act === 'photo-back') { S.viewPhoto = null; render(); return; }
+  if (d.act === 'photo-delete') {
+    const st = currentStep(c);
+    removeArrivalOrEndPhoto(c, st.id, st.room, Number(d.i));
+    S.viewPhoto = null; render(); return;
+  }
+  if (d.act === 'edit') { S.editIndex = Number(d.index); S.confirmDelete = false; S.toastIndex = null; clearTimeout(toastTimer); render(); return; }
+  if (d.act === 'edit-back') { S.editIndex = null; S.confirmDelete = false; render(); return; }
+  if (d.act === 'edit-photos' || d.act === 'edit-note') {
+    if (busy) return;
+    reopenProblem(c, S.editIndex, d.act === 'edit-photos' ? 'photos' : 'note');
+    S.confirmDelete = false;
+    await syncFlowCamera(c);
+    render();
+    // Edit note : la cleaner vient pour ecrire, le clavier s'ouvre.
+    if (d.act === 'edit-note') { const ta = root.querySelector('#problem-note'); if (ta) ta.focus(); }
+    return;
+  }
+  if (d.act === 'delete-ask') { S.confirmDelete = true; render(); return; }
+  if (d.act === 'delete-no') { S.confirmDelete = false; render(); return; }
+  if (d.act === 'delete') { removeProblem(c, Number(d.index)); S.editIndex = null; S.confirmDelete = false; S.toastIndex = null; render(); return; }
+  if (d.where && S.editIndex !== null) { editProblem(c, S.editIndex, { where: d.where }); render(); return; }
+  if (d.urgency && S.editIndex !== null) { editProblem(c, S.editIndex, { urgency: d.urgency }); render(); return; }
+  if (d.reply) {
+    if (busy) return;
+    if (d.reply === 'send' || d.reply === 'share-again') {
+      if (d.reply === 'send' && c.sent) return;
+      busy = true;
+      const textOnly = c.shareTextOnly === true; // le partage avec fichiers a echoue au dernier appui
+      let r;
+      try { r = await shareReport({ text: reportText(c), files: reportFiles(c), textOnly }); } finally { busy = false; }
+      if (r.mode === 'none') { note('This browser cannot share. Open the page in Chrome (Android) or Safari (iPhone).'); render(); return; }
+      if (!r.ok) {
+        if (r.error && r.mode === 'files') { c.shareTextOnly = true; note('Photos could not be shared. Tap again to share the text only.'); }
+        else if (r.error) note('Share failed: ' + r.error);
+        render(); return;
+      }
+      c.shareTextOnly = false;
+      if (textOnly) note('Text shared without photos.');
+      else if (r.mode === 'text') note('Text shared without photos (this browser cannot share files).');
+      else note('Shared. If the text is missing in WhatsApp, long-press and Paste: it is copied.');
+      if (d.reply === 'share-again') { render(); return; } // ni geste ni bulle
+    }
+    const prev = c.problems.length;
+    reply(c, d.reply);
+    if (c.problems.length > prev && !c.flow) showToast(c.problems.length - 1); // Can't get in, « not working »
+    else if (c.problems.length < prev) S.toastIndex = null; // « works » apres « not working » : probleme retire
+    await after(c);
+  }
+}
+
+// Delegation : un seul ecouteur pour toute l'application.
+document.addEventListener('click', function (evt) {
+  const b = evt.target.closest('button,[data-act]');
+  if (!b || b.disabled) return;
+  const nom = b.getAttribute('data-act');
+  if (nom === 'reload') { loadDay(); return; }
+  if (nom === 'viewas-exit') { evt.preventDefault(); exitViewAs(); return; }
+  if (routeName() === 'profile') {
+    const handler = nom && profile.actions && profile.actions[nom];
+    if (!handler) return;
+    evt.preventDefault();
+    Promise.resolve(handler(state, b, evt)).catch(function (err) {
+      if (err instanceof ApiError && err.kind === 'auth') { perdreSession(); render(); return; }
+      if (err instanceof ApiError && err.kind === 'practice') return;
+      toast(err && err.message ? err.message : 'Something went wrong', 'err');
+    });
+    return;
+  }
+  if (!state.session || state.loading || state.error) return;
+  convClick(b).catch(function (err) {
+    toast(err && err.message ? err.message : 'Something went wrong', 'err');
+  });
+});
+
+// Sortie du champ de note : le rendu differe passe un peu plus tard, jamais entre l'appui et le
+// relache d'un bouton (un rendu a ce moment-la remplacerait le bouton et perdrait le clic).
+appEl.addEventListener('focusout', e => {
+  if (e.target.id !== 'problem-note' || !renderDeferred) return;
+  setTimeout(() => { if (renderDeferred && !typingNote()) render(); }, 600);
+});
+
+window.addEventListener('hashchange', function () {
+  state.prepared = false;
+  render();
+});
+
+// ---------------------------------------------------------------------------
+// Journee : v3.myDay, adaptee en appartements pour la conversation.
+// ---------------------------------------------------------------------------
+
+// Seule la reponse de la demande la plus recente est appliquee, succes comme erreur.
 let generationJour = 0;
 
-// La reponse colle-t-elle au mode demande ? Seconde garde, en plus du numero.
 function reponseConforme(data, vue) {
   if (!data) return false;
   if (!vue) return !data.viewAs;
@@ -332,58 +700,35 @@ export async function loadDay() {
   render();
   try {
     const data = await api.get('v3.myDay', vue ? { as: vue.id } : {});
-    if (generation !== generationJour) return;   // demande depassee
+    if (generation !== generationJour) return;
     if (state.viewAs !== vue || !reponseConforme(data, vue)) {
-      // Mode change sans nouvelle demande, ou reponse d'un autre mode : on ne
-      // l'affiche jamais. En « View as », on repart de sa propre journee ; sur
-      // sa propre journee, une reponse non conforme est une erreur (pas de
-      // boucle de rechargement).
       if (vue) {
         oublierViewAs();
+        oublierConversations();
         return loadDay();
       }
       throw new Error('Could not load your day.');
     }
     if (vue) {
-      // Le mode appartient a qui l'a choisi : un autre manager connecte dans
-      // la meme fenetre n'en herite pas, meme en silence.
       if (!data.viewer || String(data.viewer.id) !== vue.viewerId) {
         oublierViewAs();
+        oublierConversations();
         return loadDay();
       }
       vue.confirmed = true;
-      // Practice : l'avancement simule recouvre la journee reelle, comme le
-      // proxy rendrait ce qu'il aurait ecrit.
       if (vue.practice && practiceActive()) practiceDay(data);
     }
     state.day = data;
-    // Au premier chargement, l'arret ouvert vient du fragment d'URL et non d'un
-    // clic : state.jobId est encore vide, on le lit dans l'adresse. Repartir de
-    // la progression enregistree fait qu'un rechargement au milieu d'un menage
-    // retrouve les cases deja cochees.
-    const ouvert = state.jobId ||
-      (String(location.hash).indexOf('#/job/') === 0
-        ? decodeURIComponent(String(location.hash).replace('#/job/', ''))
-        : null);
-    const stop = (data.stops || []).find(function (s) { return s.jobId === ouvert; });
-    if (stop) {
-      state.jobId = stop.jobId;
-      state.ticks = Object.assign({}, stop.progress || {});
-    }
+    state.apartments = toApartments(data, data.me, { now: new Date() });
     state.loading = false;
     render();
   } catch (err) {
-    if (generation !== generationJour) return;   // erreur d'une demande depassee
+    if (generation !== generationJour) return;
     state.loading = false;
-    // La cible n'est plus dans l'equipe (400), ou la session n'est plus celle
-    // d'un manager (403) : on sort du mode et on recharge sa propre journee,
-    // une seule fois puisque state.viewAs est alors vide. Le message n'est dit
-    // qu'a la personne qui avait choisi le mode dans cette page : un mode relu
-    // au demarrage et jamais confirme sort en silence.
     if (vue && state.viewAs === vue && err instanceof ApiError && err.kind === 'server' &&
         (err.status === 400 || err.status === 403)) {
       oublierViewAs();
-      state.jobId = null;
+      oublierConversations();
       if (vue.confirmed) toast('This view is no longer available', 'err');
       if (location.hash !== '#/today') location.hash = '#/today';
       return loadDay();
@@ -399,61 +744,6 @@ export async function loadDay() {
   }
 }
 
-// Delegation : un seul ecouteur pour toute l'application. Chaque bouton porte
-// data-act, l'ecran courant dit quoi en faire.
-document.addEventListener('click', function (evt) {
-  const cible = evt.target.closest('[data-act]');
-  if (!cible) {
-    // Toucher le fond d'une feuille la ferme.
-    if (sheetIsOpen() && evt.target.hasAttribute('data-sheet')) closeSheet();
-    return;
-  }
-  const nom = cible.getAttribute('data-act');
-  if (nom === 'reload') { loadDay(); return; }
-  if (nom === 'close-sheet') { closeSheet(); return; }
-  if (nom === 'viewas-exit') { evt.preventDefault(); exitViewAs(); return; }
-  if (readOnly(state) && GESTES_ECRITURE.has(nom)) {
-    evt.preventDefault();
-    toast('Read only', 'err');
-    return;
-  }
-  const screen = screens[routeName()] || screens.today;
-  const handler = screen && screen.actions && screen.actions[nom];
-  if (!handler) return;
-  evt.preventDefault();
-  Promise.resolve(handler(state, cible, evt)).catch(function (err) {
-    if (err instanceof ApiError && err.kind === 'auth') {
-      perdreSession();
-      render();
-      return;
-    }
-    // Geste ne dans une seance Practice finie : abandonne en silence, rien
-    // n'est parti et il n'y a rien a dire.
-    if (err instanceof ApiError && err.kind === 'practice') return;
-    toast(err && err.message ? err.message : 'Something went wrong', 'err');
-  });
-});
-
-// Changer de route remet le drapeau de preparation a zero : les liens de la
-// barre du bas passent par le hash et non par navigate(), et sans cette remise a
-// zero un retour sur Profile reafficherait la liste telle qu'elle etait a la
-// premiere visite.
-window.addEventListener('hashchange', function () {
-  // Une feuille vit dans #sheet-host, hors de #app : un redessin ne la retire
-  // pas. Apres un geste Back elle restait donc ouverte au-dessus d'un autre
-  // ecran, et la delegation, qui lit les actions de l'ecran de la NOUVELLE
-  // route, n'y trouvait plus « Send » ni « Finish » : l'appui etait avale sans
-  // un mot et le signalement perdu (revue tache 12, constat 2). On ferme la
-  // feuille avant de redessiner, et on rend son etat de travail avec elle.
-  if (sheetIsOpen()) {
-    closeSheet();
-    state.report = null;
-    state.reportStop = null;
-  }
-  state.prepared = false;
-  render();
-});
-
 onQueueChange(function (n) {
   if (state.queued === n) return;
   state.queued = n;
@@ -464,15 +754,11 @@ onQueueChange(function (n) {
     strip.textContent = 'Saved on device, ' + n + ' to sync';
     return;
   }
-  render();
+  renderLater();
 });
 
-// Un renouvellement de la session email (minuteur de supabase-js, retour du
-// reseau, ou onglet de l'app racine) relance le rejeu : des gestes mis en file
-// pendant une session « stale » repartent avec le nouveau Bearer.
-// Si la journee n'a pas pu se charger (demarrage en « stale » sur un reseau
-// lent), elle se recharge aussi : sinon « No network » resterait affiche alors
-// que la session et le reseau marchent.
+// Un renouvellement de la session email relance le rejeu, et la journee si elle
+// n'a pas pu se charger.
 onSessionRenewed(function () {
   if (!state.session) return;
   flush();
@@ -480,21 +766,12 @@ onSessionRenewed(function () {
 });
 
 export async function boot() {
-  // La lecture de session peut attendre un renouvellement (quelques secondes au
-  // pire) : on montre l'attente plutot qu'un ecran vide ou « Sign in ».
-  const app = document.getElementById('app');
-  if (app) app.innerHTML = vueAttente('Loading your day.');
-  // { kind: 'stale' } compte comme connecte : la cleaner reste dans l'app, les
-  // appels partent dans la file comme pour toute coupure.
+  porte(vueAttente('Loading your day.'));
   state.session = await readSession();
-  // Le mode relu n'est garde que pour une session, et pour la personne qui l'a
-  // choisi quand l'appareil sait deja qui est connecte : aucun `as` ne part
-  // alors pour quelqu'un d'autre.
   state.viewAs = state.session ? lireViewAs() : null;
   const qui = identiteLocale();
   if (state.viewAs && qui && qui !== state.viewAs.viewerId) state.viewAs = null;
   if (!state.viewAs) oublierViewAs();
-  // Practice relu : la seance reprend son avancement, avant tout appel.
   else if (state.viewAs.practice) practiceOn(state.viewAs, true);
   if (!state.session) {
     state.loading = false;
@@ -505,12 +782,9 @@ export async function boot() {
   watchNetwork();
   state.queued = await pendingCount();
   await loadDay();
-  // Un rejeu au demarrage : l'application a pu etre fermee hors ligne.
   if (navigator.onLine) flush();
   // Enregistrement apres le premier rendu : l'installation ne doit jamais
-  // retarder l'affichage de la journee. Aucun abonnement push ici : la cleaner
-  // recoit deja ses notifications par l'app actuelle, un second abonnement lui
-  // en ferait deux pour chaque affectation.
+  // retarder l'affichage de la journee. Aucun abonnement push ici.
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/v3/sw.js', { scope: '/v3/' })
       .catch(function (e) { console.warn('[v3] service worker non enregistre', e); });

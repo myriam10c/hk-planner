@@ -1,6 +1,18 @@
 import { expect, test } from '@playwright/test';
 import { bootV3, fetchLog } from './helpers';
 
+// File hors ligne de la v3. Depuis le portage de l'interface conversation (tache 4
+// du plan 2026-10-05), aucun geste de l'ecran n'ecrit encore (les ecritures sont
+// branchees a la tache 5) : les gestes passent ici par sendOrQueue, le chemin
+// unique de toute ecriture v3, et le bandeau « Saved on device » se lit sur la
+// liste du jour.
+async function geste(page: any, itemId: string) {
+  return await page.evaluate(async (item: string) => {
+    const m = await import('/v3/offline.js');
+    return await m.sendOrQueue('v3.tick', { jobId: 'job_aaaaaaaaaaaaaaaaaaaa', itemId: item, checked: true, idem: m.newIdem() });
+  }, itemId);
+}
+
 const JOURNEE = {
   status: 'success',
   date: '2026-09-12',
@@ -9,37 +21,37 @@ const JOURNEE = {
   totalMinutes: 306,
   stops: [
     {
-      jobId: '2026-09-12_Marc Lefevre', listingId: '102', listingName: '623 Samana Park View',
+      jobId: 'job_aaaaaaaaaaaaaaaaaaaa', listingId: '102', listingName: '623 Samana Park View',
       aptNumber: '623', unitType: '1 BHK', templateName: '1 Bedroom',
       checkOutTime: '12:00', nextArrivalDate: '2026-09-12', nextArrivalTime: '15:00',
       sameDay: true, guest: 'Marc L.', nextGuest: 'Anna W.', estimatedMinutes: 118,
       state: 'todo', startedAt: null,
       checklist: ['Master Bed & Linens', 'Bathroom', 'Final Check'],
       photoRequired: [], progress: {}, openTickets: [], label: null,
+      rooms: ['Bedroom', 'Living room', 'Kitchen', 'Bathroom', 'Balcony'], heroPhotoUrl: null,
+      othersOnJob: [], references: {},
     },
   ],
 };
 
 const ROUTES = [
   { match: 'action=v3.myDay', status: 200, body: JOURNEE },
-  { match: 'action=v3.startJob', status: 200, body: { status: 'success', jobId: '2026-09-12_Marc Lefevre', startedAt: '2026-09-12T08:00:00Z' } },
+  { match: 'action=v3.startJob', status: 200, body: { status: 'success', jobId: 'job_aaaaaaaaaaaaaaaaaaaa', startedAt: '2026-09-12T08:00:00Z' } },
   { match: 'action=v3.tick', status: 200, body: { status: 'success' } },
 ];
 
 test('hors ligne, les gestes sont gardes puis rejoues une seule fois, dans l ordre', async ({ page, context }) => {
   await bootV3(page, ROUTES, { pinToken: 'jeton-pin' });
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
-  await expect(page.getByRole('heading', { name: '623 Samana Park View' })).toBeVisible();
+  await expect(page.locator('.row-name')).toHaveText(['623 Samana Park View']);
 
   await context.setOffline(true);
-  await page.getByRole('button', { name: 'Master Bed & Linens' }).click();
-  await page.getByRole('button', { name: 'Bathroom' }).click();
-  await page.getByRole('button', { name: 'Final Check' }).click();
+  for (const item of ['Master Bed & Linens', 'Bathroom', 'Final Check']) {
+    expect(await geste(page, item)).toEqual({ ok: false, queued: true, data: null });
+  }
 
-  // Le bandeau dit exactement combien de gestes attendent.
+  // Le bandeau dit exactement combien de gestes attendent, sous l'en-tete de la liste.
   await expect(page.getByText('Saved on device, 3 to sync')).toBeVisible();
-  // Les trois lignes restent cochees a l'ecran : le geste est acquis localement.
-  await expect(page.getByRole('button', { name: 'Bathroom' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.list-top + .offstrip')).toHaveCount(1);
 
   await context.setOffline(false);
   await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0, { timeout: 10_000 });
@@ -56,9 +68,8 @@ test('hors ligne, les gestes sont gardes puis rejoues une seule fois, dans l ord
 
 test('un second retour en ligne ne rejoue rien', async ({ page, context }) => {
   await bootV3(page, ROUTES, { pinToken: 'jeton-pin' });
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
   await context.setOffline(true);
-  await page.getByRole('button', { name: 'Bathroom' }).click();
+  await geste(page, 'Bathroom');
   // Attendre que le geste soit vraiment en file avant de repasser en ligne :
   // sans cette attente, toHaveCount(0) plus bas peut etre satisfait a vide
   // (la bande n'a jamais eu le temps de s'afficher), ce qui rend le test
@@ -75,12 +86,11 @@ test('un second retour en ligne ne rejoue rien', async ({ page, context }) => {
 test('une action refusee par le proxy est signalee et mise de cote', async ({ page, context }) => {
   await bootV3(page, [
     { match: 'action=v3.myDay', status: 200, body: JOURNEE },
-    { match: 'action=v3.startJob', status: 200, body: { status: 'success', jobId: '2026-09-12_Marc Lefevre', startedAt: '2026-09-12T08:00:00Z' } },
+    { match: 'action=v3.startJob', status: 200, body: { status: 'success', jobId: 'job_aaaaaaaaaaaaaaaaaaaa', startedAt: '2026-09-12T08:00:00Z' } },
     { match: 'action=v3.tick', status: 400, body: { error: 'itemId required' } },
   ], { pinToken: 'jeton-pin' });
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
   await context.setOffline(true);
-  await page.getByRole('button', { name: 'Bathroom' }).click();
+  await geste(page, 'Bathroom');
   await expect(page.getByText('Saved on device, 1 to sync')).toBeVisible();
 
   await context.setOffline(false);
@@ -108,17 +118,17 @@ test('une action refusee par le proxy est signalee et mise de cote', async ({ pa
 test('Sign out vide la file hors ligne et le magasin mort', async ({ page }) => {
   await bootV3(page, [
     { match: 'action=v3.myDay', status: 200, body: JOURNEE },
-    { match: 'action=v3.startJob', status: 200, body: { status: 'success', jobId: '2026-09-12_Marc Lefevre', startedAt: '2026-09-12T08:00:00Z' } },
+    { match: 'action=v3.startJob', status: 200, body: { status: 'success', jobId: 'job_aaaaaaaaaaaaaaaaaaaa', startedAt: '2026-09-12T08:00:00Z' } },
     { match: 'action=v3.tick', status: 400, body: { error: 'itemId required' } },
     { match: 'action=cleanerLogout', status: 200, body: { status: 'success' } },
   ], { pinToken: 'jeton-pin' });
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
+  await expect(page.locator('.row')).toHaveCount(1);
 
   // 1. Un geste refuse par le proxy : il quitte la file pour le magasin mort.
   // Drapeau plutot que context.setOffline : la deconnexion navigue vers « / »,
   // et un contexte hors ligne ferait echouer cette navigation.
   await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
-  await page.getByRole('button', { name: 'Master Bed & Linens' }).click();
+  await geste(page, 'Master Bed & Linens');
   await expect(page.getByText('Saved on device, 1 to sync')).toBeVisible();
   await page.evaluate(() => {
     localStorage.removeItem('v3TestOffline');
@@ -128,8 +138,8 @@ test('Sign out vide la file hors ligne et le magasin mort', async ({ page }) => 
 
   // 2. Deux gestes encore en file au moment de la deconnexion.
   await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
-  await page.getByRole('button', { name: 'Bathroom' }).click();
-  await page.getByRole('button', { name: 'Final Check' }).click();
+  await geste(page, 'Bathroom');
+  await geste(page, 'Final Check');
   await expect(page.getByText('Saved on device, 2 to sync')).toBeVisible();
   expect(await page.evaluate(async () => {
     const m = await import('/v3/offline.js');
@@ -156,11 +166,10 @@ test('Sign out vide la file hors ligne et le magasin mort', async ({ page }) => 
 
 test('la file survit a un rechargement de page', async ({ page }) => {
   await bootV3(page, ROUTES, { pinToken: 'jeton-pin' });
-  await page.getByRole('button', { name: 'Start this cleaning' }).click();
   // Drapeau plutot que context.setOffline : ce dernier couperait aussi le
   // chargement de la page et le reload echouerait avant d'atteindre le test.
   await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
-  await page.getByRole('button', { name: 'Bathroom' }).click();
+  await geste(page, 'Bathroom');
   await expect(page.getByText('Saved on device, 1 to sync')).toBeVisible();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true);
