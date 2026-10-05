@@ -7,7 +7,7 @@ import { practiceActive, practiceMark } from '/v3/practice.js';
 import { toast } from '/v3/ui.js';
 
 const DB_NAME = 'hk-v3';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'queue';
 // Magasin mort : une action refusee definitivement par le proxy (4xx autre que
 // 429 et 409) ne peut pas rester dans la file, elle bloquerait tout ce qui la
@@ -15,6 +15,10 @@ const STORE = 'queue';
 // l'ecran Profile la montre. Le critere de succes de la phase A est « zero
 // action perdue », pas « zero action refusee ».
 const DEAD = 'dead';
+// Octets des photos de la journee, par cle de televersement (tache 5 du
+// branchement) : un rechargement au milieu d'un menage retrouve ses miniatures et
+// les fichiers du partage WhatsApp, qu'ils soient deja partis ou non.
+const FILES = 'files';
 
 export function newIdem() {
   const c = globalThis.crypto;
@@ -37,6 +41,9 @@ function openDb() {
       }
       if (!db.objectStoreNames.contains(DEAD)) {
         db.createObjectStore(DEAD, { keyPath: 'seq', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains(FILES)) {
+        db.createObjectStore(FILES, { keyPath: 'idem' });
       }
     };
     req.onsuccess = function () { resolve(req.result); };
@@ -106,6 +113,49 @@ export function clearDead() {
   return tx('readwrite', function (store) { return store.clear(); }, DEAD);
 }
 
+// ---- Fichiers des photos (reprise) ----
+export async function putFile(idem, file) {
+  if (!idem || !file) return;
+  const g = await gardable(file);
+  return tx('readwrite', function (store) {
+    return store.put({ idem: idem, bytes: g.bytes, file: g.file, fileType: g.fileType, name: file.name || 'photo.jpg', at: Date.now() });
+  }, FILES);
+}
+
+// Rend { idem: File } pour les cles trouvees.
+export function getFiles(idems) {
+  const voulu = new Set(idems || []);
+  return tx('readonly', function (store) { return store.getAll(); }, FILES).then(function (rows) {
+    const out = {};
+    (rows || []).forEach(function (r) {
+      if (!voulu.has(r.idem)) return;
+      const blob = blobDe(r);
+      if (blob) out[r.idem] = new File([blob], r.name || 'photo.jpg', { type: r.fileType || blob.type || 'image/jpeg' });
+    });
+    return out;
+  });
+}
+
+// Fichiers plus vieux que `ageMs` : une journee de travail est finie, ils ne
+// servent plus a rien sur le telephone.
+export function purgeFiles(ageMs) {
+  const limite = Date.now() - ageMs;
+  return tx('readwrite', function (store) {
+    const req = store.openCursor();
+    req.onsuccess = function () {
+      const cur = req.result;
+      if (!cur) return;
+      if (!(cur.value.at >= limite)) cur.delete();
+      cur.continue();
+    };
+    return null;
+  }, FILES);
+}
+
+export function clearFiles() {
+  return tx('readwrite', function (store) { return store.clear(); }, FILES);
+}
+
 function toDead(entry, raison) {
   return tx('readwrite', function (store) {
     return store.add({
@@ -117,6 +167,18 @@ function toDead(entry, raison) {
 
 const abonnes = [];
 export function onQueueChange(fn) { abonnes.push(fn); }
+
+// Reponse 2xx d'une entree rejouee : fn(entry, data). Sert aux coches ✓✓ et aux
+// identifiants rendus par le proxy (photoId, ticketId).
+const envoyes = [];
+export function onSent(fn) { envoyes.push(fn); }
+
+// Refus definitif d'une entree (4xx autre que 409 et 429) : fn(entry, err) rend
+// true si l'appelant le prend en charge (l'entree quitte alors la file sans aller
+// au magasin mort, ni bandeau). Exemple : finishJob refuse faute de linge, l'ecran
+// demande le comptage au lieu de laisser le geste bloque.
+const refusGeres = [];
+export function onRefused(fn) { refusGeres.push(fn); }
 function annoncer() {
   return pendingCount().then(function (n) {
     abonnes.forEach(function (fn) { fn(n); });
@@ -164,10 +226,26 @@ let enCours = false;
 // la fin de celle-ci. Jamais deux rejeux en parallele, jamais de boucle : la
 // passe suivante ne se relance que si une NOUVELLE demande arrive pendant elle.
 let encore = false;
+// Entree en cours d'envoi, et entrees retirees de la file pendant un rejeu
+// (unqueue) : le rejeu travaille sur une copie de la file, il doit sauter une
+// entree retiree entre-temps, et une entree deja partie ne se retire plus.
+let enVol = null;
+const retirees = new Set();
+// Nouvel essai automatique apres un arret temporaire (5xx, 429, 409, reseau qui
+// ne repond pas alors que le telephone se croit en ligne) : sans lui, un 409
+// « Still processing » ou un wifi sans internet laissaient la file en attente
+// jusqu'au prochain geste. Hors ligne declare, l'evenement « online » suffit.
+const RETRY_MS = 8000;
+let relance = null;
+function relancerPlusTard() {
+  if (relance || !navigator.onLine) return;
+  relance = setTimeout(function () { relance = null; flush(); }, RETRY_MS);
+}
 
 // Rejeu strictement ordonne. On s'arrete des qu'une entree ne passe pas pour une
 // raison temporaire, pour ne jamais inverser l'ordre des gestes. L'ordre compte :
-// un signalement rejoue apres sa photo la retrouve par photoIdem.
+// un signalement rejoue apres sa photo la retrouve par photoIdem, une photo de
+// plus retrouve son ticket par ticketIdem.
 export async function flush() {
   // En Practice, api.js servirait chaque entree par le simulateur : une vraie
   // entree en attente serait jugee passee et effacee sans jamais partir. Le
@@ -183,23 +261,40 @@ export async function flush() {
       // Une seance Practice ouverte pendant un rejeu deja lance l'arrete net :
       // l'entree suivante serait servie par le simulateur, puis effacee.
       if (practiceActive()) return;
+      // Verification et marque sans attente entre les deux : unqueue ne peut
+      // pas retirer une entree que ce rejeu est en train d'envoyer.
+      if (retirees.has(e.seq)) continue;
+      enVol = e.seq;
+      let data;
       try {
         const blob = blobDe(e);
-        if (blob) await api.upload(e.action, formFrom(e.body, blob, e.fileName));
-        else await api.post(e.action, e.body);
+        if (blob) data = await api.upload(e.action, formFrom(e.body, blob, e.fileName));
+        else data = await api.post(e.action, e.body);
         await drop(e.seq);
+        enVol = null;
+        envoyes.forEach(function (fn) {
+          try { fn(e, data); } catch (x) { console.warn('[v3] onSent', x); }
+        });
       } catch (err) {
+        enVol = null;
         const kind = err instanceof ApiError ? err.kind : 'offline';
-        if (kind === 'offline' || kind === 'auth') return;   // on reessaiera
-        if (err.status >= 500 || err.status === 429 || err.status === 409) return;
+        if (kind === 'offline') { relancerPlusTard(); return; }   // on reessaiera
+        if (kind === 'auth') return;   // le renouvellement de session relance
+        if (err.status >= 500 || err.status === 429 || err.status === 409) { relancerPlusTard(); return; }
         // 409 = rejeu sans resultat memorise cote proxy ("Still processing.
         // Retry."), pas un refus : l'entree reste en file, on la retentera au
         // prochain flush() (revue tache 4, constat majeur 2). Seul un 4xx
         // AUTRE que 409 est definitif : l'entree ne passera jamais, la garder
         // bloquerait toute la file derriere elle. On la sort de la file, on la
         // garde dans le magasin mort, et on le dit a la cleaner : un
-        // console.warn n'est vu de personne sur un telephone.
+        // console.warn n'est vu de personne sur un telephone. Sauf refus pris
+        // en charge par l'ecran (onRefused).
         const raison = (err && err.message) ? err.message : 'refused';
+        let gere = false;
+        refusGeres.forEach(function (fn) {
+          try { if (fn(e, err)) gere = true; } catch (x) { console.warn('[v3] onRefused', x); }
+        });
+        if (gere) { await drop(e.seq); continue; }
         console.warn('[v3] geste refuse par le proxy:', e.action, raison);
         await toDead(e, raison);
         await drop(e.seq);
@@ -208,12 +303,45 @@ export async function flush() {
     }
   } finally {
     enCours = false;
+    enVol = null;
     await annoncer();
     if (encore && !enCours) {
       encore = false;
       flush();
     }
   }
+}
+
+// Retire de la file le geste de cle `idem` s'il n'est pas encore parti (photo
+// effacee depuis sa miniature avant son envoi). Rend false s'il est introuvable
+// ou en cours d'envoi : l'appelant envoie alors une suppression, qui passera
+// apres lui dans la file.
+export async function unqueue(idem) {
+  const rows = await pendingEntries();
+  const e = rows.find(function (r) { return r.body && r.body.idem === idem; });
+  if (!e || e.seq === enVol) return false;
+  retirees.add(e.seq);
+  await drop(e.seq);
+  await annoncer();
+  return true;
+}
+
+// Ecriture de la conversation (tache 5 du branchement) : TOUJOURS en file
+// d'abord, puis rejeu. Un seul chemin, strictement ordonne : un geste ne double
+// jamais un geste plus ancien encore en attente (une photo hors ligne puis son
+// signalement en ligne partiraient sinon a l'envers). ✓ = en file, ✓✓ = onSent.
+// Rien en Practice : la conversation n'ecrit pas, et rien n'entre en file.
+export async function submit(action, body, file, fileName) {
+  if (practiceActive()) return { queued: false };
+  const garde = file ? await gardable(file) : { bytes: null, fileType: null, file: null };
+  await enqueue({
+    action: action, body: body,
+    bytes: garde.bytes, fileType: garde.fileType, file: garde.file,
+    fileName: file ? (fileName || 'photo.jpg') : null, at: Date.now(),
+  });
+  await annoncer();
+  flush();
+  return { queued: true };
 }
 
 // Chemin unique de toute ecriture v3 : on tente, et si le reseau manque on garde.

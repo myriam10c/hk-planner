@@ -69,7 +69,7 @@ export async function bootV3(
         try {
           const l = JSON.parse(localStorage.getItem('v3FetchLog') || '[]');
           l.push(entry);
-          localStorage.setItem('v3FetchLog', JSON.stringify(l.slice(-80)));
+          localStorage.setItem('v3FetchLog', JSON.stringify(l.slice(-200)));
         } catch (e) { /* quota plein : le test lira ce qu'il y a */ }
       };
       // Deux facons de couper le reseau de l'application : context.setOffline()
@@ -115,9 +115,18 @@ export async function bootV3(
           }));
         }
         if (proxy) {
+          // Multipart (televersement) : les champs texte sont notes en JSON, le
+          // fichier par son nom, pour que les tests lisent itemName et idem.
+          let corps = '';
+          if (init && init.body && typeof init.body === 'string') corps = init.body;
+          else if (init && init.body instanceof FormData) {
+            const champs: Record<string, string> = {};
+            init.body.forEach((v: any, k: string) => { champs[k] = typeof v === 'string' ? v : '[file]'; });
+            corps = JSON.stringify(champs);
+          }
           (window as any).__logFetch({
             url,
-            body: init && init.body && typeof init.body === 'string' ? init.body : '',
+            body: corps,
             headers: init && init.headers ? JSON.parse(JSON.stringify(init.headers)) : {},
           });
           if (!navigator.onLine || (window as any).__offlineFlag()) {

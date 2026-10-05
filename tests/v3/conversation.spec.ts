@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { bootV3, fetchLog, noHorizontalScroll } from './helpers';
+import { WRITE_ROUTES, fileVide } from './conv-helpers';
 
 // Interface conversation portee du prototype, sur la journee reelle (tache 4 du
 // plan 2026-10-05) : la liste vient de v3.myDay, ouvrir un appartement cree la
-// conversation locale, et rien n'est encore ecrit au serveur (tache 5).
+// conversation locale. Les ecritures (tache 5) sont verifiees en detail par
+// conversation-write.spec.ts ; ici, le proxy simule les accepte toutes.
 
 const PNG_1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const IMG = 'data:image/png;base64,' + PNG_1x1;
@@ -42,7 +44,8 @@ const DAY = {
   status: 'success', date: dubaiToday(), me: { id: 4, name: 'Faiza', role: 'cleaner' }, linenRequired: true,
   totalMinutes: 350, stops: [OXFORD, CREEK, BLOOM],
 };
-const ROUTES = [{ match: 'action=v3.myDay', status: 200, body: DAY }];
+const ROUTES = [{ match: 'action=v3.myDay', status: 200, body: DAY }, ...WRITE_ROUTES.filter((r) => r.match !== 'action=v3.myDay')];
+const actionsEcrites = async (page: Page) => (await ecritures(page)).map((l) => (l.url.match(/action=v3\.(\w+)/) || [])[1]);
 
 // Pas de camera dans le navigateur de test : le viseur passe en image fixe et le
 // declencheur ouvre l'appareil photo du telephone (champ fichier), le repli reel.
@@ -120,7 +123,7 @@ test('ouvrir un appartement cree la conversation locale ; Back et le retour syst
   expect(page.url()).toContain('/v3/');
 });
 
-test('parcours local du studio jusqu au rapport en 25 gestes, sans aucune ecriture au serveur', async ({ page }) => {
+test('parcours du studio jusqu au rapport en 25 gestes, ✓✓ une fois la file partie', async ({ page }) => {
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
@@ -148,9 +151,10 @@ test('parcours local du studio jusqu au rapport en 25 gestes, sans aucune ecritu
     return { gestes: c.gestures, envoye: c.sent };
   });
   expect(etat).toEqual({ gestes: 25, envoye: true });
+  await fileVide(page);
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.locator('.row').nth(2).locator('.row-sub')).toHaveText('Report sent ✓✓');
-  expect(await ecritures(page)).toEqual([]);
+  expect((await actionsEcrites(page)).filter((a) => a === 'finishJob').length).toBe(1);
 });
 
 test('ticket pest : verification du manager, et les autres tickets ouverts en bulle a l etape 2', async ({ page }) => {
@@ -164,7 +168,9 @@ test('ticket pest : verification du manager, et les autres tickets ouverts en bu
   await expect(page.locator('[data-reply="check-see"]')).toHaveText('I see insects');
   await page.locator('[data-reply="check-ok"]').click();
   await expect(page.locator('[data-reply="walls-ok"]')).toBeVisible();
-  expect(await ecritures(page)).toEqual([]);
+  // « No insects » n'ecrit rien : seuls le demarrage et les photos des pieces partent.
+  await fileVide(page);
+  expect(new Set(await actionsEcrites(page))).toEqual(new Set(['startJob', 'uploadPhoto']));
 });
 
 test('binome : Pionah a demarre avant, la cleaner ajoute ses pieces a son rapport', async ({ page }) => {
@@ -231,6 +237,5 @@ for (const largeur of [360, 390, 430]) {
     await page.locator('[data-reply="low-done"]').click();
     await expect(page.locator('.msg.report')).toContainText('Leak: under the sink');
     await shot('08-rapport');
-    expect(await ecritures(page)).toEqual([]);
   });
 }

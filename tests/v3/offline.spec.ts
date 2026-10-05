@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { bootV3, fetchLog } from './helpers';
+import { BLOOM, demarrer, ecritures, fileVide, photo, piece } from './conv-helpers';
 
-// File hors ligne de la v3. Depuis le portage de l'interface conversation (tache 4
-// du plan 2026-10-05), aucun geste de l'ecran n'ecrit encore (les ecritures sont
-// branchees a la tache 5) : les gestes passent ici par sendOrQueue, le chemin
-// unique de toute ecriture v3, et le bandeau « Saved on device » se lit sur la
-// liste du jour.
+// File hors ligne de la v3. Les premiers tests passent par sendOrQueue (chemin
+// direct, garde pour les actions hors conversation) et lisent le bandeau « Saved
+// on device » sur la liste du jour. Les derniers (tache 5 du branchement) passent
+// par l'interface : reseau coupe au milieu d'un signalement, rechargement au
+// milieu de l'etape 4.
 async function geste(page: any, itemId: string) {
   return await page.evaluate(async (item: string) => {
     const m = await import('/v3/offline.js');
@@ -174,4 +175,89 @@ test('la file survit a un rechargement de page', async ({ page }) => {
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true);
   await expect(page.getByText('Saved on device, 1 to sync')).toBeVisible();
+});
+
+// ---------------------------------------------------------------------------
+// Par l'interface (tache 5 du branchement)
+// ---------------------------------------------------------------------------
+
+test('reseau coupe au milieu d un signalement puis retabli : un seul ticket, ses deux photos et sa note rattachees', async ({ page }) => {
+  await demarrer(page);
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
+  await page.locator('[data-reply="walls-ok"]').click();
+  await page.locator('[data-reply="some-damage"]').click();
+  await page.locator('[data-kind="Leak"]').click();
+  await fileVide(page);
+  // Coupure par le drapeau du faux fetch, pas par context.setOffline() : sous WebKit,
+  // Playwright hors ligne refuse aussi la lecture des Blob de la page (photo du canvas),
+  // ce qu'un vrai iPhone en mode avion ne fait pas.
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await photo(page, 'flow-shutter');
+  await photo(page, 'flow-shutter');
+  await page.locator('[data-flow="photos-done"]').click();
+  await page.locator('#problem-note').fill('under the sink');
+  await page.locator('[data-flow="save-text"]').click();
+  // Garde sur le telephone : une seule coche.
+  await expect(page.locator('.msg.me.problem .ticks')).toHaveText('✓');
+  await expect.poll(async () => page.evaluate(async () => (await (await import('/v3/offline.js')).pendingEntries()).length)).toBe(5);
+  await page.evaluate(() => { localStorage.removeItem('v3TestOffline'); window.dispatchEvent(new Event('online')); });
+  await fileVide(page);
+  const e = await ecritures(page);
+  const reports = e.filter((x) => x.action === 'v3.reportProblem');
+  expect(reports.length).toBe(1);
+  const ups = e.filter((x) => x.action === 'v3.uploadPhoto' && x.body.itemName === 'problem');
+  expect(ups.length).toBe(2);
+  const adds = e.filter((x) => x.action === 'v3.addProblemPhoto');
+  const notes = e.filter((x) => x.action === 'v3.setProblemNote');
+  expect(adds.length).toBe(1);
+  expect(notes.length).toBe(1);
+  expect(reports[0].body.photoIdem).toBe(ups[0].body.idem);
+  expect(adds[0].body).toMatchObject({ ticketIdem: reports[0].body.idem, photoIdem: ups[1].body.idem });
+  expect(notes[0].body).toMatchObject({ ticketIdem: reports[0].body.idem, note: 'under the sink' });
+  // Dans l'ordre de la file : photo, signalement, photo, rattachement, note.
+  const log = (await fetchLog(page)).filter((l) => /action=v3\.(uploadPhoto|reportProblem|addProblemPhoto|setProblemNote)/.test(l.url));
+  const derniers = log.slice(-5).map((l) => (l.url.match(/action=v3\.(\w+)/) || [])[1]);
+  expect(derniers).toEqual(['uploadPhoto', 'reportProblem', 'uploadPhoto', 'addProblemPhoto', 'setProblemNote']);
+  await expect(page.locator('.msg.me.problem .ticks')).toHaveText('✓✓');
+  expect(await page.evaluate(async () => (await (await import('/v3/offline.js')).deadEntries()).length)).toBe(0);
+});
+
+test('rechargement au milieu de l etape 4 : meme etape, photos retrouvees, aucun geste renvoye', async ({ page }) => {
+  await demarrer(page);
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
+  await page.locator('[data-reply="walls-ok"]').click();
+  await page.locator('[data-reply="no-damage"]').click();
+  await page.locator('[data-reply="linen-yes"]').click();
+  await piece(page, 4, 'Bed');
+  await fileVide(page);
+  const avant = await ecritures(page);
+  expect(avant.length).toBe(5);
+  // Une photo encore en file au moment du rechargement.
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await photo(page);
+  await expect(page.locator('.vf .count')).toHaveText('1 photo');
+  await expect.poll(async () => page.evaluate(async () => (await (await import('/v3/offline.js')).pendingEntries()).length)).toBe(1);
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true);
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 4 · Bathroom /);
+  await expect(page.locator('.vf .count')).toHaveText('1 photo');
+  await page.evaluate(() => { localStorage.removeItem('v3TestOffline'); window.dispatchEvent(new Event('online')); });
+  await fileVide(page);
+  const apres = await ecritures(page);
+  expect(apres.length).toBe(6);
+  const anciens = new Set(avant.map((x) => x.body.idem));
+  expect(apres.filter((x) => anciens.has(x.body.idem)).every((x) => x.essais === 1)).toBe(true);
+  expect(apres[5]).toMatchObject({ action: 'v3.uploadPhoto', body: { itemName: 'end:Bathroom', jobId: BLOOM.jobId } });
+  // La conversation continue la ou elle en etait.
+  await page.locator('.vf [data-reply="next-room"]').click();
+  await piece(page, 4, 'Kitchen');
+  await fileVide(page);
+  const fin = await ecritures(page);
+  expect(fin.length).toBe(7);
+  expect(fin[6].body.itemName).toBe('end:Kitchen');
 });

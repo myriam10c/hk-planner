@@ -4,6 +4,7 @@ import { LINEN_USUAL, GROUP_NAME, aptLabel } from "./rules.js";
 import { KINDS, URGENCY } from "./problems.js";
 import { currentStep, currentFlow, elapsedMinutes, isHelper } from "./conversation.js";
 import { reportText, formatMinutes } from "./report.js";
+import { finishAcked } from "./sync.js";
 
 export const escapeHtml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const waFormat = t => escapeHtml(t).replace(/\*([^*\n]+)\*/g, "<b>$1</b>").replace(/_([^_\n]+)_/g, "<i>$1</i>").replace(/\n/g, "<br>");
@@ -33,7 +34,8 @@ function avatar(a, cls) {
 }
 
 function rowStatus(apt, conv, now) {
-  if (conv && conv.sent) return isHelper(conv) ? "Added to " + apt.lead.name + "'s report" : "Report sent ✓✓";
+  // ✓✓ quand le proxy a reçu la fin du ménage (finishJob), ✓ tant qu'elle attend dans la file.
+  if (conv && conv.sent) return isHelper(conv) && !conv.linenNeeded ? "Added to " + apt.lead.name + "'s report" : "Report sent " + (finishAcked(conv) ? "✓✓" : "✓");
   // Étape visible (1 à 5), jamais le nombre d'étapes internes.
   if (conv && conv.startedAt) return "Step " + currentStep(conv).n + " of 5 · " + formatMinutes(elapsedMinutes(conv, now));
   // État enregistré sur le serveur (journée réelle), sans conversation sur ce téléphone.
