@@ -1,6 +1,5 @@
 import { get, post } from '/inspections/api.js';
 
-const TZ = 'Asia/Dubai';
 const dot = (c) => (c === 'green' ? 'dot-green' : c === 'orange' ? 'dot-orange' : 'dot-red');
 
 function last(r) {
@@ -83,6 +82,7 @@ export async function renderFleet(ctx) {
     if (a === 'open') return go('#/history/' + encodeURIComponent(b.dataset.id));
     if (a === 'toggle') return toggle(b.dataset.id, b.dataset.ex === '1', b);
   };
+  view.addEventListener('focusout', (ev) => { if (ev.target && ev.target.id === 'fq') st.focusQ = false; });
   view.oninput = (ev) => { if (ev.target.id === 'fq') { st.q = ev.target.value; st.focusQ = true; paint(); } };
 
   paint();

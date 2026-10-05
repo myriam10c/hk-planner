@@ -71,6 +71,7 @@ async function boot() {
   let s = null;
   try { s = await getSession(); } catch (e) { s = null; }
   if (!s) { signIn(); return; }
+  if (s.kind === 'stale') { loadError(); return; }
   try {
     const r = await get('cleanerMe');
     const c = r && r.cleaner;

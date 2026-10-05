@@ -44,3 +44,11 @@ test('historique : photo en grand', async ({ page }) => {
   await page.getByRole('button', { name: 'Open photo' }).click();
   await expect(page.locator('dialog.photo[open]')).toBeVisible();
 });
+
+test('parc : la recherche ne reprend pas le focus apres Exclude', async ({ page }) => {
+  await bootInsp(page, [MGR, OVERVIEW, { status: 200, match: 'action=insp.setExcluded', body: { listingId: 'C', excluded: true } }], { pinToken: 'tok', hash: '#/fleet' });
+  await page.locator('#fq').fill('Apt');
+  await page.getByTestId('row-C').getByRole('button', { name: 'Exclude from inspections' }).click();
+  await expect(page.getByTestId('row-C').getByText('Excluded')).toBeVisible();
+  expect(await page.evaluate(() => document.activeElement && (document.activeElement as HTMLElement).id)).not.toBe('fq');
+});

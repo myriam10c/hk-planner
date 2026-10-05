@@ -47,6 +47,29 @@ Deno.test("today : deuxieme appel ne change pas les rangs ni les prises en charg
   assertEquals(r.today[0].claimedByName, "Faiza");
 });
 
+Deno.test("today : inProgressById present pour l'auteur", async () => {
+  const db = base();
+  db.tables.inspections.push({ id: 3, listing_id: "C", inspector_id: 3, inspection_date: D, finished_at: null, started_at: D + "T09:00:00+04:00", eligibility: "checkout" });
+  const r = await inspToday(db, D, [], null);
+  assertEquals(r.today.find((c) => c.listingId === "C")!.inProgressById, 3);
+  assertEquals(r.today.find((c) => c.listingId === "A")!.inProgressById, null);
+});
+
+Deno.test("today : liste stable, journalisee une fois, doneToday, also exclut les journalises", async () => {
+  const db = base();
+  const r1 = await inspToday(db, D, [], null);
+  assertEquals(r1.today.map((c) => c.listingId), ["C", "A"]);
+  const avant = db.tables.inspection_proposals.filter((p: any) => p.proposal_date === D).length;
+  db.tables.inspections.push({ id: 8, listing_id: "C", inspector_id: 2, inspection_date: D, finished_at: D + "T10:42:00+04:00", started_at: D + "T10:00:00+04:00", eligibility: "vacant" });
+  const r2 = await inspToday(db, D, [], null);
+  assertEquals(r2.today.map((c) => c.listingId), ["C", "A"]);
+  assertEquals(r2.today[0].doneToday, { by: "Walter", at: D + "T10:42:00+04:00" });
+  assertEquals(r2.today[1].doneToday, null);
+  assertEquals(db.tables.inspection_proposals.filter((p: any) => p.proposal_date === D && Number(p.rank) >= 1).length, avant);
+  assertEquals(r2.also.map((c) => c.listingId), ["B"]);
+  assertEquals(r2.also.some((c) => ["C", "A"].includes(c.listingId)), false);
+});
+
 Deno.test("today : config absente = 4", async () => {
   const db = base(); db.tables.app_config = [];
   assertEquals((await inspToday(db, D, [], null)).target, 4);

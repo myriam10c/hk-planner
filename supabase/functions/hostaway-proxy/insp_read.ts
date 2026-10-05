@@ -1,7 +1,7 @@
 // Lectures du module Inspections : liste du jour, tableau du parc, historique.
 import { plusDays, V3_PHOTO_BUCKET } from "./v3.ts";
 import {
-  daysBetween, dubaiDay, fleetColor, INSP_DEFAULT_TARGET, INSP_GOAL_DAYS, INSP_ZONES, listingLabel, rankToday,
+  daysBetween, dubaiDay, eligibilityFor, fleetColor, INSP_DEFAULT_TARGET, INSP_GOAL_DAYS, INSP_ZONES, listingLabel, rankToday,
 } from "./insp_rules.ts";
 import type { InspCard, InspReservation } from "./insp_rules.ts";
 
@@ -10,7 +10,8 @@ export type OverviewRow = {
   daysSince: number | null; color: string; openIssues: number; missed: number;
 };
 const CLOSED = new Set(["resolved", "cancelled"]);
-export type TodayCard = InspCard & { claimedBy: number | null; claimedByName: string | null; inProgressBy: string | null };
+export type TodayCard = InspCard & { claimedBy: number | null; claimedByName: string | null; inProgressBy: string | null;
+  inProgressById: number | null; doneToday: { by: string; at: string } | null };
 
 async function cleanerNames(sb: any): Promise<Record<string, string>> {
   const { data } = await sb.from("cleaners").select("id, name");
@@ -88,10 +89,14 @@ async function readTarget(sb: any): Promise<number> {
   return Number.isInteger(n) && n >= 0 && n <= 50 ? n : INSP_DEFAULT_TARGET;
 }
 
-export async function inspToday(sb: any, day: string, reservations: InspReservation[], cachedAt: string | null) {
+export async function inspToday(
+  sb: any, day: string, reservations: InspReservation[], cachedAt: string | null,
+): Promise<{ day: string; target: number; cachedAt: string | null; today: TodayCard[]; also: TodayCard[] }> {
   const names = await cleanerNames(sb);
+  const finished = await finishedInspections(sb);
   const [target, { data: listings }, lastDone] = await Promise.all([
-    readTarget(sb), sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded"), loadLastDone(sb, names),
+    readTarget(sb), sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded"),
+    loadLastDone(sb, names, finished),
   ]);
   const issues = await openIssuesByListing(sb, lastDone);
   const missed = await missedCounts(sb, day, lastDone);
@@ -99,24 +104,63 @@ export async function inspToday(sb: any, day: string, reservations: InspReservat
     day, target, listings: listings ?? [], reservations, lastDone,
     openIssueListings: new Set(Object.keys(issues)), missed,
   });
-  if (ranked.today.length) {
+  // Les propositions sont journalisees UNE fois par jour Dubai : la liste du jour reste stable.
+  const loggedRows = async () => {
+    const { data } = await sb.from("inspection_proposals").select("listing_id, claimed_by, rank").eq("proposal_date", day);
+    return data ?? [];
+  };
+  let props = await loggedRows();
+  if (!props.some((p: any) => Number(p.rank) >= 1) && ranked.today.length) {
     await sb.from("inspection_proposals").upsert(
       ranked.today.map((c, i) => ({ proposal_date: day, listing_id: c.listingId, rank: i + 1 })),
       { onConflict: "proposal_date,listing_id", ignoreDuplicates: true },
     );
+    props = await loggedRows();
   }
-  const { data: props } = await sb.from("inspection_proposals").select("listing_id, claimed_by").eq("proposal_date", day);
   const claimed: Record<string, number | null> = {};
-  for (const p of props ?? []) claimed[p.listing_id] = p.claimed_by ?? null;
+  for (const p of props) claimed[p.listing_id] = p.claimed_by ?? null;
+  const logged = props.filter((p: any) => Number(p.rank) >= 1).sort((a: any, b: any) => Number(a.rank) - Number(b.rank));
+  const loggedIds = new Set<string>(logged.map((p: any) => String(p.listing_id)));
   const { data: running } = await sb.from("inspections").select("listing_id, inspector_id")
     .eq("inspection_date", day).is("finished_at", null);
   const runningBy: Record<string, string> = {};
-  for (const r of running ?? []) runningBy[r.listing_id] = names[String(r.inspector_id)] ?? "Someone";
+  const runningById: Record<string, number> = {};
+  for (const r of running ?? []) {
+    runningBy[r.listing_id] = names[String(r.inspector_id)] ?? "Someone";
+    runningById[r.listing_id] = Number(r.inspector_id);
+  }
+  const doneToday: Record<string, { by: string; at: string }> = {};
+  for (const r of finished) { // trie du plus recent au plus ancien : on garde le premier du jour
+    if (dubaiDay(r.finished_at) !== day || doneToday[r.listing_id]) continue;
+    doneToday[r.listing_id] = { by: names[String(r.inspector_id)] ?? "Someone", at: r.finished_at };
+  }
   const decorate = (c: InspCard): TodayCard => {
     const by = claimed[c.listingId] ?? null;
-    return { ...c, claimedBy: by, claimedByName: by ? names[String(by)] ?? null : null, inProgressBy: runningBy[c.listingId] ?? null };
+    return {
+      ...c, claimedBy: by, claimedByName: by ? names[String(by)] ?? null : null,
+      inProgressBy: runningBy[c.listingId] ?? null, inProgressById: runningById[c.listingId] ?? null,
+      doneToday: doneToday[c.listingId] ?? null,
+    };
   };
-  return { day, target, cachedAt, today: ranked.today.map(decorate), also: ranked.also.map(decorate) };
+  const rankedById: Record<string, InspCard> = {};
+  for (const c of ranked.today.concat(ranked.also)) rankedById[c.listingId] = c;
+  const lById: Record<string, any> = {};
+  for (const l of listings ?? []) lById[String(l.listing_id)] = l;
+  const cardFor = (id: string): InspCard => {
+    if (rankedById[id]) return rankedById[id];
+    const last = lastDone[id];
+    return {
+      listingId: id, name: listingLabel(lById[id] ?? {}),
+      eligibility: eligibilityFor(id, reservations, day) ?? { kind: "vacant", nextArrival: null },
+      daysSince: last ? daysBetween(last.finishedAt, day) : null, lastInspector: last ? last.inspector : null,
+      missed: missed[id] ?? 0, openIssue: id in issues,
+    };
+  };
+  return {
+    day, target, cachedAt,
+    today: logged.map((p: any) => decorate(cardFor(String(p.listing_id)))),
+    also: ranked.today.concat(ranked.also).filter((c) => !loggedIds.has(c.listingId)).map(decorate),
+  };
 }
 
 export async function inspOverview(sb: any, day: string) {

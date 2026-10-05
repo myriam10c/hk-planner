@@ -5,6 +5,7 @@ h3 { margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
 .reason, .mute, .badge, .state { overflow-wrap: anywhere; }
 .mute { color: var(--mute); margin: 4px 0; }
 .pad { padding: 12px; }
+.top-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
 .btn { min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--bone-hi); color: var(--ink); font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 .btn.primary { background: var(--terra); border-color: var(--terra); color: var(--bone-hi); }

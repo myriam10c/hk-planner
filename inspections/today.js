@@ -2,7 +2,8 @@ import { get, post } from '/inspections/api.js';
 
 const TZ = 'Asia/Dubai';
 const hh = (n) => String(n).padStart(2, '0') + ':00';
-const dayMonth = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dayMonth = (iso) => { const p = String(iso).split('-'); return Number(p[2]) + ' ' + MON[Number(p[1]) - 1]; };
 const clock = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: TZ });
 const longDate = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
 
@@ -36,7 +37,10 @@ export async function renderToday(ctx) {
   const cardHtml = (c) => {
     const mine = c.claimedBy === me.cleaner_id;
     let actions = '';
-    if (c.inProgressBy) actions += '<span class="state">In progress by ' + esc(c.inProgressBy) + '</span>';
+    if (c.doneToday) actions += '<span class="state">Done by ' + esc(c.doneToday.by) + ' at ' + esc(clock(c.doneToday.at)) + '</span>';
+    else if (c.inProgressBy && c.inProgressById != null && c.inProgressById === me.cleaner_id) {
+      actions += '<button class="btn primary" data-act="start" data-id="' + esc(c.listingId) + '" data-e="' + esc(c.eligibility && c.eligibility.kind) + '">Resume inspection</button>';
+    } else if (c.inProgressBy) actions += '<span class="state">In progress by ' + esc(c.inProgressBy) + '</span>';
     else if (c.claimedBy == null) actions += '<button class="btn primary" data-act="claim" data-id="' + esc(c.listingId) + '">I\'ll take it</button>';
     else if (mine) actions += '<button class="btn primary" data-act="start" data-id="' + esc(c.listingId) + '" data-e="' + esc(c.eligibility && c.eligibility.kind) + '">Start inspection</button>'
       + '<button class="btn ghost" data-act="release" data-id="' + esc(c.listingId) + '">Release</button>';
@@ -44,7 +48,7 @@ export async function renderToday(ctx) {
       actions += '<span class="state">Taken by ' + esc(c.claimedByName || 'a teammate') + '</span>';
       if (isMgr) actions += '<button class="btn ghost" data-act="release" data-id="' + esc(c.listingId) + '">Release</button>';
     }
-    if (isMgr) actions += '<button class="btn ghost" data-act="assign" data-id="' + esc(c.listingId) + '">Assign</button>';
+    if (isMgr && !c.doneToday) actions += '<button class="btn ghost" data-act="assign" data-id="' + esc(c.listingId) + '">Assign</button>';
     return '<article class="card"><div class="card-top"><span class="dot ' + dot(c) + '" aria-hidden="true"></span><h3>' + esc(c.name) + '</h3></div>'
       + '<p class="reason">' + esc(reason(c.eligibility)) + '</p>'
       + '<p class="mute">' + esc(last(c)) + '</p>'
@@ -55,7 +59,7 @@ export async function renderToday(ctx) {
 
   const head = () => '<header class="top"><div><h1>Today\'s inspections</h1><p class="mute">'
     + esc(st.data ? longDate(st.data.day) : '') + '</p></div>'
-    + '<button class="btn ghost" data-act="fleet">Fleet</button></header>';
+    + '<div class="top-actions"><a class="btn ghost" href="/">Back to HK Planner</a><button class="btn ghost" data-act="fleet">Fleet</button></div></header>';
 
   const body = () => {
     if (st.picker) {

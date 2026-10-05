@@ -4,7 +4,7 @@ import { bootInsp, fetchLog, noHorizontalScroll } from './helpers';
 // Forme reelle de cleanerMe (index.ts) : { status, cleaner: { id, name, color, role } }.
 const ME = { status: 200, match: 'action=cleanerMe', body: { status: 'success', cleaner: { id: 3, name: 'Faiza', color: '#abc', role: 'cleaner' } } };
 const card = (o: any) => ({ listingId: 'A', name: 'Apt 101 · Tower A', eligibility: { kind: 'checkout', checkOutTime: 12, nextCheckIn: { date: '2026-10-06', time: 15 } },
-  daysSince: null, lastInspector: null, missed: 2, openIssue: false, claimedBy: null, claimedByName: null, inProgressBy: null, ...o });
+  daysSince: null, lastInspector: null, missed: 2, openIssue: false, claimedBy: null, claimedByName: null, inProgressBy: null, inProgressById: null, doneToday: null, ...o });
 const TODAY = { status: 200, match: 'action=insp.today', body: { day: '2026-10-06', target: 4, cachedAt: null,
   today: [card({}), card({ listingId: 'B', name: 'Apt 202 · Tower B', eligibility: { kind: 'vacant', nextArrival: '2026-10-10' }, daysSince: 35, lastInspector: 'Walter', missed: 0, claimedBy: 2, claimedByName: 'Walter' })],
   also: [card({ listingId: 'C', name: 'Apt 303 · Tower C', eligibility: { kind: 'vacant', nextArrival: null }, daysSince: 5, lastInspector: 'Harlene', missed: 0 })] } };
@@ -116,6 +116,56 @@ test('Inspect another apartment : liste, exclus masques, navigation ad hoc', asy
 test('erreur reseau au boot : Retry, pas "Please sign in"', async ({ page }) => {
   await bootInsp(page, [{ status: 500, match: 'action=cleanerMe', body: { error: 'boom' } }], { pinToken: 'tok' });
   await expect(page.getByText('Could not load. Check your connection and try again.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect(page.getByText('Please sign in')).toHaveCount(0);
+});
+
+test('reprise : l\'auteur voit Resume inspection, un autre voit In progress by', async ({ page }) => {
+  const t = JSON.parse(JSON.stringify(TODAY.body));
+  t.today[0].inProgressBy = 'Faiza'; t.today[0].inProgressById = 3; t.today[0].claimedBy = 3; t.today[0].claimedByName = 'Faiza';
+  await bootInsp(page, [ME, { ...TODAY, body: t }], { pinToken: 'tok' });
+  await page.getByRole('button', { name: 'Resume inspection' }).click();
+  await expect(page).toHaveURL(/#\/inspect\/A\?e=checkout/);
+});
+
+test('reprise : un autre utilisateur voit In progress by Faiza', async ({ page }) => {
+  const t = JSON.parse(JSON.stringify(TODAY.body));
+  t.today[0].inProgressBy = 'Faiza'; t.today[0].inProgressById = 3;
+  await bootInsp(page, [MGR, { ...TODAY, body: t }], { pinToken: 'tok' });
+  await expect(page.getByText('In progress by Faiza')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Resume inspection' })).toHaveCount(0);
+});
+
+test('carte terminee : Done by, sans bouton de prise en charge', async ({ page }) => {
+  const t = JSON.parse(JSON.stringify(TODAY.body));
+  t.today = [card({ doneToday: { by: 'Walter', at: '2026-10-06T06:42:00Z' }, daysSince: 0, lastInspector: 'Walter' })];
+  t.also = [];
+  await bootInsp(page, [ME, { ...TODAY, body: t }], { pinToken: 'tok' });
+  await expect(page.getByText('Done by Walter at 10:42')).toBeVisible();
+  await expect(page.getByRole('button', { name: "I'll take it" })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Start inspection' })).toHaveCount(0);
+});
+
+test('en-tete : lien retour vers HK Planner', async ({ page }) => {
+  await bootInsp(page, [ME, TODAY], { pinToken: 'tok' });
+  await expect(page.getByRole('link', { name: 'Back to HK Planner' })).toHaveAttribute('href', '/');
+});
+
+test('date de prochaine arrivee en septembre : Sep', async ({ page }) => {
+  const t = JSON.parse(JSON.stringify(TODAY.body));
+  t.today = [card({ eligibility: { kind: 'vacant', nextArrival: '2026-09-10' } })]; t.also = [];
+  await bootInsp(page, [ME, { ...TODAY, body: t }], { pinToken: 'tok' });
+  await expect(page.getByText('Vacant · next arrival 10 Sep', { exact: true })).toBeVisible();
+});
+
+test('session stale : ecran Retry et non "Please sign in"', async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('hkAuthSession', JSON.stringify({ access_token: 'x', refresh_token: 'r', expires_at: 1 }));
+      Object.defineProperty(navigator, 'onLine', { get: () => false });
+    } catch (e) { /* stockage indisponible */ }
+  });
+  await bootInsp(page, [ME, TODAY], {});
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
   await expect(page.getByText('Please sign in')).toHaveCount(0);
 });
