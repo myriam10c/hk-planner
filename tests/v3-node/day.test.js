@@ -34,6 +34,19 @@ test("numéro et immeuble depuis listingName ; à défaut numéro vide et immeub
   assert.deepEqual(splitName("3207 - Sobha Waves"), { num: "3207", building: "Sobha Waves" });
   assert.deepEqual(splitName("1011C - Bloom Towers"), { num: "1011C", building: "Bloom Towers" });
   assert.deepEqual(splitName("704 Golf Links"), { num: "704", building: "Golf Links" });
+  // Noms réels de listing_config.internal_name (revue, correctif 1).
+  assert.deepEqual(splitName("414 | Azizi Riviera 11"), { num: "414", building: "Azizi Riviera 11" });
+  assert.deepEqual(splitName("506 | Act 2"), { num: "506", building: "Act 2" });
+  assert.deepEqual(splitName("506 | Azizi Riviera 28"), { num: "506", building: "Azizi Riviera 28" });
+  assert.deepEqual(splitName("510-B Cloud by Tiger"), { num: "510-B", building: "Cloud by Tiger" });
+  assert.deepEqual(splitName("903-B | Cloud by Tiger"), { num: "903-B", building: "Cloud by Tiger" });
+  assert.deepEqual(splitName("G34 - elysee 3"), { num: "G34", building: "elysee 3" });
+  assert.deepEqual(splitName("1913a - Bloom Height"), { num: "1913a", building: "Bloom Height" });
+  assert.deepEqual(splitName("1205 - Binghatti Gems V2 - ok"), { num: "1205", building: "Binghatti Gems" });
+  assert.deepEqual(splitName("1205 - Binghatti Gems V2"), { num: "1205", building: "Binghatti Gems" });
+  assert.deepEqual(splitName("308 - Samana Golf Avenue (NEW)"), { num: "308", building: "Samana Golf Avenue" });
+  assert.deepEqual(splitName("308 - Samana Golf Avenue (new)"), { num: "308", building: "Samana Golf Avenue" });
+  assert.deepEqual(splitName("1702 -  Sobha   Waves /"), { num: "1702", building: "Sobha Waves" });
   assert.deepEqual(splitName("Perfect 2br for families in JVC"), { num: "", building: "Perfect 2br for families in JVC" });
   assert.deepEqual(splitName("Apartment"), { num: "", building: "Apartment" });
   assert.deepEqual(splitName(""), { num: "", building: "Apartment" });

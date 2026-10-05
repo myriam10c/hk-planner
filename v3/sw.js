@@ -28,7 +28,6 @@ const PRECACHE = [
   '/v3/api.js',
   '/v3/offline.js',
   '/v3/ui.js',
-  '/v3/photo.js',
   '/v3/practice.js',
   '/v3/proxy-config.js',
   '/v3/session.js',

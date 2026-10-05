@@ -1,4 +1,4 @@
-// Briques d'interface : icones SVG (jamais d'emoji, ruling 8), toast, feuille.
+// Briques d'interface : icones SVG (jamais d'emoji, ruling 8), toast.
 // Aucun gestionnaire en ligne : tout passe par la delegation d'app.js.
 const ICONS = {
   check: '<path d="M20 6 9 17l-5-5"/>',
@@ -32,22 +32,6 @@ export function toast(message, kind) {
   div.textContent = message;
   host.appendChild(div);
   setTimeout(function () { div.remove(); }, 3500);
-}
-
-export function openSheet(html) {
-  const host = document.getElementById('sheet-host');
-  host.innerHTML = '<div class="sheet" data-sheet><div class="sheet-in">' + html + '</div></div>';
-  return host.querySelector('.sheet-in');
-}
-
-export function closeSheet() {
-  const host = document.getElementById('sheet-host');
-  if (host) host.innerHTML = '';
-}
-
-export function sheetIsOpen() {
-  const host = document.getElementById('sheet-host');
-  return !!(host && host.querySelector('[data-sheet]'));
 }
 
 // « 4h40 » plutot que « 280 min » : c'est ce que la cleaner lit en marchant.

@@ -65,11 +65,27 @@ export function guestOf(stop, now) {
 // « 3207 - Sobha Waves » -> 3207 / Sobha Waves ; « 704 Golf Links » -> 704 / Golf Links.
 // Le numero est le premier mot s'il contient un chiffre ; a defaut, numero vide et
 // immeuble = le nom entier (jamais d'identifiant de listing).
+// Séparateurs vus dans listing_config.internal_name : « - », « | », « : », « , », « · ».
+// Un suffixe « -B » colle au numero (« 510-B Cloud by Tiger ») fait partie du numero.
+// Bruit retire de l'immeuble : « V2 - ok », « V2 », « (NEW) », « / » final, espaces en trop.
+function cleanBuilding(b) {
+  let s = String(b || "").replace(/\s+/g, " ").trim();
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/\s*\/+$/, "").replace(/\s*\(new\)$/i, "").replace(/\s+V2(\s*-\s*ok)?$/i, "").trim();
+  } while (s !== prev);
+  return s;
+}
+
 export function splitName(name) {
-  const s = String(name || "").trim();
-  const m = s.match(/^([A-Za-z]{0,2}\d[\w/]*)\s*(?:[-–:,·]\s*)?(\S.*)$/);
-  if (m) return { num: m[1], building: m[2].trim() };
-  return { num: "", building: s || "Apartment" };
+  const s = String(name || "").replace(/\s+/g, " ").trim();
+  const m = s.match(/^([A-Za-z]{0,2}\d\w*(?:-[A-Za-z](?=[\s|]))?)\s*(?:[-\u2013:,·|]\s*)?(\S.*)$/);
+  if (m) {
+    const building = cleanBuilding(m[2]);
+    if (building) return { num: m[1], building };
+  }
+  return { num: "", building: cleanBuilding(s) || "Apartment" };
 }
 
 const PEST = { text: "Pest control was asked. Do you see insects?", ok: "No insects", see: "I see insects", kind: "Insects", reportLabel: "Insects seen" };

@@ -14,7 +14,7 @@ test('le service worker v3 precache la coquille, les modules, la conversation et
   const source = await r.text();
   for (const chemin of [
     '/v3/', '/v3/index.html', '/v3/app.js', '/v3/api.js', '/v3/offline.js', '/v3/ui.js',
-    '/v3/photo.js', '/v3/practice.js', '/v3/screens/profile.js',
+    '/v3/practice.js', '/v3/screens/profile.js',
     // Interface conversation (branchement 2026-10-05) : modules purs, styles, police.
     '/v3/conv/camera.js', '/v3/conv/conversation.js', '/v3/conv/day.js', '/v3/conv/problems.js',
     '/v3/conv/report.js', '/v3/conv/rules.js', '/v3/conv/share.js', '/v3/conv/stamp.js', '/v3/conv/ui.js',
@@ -33,6 +33,8 @@ test('le service worker v3 precache la coquille, les modules, la conversation et
   for (const ancien of ['today', 'job', 'finish', 'report']) {
     expect(source).not.toContain("'/v3/screens/" + ancien + ".js'");
   }
+  // photo.js est remplace par la capture du prototype (/v3/conv/camera.js).
+  expect(source).not.toContain("'/v3/photo.js'");
   // Les appels au proxy ne passent jamais par le cache.
   expect(source).toContain('supabase.co');
   // Le bundle vendor vit hors de /v3/ : le gestionnaire fetch doit quand meme le
