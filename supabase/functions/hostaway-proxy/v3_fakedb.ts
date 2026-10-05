@@ -32,6 +32,7 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
   function from(table: string) {
     const filters: Array<{ col: string; val: any; kind: "eq" | "in" | "or" | "gte" | "lte" | "lt" | "gt" | "isnull" }> = [];
     let pending: { op: string; values: any; opts?: any } | null = null;
+    let slice: [number, number] | null = null; // .range(a, b) : bornes incluses
     const list = () => (tables[table] ??= []);
     // « payload->>listingId » : chemin JSON texte de PostgREST, un seul niveau.
     const lire = (r: any, col: string) => {
@@ -71,7 +72,10 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
     async function run(): Promise<{ data: any; error: any }> {
       const key = table + "." + (pending ? pending.op : "select");
       if (fail[key]) return { data: null, error: fail[key] };
-      if (!pending) return { data: selected(), error: null };
+      if (!pending) {
+        const all = selected();
+        return { data: slice ? all.slice(slice[0], slice[1] + 1) : all, error: null };
+      }
       const rows = Array.isArray(pending.values) ? pending.values : [pending.values];
       if (pending.op === "insert") {
         const out: any[] = [];
@@ -121,6 +125,7 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
       or: (expr: string) => { filters.push({ col: "", val: expr, kind: "or" }); return q; },
       in: (col: string, val: any[]) => { filters.push({ col, val, kind: "in" }); return q; },
       order: () => q, limit: () => q, not: () => q,
+      range: (a: number, b: number) => { slice = [a, b]; return q; },
       is: (col: string, val: any) => { if (val === null) filters.push({ col, val, kind: "isnull" }); return q; },
       gte: (col: string, val: any) => { filters.push({ col, val, kind: "gte" }); return q; },
       lte: (col: string, val: any) => { filters.push({ col, val, kind: "lte" }); return q; },

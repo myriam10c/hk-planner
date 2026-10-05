@@ -84,3 +84,47 @@ Deno.test("history : zones not_ok, ticket et photos signees", async () => {
   assertEquals(it.photos[0].url.startsWith("https://signed.test/inspections/2/ac/"), true);
   assertEquals(db.storage.signBatches.length, 1);
 });
+
+Deno.test("missed : propose le jour D et inspecte le jour D = 0 le lendemain", async () => {
+  const db = base();
+  db.tables.inspection_proposals = [{ proposal_date: "2026-10-05", listing_id: "C", rank: 1 }];
+  db.tables.inspections.push({ id: 7, listing_id: "C", inspector_id: 3, inspection_date: "2026-10-05", finished_at: "2026-10-05T07:00:00+00:00", started_at: "2026-10-05T06:00:00+00:00", eligibility: "vacant" });
+  const r = await inspOverview(db, D);
+  assertEquals(r.rows.find((x) => x.listingId === "C")!.missed, 0);
+});
+
+Deno.test("missed : deux propositions apres la derniere inspection = 2, rang 0 ignore", async () => {
+  const db = base();
+  db.tables.inspection_proposals = [
+    { proposal_date: "2026-10-03", listing_id: "C", rank: 1 },
+    { proposal_date: "2026-10-04", listing_id: "C", rank: 2 },
+    { proposal_date: "2026-10-04", listing_id: "A", rank: 0 },
+  ];
+  db.tables.inspections.push({ id: 7, listing_id: "C", inspector_id: 3, inspection_date: "2026-10-02", finished_at: "2026-10-02T07:00:00+00:00", started_at: "2026-10-02T06:00:00+00:00", eligibility: "vacant" });
+  const r = await inspOverview(db, D);
+  assertEquals(r.rows.find((x) => x.listingId === "C")!.missed, 2);
+  assertEquals(r.rows.find((x) => x.listingId === "A")!.missed, 0);
+});
+
+Deno.test("overview : inspection terminee 21:00 UTC le 30/09 compte en octobre", async () => {
+  const db = base();
+  db.tables.inspections = [{ id: 8, listing_id: "A", inspector_id: 2, inspection_date: "2026-10-01", finished_at: "2026-09-30T21:00:00+00:00", started_at: "2026-09-30T20:00:00+00:00", eligibility: "vacant" }];
+  assertEquals((await inspOverview(db, D)).inspectedThisMonth, 1);
+});
+
+Deno.test("overview : plus de 1000 inspections terminees sont toutes lues", async () => {
+  const db = base();
+  db.tables.inspections = [];
+  for (let i = 1; i <= 1001; i++) {
+    db.tables.inspections.push({ id: i, listing_id: i === 1 ? "A" : "B", inspector_id: 2, inspection_date: "2026-10-01", finished_at: "2026-10-01T08:00:00+00:00", started_at: "2026-10-01T07:00:00+00:00", eligibility: "vacant" });
+  }
+  assertEquals((await inspOverview(db, D)).inspectedThisMonth, 1001);
+});
+
+Deno.test("issues : item avec ticket mais outcome fixed n'est pas un probleme ouvert", async () => {
+  const db = base();
+  db.tables.inspection_items = [{ inspection_id: 2, zone: "ac", status: "ok", note: null, outcome: "fixed", ticket_id: 50 }];
+  assertEquals((await inspOverview(db, D)).rows.find((x) => x.listingId === "B")!.openIssues, 0);
+  db.tables.inspection_items = [{ inspection_id: 2, zone: "ac", status: "not_ok", outcome: "fixed", ticket_id: 50 }];
+  assertEquals((await inspOverview(db, D)).rows.find((x) => x.listingId === "B")!.openIssues, 0);
+});

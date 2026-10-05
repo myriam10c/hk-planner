@@ -1,7 +1,7 @@
 // Lectures du module Inspections : liste du jour, tableau du parc, historique.
-import { V3_PHOTO_BUCKET } from "./v3.ts";
+import { plusDays, V3_PHOTO_BUCKET } from "./v3.ts";
 import {
-  daysBetween, fleetColor, INSP_DEFAULT_TARGET, INSP_GOAL_DAYS, INSP_ZONES, listingLabel, rankToday,
+  daysBetween, dubaiDay, fleetColor, INSP_DEFAULT_TARGET, INSP_GOAL_DAYS, INSP_ZONES, listingLabel, rankToday,
 } from "./insp_rules.ts";
 import type { InspCard, InspReservation } from "./insp_rules.ts";
 
@@ -19,16 +19,24 @@ async function cleanerNames(sb: any): Promise<Record<string, string>> {
   return m;
 }
 
+const PAGE = 1000; // PostgREST max_rows : sans pagination, la lecture est tronquee en silence.
 async function finishedInspections(sb: any): Promise<any[]> {
-  const { data } = await sb.from("inspections").select("id, listing_id, inspector_id, finished_at")
-    .not("finished_at", "is", null).order("finished_at", { ascending: false });
-  return (data ?? []).filter((r: any) => r.finished_at);
+  const out: any[] = [];
+  for (let from = 0;; from += PAGE) {
+    const { data } = await sb.from("inspections").select("id, listing_id, inspector_id, finished_at")
+      .not("finished_at", "is", null).order("finished_at", { ascending: false }).order("id", { ascending: false })
+      .range(from, from + PAGE - 1);
+    const page = data ?? [];
+    out.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return out.filter((r: any) => r.finished_at);
 }
 
-export async function loadLastDone(sb: any, names?: Record<string, string>) {
+export async function loadLastDone(sb: any, names?: Record<string, string>, finished?: any[]) {
   const n = names ?? await cleanerNames(sb);
   const out: Record<string, { finishedAt: string; inspector: string; id: number }> = {};
-  for (const r of await finishedInspections(sb)) {
+  for (const r of finished ?? await finishedInspections(sb)) {
     const prev = out[r.listing_id];
     if (!prev || r.finished_at > prev.finishedAt) {
       out[r.listing_id] = { finishedAt: r.finished_at, inspector: n[String(r.inspector_id)] ?? "Someone", id: r.id };
@@ -40,8 +48,8 @@ export async function loadLastDone(sb: any, names?: Record<string, string>) {
 async function openIssuesByListing(sb: any, lastDone: Record<string, { id: number }>): Promise<Record<string, number>> {
   const lastIds = Object.values(lastDone).map((d) => d.id);
   if (!lastIds.length) return {};
-  const { data: items } = await sb.from("inspection_items").select("inspection_id, ticket_id").in("inspection_id", lastIds);
-  const withTicket = (items ?? []).filter((i: any) => i.ticket_id);
+  const { data: items } = await sb.from("inspection_items").select("inspection_id, ticket_id, status, outcome").in("inspection_id", lastIds);
+  const withTicket = (items ?? []).filter((i: any) => i.ticket_id && i.status === "not_ok" && i.outcome === "maintenance");
   if (!withTicket.length) return {};
   const { data: tickets } = await sb.from("maintenance_tickets").select("id, status").in("id", withTicket.map((i: any) => i.ticket_id));
   const open = new Set((tickets ?? []).filter((t: any) => !CLOSED.has(String(t.status))).map((t: any) => String(t.id)));
@@ -60,12 +68,15 @@ export async function loadOpenIssueListings(sb: any): Promise<Set<string>> {
   return new Set(Object.keys(await openIssuesByListing(sb, await loadLastDone(sb))));
 }
 
+// Propositions ratees : rang >= 1, strictement apres le jour Dubai de la derniere inspection terminee, avant `day`.
 async function missedCounts(sb: any, day: string, lastDone: Record<string, { finishedAt: string }>) {
-  const { data } = await sb.from("inspection_proposals").select("proposal_date, listing_id").lt("proposal_date", day);
+  const { data } = await sb.from("inspection_proposals").select("proposal_date, listing_id, rank")
+    .lt("proposal_date", day).gte("proposal_date", plusDays(day, -120));
   const out: Record<string, number> = {};
   for (const p of data ?? []) {
+    if (!(Number(p.rank) >= 1)) continue;
     const last = lastDone[p.listing_id];
-    if (last && String(p.proposal_date) < last.finishedAt.slice(0, 10)) continue;
+    if (last && String(p.proposal_date) <= dubaiDay(last.finishedAt)) continue;
     out[p.listing_id] = (out[p.listing_id] ?? 0) + 1;
   }
   return out;
@@ -111,7 +122,8 @@ export async function inspToday(sb: any, day: string, reservations: InspReservat
 export async function inspOverview(sb: any, day: string) {
   const names = await cleanerNames(sb);
   const { data: listings } = await sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded");
-  const lastDone = await loadLastDone(sb, names);
+  const finished = await finishedInspections(sb);
+  const lastDone = await loadLastDone(sb, names, finished);
   const issues = await openIssuesByListing(sb, lastDone);
   const missed = await missedCounts(sb, day, lastDone);
   const rows: OverviewRow[] = (listings ?? []).map((l: any): OverviewRow => {
@@ -128,8 +140,8 @@ export async function inspOverview(sb: any, day: string) {
   const active = rows.filter((r) => !r.excluded);
   const covered = active.filter((r) => r.daysSince !== null && r.daysSince < INSP_GOAL_DAYS).length;
   const monthStart = day.slice(0, 8) + "01";
-  const inspectedThisMonth = (await finishedInspections(sb))
-    .filter((r: any) => r.finished_at.slice(0, 10) >= monthStart).length;
+  const inspectedThisMonth = finished
+    .filter((r: any) => dubaiDay(r.finished_at) >= monthStart).length;
   return {
     coveragePct: active.length ? Math.round((covered / active.length) * 100) : 0,
     inspectedThisMonth, rows,

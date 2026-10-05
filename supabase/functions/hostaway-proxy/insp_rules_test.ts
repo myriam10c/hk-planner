@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  daysBetween, eligibilityFor, fleetColor, INSP_ZONES, inspRoleAllowed, listingLabel, rankToday,
+  daysBetween, dubaiDay, eligibilityFor, fleetColor, INSP_ZONES, inspRoleAllowed, listingLabel, rankToday,
 } from "./insp_rules.ts";
 
 const R = (listingId: string, arrival: string, departure: string, extra: any = {}) =>
@@ -104,4 +104,10 @@ Deno.test("rankToday : < 7 jours mais probleme ouvert = propose", () => {
   });
   assertEquals(out.today.map((c) => c.listingId), ["2"]);
   assertEquals(out.today[0].openIssue, true);
+});
+
+Deno.test("dubaiDay : jour Dubai d'un horodatage UTC ou +04:00", () => {
+  assertEquals(dubaiDay("2026-09-30T21:00:00+00:00"), "2026-10-01");
+  assertEquals(dubaiDay("2026-09-30T19:59:59+00:00"), "2026-09-30");
+  assertEquals(dubaiDay("2026-10-01T00:30:00+04:00"), "2026-10-01");
 });

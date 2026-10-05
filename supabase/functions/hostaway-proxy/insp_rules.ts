@@ -62,8 +62,12 @@ export function eligibilityFor(listingId: string, reservations: InspReservation[
 }
 
 const DUBAI_MS = 4 * 3600_000;
+// Jour calendaire Asia/Dubai (UTC+4 fixe) d'un horodatage ISO, quel que soit son fuseau.
+export function dubaiDay(iso: string): string {
+  return new Date(new Date(iso).getTime() + DUBAI_MS).toISOString().slice(0, 10);
+}
 export function daysBetween(fromIso: string, toDay: string): number {
-  const fromDay = new Date(new Date(fromIso).getTime() + DUBAI_MS).toISOString().slice(0, 10);
+  const fromDay = dubaiDay(fromIso);
   return Math.round((Date.parse(toDay + "T00:00:00Z") - Date.parse(fromDay + "T00:00:00Z")) / 86400_000);
 }
 
