@@ -75,6 +75,11 @@ async function ensureTicket(sb: any, me: SessionUser, insp: any, zone: string, n
   const { data: sla } = await sb.from("maintenance_sla").select("max_hours")
     .eq("category", "general").eq("priority", "medium").maybeSingle();
   const hours = sla?.max_hours ?? 72;
+  // Plus ancienne photo "issue" de la zone, si elle existe deja.
+  const { data: shots } = await sb.from("inspection_photos").select("id, storage_path, created_at")
+    .eq("inspection_id", insp.id).eq("zone", zone).eq("kind", "issue");
+  const first = (shots ?? []).slice().sort((a: any, b: any) =>
+    String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || Number(a.id) - Number(b.id))[0];
   const { data, error } = await sb.from("maintenance_tickets").insert({
     listing_id: insp.listing_id,
     title: zoneLabel(zone) + ": " + note.slice(0, 80),
@@ -82,6 +87,7 @@ async function ensureTicket(sb: any, me: SessionUser, insp: any, zone: string, n
     category: "general", priority: "medium", status: "open",
     reported_by: me.name, source: "inspection", source_ref: ref,
     sla_deadline: new Date(now + hours * 3600_000).toISOString(),
+    ...(first?.storage_path ? { photo_path: first.storage_path } : {}),
   }).select("id").single();
   if (!error) return data.id;
   if (String(error.code) !== "23505") throw error;
@@ -150,6 +156,17 @@ export async function uploadInspectionPhoto(sb: any, me: SessionUser, form: Form
     const { data: race } = await sb.from("inspection_photos").select("id, zone, kind").eq("idem_key", String(idem)).maybeSingle();
     if (!race) throw error;
     return { status: 200, body: { photo: race } };
+  }
+  if (kind === "issue") {
+    try {
+      const { data: item } = await sb.from("inspection_items").select("ticket_id")
+        .eq("inspection_id", o.insp.id).eq("zone", zone).maybeSingle();
+      if (item?.ticket_id) {
+        const { error: upErr } = await sb.from("maintenance_tickets").update({ photo_path: path })
+          .eq("id", item.ticket_id).is("photo_path", null);
+        if (upErr) console.error("inspection photo -> ticket failed", upErr);
+      }
+    } catch (e) { console.error("inspection photo -> ticket failed", e); }
   }
   return { status: 200, body: { photo: data } };
 }

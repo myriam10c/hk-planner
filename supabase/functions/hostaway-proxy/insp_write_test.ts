@@ -243,3 +243,50 @@ Deno.test("setExcluded", async () => {
   assertEquals(r.status, 200);
   assertEquals(db.tables.listing_config[0].inspection_excluded, true);
 });
+
+async function maintItem(db: any, id: number, zone = "ac") {
+  const r = await saveItem(db, FAIZA, { inspectionId: id, zone, status: "not_ok", note: "Leaking", outcome: "maintenance" }, NOW);
+  assertEquals(r.status, 200);
+}
+
+Deno.test("ticket photo : photo puis saveItem maintenance, photo_path = chemin de la photo", async () => {
+  const db = seed(); const id = await started(db);
+  await uploadInspectionPhoto(db, FAIZA, photoForm(id, "ac", "idem-photo-t1"));
+  await maintItem(db, id);
+  assertEquals(db.tables.maintenance_tickets[0].photo_path, db.tables.inspection_photos[0].storage_path);
+});
+
+Deno.test("ticket photo : saveItem maintenance puis photo, ticket mis a jour", async () => {
+  const db = seed(); const id = await started(db);
+  await maintItem(db, id);
+  assertEquals(db.tables.maintenance_tickets[0].photo_path ?? null, null);
+  await uploadInspectionPhoto(db, FAIZA, photoForm(id, "ac", "idem-photo-t2"));
+  assertEquals(db.tables.maintenance_tickets[0].photo_path, db.tables.inspection_photos[0].storage_path);
+});
+
+Deno.test("ticket photo : photo_path deja renseignee, jamais ecrasee", async () => {
+  const db = seed(); const id = await started(db);
+  await uploadInspectionPhoto(db, FAIZA, photoForm(id, "ac", "idem-photo-t3"));
+  await maintItem(db, id);
+  const first = db.tables.maintenance_tickets[0].photo_path;
+  await uploadInspectionPhoto(db, FAIZA, photoForm(id, "ac", "idem-photo-t4"));
+  assertEquals(db.tables.inspection_photos.length, 2);
+  assertEquals(db.tables.maintenance_tickets[0].photo_path, first);
+});
+
+Deno.test("ticket photo : une photo after n'alimente jamais le ticket", async () => {
+  const db = seed(); const id = await started(db);
+  await uploadInspectionPhoto(db, FAIZA, photoForm(id, "ac", "idem-photo-t5", "after"));
+  await maintItem(db, id);
+  assertEquals(db.tables.maintenance_tickets[0].photo_path ?? null, null);
+  await uploadInspectionPhoto(db, FAIZA, photoForm(id, "ac", "idem-photo-t6", "after"));
+  assertEquals(db.tables.maintenance_tickets[0].photo_path ?? null, null);
+});
+
+Deno.test("ticket photo : erreur de mise a jour du ticket n'echoue pas l'upload", async () => {
+  const db = seed(); const id = await started(db);
+  await maintItem(db, id);
+  db.fail["maintenance_tickets.update"] = { code: "XX", message: "boom" };
+  const r = await uploadInspectionPhoto(db, FAIZA, photoForm(id, "ac", "idem-photo-t7"));
+  assertEquals(r.status, 200);
+});
