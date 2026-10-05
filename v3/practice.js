@@ -8,6 +8,13 @@
 // les refus qui donnent un message a la cleaner sont rendus avec le meme texte et
 // le meme code, dans le meme ordre de verification.
 //
+// Tache 6 du branchement 2026-10-05 : les gestes de l'app conversation
+// (reportProblem par type et urgence, photos de plus, note, urgence et piece,
+// annulation, suppression d'une photo, fin avec rapport et role lead / aide) sont
+// simules avec les memes validations que v3_tickets.ts, v3_problems.ts,
+// v3_photos.ts et v3_write.ts. Les conversations de la seance sont gardees a part
+// (v3PracticeConvs), jamais avec celles de la vraie journee.
+//
 // L'avancement simule vit en memoire et dans sessionStorage (v3PracticeState),
 // pour survivre a la navigation et au rechargement de l'onglet. Il est lie a la
 // cible et a la personne qui l'a choisie : une autre cible, un autre manager, un
@@ -22,15 +29,21 @@ export const CLE_PRACTICE = 'v3PracticeState';
 // (la meme v3.myDay?as=<id> que « View as ») et la revocation de la session.
 export const PASSE_PRACTICE = new Set(['v3.myDay', 'cleanerLogout']);
 
-// Memes valeurs que le proxy (v3.ts, v3_photos.ts, v3_myday.ts).
-const CATEGORIES = {
-  ac: { label: 'AC', ticketCategory: 'ac' },
-  plumbing: { label: 'Plumbing', ticketCategory: 'plumbing' },
-  electrical: { label: 'Electrical', ticketCategory: 'electrical' },
-  appliance: { label: 'Appliance', ticketCategory: 'appliance' },
-  pest: { label: 'Pest', ticketCategory: 'pest' },
-  other: { label: 'Other', ticketCategory: 'general' },
+// Memes valeurs que le proxy (v3.ts V3_PROBLEM_KINDS, V3_PHOTO_OPTIONAL_KINDS,
+// V3_URGENCY_PRIORITY ; v3_photos.ts ; v3_problems.ts ; v3_finish_context.ts).
+const KINDS = {
+  'Gas smell': 'appliance', 'Leak': 'plumbing', 'AC': 'ac', 'AC not working': 'ac',
+  'Power': 'electrical', 'Insects': 'pest', 'Missing': 'general', 'Broken': 'general',
+  'Stain': 'general', 'Very dirty': 'general', 'Guest forgot': 'general',
+  'Wall damage': 'general', "Can't get in": 'general', 'Gas not working': 'appliance',
+  'Wi-Fi not working': 'general',
 };
+const PHOTO_OPTIONAL = ['Gas smell', "Can't get in", 'AC not working', 'Gas not working', 'Wi-Fi not working'];
+const URGENCY_PRIORITY = { urgent: 'urgent', soon: 'medium', later: 'low' };
+const NOTE_MAX = 300;
+const WHERE_MAX = 60;
+const WHOLE_APARTMENT = 'Whole apartment';
+const REPORT_MAX_BYTES = 20 * 1024;
 const LINEN_FIELDS = [
   'pillowcases', 'bed_sheets', 'duvet_covers',
   'small_towels', 'face_towels', 'large_towels', 'bath_mats',
@@ -72,13 +85,17 @@ function neuve(c) {
     photos: {},    // photoId -> {idem, jobId, ticketId, itemName}
     tickets: {},   // ticketId -> {listingId, title, category, priority, status}
     idem: {},      // cle d'idempotence -> resultat memorise
+    reports: {},   // cle d'un signalement -> ticketId (ticketIdem)
   };
 }
 
 function lire(c) {
   try {
     const s = JSON.parse(sessionStorage.getItem(CLE_PRACTICE) || 'null');
-    if (s && String(s.targetId) === c.id && String(s.viewerId) === c.viewerId && s.jobs) return s;
+    if (s && String(s.targetId) === c.id && String(s.viewerId) === c.viewerId && s.jobs) {
+      if (!s.reports) s.reports = {};
+      return s;
+    }
   } catch (e) { /* illisible : on repart du reel */ }
   return null;
 }
@@ -98,7 +115,11 @@ export function practiceOn(c, reprendre) {
   cible = n;
   if (reprendre && memeCible && seance) return;
   epoque += 1;
-  seance = (reprendre && lire(n)) || neuve(n);
+  const lue = reprendre ? lire(n) : null;
+  seance = lue || neuve(n);
+  // Seance repartie du reel : les conversations simulees gardees ne lui
+  // correspondent plus (elles citeraient des tickets que le simulateur a oublies).
+  if (!lue) oublierConvs();
   jour = null;
   ecrire();
 }
@@ -110,6 +131,37 @@ export function practiceOff() {
   seance = null;
   jour = null;
   try { sessionStorage.removeItem(CLE_PRACTICE); } catch (e) { /* stockage indisponible */ }
+  oublierConvs();
+}
+
+// ---------------------------------------------------------------------------
+// Conversations de la seance (tache 6 du branchement 2026-10-05). Gardees a
+// part de celles de la vraie journee (v3Convs, IndexedDB) : jamais melangees,
+// effacees avec la seance. Seulement dans sessionStorage, sans les octets des
+// photos (un rechargement garde l'avancement, pas les miniatures).
+// ---------------------------------------------------------------------------
+export const CLE_PRACTICE_CONVS = 'v3PracticeConvs';
+
+function oublierConvs() {
+  try { sessionStorage.removeItem(CLE_PRACTICE_CONVS); } catch (e) { /* stockage indisponible */ }
+}
+
+export function practiceSaveConvs(blob) {
+  if (!cible || !blob) return;
+  try {
+    sessionStorage.setItem(CLE_PRACTICE_CONVS, JSON.stringify(Object.assign({}, blob, {
+      targetId: cible.id, viewerId: cible.viewerId,
+    })));
+  } catch (e) { /* stockage plein ou indisponible : la seance vit le temps de la page */ }
+}
+
+export function practiceLoadConvs() {
+  if (!cible) return null;
+  try {
+    const s = JSON.parse(sessionStorage.getItem(CLE_PRACTICE_CONVS) || 'null');
+    if (s && String(s.targetId) === cible.id && String(s.viewerId) === cible.viewerId) return s;
+  } catch (e) { /* illisible : on repart sans conversation */ }
+  return null;
 }
 
 export function practiceActive() {
@@ -287,29 +339,191 @@ function uploadPhoto(form) {
   });
 }
 
+// Lecture sure d'une table, comme ownKey (v3.ts) : un « constructor » herite
+// d'Object.prototype n'est jamais une cle valide.
+function ownKey(table, key) {
+  const k = typeof key === 'string' ? key : '';
+  return Object.prototype.hasOwnProperty.call(table, k) ? table[k] : null;
+}
+
+// eslint-disable-next-line no-control-regex
+const CONTROLES = /[\u0000-\u0008\u000B-\u001F\u007F]/g;
+
+// Meme nettoyage que cleanNote (v3_problems.ts).
+function cleanNote(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).replace(/\r\n?/g, '\n').replace(/\t/g, ' ').replace(CONTROLES, '')
+    .replace(/[ ]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  const coupe = Array.from(s).slice(0, NOTE_MAX).join('').trim();
+  return coupe === '' ? null : coupe;
+}
+
+// Meme nettoyage que cleanWhere (v3_problems.ts).
+function cleanWhere(v) {
+  const s = typeof v === 'string' ? v.replace(CONTROLES, ' ').replace(/\s+/g, ' ').trim() : '';
+  const coupe = Array.from(s).slice(0, WHERE_MAX).join('').trim();
+  return coupe === '' ? WHOLE_APARTMENT : coupe;
+}
+
+// Corps de l'app conversation (v3_tickets.ts) : { jobId?, listingId, kind,
+// urgency, where, note?, photoId? | photoIdem?, idem }. L'ancien `category` n'est
+// plus lu : sans `kind`, le refus est « unknown kind », comme au proxy.
 function reportProblem(body) {
   const jobId = body && body.jobId ? String(body.jobId) : null;
   const listingId = body && body.listingId ? String(body.listingId) : '';
-  const category = String((body && body.category) || '').toLowerCase();
   if (!listingId) return refus(400, 'listingId required');
-  const meta = Object.prototype.hasOwnProperty.call(CATEGORIES, category) ? CATEGORIES[category] : null;
-  if (!meta) return refus(400, 'unknown category');
+  const kind = typeof body.kind === 'string' ? body.kind : '';
+  const cat = ownKey(KINDS, kind);
+  if (!cat) return refus(400, 'unknown kind');
+  const priority = ownKey(URGENCY_PRIORITY, body.urgency);
+  if (!priority) return refus(400, 'invalid urgency');
   if (!validIdem(body.idem)) return refus(400, 'idem required');
+  const where = cleanWhere(body.where);
+  const note = cleanNote(body.note);
   if (jobId && !stopDe(jobId)) return refus(404, 'Job not found.');
+  // Photo obligatoire sauf pour les types a photo facultative ; designee mais
+  // introuvable, elle est refusee meme pour eux.
+  const designee = (body.photoId !== undefined && body.photoId !== null) ||
+    (body.photoIdem !== undefined && body.photoIdem !== null);
   const photoId = resolvePhotoId(body);
-  if (!photoId) return refus(400, 'photoId required');
+  if (!photoId && (designee || PHOTO_OPTIONAL.indexOf(kind) === -1)) return refus(400, 'photo required');
   const r = rejeu(body.idem);
   if (r) return r;
-  if (!seance.photos[photoId]) return refus(400, 'photo not found');
+  if (photoId && !photoVivante(photoId)) return refus(400, 'photo not found');
   seance.seq += 1;
   const ticketId = BASE_ID + seance.seq;
   // Aucun technicien de permanence connu ici : le ticket reel naitrait
   // « assigned » ou « open », les deux restent a verifier pendant un menage.
   seance.tickets[ticketId] = {
-    created: true, listingId: listingId, title: meta.label + ' problem reported during a cleaning',
-    category: meta.ticketCategory, priority: 'medium', status: 'open',
+    created: true, listingId: listingId, title: kind + ' · ' + where, kind: kind,
+    category: cat, priority: priority, status: 'open', note: note,
   };
-  return memoriser(body.idem, { status: 'success', ticketId: ticketId, technicianId: null });
+  if (photoId) seance.photos[photoId].ticketId = ticketId;
+  seance.reports[String(body.idem)] = ticketId;
+  return memoriser(body.idem, { status: 'success', ticketId: ticketId, technicianId: null, priority: priority });
+}
+
+function photoVivante(id) {
+  const p = seance.photos[id];
+  return p && !p.deleted ? p : null;
+}
+
+// Ticket designe par son id ou par la cle du signalement (ticketIdem), comme
+// entree() de v3_problems.ts : la cle n'est lue que sur un signalement de cette
+// seance.
+function entree(body) {
+  let ticketId = readTicketId(body.ticketId);
+  if (ticketId === 'invalid') ticketId = null;
+  if (!ticketId && validIdem(body.ticketIdem)) {
+    const tid = seance.reports[String(body.ticketIdem)];
+    if (!tid) return refus(400, 'ticket not found');
+    ticketId = tid;
+  }
+  if (!ticketId) return refus(400, 'ticketId required');
+  if (!validIdem(body.idem)) return refus(400, 'idem required');
+  return { ticketId: ticketId };
+}
+
+// monTicket : un ticket signale dans cette seance, sinon refus. Un vrai ticket
+// du logement n'est pas « a moi » (403), un inconnu n'existe pas (400).
+function monTicket(ticketId) {
+  const t = seance.tickets[ticketId];
+  if (t && t.created) return { ticket: t };
+  if (ticketConnu(ticketId)) return refus(403, 'not your problem');
+  return refus(400, 'ticket not found');
+}
+
+const estFerme = t => TICKET_CLOS.indexOf(String(t.status || '')) !== -1;
+
+function surMonTicket(ticketId, idem, ecrire) {
+  const r = rejeu(idem);
+  if (r) return r;
+  const mt = monTicket(ticketId);
+  if (!mt.ticket) return mt;
+  const w = ecrire(mt.ticket);
+  if (w.body) return w;   // refus : {status, body}
+  return memoriser(idem, w);
+}
+
+function addProblemPhoto(body) {
+  const e = entree(body);
+  if (e.body) return e;
+  const photoId = resolvePhotoId(body);
+  if (!photoId) return refus(400, 'photo required');
+  return surMonTicket(e.ticketId, body.idem, function (t) {
+    if (estFerme(t)) return refus(400, 'ticket is already closed');
+    const p = photoVivante(photoId);
+    if (!p) return refus(400, 'photo not found');
+    p.ticketId = e.ticketId;
+    return { status: 'success', ticketId: e.ticketId, photoId: photoId };
+  });
+}
+
+function setProblemNote(body) {
+  const e = entree(body);
+  if (e.body) return e;
+  if (body.note === undefined || (body.note !== null && typeof body.note !== 'string')) {
+    return refus(400, 'note required');
+  }
+  const note = cleanNote(body.note);
+  return surMonTicket(e.ticketId, body.idem, function (t) {
+    if (estFerme(t)) return refus(400, 'ticket is already closed');
+    t.note = note;
+    return { status: 'success', ticketId: e.ticketId, note: note };
+  });
+}
+
+function updateProblem(body) {
+  const e = entree(body);
+  if (e.body) return e;
+  const aUrgence = body.urgency !== undefined;
+  const priority = aUrgence ? ownKey(URGENCY_PRIORITY, body.urgency) : null;
+  if (aUrgence && !priority) return refus(400, 'invalid urgency');
+  const aPiece = body.where !== undefined;
+  if (!aUrgence && !aPiece) return refus(400, 'nothing to update');
+  const where = aPiece ? cleanWhere(body.where) : null;
+  return surMonTicket(e.ticketId, body.idem, function (t) {
+    if (estFerme(t)) return refus(400, 'ticket is already closed');
+    if (priority) t.priority = priority;
+    if (where !== null) t.title = String(t.title || '').split(' · ')[0] + ' · ' + where;
+    return { status: 'success', ticketId: e.ticketId, priority: t.priority, title: t.title };
+  });
+}
+
+function deleteProblem(body) {
+  const e = entree(body);
+  if (e.body) return e;
+  return surMonTicket(e.ticketId, body.idem, function (t) {
+    const fait = { status: 'success', ticketId: e.ticketId, status_value: 'cancelled' };
+    if (String(t.status) === 'cancelled') return fait;
+    if (estFerme(t)) return refus(400, 'ticket is already closed');
+    t.status = 'cancelled';
+    return fait;
+  });
+}
+
+// Meme ordre que deletePhoto (v3_photos.ts) : la photo par son id ou par la cle
+// de son televersement ; un televersement inconnu n'a rien a effacer.
+function deletePhoto(body) {
+  if (!validIdem(body.idem)) return refus(400, 'idem required');
+  let brut = body.photoId;
+  if ((brut === undefined || brut === null || brut === '') && validIdem(body.photoIdem)) {
+    const up = seance.idem[String(body.photoIdem)];
+    if (!up || !up.photoId) return ok({ status: 'success', photoId: null });
+    brut = up.photoId;
+  }
+  const n = typeof brut === 'number' || (typeof brut === 'string' && brut !== '') ? Number(brut) : NaN;
+  if (!Number.isInteger(n) || n <= 0) return refus(400, 'Invalid photo id.');
+  const p = photoVivante(n);
+  if (!p) {
+    const r = rejeu(body.idem);
+    return r || refus(404, 'Photo not found.');
+  }
+  if (p.ticketId !== null && p.ticketId !== undefined) return refus(409, 'This photo belongs to a problem report.');
+  const r = rejeu(body.idem);
+  if (r) return r;
+  p.deleted = true;
+  return memoriser(body.idem, { status: 'success', photoId: n });
 }
 
 function ticketConnu(id) {
@@ -333,7 +547,7 @@ function checkTicket(body) {
   const ticket = ticketConnu(ticketId);
   if (!ticket) return refus(400, 'ticket not found');
   if (TICKET_CLOS.indexOf(String(ticket.status || '')) !== -1) return refus(400, 'ticket is already closed');
-  if (!seance.photos[photoId]) return refus(400, 'photo not found');
+  if (!photoVivante(photoId)) return refus(400, 'photo not found');
   ticket.status = 'to_confirm';
   return memoriser(body.idem, { status: 'success', ticketId: ticketId, status_value: 'to_confirm' });
 }
@@ -364,10 +578,15 @@ function finishJob(body) {
   for (const brut of Array.isArray(body.photos) ? body.photos : []) {
     if (readPhotoId(brut) === 'invalid') return refus(400, 'Invalid photo id.');
   }
-  // Le proxy compte le linge pour toute personne qui n'est pas sous-traitante.
-  const role = jour && jour.me ? String(jour.me.role || '') : '';
+  const rapport = readReport(body.report);
+  if (rapport.error) return refus(400, rapport.error);
+  // Role sur ce menage comme jobRole (v3_finish_context.ts) : le lead compte le
+  // linge, sauf une sous-traitante ; l'aide ne compte rien et ne clot rien.
+  const role = roleDe(stop, jobId);
+  const lead = role === 'lead';
+  const metier = jour && jour.me ? String(jour.me.role || '') : '';
   let linen = null;
-  if (role !== 'subcontractor') {
+  if (lead && metier !== 'subcontractor') {
     const lu = readLinen(body.linen && typeof body.linen === 'object' ? body.linen : {});
     if (lu.error) return refus(400, lu.error);
     linen = lu.values;
@@ -375,6 +594,11 @@ function finishJob(body) {
   const r = rejeu(body.idem);
   if (r) return r;
   const j = job(jobId);
+  if (!lead) {
+    j.helperFinished = true;
+    return memoriser(body.idem, { status: 'success', jobId: jobId, durationMinutes: null, unchecked: unchecked, role: role });
+  }
+  if (rapport.report) j.report = true;
   stop.progress = Object.assign({}, stop.progress || {});
   Object.keys(checklist).forEach(function (k) {
     j.progress[k] = checklist[k] === true;
@@ -394,7 +618,35 @@ function finishJob(body) {
   }
   j.state = 'done';
   j.durationMinutes = durationMinutes;
-  return memoriser(body.idem, { status: 'success', jobId: jobId, durationMinutes: durationMinutes, unchecked: unchecked });
+  return memoriser(body.idem, {
+    status: 'success', jobId: jobId, durationMinutes: durationMinutes, unchecked: unchecked, role: role,
+  });
+}
+
+// Meme lecture que readReport (v3_finish_context.ts).
+function readReport(v) {
+  if (v === undefined || v === null) return { report: null };
+  if (typeof v !== 'object' || Array.isArray(v)) return { error: 'report must be an object' };
+  let taille;
+  try {
+    taille = new TextEncoder().encode(JSON.stringify(v)).length;
+  } catch (e) {
+    return { error: 'report must be an object' };
+  }
+  if (taille > REPORT_MAX_BYTES) return { error: 'report is too large' };
+  return { report: v };
+}
+
+// Role de la cible sur ce menage, comme v3.myDay le rend (meme regle que
+// jobRole). Sans role connu : aide si une autre personne a demarre avant elle.
+function roleDe(stop, jobId) {
+  if (stop.role === 'lead' || stop.role === 'helper') return stop.role;
+  const autres = (stop.othersOnJob || []).filter(function (o) { return o && o.startedAt; });
+  if (!autres.length) return 'lead';
+  const j = seance.jobs[jobId];
+  const mien = stop.myStartedAt || (j && j.startedAt) || null;
+  const premier = autres.map(function (o) { return Date.parse(o.startedAt); }).sort()[0];
+  return mien && Date.parse(mien) <= premier ? 'lead' : 'helper';
 }
 
 // Point d'entree, appele par api.js. `opts` est celui de request() : `body`
@@ -406,8 +658,11 @@ export async function simulate(action, opts) {
   const SIMULEES = {
     'v3.startJob': startJob, 'v3.tick': tick, 'v3.reportProblem': reportProblem,
     'v3.checkTicket': checkTicket, 'v3.finishJob': finishJob,
+    'v3.addProblemPhoto': addProblemPhoto, 'v3.setProblemNote': setProblemNote,
+    'v3.updateProblem': updateProblem, 'v3.deleteProblem': deleteProblem,
+    'v3.deletePhoto': deletePhoto,
   };
-  const fn = SIMULEES[action];
+  const fn = ownKey(SIMULEES, action);
   if (!fn) return refus(400, 'Not available in practice');
   const body = corpsJson(o);
   if (!body || typeof body !== 'object') return refus(400, 'invalid json body');

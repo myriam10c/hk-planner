@@ -48,9 +48,10 @@ function rowStatus(apt, conv, now) {
 // Practice) au-dessus de l'en-tête ; `after` : bandeau des gestes en attente, sous l'en-tête ;
 // `empty` : texte d'une journée vide.
 export function renderList({ me, apartments, convs, activeId, now, before = "", after = "", empty = "Nothing assigned to you today." }) {
-  const busy = activeId && convs[activeId] && convs[activeId].startedAt && !convs[activeId].sent;
+  const busy = activeId && convs[activeId] && !convs[activeId].readOnly && convs[activeId].startedAt && !convs[activeId].sent;
   const rows = apartments.map(a => {
-    const c = convs[a.id];
+    // Conversation en lecture seule (View as) : la ligne garde l'état du serveur.
+    const c = convs[a.id] && !convs[a.id].readOnly ? convs[a.id] : null;
     const locked = busy && a.id !== activeId;
     const done = (c && c.sent) || (!c && a.state === "done");
     const warn = !c && !done && a.guest.hoursAway !== null && a.guest.hoursAway <= 24;
@@ -109,7 +110,18 @@ function replyButtons(step) {
   return step.replies.map(r => '<button class="reply' + (r.label.startsWith("✓ ") ? " on" : "") + '" data-reply="' + escapeHtml(r.id) + '"' + (r.enabled ? "" : " disabled") + ">" + escapeHtml(r.label) + "</button>").join("");
 }
 
+// View as : en-tête « Read only · <état> », fil reconstruit, aucune réponse ni outil.
+function renderReadOnly(conv, before) {
+  const a = conv.apt;
+  const head = '<header class="top"><button class="icon" data-act="back" aria-label="Back">' + I.back + "</button>" +
+    avatar(a, "avatar small") + '<div class="title"><b>' + escapeHtml(aptLabel(a)) + "</b><span>" + escapeHtml("Read only · " + (conv.viewStatus || "")) + "</span></div></header>";
+  const thread = '<main class="thread" id="thread">' + conv.messages.map(m => bubble(conv, m)).join("") + "</main>";
+  const bar = '<footer class="bar"><p class="help">Read only. Only ' + escapeHtml(conv.me.name) + " can answer here.</p></footer>";
+  return before + head + thread + bar;
+}
+
 export function renderConversation(conv, { now = new Date(), before = "" } = {}) {
+  if (conv.readOnly) return renderReadOnly(conv, before);
   const a = conv.apt;
   const step = currentStep(conv);
   const stepTxt = "Step " + step.n + " of 5 · " + step.title;

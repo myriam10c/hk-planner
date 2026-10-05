@@ -12,17 +12,25 @@
 // Ecritures (tache 5) : apres chaque geste, /v3/conv/sync.js compare la
 // conversation a ce qui est deja parti et rend les actions du proxy ; elles
 // passent TOUTES par la file de offline.js (submit), dans l'ordre. ✓ = en file,
-// ✓✓ = reponse 2xx recue pour son idem (onSent). Rien en View as ni en Practice.
+// ✓✓ = reponse 2xx recue pour son idem (onSent).
 // Reprise : chaque conversation est gardee dans sessionStorage (persist.js) et
 // les octets des photos dans IndexedDB ; un rechargement revient au meme ecran.
+//
+// Modes (tache 6) : writeMode (sync.js) dit qui ecrit. View as : la conversation
+// de la cleaner en lecture seule (readOnlyConversation), ni camera, ni ecriture,
+// ni sauvegarde. Practice : les memes gestes, servis un par un par le simulateur
+// (practice.js, via api.js), jamais par la file ; ses conversations sont gardees
+// a part (v3PracticeConvs) et effacees avec la seance ; rien n'est partage.
 // Aucun gestionnaire en ligne (CSP script-src 'self'), interface en anglais.
 import { api, ApiError, readSession } from '/v3/api.js';
 import {
   deleteState, flush, getFiles, getState, newIdem, onQueueChange, onRefused, onSent, pendingCount, purgeFiles,
-  putFile, putState, submit, unqueue, watchNetwork,
+  putFile, putState, sendOrQueue, submit, unqueue, watchNetwork,
 } from '/v3/offline.js';
 import { onSessionRenewed } from '/v3/session.js';
-import { practiceActive, practiceDay, practiceOff, practiceOn } from '/v3/practice.js';
+import {
+  practiceActive, practiceDay, practiceLoadConvs, practiceMark, practiceOff, practiceOn, practiceSaveConvs,
+} from '/v3/practice.js';
 import { esc, icon, toast } from '/v3/ui.js';
 import profile from '/v3/screens/profile.js';
 import { dubaiDate, toApartments } from '/v3/conv/day.js';
@@ -30,8 +38,11 @@ import { stampText } from '/v3/conv/stamp.js';
 import {
   createConversation, currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
   addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto, requireLinen,
+  readOnlyConversation,
 } from '/v3/conv/conversation.js';
-import { syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL } from '/v3/conv/sync.js';
+import {
+  syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL, writeMode,
+} from '/v3/conv/sync.js';
 import { serializeConversation, deserializeConversation, photoIdems } from '/v3/conv/persist.js';
 import { reportText, reportFiles } from '/v3/conv/report.js';
 import {
@@ -292,7 +303,7 @@ function stepKey(c) { const st = currentStep(c); return c.i + ':' + st.id; }
 
 async function maybeAutoOpen() {
   const c = conv();
-  if (!c || S.screen !== 'conv' || routeName() !== 'cv' || S.camera.open || c.flow) return;
+  if (!c || c.readOnly || S.screen !== 'conv' || routeName() !== 'cv' || S.camera.open || c.flow) return;
   const st = currentStep(c);
   const key = stepKey(c);
   if (st.camera && S.autoOpenedAt !== key) { S.autoOpenedAt = key; await openCamera(); }
@@ -303,7 +314,8 @@ let camGen = 0; // generation de la demande de flux : une demande depassee arret
 async function openCamera() {
   // Le viseur s'affiche tout de suite (video permanente), puis on demande le flux.
   // Refus = viseur garde ouvert en image fixe (live:false) ; declencheur et tuiles passent par le champ fichier.
-  if (S.camera.open) return;
+  // View as : jamais de camera (rien a photographier pour la cleaner regardee).
+  if (S.camera.open || viewOnly() || !conv() || conv().readOnly) return;
   const c0 = conv();
   const gen = ++camGen;
   S.camera = { open: true, stream: null, live: true };
@@ -399,9 +411,22 @@ async function capture(c, handle) {
 // Ecritures, coches et reprise (tache 5 du branchement)
 // ---------------------------------------------------------------------------
 
-// La conversation n'ecrit que pour la personne connectee, sur sa propre journee.
+// Qui ecrit (sync.js, writeMode) : « real » pour la personne connectee sur sa
+// propre journee, « practice » pour le simulateur, « none » en View as.
+function mode() {
+  return writeMode({
+    session: !!state.session, viewAs: state.viewAs, dayViewAs: !!(state.day && state.day.viewAs),
+    practiceActive: practiceActive(),
+  });
+}
+
 function writesActive() {
-  return !!state.session && !readOnly() && !practicing() && !practiceActive();
+  return mode() === 'real';
+}
+
+// View as (ou mode Practice dont la seance est fermee) : rien ne se touche.
+function viewOnly() {
+  return mode() === 'none' && !!state.session && (!!state.viewAs || !!(state.day && state.day.viewAs));
 }
 
 // Chaine unique : les actions entrent en file dans l'ordre ou sync.js les rend,
@@ -410,9 +435,12 @@ function writesActive() {
 // (runActions) : le geste suivant la reemet, rien ne part vers une cle inconnue.
 let chaine = Promise.resolve();
 const defaites = new Set();
-function dispatch(c, actions) {
-  if (!actions.length) return chaine;
-  chaine = chaine.then(() => runActions(c, actions, runAction, defaites)).then(function (n) {
+function dispatch(c, actions, m) {
+  if (!actions.length || m === 'none') return chaine;
+  // Practice : la marque de la seance est prise au geste ; une seance finie
+  // avant le tour de l'action (Exit) la fait refuser par api.js, sans reseau.
+  const run = m === 'practice' ? practiceRunner(c, practiceMark()) : runAction;
+  chaine = chaine.then(() => runActions(c, actions, run, defaites)).then(function (n) {
     if (!n) return;
     console.warn('[v3] gestes non gardes', n);
     refreshTicks(c);
@@ -428,12 +456,31 @@ async function runAction(a) {
   await submit(a.action, a.body, a.file || null, a.fileName);
 }
 
+// Practice : chaque action est servie tout de suite par le simulateur (api.js),
+// jamais mise en file. Reponse = ✓✓ ; refus = le meme bandeau que le magasin
+// mort de la vraie file (l'action n'est pas defaite : la cleaner verrait la meme
+// chose), sauf le refus « linge » que la conversation prend en charge.
+function practiceRunner(c, marque) {
+  return async function (a) {
+    if (!marque) return;
+    try {
+      const data = await sendOrQueue(a.action, a.body, a.file || null, a.fileName, marque);
+      if (ackSync(c, a.body.idem, data && data.data) && refreshTicks(c)) renderLater();
+    } catch (err) {
+      if (err instanceof ApiError && err.kind === 'practice') return;   // seance finie
+      if (refusLinge({ action: a.action, body: a.body }, err)) return;
+      toast('Not sent: ' + (err && err.message ? err.message : 'refused') + '. Tell your manager.', 'err');
+    }
+  };
+}
+
 // Apres chaque geste : actions a mettre en file, coches, sauvegarde pour la reprise.
 function markSynced(c) {
   if (!c) return c;
-  const actions = syncPlan(c, { newIdem, active: writesActive() });
+  const m = mode();
+  const actions = syncPlan(c, { newIdem, active: m !== 'none' });
   refreshTicks(c);
-  dispatch(c, actions);
+  dispatch(c, actions, m);
   persist();
   return c;
 }
@@ -442,7 +489,8 @@ function markSynced(c) {
 // encore en attente, et jamais attendue (le partage garde l'activation du geste).
 function finishNow(c) {
   markSynced(c);
-  dispatch(c, finishPlan(c, { newIdem, active: writesActive(), now: new Date() }));
+  const m = mode();
+  dispatch(c, finishPlan(c, { newIdem, active: m !== 'none', now: new Date() }), m);
   persist();
 }
 
@@ -461,7 +509,8 @@ onSent(function (entry, data) {
 // aider). La conversation demande le comptage au lieu de laisser le geste au
 // magasin mort.
 const ERREUR_LINGE = /must be an integer|must be >= 0|is out of range/;
-onRefused(function (entry, err) {
+onRefused(refusLinge);
+function refusLinge(entry, err) {
   if (!entry || entry.action !== 'v3.finishJob' || !err || err.status !== 400 || !ERREUR_LINGE.test(String(err.message))) return false;
   const c = Object.values(S.convs).find(x => x.sync && x.sync.finish === entry.body.idem);
   if (!c) return false;
@@ -470,14 +519,49 @@ onRefused(function (entry, err) {
   note('Housekeeping needs your linen count.');
   renderLater();
   return true;
-});
+}
 
 export const CLE_CONVS = 'v3Convs';
 // La sauvegarde passe apres les mises en file en cours : une conversation
 // sauvegardee ne dit jamais « parti » pour un geste qui n'est pas encore dans
 // IndexedDB (un rechargement le perdrait).
 function persist() {
-  chaine = chaine.then(ecrireConvs);
+  chaine = chaine.then(function () {
+    const m = mode();
+    if (m === 'practice') return ecrirePractice();
+    if (m === 'real') return ecrireConvs();
+  });
+}
+
+// Practice : la seance garde ses conversations a part (practice.js), sans les
+// octets des photos ; jamais dans v3Convs ni dans IndexedDB.
+function ecrirePractice() {
+  if (!state.day || !state.day.me) return;
+  const convs = {};
+  try {
+    for (const [id, c] of Object.entries(S.convs)) convs[id] = serializeConversation(c);
+  } catch (e) { return; }
+  practiceSaveConvs({ me: String(state.day.me.id), date: state.day.date, activeId: S.activeId, screen: S.screen, convs });
+}
+
+// Reprise d'une seance Practice apres un rechargement : une fois par seance.
+let reprisPractice = 0;
+function restorePractice() {
+  const marque = practiceMark();
+  if (!marque || reprisPractice === marque) return;
+  reprisPractice = marque;
+  const saved = practiceLoadConvs();
+  const day = state.day;
+  if (!saved || !day || !day.me || saved.me !== String(day.me.id) || saved.date !== day.date) return;
+  const convs = {};
+  for (const id of Object.keys(saved.convs || {})) {
+    if (!state.apartments.some(a => a.id === id)) continue;
+    const c = deserializeConversation(saved.convs[id], () => null);
+    if (c) convs[id] = c;
+  }
+  S.convs = convs;
+  rafraichirRoles();
+  if (saved.activeId && convs[saved.activeId]) { S.activeId = saved.activeId; S.screen = saved.screen === 'conv' ? 'conv' : 'list'; }
 }
 
 // Gardee dans sessionStorage ET dans IndexedDB : iOS vide sessionStorage quand il
@@ -485,7 +569,7 @@ function persist() {
 // fin est confirmee par le proxy n'est plus gardee : le serveur fait foi pour
 // elle. Plus rien a reprendre : les deux copies sont effacees.
 async function ecrireConvs() {
-  if (!writesActive() || !state.day || !state.day.me) return;
+  if (!writesActive() || !state.day || !state.day.me || state.day.viewAs) return;
   const convs = {};
   try {
     for (const [id, c] of Object.entries(S.convs)) if (!finishAcked(c)) convs[id] = serializeConversation(c);
@@ -700,7 +784,7 @@ async function flowStep(c, id) {
   if (id === 'system-back') flowBack(c);
   else flowReply(c, id, { text: ta ? ta.value : '' });
   // Sans photo, un probleme dont la photo est obligatoire ne devient pas un ticket.
-  if (id === 'no-photo' && before.problem && !PHOTO_OPTIONAL.includes(before.problem.kind) && writesActive()) {
+  if (id === 'no-photo' && before.problem && !PHOTO_OPTIONAL.includes(before.problem.kind) && mode() !== 'none') {
     note('No photo: this problem stays in your report. Add a photo to send it to maintenance.');
   }
   if (!c.flow) {
@@ -721,11 +805,16 @@ async function convClick(b) {
     const apt = S.apartments.find(a => a.id === d.id);
     if (!apt) return;
     S.activeId = d.id;
-    if (!S.convs[d.id]) S.convs[d.id] = createConversation(apt, { me: me() });
+    // View as : la conversation est reconstruite de la journee a chaque ouverture,
+    // jamais gardee ni ecrite.
+    if (viewOnly()) S.convs[d.id] = readOnlyConversation(apt, { me: me(), now: new Date() });
+    else if (!S.convs[d.id]) S.convs[d.id] = createConversation(apt, { me: me() });
     S.screen = 'conv'; S.autoOpenedAt = null; render(); await maybeAutoOpen(); return;
   }
   if (!c) return;
   if (d.act === 'back') { await toList(c); return; }
+  // Lecture seule : seul le retour a la liste repond.
+  if (c.readOnly || viewOnly()) return;
   if (d.act === 'close-camera') { closeCamera(); render(); return; }
   if (d.act === 'camera') { await openCamera(); return; }
   if (d.act === 'problem') {
@@ -788,6 +877,16 @@ async function convClick(b) {
         currentStep(c).replies.some(r => r.id === d.reply)) finishNow(c);
     if (d.reply === 'send' || d.reply === 'share-again') {
       if (d.reply === 'send' && c.sent) return;
+      // Practice : aucun partage, le groupe WhatsApp de l'equipe ne recoit rien.
+      if (mode() === 'practice') {
+        note('Practice: nothing is shared. The cleaner shares this report to WhatsApp.');
+        if (d.reply === 'share-again') { render(); return; }
+        const prev0 = c.problems.length;
+        reply(c, d.reply);
+        if (c.problems.length > prev0 && !c.flow) showToast(c.problems.length - 1);
+        await after(c);
+        return;
+      }
       busy = true;
       const textOnly = c.shareTextOnly === true; // le partage avec fichiers a echoue au dernier appui
       let r;
@@ -896,7 +995,8 @@ export async function loadDay({ silent = false } = {}) {
     state.day = data;
     state.apartments = toApartments(data, data.me, { now: new Date() });
     state.jourGarde = false;
-    if (!repris && writesActive()) {
+    if (mode() === 'practice') restorePractice();
+    else if (!repris && writesActive()) {
       repris = true;
       await restoreConvs();
       if (generation !== generationJour) return;

@@ -113,6 +113,42 @@ export function createConversation(apt, { me, refStart = 461, now = new Date() }
   return conv;
 }
 
+// « View as » (tâche 6 du branchement) : la conversation d'une cleaner vue par un manager, en
+// lecture seule, reconstruite depuis v3.myDay. La journée ne rend ni ses photos ni son rapport :
+// seulement l'état du ménage (pas commencé, démarré à telle heure, fini), le binôme et les
+// tickets ouverts du logement. Aucune réponse n'est possible (readOnly : currentStep n'en rend
+// aucune, syncPlan n'émet rien).
+const dubaiHHMM = iso => {
+  const t = Date.parse(String(iso || ""));
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t + 4 * 3600 * 1000);
+  return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
+};
+
+export function readOnlyConversation(apt, { me, now = new Date() } = {}) {
+  const conv = createConversation(apt, { me, now });
+  conv.readOnly = true;
+  const tickets = (apt.openTickets || []).map(t => t.title).filter(Boolean);
+  if (tickets.length) conv.messages.push({ from: "app", type: "text", text: "Open problems here: " + tickets.join(", ") + "." });
+  const at = (apt.state === "running" || apt.state === "done") ? dubaiHHMM(apt.startedAt) : null;
+  if (at) {
+    conv.startedAt = new Date(apt.startedAt);
+    conv.messages.push({ from: "app", type: "text", text: "Started at " + at + "." });
+  }
+  if (apt.state === "done") {
+    conv.endedAt = now;
+    conv.viewStatus = "Cleaning done";
+    conv.messages.push({ from: "app", type: "text", text: "Cleaning done." });
+  } else if (apt.state === "running") {
+    conv.viewStatus = at ? "Started " + at : "Started";
+    conv.messages.push({ from: "app", type: "text", text: "Cleaning in progress. Photos and problems are not shown in this view." });
+  } else {
+    conv.viewStatus = "Not started yet";
+    conv.messages.push({ from: "app", type: "text", text: "Not started yet." });
+  }
+  return conv;
+}
+
 const R = (id, label, enabled = true) => ({ id, label, enabled });
 
 // Le déclencheur ne change jamais de pièce : autant de photos que voulu, puis Next room (actif dès la première).
@@ -122,6 +158,7 @@ function photoStep(conv, st, store) {
 }
 
 export function currentStep(conv) {
+  if (conv.readOnly) return { id: "view", n: conv.steps[conv.i] ? conv.steps[conv.i].n : 1, title: "Read only", camera: false, replies: [] };
   const st = conv.steps[conv.i];
   if (!st) return { id: "done", n: 5, title: STEP_TITLES[5], camera: false, replies: [] };
   const a = conv.apt;
@@ -158,7 +195,7 @@ export function currentStep(conv) {
 const say = (conv, text) => { const m = { from: "me", type: "text", text, status: "saved" }; conv.messages.push(m); return m; };
 
 export function reply(conv, id, { now = new Date() } = {}) {
-  if (conv.flow) return conv; // signalement en cours : ses écrans ont leurs propres réponses (flowReply)
+  if (conv.flow || conv.readOnly) return conv; // signalement en cours : ses écrans ont leurs propres réponses (flowReply)
   const st = currentStep(conv);
   const linenAdjust = /^linen-(inc|dec):/.test(id) && st.editor === "linen";
   const r = st.replies.find(x => x.id === id);
@@ -272,7 +309,7 @@ function pushProblem(conv, kind, where, photos, now) {
 
 export function addPhoto(conv, photo) {
   const st = conv.steps[conv.i];
-  if (!st) return conv;
+  if (!st || conv.readOnly) return conv;
   const store = st.id === "arrival-photo" ? conv.arrivalPhotos : st.id === "end-photo" ? conv.endPhotos : null;
   if (!store) return conv;
   conv.gestures += 1;
@@ -285,6 +322,7 @@ export function addPhoto(conv, photo) {
 export const GAS_DEBOUNCE_MS = 2000;
 
 export function addProblem(conv, kind, photo, { now = new Date() } = {}) {
+  if (conv.readOnly) return conv;
   if (kind === "Gas smell") {
     if (conv.lastGasAt !== null && now - conv.lastGasAt < GAS_DEBOUNCE_MS) return conv;
     conv.lastGasAt = now.getTime();
@@ -347,7 +385,7 @@ function openFlow(conv, f) {
 
 // Bouton ⚠ Problem (viseur ou barre) : un geste, l'écran des tuiles s'ouvre.
 export function startProblem(conv, { from = "conv" } = {}) {
-  if (conv.flow) return conv;
+  if (conv.flow || conv.readOnly) return conv;
   conv.gestures += 1;
   return openFlow(conv, { stage: "kind", from, where: guessWhere(conv) });
 }
@@ -455,20 +493,20 @@ export function flowBack(conv) {
 // Depuis la page du problème : Add photo (photos) ou Edit note (note).
 export function reopenProblem(conv, index, stage) {
   const p = conv.problems[index];
-  if (!p || conv.flow || (stage !== "photos" && stage !== "note")) return conv;
+  if (!p || conv.flow || conv.readOnly || (stage !== "photos" && stage !== "note")) return conv;
   return openFlow(conv, { stage, from: "edit", problem: p });
 }
 
 export function editProblem(conv, index, patch) {
   const p = conv.problems[index];
-  if (!p) return conv;
+  if (!p || conv.readOnly) return conv;
   Object.assign(p, patch);
   if (patch.urgency === "urgent") p.notified = true;
   return conv;
 }
 
 export function removeProblem(conv, index) {
-  if (index < 0 || index >= conv.problems.length) return conv;
+  if (conv.readOnly || index < 0 || index >= conv.problems.length) return conv;
   const [p] = conv.problems.splice(index, 1);
   // Problème relié à une ligne de l'étape 5 supprimé (page du problème) : la ligne revient à « non traitée ».
   for (const key of Object.keys(conv.leaveProblems)) {
