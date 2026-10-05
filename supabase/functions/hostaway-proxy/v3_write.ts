@@ -13,11 +13,19 @@
 //     quitte jamais le proxy (revue tache 3, constat 5).
 import type { SessionUser } from "./auth.ts";
 import {
-  ActionResult, claimEvent, managerIds, pickSnapshot, readLinen, recordResult,
+  ActionResult, claimEvent, readLinen, recordResult,
   releaseEvent, replayResponse, resolveJob, v3Log, validIdem,
 } from "./v3.ts";
 import { sendPush } from "./push.ts";
 import type { PushFn } from "./v3_tickets.ts";
+import {
+  dateDeLaCle, jobRole, readReport, V3_REPORT_TEXT_MAX,
+} from "./v3_finish_context.ts";
+import type { FinishContext } from "./v3_finish_context.ts";
+export {
+  dateDeLaCle, jobRole, loadFinishContext, readReport, V3_REPORT_MAX_BYTES, V3_REPORT_TEXT_MAX,
+} from "./v3_finish_context.ts";
+export type { FinishContext } from "./v3_finish_context.ts";
 
 export async function startJob(sb: any, me: SessionUser, body: any): Promise<ActionResult> {
   const jobId = String(body?.jobId ?? "");
@@ -135,78 +143,6 @@ export async function tickItem(sb: any, me: SessionUser, body: any): Promise<Act
 // Fin de menage
 // ===========================================================================
 
-export interface FinishContext {
-  sameDay: boolean;
-  listingName: string;
-  managerIds: number[];
-}
-
-// Prefixe date d'une cle de reservation. « 2026-09-12_Marc Lefevre » et
-// « extra_2026-09-12_Deep clean » rendent tous deux « 2026-09-12 ».
-function dateDeLaCle(jobId: string): string | null {
-  const m = String(jobId).match(/^(?:extra_)?(\d{4}-\d{2}-\d{2})_/);
-  return m ? m[1] : null;
-}
-
-// Prend la reservation_key, et non l'id oppose : les instantanes de proxy_cache
-// sont indexes sur « <checkOut>_<guest> ». C'est l'appelant (le bloc de dispatch
-// d'index.ts) qui resout l'id avant d'appeler ici.
-//
-// Contexte lu sans jamais appeler Hostaway : uniquement les instantanes deja poses
-// dans proxy_cache (par l'app actuelle ou par v3.myDay), choisis par le meme
-// `pickSnapshot` que la lecture de la journee. Aucun instantane utilisable = on
-// finit quand meme, sans notification, et on le journalise. Rien ici ne leve :
-// une notification est un confort, elle ne doit jamais empecher une cleaner de
-// finir son menage.
-export async function loadFinishContext(sb: any, reservationKey: string): Promise<FinishContext> {
-  let sameDay = false;
-  let listingName = "";
-  let listingId = "";
-  const date = dateDeLaCle(reservationKey);
-  if (date) {
-    try {
-      const { data } = await sb.from("proxy_cache")
-        .select("key, payload, updated_at").like("key", "checkouts:%");
-      const snap = pickSnapshot(data ?? [], date);
-      const reservations = (snap && snap.payload && snap.payload.reservations) || [];
-      const hit = reservations.find((r: any) =>
-        String(r.checkOut) + "_" + (r.guest || "Guest") === reservationKey);
-      if (hit) {
-        sameDay = !!(hit.nextGuest && hit.nextGuest.sameDay);
-        listingName = String(hit.listing ?? "");
-        listingId = String(hit.listingId ?? "");
-      } else {
-        console.log("[v3.finishJob] aucun instantane ne couvre " + date + ", pas de notification");
-      }
-    } catch (e) {
-      console.warn("[v3.finishJob] contexte indisponible: " + String(e));
-    }
-  }
-  // Meme precedence que l'ecran Today (v3_myday.nomDuLogement) : le nom interne
-  // « Apt - Immeuble » d'abord, le titre Hostaway ensuite, le titre marketing
-  // OTA en dernier. La notification manager dit donc exactement ce que la
-  // cleaner a lu sur son telephone. L'ordre etait inverse ici aussi : un manager
-  // recevait « Modern 1bdr, 10' to Burj Khalifa » au lieu de « 3207 - Sobha
-  // Waves » (revue de branche, finding 1).
-  if (listingId) {
-    try {
-      const { data } = await sb.from("listing_config")
-        .select("listing_id, listing_name, internal_name").eq("listing_id", listingId).maybeSingle();
-      const propre = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim());
-      listingName = propre(data?.internal_name) || propre(listingName) ||
-        propre(data?.listing_name);
-    } catch (e) {
-      console.warn("[v3.finishJob] nom de logement indisponible: " + String(e));
-    }
-  }
-  let managers: number[] = [];
-  try {
-    managers = await managerIds(sb);
-  } catch (e) {
-    console.warn("[v3.finishJob] liste des managers indisponible: " + String(e));
-  }
-  return { sameDay, listingName, managerIds: managers };
-}
 
 export async function finishJob(
   sb: any, me: SessionUser, body: any, ctx: FinishContext,
@@ -233,9 +169,19 @@ export async function finishJob(
     if (pid !== null) photos.push(pid);
   }
 
+  const lu = readReport(body?.report);
+  if ("error" in lu) return { status: 400, body: { error: lu.error } };
+  const role = await jobRole(sb, jobId, me.cleaner_id);
+  const lead = role === "lead";
+  // L'aide ne rend pas de rapport : le sien ecraserait celui du lead (une ligne
+  // par menage). Il est ignore, et journalise.
+  const report = lead ? lu.report : null;
+  if (!lead && lu.report) console.log("[v3.finishJob] rapport d'une aide ignore sur " + jobId);
+
   // Elite ne compte pas le linge (specification, section 3) ; une cleaner interne,
   // si : ce comptage alimente laundry_balances, qui est un vrai solde d'inventaire.
-  const linenRequired = me.role !== "subcontractor";
+  // L'aide non plus : le linge du menage est compte une fois, par le lead.
+  const linenRequired = lead && me.role !== "subcontractor";
   let linen: Record<string, number> | null = null;
   if (linenRequired) {
     const lu = readLinen((body?.linen && typeof body.linen === "object") ? body.linen : {});
@@ -244,7 +190,7 @@ export async function finishJob(
   }
 
   const claim = await claimEvent(sb, idem, "finish_job", jobId, me.cleaner_id, {
-    unchecked, photos, linen, sameDay: ctx.sameDay,
+    unchecked, photos, linen, sameDay: ctx.sameDay, role, report: !!report,
   });
   // Rejeu : 200 avec le resultat memorise, ou 409 si la cle a ete posee sans que
   // la fin aboutisse. Jamais de succes fabrique : le telephone effacerait de sa
@@ -254,7 +200,8 @@ export async function finishJob(
 
   let result: Record<string, unknown>;
   try {
-    const items = Object.keys(checklist);
+    // L'aide ne decoche jamais une ligne du lead : seules ses lignes faites partent.
+    const items = Object.keys(checklist).filter((k) => lead || checklist[k] === true);
     if (items.length > 0) {
       const rows = items.map((name) => ({
         reservation_key: reservationKey, item_name: name, is_done: checklist[name] === true,
@@ -283,6 +230,24 @@ export async function finishJob(
       if (error) throw error;
       await v3Log(sb, reservationKey, "laundry_counted", me.name, linen);
     }
+    if (report) {
+      const texte = String(report.text ?? "").trim().slice(0, V3_REPORT_TEXT_MAX);
+      const { error } = await sb.from("cleaning_reports").upsert({
+        job_id: jobId, reservation_key: reservationKey, cleaner_id: me.cleaner_id,
+        // listingId vient du serveur et ecrase toute valeur envoyee.
+        payload: { ...report, listingId: ctx.listingId ?? null },
+        text: texte,
+      }, { onConflict: "job_id" });
+      if (error) throw error;
+      // Le texte du rapport apparait dans les notes du menage de l'app racine.
+      if (texte) {
+        const { error: nErr } = await sb.from("cleaning_notes").insert({
+          reservation_key: reservationKey, note_text: texte, author: me.name,
+        });
+        if (nErr) throw nErr;
+        await v3Log(sb, reservationKey, "note_added", me.name, { text: texte, via: "v3_report" });
+      }
+    }
     if (body?.notes && String(body.notes).trim()) {
       const noteText = String(body.notes).trim().slice(0, 2000);
       const { error } = await sb.from("cleaning_notes").insert({
@@ -290,6 +255,15 @@ export async function finishJob(
       });
       if (error) throw error;
       await v3Log(sb, reservationKey, "note_added", me.name, { text: noteText });
+    }
+
+    // L'aide s'arrete ici : le chrono partage et le « fait » du menage
+    // appartiennent au lead, une aide qui finit la premiere ne clot pas le
+    // menage de sa collegue encore au travail.
+    if (!lead) {
+      result = { status: "success", jobId, durationMinutes: null, unchecked, role };
+      await recordResult(sb, idem, result);
+      return { status: 200, body: result };
     }
 
     // Chrono : meme calcul que l'action stopTimer, pauses comprises (un menage
@@ -335,7 +309,7 @@ export async function finishJob(
     if (dErr) throw dErr;
     await v3Log(sb, reservationKey, "marked_done", me.name, { via: "v3", unchecked });
 
-    result = { status: "success", jobId, durationMinutes, unchecked };
+    result = { status: "success", jobId, durationMinutes, unchecked, role };
     await recordResult(sb, idem, result);
   } catch (e) {
     await releaseEvent(sb, idem);

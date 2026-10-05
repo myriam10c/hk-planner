@@ -26,11 +26,18 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
     const filters: Array<{ col: string; val: any; kind: "eq" | "in" }> = [];
     let pending: { op: string; values: any } | null = null;
     const list = () => (tables[table] ??= []);
+    // « payload->>listingId » : chemin JSON texte de PostgREST, un seul niveau.
+    const lire = (r: any, col: string) => {
+      const i = col.indexOf("->>");
+      if (i < 0) return r[col];
+      const v = r[col.slice(0, i)]?.[col.slice(i + 3)];
+      return v === undefined || v === null ? undefined : String(v);
+    };
     const match = (r: any) =>
       filters.every((f) =>
         f.kind === "in"
-          ? (f.val as any[]).map(String).includes(String(r[f.col]))
-          : String(r[f.col]) === String(f.val)
+          ? (f.val as any[]).map(String).includes(String(lire(r, f.col)))
+          : String(lire(r, f.col)) === String(f.val)
       );
     const selected = () => list().filter(match);
     const sameUnique = (a: any, b: any) => {

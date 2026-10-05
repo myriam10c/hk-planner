@@ -74,6 +74,9 @@ export const V3_ROLES: Record<string, string[]> = {
   "v3.setProblemNote": ["cleaner", "subcontractor"],
   "v3.updateProblem": ["cleaner", "subcontractor"],
   "v3.deleteProblem": ["cleaner", "subcontractor"],
+  // Suppression depuis la miniature (tache 3) : ceux qui televersent, et
+  // seulement leurs propres photos (controle dans deletePhoto).
+  "v3.deletePhoto": ["cleaner", "subcontractor", "maintenance"],
 };
 
 // Echoue fermee : une action inconnue de la table n'est autorisee a personne.

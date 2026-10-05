@@ -15,6 +15,7 @@ import {
 import { buildMyDay } from "./v3_myday.ts";
 import { loadTeam, resolveViewAs } from "./v3_viewas.ts";
 import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
+import { deletePhoto } from "./v3_photos.ts";
 import {
   checkTicket, reportProblem, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES, V3_PROBLEM_ACTIONS,
 } from "./v3_tickets.ts";
@@ -983,6 +984,8 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["v3.setProblemNote", "POST"],
   ["v3.updateProblem", "POST"],
   ["v3.deleteProblem", "POST"],
+  // Suppression d'une photo depuis sa miniature (branchement 2026-10-05, tache 3)
+  ["v3.deletePhoto", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -1269,6 +1272,16 @@ Deno.serve(async (req: Request) => {
         return jsonResp({ error: "multipart body required" }, 400);
       }
       const r = await uploadPhoto(sb, me, form);
+      return jsonResp(r.body, r.status);
+    }
+
+    if (action === "v3.deletePhoto" && req.method === "POST") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await deletePhoto(sb, me, body);
       return jsonResp(r.body, r.status);
     }
 

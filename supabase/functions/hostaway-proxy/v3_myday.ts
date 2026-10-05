@@ -18,6 +18,10 @@ import {
 } from "./v3.ts";
 import type { SessionUser } from "./v3.ts";
 import type { TeamMember } from "./v3_viewas.ts";
+import {
+  heroPhotoFrom, loadOthersOnJob, loadReferences, roomsFor,
+} from "./v3_day_extras.ts";
+import type { OtherOnJob } from "./v3_day_extras.ts";
 
 export interface V3Ticket {
   id: number;
@@ -47,6 +51,11 @@ export interface V3Stop {
   progress: Record<string, boolean>;
   openTickets: V3Ticket[];
   label: string | null;       // libelle d'un menage hors Hostaway
+  // Branchement 2026-10-05 (tache 3), voir v3_day_extras.ts.
+  rooms: string[];            // pieces par type, regle unique cote serveur
+  heroPhotoUrl: string | null; // premiere image de l'annonce, cache seulement
+  othersOnJob: OtherOnJob[];  // autres personnes du meme menage, par demarrage
+  references: Record<string, string>; // piece -> URL signee 1 h, menage precedent
 }
 
 export interface MyDayInput {
@@ -190,6 +199,10 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
           priority: String(t.priority ?? "medium"),
         })),
       label: base.label,
+      rooms: roomsFor(listing.unit_type, listing.bedrooms),
+      heroPhotoUrl: heroPhotoFrom(listing),
+      othersOnJob: [],
+      references: {},
     };
   };
 
@@ -248,6 +261,15 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
   // arret sur lequel aucune action d'ecriture ne fonctionnerait ensuite.
   const ids = await ensureJobKeys(input.sb, brut.map((b) => b.cle));
   for (const b of brut) b.stop.jobId = ids[b.cle];
+
+  // Binome et references : lectures de confort, jamais bloquantes (voir
+  // v3_day_extras.ts). En « View as », `me` est la cleaner regardee : le manager
+  // voit exactement ce qu'elle voit, en lecture seule.
+  const binomes = await loadOthersOnJob(input.sb,
+    brut.map((b) => ({ cle: b.cle, jobId: b.stop.jobId })), input.me.cleaner_id);
+  for (const b of brut) b.stop.othersOnJob = binomes[b.cle] ?? [];
+  const refs = await loadReferences(input.sb, brut.map((b) => b.stop));
+  brut.forEach((b, i) => { b.stop.references = refs[i] ?? {}; });
 
   const ordered = orderStops(brut.map((b) => b.stop));
   const out: MyDayPayload = {

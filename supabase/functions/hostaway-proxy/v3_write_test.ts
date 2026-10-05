@@ -648,3 +648,166 @@ Deno.test("finishJob ecrit linge, chrono et fait sur la reservation_key", async 
   assertEquals(sb.tables.laundry_counts[0].counted_on, "2026-09-12");
   assertEquals((r.body as any).jobId, JOB_ID);
 });
+
+// ===========================================================================
+// Branchement 2026-10-05, tache 3 : rapport de fin, lead et aide
+// ===========================================================================
+
+const JOY = { cleaner_id: 8, name: "Joy", role: "cleaner", color: "#000000" };
+
+// Faiza a demarre la premiere, Joy ensuite : Faiza est le lead, Joy l'aide.
+function baseBinome() {
+  const sb = baseFin();
+  sb.tables.cleaning_reports = [];
+  sb.tables.job_events.push(
+    { id: 1, idem_key: "start-faiza-0001", event_type: "start_job", job_id: JOB_ID,
+      cleaner_id: 3, payload: {}, result: { status: "success" }, created_at: "2026-09-12T08:00:00Z" },
+    { id: 2, idem_key: "start-joy-00001", event_type: "start_job", job_id: JOB_ID,
+      cleaner_id: 8, payload: {}, result: { status: "success" }, created_at: "2026-09-12T08:10:00Z" },
+  );
+  return sb;
+}
+
+const RAPPORT = {
+  arrival: { Kitchen: 2 }, walls: "ok", damage: "none", checkAnswer: "yes",
+  leave: { ac: true, gas: "ko" }, acLabel: "24", low: ["Soap"],
+  text: "All done. Kitchen was very dirty.",
+};
+
+const CONTEXTE_LOGEMENT = { ...CONTEXTE, listingId: "102" };
+
+Deno.test("finishJob enregistre le rapport et ajoute son texte aux notes", async () => {
+  const sb = baseBinome();
+  const r = await finishJob(sb, FAIZA as any, {
+    jobId: JOB_ID, linen: lingePlein(), report: RAPPORT, idem: "idem-finish-r001",
+  }, CONTEXTE_LOGEMENT, { push: espionPushFin().push });
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).role, "lead");
+  assertEquals(sb.tables.cleaning_reports.length, 1);
+  const rapport = sb.tables.cleaning_reports[0];
+  assertEquals(rapport.job_id, JOB_ID);
+  assertEquals(rapport.reservation_key, JOB);
+  assertEquals(rapport.cleaner_id, 3);
+  assertEquals(rapport.text, RAPPORT.text);
+  assertEquals(rapport.payload.walls, "ok");
+  // Le logement est pose par le serveur, pour les references du menage suivant.
+  assertEquals(rapport.payload.listingId, "102");
+  assertEquals(sb.tables.cleaning_notes.length, 1);
+  assertEquals(sb.tables.cleaning_notes[0].note_text, RAPPORT.text);
+  assertEquals(sb.tables.cleaning_notes[0].reservation_key, JOB);
+});
+
+Deno.test("finishJob ignore un listingId envoye par le telephone", async () => {
+  const sb = baseBinome();
+  await finishJob(sb, FAIZA as any, {
+    jobId: JOB_ID, linen: lingePlein(), report: { ...RAPPORT, listingId: "666" },
+    idem: "idem-finish-r002",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(sb.tables.cleaning_reports[0].payload.listingId, null);
+});
+
+Deno.test("finishJob : rejouer le rapport ne double ni la note ni le rapport", async () => {
+  const sb = baseBinome();
+  const corps = { jobId: JOB_ID, linen: lingePlein(), report: RAPPORT, idem: "idem-finish-r003" };
+  const un = await finishJob(sb, FAIZA as any, corps, CONTEXTE_LOGEMENT, { push: espionPushFin().push });
+  const deux = await finishJob(sb, FAIZA as any, corps, CONTEXTE_LOGEMENT, { push: espionPushFin().push });
+  assertEquals(deux.status, 200);
+  assertEquals(deux.body, un.body);
+  assertEquals(sb.tables.cleaning_reports.length, 1);
+  assertEquals(sb.tables.cleaning_notes.length, 1);
+});
+
+Deno.test("finishJob refuse un rapport de plus de 20 Ko (400), sans bruler la cle", async () => {
+  const sb = baseBinome();
+  const r = await finishJob(sb, FAIZA as any, {
+    jobId: JOB_ID, linen: lingePlein(), report: { text: "x".repeat(21 * 1024) },
+    idem: "idem-finish-r004",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r.status, 400);
+  assertEquals(sb.tables.cleaning_reports.length, 0);
+  assertEquals(sb.tables.menage_done.length, 0);
+  assertEquals(sb.tables.job_events.length, 2);
+});
+
+Deno.test("finishJob refuse un rapport qui n'est pas un objet", async () => {
+  const sb = baseBinome();
+  for (const report of ["texte", [1, 2], 42]) {
+    const r = await finishJob(sb, FAIZA as any, {
+      jobId: JOB_ID, linen: lingePlein(), report, idem: "idem-finish-r005",
+    }, CONTEXTE, { push: espionPushFin().push });
+    assertEquals(r.status, 400);
+  }
+});
+
+Deno.test("finishJob borne le texte du rapport a 4000 caracteres", async () => {
+  const sb = baseBinome();
+  const r = await finishJob(sb, FAIZA as any, {
+    jobId: JOB_ID, linen: lingePlein(), report: { text: "a".repeat(5000) },
+    idem: "idem-finish-r006",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r.status, 200);
+  assertEquals(sb.tables.cleaning_reports[0].text.length, 4000);
+});
+
+Deno.test("finishJob accepte l'aide sans linge, sans clore le menage du lead", async () => {
+  const sb = baseBinome();
+  const r = await finishJob(sb, JOY as any, {
+    jobId: JOB_ID, idem: "idem-finish-h001",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).role, "helper");
+  assertEquals(sb.tables.laundry_counts.length, 0);
+  // Le chrono et le « fait » appartiennent au lead.
+  assertEquals(sb.tables.cleaning_timer[0].finished_at, null);
+  assertEquals(sb.tables.menage_done.length, 0);
+});
+
+Deno.test("finishJob refuse le lead sans linge", async () => {
+  const sb = baseBinome();
+  const r = await finishJob(sb, FAIZA as any, {
+    jobId: JOB_ID, idem: "idem-finish-l001",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r.status, 400);
+  assertEquals(sb.tables.menage_done.length, 0);
+});
+
+Deno.test("finishJob : sans demarrage journalise par une autre, on est le lead", async () => {
+  // Le role se lit dans les demarrages v3 (job_events), pas dans le chrono : un
+  // chrono ouvert depuis l'app racine ne fait de personne une aide.
+  const sb = baseFin();
+  const r = await finishJob(sb, JOY as any, {
+    jobId: JOB_ID, idem: "idem-finish-l002",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r.status, 400); // linge exige du lead
+  // Une autre a demarre, moi jamais : aide.
+  const sb2 = baseFin();
+  sb2.tables.job_events.push({ id: 1, idem_key: "start-faiza-0009", event_type: "start_job",
+    job_id: JOB_ID, cleaner_id: 3, payload: {}, result: { status: "success" } });
+  const r2 = await finishJob(sb2, JOY as any, {
+    jobId: JOB_ID, idem: "idem-finish-l003",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r2.status, 200);
+  assertEquals((r2.body as any).role, "helper");
+});
+
+Deno.test("finishJob : un sous-traitant lead finit sans linge", async () => {
+  const sb = baseFin();
+  sb.tables.cleaning_timer[0].cleaner_id = 9;
+  const r = await finishJob(sb, ELITE as any, {
+    jobId: JOB_ID, idem: "idem-finish-l004",
+  }, CONTEXTE, { push: espionPushFin().push });
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).role, "lead");
+  assertEquals(sb.tables.menage_done[0].done, true);
+});
+
+Deno.test("loadFinishContext rend le logement, y compris d'un menage hors Hostaway", async () => {
+  const sb = fakeDb({
+    proxy_cache: [],
+    extra_cleanings: [{ reservation_key: "extra_2026-09-12_Deep clean", listing_id: "205" }],
+    listing_config: [],
+    cleaners: [],
+  });
+  const ctx = await loadFinishContext(sb, "extra_2026-09-12_Deep clean");
+  assertEquals(ctx.listingId, "205");
+});

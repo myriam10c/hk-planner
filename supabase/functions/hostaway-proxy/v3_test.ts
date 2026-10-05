@@ -160,8 +160,9 @@ Deno.test("roleAllowed accepte les roles prevus par la specification", () => {
   assertEquals(roleAllowed("v3.uploadPhoto", "maintenance"), true);
   assertEquals(roleAllowed("v3.reportProblem", "subcontractor"), true);
   assertEquals(roleAllowed("inconnue", "cleaner"), false);
-  // 7 actions de la phase A, 4 gestes sur un probleme (branchement, tache 2).
-  assertEquals(Object.keys(V3_ROLES).length, 11);
+  // 7 actions de la phase A, 4 gestes sur un probleme (branchement, tache 2),
+  // la suppression de photo (tache 3).
+  assertEquals(Object.keys(V3_ROLES).length, 12);
 });
 
 for (const [action, refuse] of [

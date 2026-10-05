@@ -183,6 +183,56 @@ export async function sansEchec(quoi: string, fn: () => Promise<unknown>): Promi
   }
 }
 
+// ===========================================================================
+// Suppression d'une photo depuis sa miniature (branchement 2026-10-05, tache 3)
+// ===========================================================================
+
+// Proprietaire uniquement. Le controle (et le 404 / 403 / 409) passe AVANT la
+// pose de la cle : un refus ne doit pas bruler la cle du telephone. Une photo
+// deja rattachee a un probleme est gardee (409) : elle est la preuve du ticket,
+// et maintenance_tickets.photo_path pointe peut-etre sur le meme objet.
+export async function deletePhoto(sb: any, me: SessionUser, body: any): Promise<ActionResult> {
+  const idem = body?.idem;
+  if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
+  const brut = body?.photoId;
+  const n = typeof brut === "number" || (typeof brut === "string" && brut !== "") ? Number(brut) : NaN;
+  if (!Number.isInteger(n) || n <= 0) return { status: 400, body: { error: "Invalid photo id." } };
+
+  const { data: photo, error: lecture } = await sb.from("photos")
+    .select("id, storage_path, cleaner_id, ticket_id").eq("id", n).maybeSingle();
+  if (lecture) throw lecture;
+  if (!photo) {
+    // Rejeu apres une suppression reussie : la ligne n'existe plus, mais le
+    // resultat memorise sous la meme cle fait foi.
+    const { data: ev } = await sb.from("job_events")
+      .select("result").eq("idem_key", String(idem)).maybeSingle();
+    if (ev && ev.result) return { status: 200, body: ev.result };
+    return { status: 404, body: { error: "Photo not found." } };
+  }
+  if (Number(photo.cleaner_id) !== Number(me.cleaner_id)) {
+    return { status: 403, body: { error: "forbidden" } };
+  }
+  if (photo.ticket_id !== null && photo.ticket_id !== undefined) {
+    return { status: 409, body: { error: "This photo belongs to a problem report." } };
+  }
+
+  const claim = await claimEvent(sb, String(idem), "delete_photo", null, me.cleaner_id, { photoId: n });
+  const rejeu = replayResponse(claim);
+  if (rejeu) return rejeu;
+  try {
+    const { error: rmErr } = await sb.storage.from(V3_PHOTO_BUCKET).remove([String(photo.storage_path)]);
+    if (rmErr) throw rmErr;
+    const { error } = await sb.from("photos").delete().eq("id", n).eq("cleaner_id", me.cleaner_id);
+    if (error) throw error;
+    const result = { status: "success", photoId: n };
+    await recordResult(sb, String(idem), result);
+    return { status: 200, body: result };
+  } catch (e) {
+    await releaseEvent(sb, String(idem));
+    throw e;
+  }
+}
+
 // Retrait best-effort d'un objet du bucket. Ne leve jamais : l'appelant est deja
 // dans un chemin d'erreur et c'est l'erreur d'origine qui doit remonter.
 async function removeQuietly(sb: any, path: string): Promise<void> {
