@@ -79,10 +79,9 @@ export async function renderFleet(ctx) {
     if (!b) return;
     const a = b.dataset.act;
     if (a === 'home') return go('#/');
-    if (a === 'open') return go('#/history/' + encodeURIComponent(b.dataset.id));
-    if (a === 'toggle') return toggle(b.dataset.id, b.dataset.ex === '1', b);
+    if (a === 'open') { st.focusQ = false; return go('#/history/' + encodeURIComponent(b.dataset.id)); }
+    if (a === 'toggle') { st.focusQ = false; return toggle(b.dataset.id, b.dataset.ex === '1', b); }
   };
-  view.addEventListener('focusout', (ev) => { if (ev.target && ev.target.id === 'fq') st.focusQ = false; });
   view.oninput = (ev) => { if (ev.target.id === 'fq') { st.q = ev.target.value; st.focusQ = true; paint(); } };
 
   paint();

@@ -52,3 +52,11 @@ test('parc : la recherche ne reprend pas le focus apres Exclude', async ({ page 
   await expect(page.getByTestId('row-C').getByText('Excluded')).toBeVisible();
   expect(await page.evaluate(() => document.activeElement && (document.activeElement as HTMLElement).id)).not.toBe('fq');
 });
+
+test('parc : saisie lettre par lettre garde la valeur et le focus', async ({ page }) => {
+  await bootInsp(page, [MGR, OVERVIEW], { pinToken: 'tok', hash: '#/fleet' });
+  await page.locator('#fq').click();
+  await page.locator('#fq').pressSequentially('Apt 3');
+  await expect(page.locator('#fq')).toHaveValue('Apt 3');
+  await expect(page.locator('#fq')).toBeFocused();
+});
