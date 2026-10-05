@@ -73,7 +73,7 @@ function cleanBuilding(b) {
   let prev;
   do {
     prev = s;
-    s = s.replace(/\s*\/+$/, "").replace(/\s*\(new\)$/i, "").replace(/\s+V2(\s*-\s*ok)?$/i, "").trim();
+    s = s.replace(/\s*\/+$/, "").replace(/\s*\(\s*new\s*\)$/i, "").replace(/\s+V2(\s*-\s*ok)?$/i, "").trim();
   } while (s !== prev);
   return s;
 }
