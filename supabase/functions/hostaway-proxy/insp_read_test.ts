@@ -151,3 +151,11 @@ Deno.test("issues : item avec ticket mais outcome fixed n'est pas un probleme ou
   db.tables.inspection_items = [{ inspection_id: 2, zone: "ac", status: "not_ok", outcome: "fixed", ticket_id: 50 }];
   assertEquals((await inspOverview(db, D)).rows.find((x) => x.listingId === "B")!.openIssues, 0);
 });
+
+Deno.test("today : cleaners lu exactement une fois par appel", async () => {
+  const db = base();
+  const calls: string[] = [];
+  const wrapped = { ...db, from: (t: string) => { calls.push(t); return db.from(t); } };
+  await inspToday(wrapped, D, [], null);
+  assertEquals(calls.filter((t) => t === "cleaners").length, 1);
+});

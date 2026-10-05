@@ -92,24 +92,25 @@ async function readTarget(sb: any): Promise<number> {
 export async function inspToday(
   sb: any, day: string, reservations: InspReservation[], cachedAt: string | null,
 ): Promise<{ day: string; target: number; cachedAt: string | null; today: TodayCard[]; also: TodayCard[] }> {
-  const names = await cleanerNames(sb);
-  const finished = await finishedInspections(sb);
-  const [target, { data: listings }, lastDone] = await Promise.all([
-    readTarget(sb), sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded"),
-    loadLastDone(sb, names, finished),
+  const loggedRows = async () => {
+    const { data } = await sb.from("inspection_proposals").select("listing_id, claimed_by, rank").eq("proposal_date", day);
+    return data ?? [];
+  };
+  // Lectures independantes en parallele ; seuls issues et missed dependent des inspections terminees.
+  const [names, finished, target, { data: listings }, props0, { data: running }] = await Promise.all([
+    cleanerNames(sb), finishedInspections(sb), readTarget(sb),
+    sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded"),
+    loggedRows(),
+    sb.from("inspections").select("listing_id, inspector_id").eq("inspection_date", day).is("finished_at", null),
   ]);
-  const issues = await openIssuesByListing(sb, lastDone);
-  const missed = await missedCounts(sb, day, lastDone);
+  const lastDone = await loadLastDone(sb, names, finished);
+  const [issues, missed] = await Promise.all([openIssuesByListing(sb, lastDone), missedCounts(sb, day, lastDone)]);
   const ranked = rankToday({
     day, target, listings: listings ?? [], reservations, lastDone,
     openIssueListings: new Set(Object.keys(issues)), missed,
   });
   // Les propositions sont journalisees UNE fois par jour Dubai : la liste du jour reste stable.
-  const loggedRows = async () => {
-    const { data } = await sb.from("inspection_proposals").select("listing_id, claimed_by, rank").eq("proposal_date", day);
-    return data ?? [];
-  };
-  let props = await loggedRows();
+  let props = props0;
   if (!props.some((p: any) => Number(p.rank) >= 1) && ranked.today.length) {
     await sb.from("inspection_proposals").upsert(
       ranked.today.map((c, i) => ({ proposal_date: day, listing_id: c.listingId, rank: i + 1 })),
@@ -121,8 +122,6 @@ export async function inspToday(
   for (const p of props) claimed[p.listing_id] = p.claimed_by ?? null;
   const logged = props.filter((p: any) => Number(p.rank) >= 1).sort((a: any, b: any) => Number(a.rank) - Number(b.rank));
   const loggedIds = new Set<string>(logged.map((p: any) => String(p.listing_id)));
-  const { data: running } = await sb.from("inspections").select("listing_id, inspector_id")
-    .eq("inspection_date", day).is("finished_at", null);
   const runningBy: Record<string, string> = {};
   const runningById: Record<string, number> = {};
   for (const r of running ?? []) {
@@ -164,12 +163,13 @@ export async function inspToday(
 }
 
 export async function inspOverview(sb: any, day: string) {
-  const names = await cleanerNames(sb);
-  const { data: listings } = await sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded");
-  const finished = await finishedInspections(sb);
+  const [names, { data: listings }, finished] = await Promise.all([
+    cleanerNames(sb),
+    sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded"),
+    finishedInspections(sb),
+  ]);
   const lastDone = await loadLastDone(sb, names, finished);
-  const issues = await openIssuesByListing(sb, lastDone);
-  const missed = await missedCounts(sb, day, lastDone);
+  const [issues, missed] = await Promise.all([openIssuesByListing(sb, lastDone), missedCounts(sb, day, lastDone)]);
   const rows: OverviewRow[] = (listings ?? []).map((l: any): OverviewRow => {
     const last = lastDone[l.listing_id];
     const daysSince = last ? daysBetween(last.finishedAt, day) : null;
@@ -193,24 +193,27 @@ export async function inspOverview(sb: any, day: string) {
 }
 
 export async function inspHistory(sb: any, listingId: string) {
-  const names = await cleanerNames(sb);
-  const { data: l } = await sb.from("listing_config").select("listing_id, internal_name, listing_name").eq("listing_id", listingId).maybeSingle();
-  const { data: insps } = await sb.from("inspections").select("*").eq("listing_id", listingId)
-    .order("started_at", { ascending: false }).limit(20);
+  const [names, { data: l }, { data: insps }] = await Promise.all([
+    cleanerNames(sb),
+    sb.from("listing_config").select("listing_id, internal_name, listing_name").eq("listing_id", listingId).maybeSingle(),
+    sb.from("inspections").select("*").eq("listing_id", listingId).order("started_at", { ascending: false }).limit(20),
+  ]);
   const list = (insps ?? []).slice().sort((a: any, b: any) => String(b.started_at).localeCompare(String(a.started_at))).slice(0, 20);
   const ids = list.map((i: any) => i.id);
-  const { data: items } = ids.length ? await sb.from("inspection_items").select("*").in("inspection_id", ids) : { data: [] };
-  const { data: photos } = ids.length ? await sb.from("inspection_photos").select("*").in("inspection_id", ids) : { data: [] };
+  const [{ data: items }, { data: photos }] = await Promise.all([
+    ids.length ? sb.from("inspection_items").select("*").in("inspection_id", ids) : { data: [] },
+    ids.length ? sb.from("inspection_photos").select("*").in("inspection_id", ids) : { data: [] },
+  ]);
   const ticketIds = (items ?? []).map((i: any) => i.ticket_id).filter(Boolean);
-  const { data: tickets } = ticketIds.length ? await sb.from("maintenance_tickets").select("id, status, title").in("id", ticketIds) : { data: [] };
+  const paths = (photos ?? []).map((p: any) => p.storage_path);
+  const [{ data: tickets }, signedRes] = await Promise.all([
+    ticketIds.length ? sb.from("maintenance_tickets").select("id, status, title").in("id", ticketIds) : { data: [] },
+    paths.length ? sb.storage.from(V3_PHOTO_BUCKET).createSignedUrls(paths, 3600) : { data: [] },
+  ]);
   const tById: Record<string, any> = {};
   for (const t of tickets ?? []) tById[String(t.id)] = t;
-  const paths = (photos ?? []).map((p: any) => p.storage_path);
   const signed: Record<string, string> = {};
-  if (paths.length) {
-    const { data } = await sb.storage.from(V3_PHOTO_BUCKET).createSignedUrls(paths, 3600);
-    for (const s of data ?? []) if (s.signedUrl) signed[s.path] = s.signedUrl;
-  }
+  for (const s of signedRes?.data ?? []) if (s.signedUrl) signed[s.path] = s.signedUrl;
   const label = (z: string) => INSP_ZONES.find((x) => x.key === z)?.label ?? z;
   return {
     listingId, name: listingLabel(l ?? {}),
