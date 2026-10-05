@@ -240,7 +240,7 @@ export async function inspRecap(sb: any, day: string) {
     cleanerNames(sb), finishedInspections(sb), readTarget(sb),
     sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded"),
     sb.from("inspection_proposals").select("listing_id, rank").eq("proposal_date", day),
-    sb.from("inspections").select("listing_id").eq("inspection_date", day).is("finished_at", null),
+    sb.from("inspections").select("listing_id, inspector_id").eq("inspection_date", day).is("finished_at", null),
     sb.from("maintenance_tickets").select("id, status").eq("source", "inspection").not("status", "in", "(resolved,cancelled)"),
   ]);
   const lastDone = await loadLastDone(sb, names, finished);
@@ -261,6 +261,8 @@ export async function inspRecap(sb: any, day: string) {
     .sort((a: any, b: any) => String(a.finished_at).localeCompare(String(b.finished_at)) || Number(a.id) - Number(b.id));
   const doneFirst: Record<string, any> = {};
   for (const r of todays) if (!doneFirst[r.listing_id]) doneFirst[r.listing_id] = r;
+  const runningByListingId: Record<string, any> = {};
+  for (const r of running ?? []) if (!runningByListingId[r.listing_id]) runningByListingId[r.listing_id] = r;
   const runningIds = new Set((running ?? []).map((r: any) => String(r.listing_id)));
   const logged = (props ?? []).filter((p: any) => Number(p.rank) >= 1).sort((a: any, b: any) => Number(a.rank) - Number(b.rank));
   const loggedIds = new Set<string>(logged.map((p: any) => String(p.listing_id)));
@@ -268,10 +270,11 @@ export async function inspRecap(sb: any, day: string) {
   const proposals = logged.map((p: any) => {
     const id = String(p.listing_id);
     const d = doneFirst[id];
+    const r = runningByListingId[id];
     return {
       listingId: id, name: nameOf(id), rank: Number(p.rank),
       status: (d ? "done" : runningIds.has(id) ? "in_progress" : "not_done") as "done" | "in_progress" | "not_done",
-      by: d ? names[String(d.inspector_id)] ?? "Someone" : null, at: d ? d.finished_at as string : null,
+      by: d ? names[String(d.inspector_id)] ?? "Someone" : (r ? names[String(r.inspector_id)] ?? "Someone" : null), at: d ? d.finished_at as string : null,
     };
   });
 

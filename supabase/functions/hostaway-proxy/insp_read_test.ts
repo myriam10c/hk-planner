@@ -199,7 +199,7 @@ Deno.test("recap : statuts done, in_progress, not_done ordonnes par rang", async
   );
   const r = await inspRecap(db, D);
   assertEquals(r.proposals.map((p: any) => [p.listingId, p.rank, p.status, p.by]), [
-    ["A", 1, "done", "Faiza"], ["B", 2, "in_progress", null], ["C", 3, "not_done", null],
+    ["A", 1, "done", "Faiza"], ["B", 2, "in_progress", "Walter"], ["C", 3, "not_done", null],
   ]);
   assertEquals(r.proposals[0].at, D + "T10:00:00+04:00");
   assertEquals(r.proposals[0].name, "Apt 101 · Tower A");
@@ -255,4 +255,16 @@ Deno.test("recap : couverture identique a overview, jamais inspectes et en retar
   assertEquals(r.inspectedThisMonth, o.inspectedThisMonth);
   assertEquals(r.neverInspected, 1); // C ; X exclu
   assertEquals(r.overdue, 2); // A (66 j) + C (jamais) ; B 11 j
+});
+
+Deno.test("recap : inspection en cours set by a le nom de l'inspecteur", async () => {
+  const db = recapDb();
+  db.tables.inspections.push(
+    { id: 4, listing_id: "B", inspector_id: 2, inspection_date: D, started_at: D + "T11:00:00+04:00", finished_at: null, eligibility: "vacant" },
+  );
+  const r = await inspRecap(db, D);
+  const bProposal = r.proposals.find((p: any) => p.listingId === "B");
+  assertEquals(bProposal?.status, "in_progress");
+  assertEquals(bProposal?.by, "Walter");
+  assertEquals(bProposal?.at, null);
 });
