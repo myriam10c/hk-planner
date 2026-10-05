@@ -56,6 +56,9 @@ Deno.test("daysBetween across Dubai day boundary", () => {
 
 Deno.test("listingLabel", () => {
   assertEquals(listingLabel({ internal_name: "3207 - Sobha Waves" }), "Apt 3207 · Sobha Waves");
+  assertEquals(listingLabel({ internal_name: "414 | Azizi Riviera 11" }), "Apt 414 · Azizi Riviera 11");
+  assertEquals(listingLabel({ internal_name: "503 WILTON PARK 2" }), "Apt 503 · WILTON PARK 2");
+  assertEquals(listingLabel({ internal_name: "1011c - Bloom Tower" }), "Apt 1011c · Bloom Tower");
   assertEquals(listingLabel({ internal_name: "Villa Jumeirah" }), "Villa Jumeirah");
   assertEquals(listingLabel({ listing_name: "Nice 2br" }), "Nice 2br");
   assertEquals(listingLabel({}), "Apartment");
