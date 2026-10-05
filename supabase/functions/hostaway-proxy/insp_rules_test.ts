@@ -48,11 +48,25 @@ Deno.test("daysBetween et pastilles", () => {
   assertEquals(fleetColor(46), "red");
 });
 
+Deno.test("daysBetween across Dubai day boundary", () => {
+  // 21:00 UTC on 2026-09-05 is 01:00 on 2026-09-06 in Dubai (UTC+4)
+  // So from 2026-09-06 to 2026-10-06 is 30 days
+  assertEquals(daysBetween("2026-09-05T21:00:00Z", D), 30);
+});
+
 Deno.test("listingLabel", () => {
   assertEquals(listingLabel({ internal_name: "3207 - Sobha Waves" }), "Apt 3207 · Sobha Waves");
   assertEquals(listingLabel({ internal_name: "Villa Jumeirah" }), "Villa Jumeirah");
   assertEquals(listingLabel({ listing_name: "Nice 2br" }), "Nice 2br");
   assertEquals(listingLabel({}), "Apartment");
+});
+
+Deno.test("listingLabel requires digit in apartment token", () => {
+  // No digit: should not match regex, return as-is
+  assertEquals(listingLabel({ internal_name: "Villa - Jumeirah" }), "Villa - Jumeirah");
+  assertEquals(listingLabel({ internal_name: "Dubai-Marina Tower" }), "Dubai-Marina Tower");
+  // Digit present: should match regex and format as "Apt X · Y"
+  assertEquals(listingLabel({ internal_name: "G05 - Marina Gate" }), "Apt G05 · Marina Gate");
 });
 
 Deno.test("roles", () => {

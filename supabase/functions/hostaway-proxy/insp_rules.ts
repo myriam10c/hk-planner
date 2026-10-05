@@ -74,7 +74,7 @@ export function fleetColor(daysSince: number | null): "green" | "orange" | "red"
 
 export function listingLabel(row: { internal_name?: string | null; listing_name?: string | null }): string {
   const s = String(row?.internal_name ?? "").trim();
-  const m = s.match(/^([A-Za-z0-9]+)\s*-\s*(.+)$/);
+  const m = s.match(/^([A-Za-z]*\d[A-Za-z0-9]*)\s*-\s*(.+)$/);
   if (m) return "Apt " + m[1] + " · " + m[2].trim();
   return s || String(row?.listing_name ?? "").trim() || "Apartment";
 }
