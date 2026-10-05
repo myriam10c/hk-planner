@@ -169,3 +169,20 @@ test('session stale : ecran Retry et non "Please sign in"', async ({ page }) => 
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
   await expect(page.getByText('Please sign in')).toHaveCount(0);
 });
+
+test('carte "Not free today" : raison attenuee, ni I\'ll take it, ni Start inspection, ni Assign', async ({ page }) => {
+  const mgr = { ...ME, body: { status: 'success', cleaner: { id: 3, name: 'Faiza', color: '#abc', role: 'manager' } } };
+  const t = JSON.parse(JSON.stringify(TODAY.body));
+  t.today = [
+    card({ eligibility: { kind: 'unavailable' } }),
+    card({ listingId: 'M', name: 'Apt 404 · Tower M', eligibility: { kind: 'unavailable' }, claimedBy: 3, claimedByName: 'Faiza' }),
+  ];
+  t.also = [];
+  await bootInsp(page, [mgr, { ...TODAY, body: t }], { pinToken: 'tok' });
+  await expect(page.getByText('Not free today', { exact: true })).toHaveCount(2);
+  await expect(page.locator('.reason.dim')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: "I'll take it" })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Start inspection' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Assign' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Release' })).toHaveCount(1);
+});

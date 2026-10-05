@@ -40,7 +40,8 @@ export type InspReservation = {
 };
 export type Eligibility =
   | { kind: "checkout"; checkOutTime: number | null; nextCheckIn: { date: string; time: number | null } | null }
-  | { kind: "vacant"; nextArrival: string | null };
+  | { kind: "vacant"; nextArrival: string | null }
+  | { kind: "unavailable" };
 
 // Checkout le jour J (check-in le meme jour accepte), sinon vacant si aucune
 // reservation n'occupe la nuit J-1→J ni la nuit J→J+1.

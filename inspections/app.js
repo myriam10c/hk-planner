@@ -5,6 +5,7 @@ import { renderToday } from '/inspections/today.js';
 const view = document.getElementById('view');
 let me = null;
 let seq = 0;
+let leaving = []; // nettoyages de l'ecran courant, lances au changement de route
 
 export function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -32,8 +33,10 @@ function placeholder(title, extra) {
 
 async function route() {
   const mine = ++seq;
+  const old = leaving; leaving = [];
+  for (const fn of old) { try { fn(); } catch (e) { /* nettoyage best effort */ } }
   const hash = location.hash || '#/';
-  const ctx = { me, go, toast, render, esc, isCurrent: () => mine === seq };
+  const ctx = { me, go, toast, render, esc, isCurrent: () => mine === seq, onLeave: (fn) => { leaving.push(fn); } };
   view.onclick = null; view.oninput = null;
   const [path, query] = hash.slice(2).split('?');
   const parts = path.split('/');

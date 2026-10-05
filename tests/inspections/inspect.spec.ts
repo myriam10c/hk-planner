@@ -17,10 +17,10 @@ test('parcours : 9 OK, AC en maintenance avec photo, fin', async ({ page }) => {
   ], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
   for (const z of ZONES) {
     if (z === 'AC') continue;
-    await page.getByTestId('zone-' + KEYS[ZONES.indexOf(z)]).getByRole('button', { name: 'OK', exact: true }).click();
+    await page.getByTestId('zone-' + KEYS[ZONES.indexOf(z)]).getByRole('button', { name: 'OK: ' + z, exact: true }).click();
   }
   const ac = page.getByTestId('zone-ac');
-  await ac.getByRole('button', { name: 'Not OK' }).click();
+  await ac.getByRole('button', { name: 'Not OK: AC', exact: true }).click();
   await ac.getByLabel('What is wrong?').fill('AC leaking water');
   await ac.locator('input[type=file]').first().setInputFiles({ name: 'a.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
   await ac.getByRole('button', { name: 'Needs maintenance' }).click();
@@ -52,7 +52,7 @@ test('erreur de fin affichee telle quelle', async ({ page }) => {
 test('Not OK sans description : Save bloque', async ({ page }) => {
   await bootInsp(page, [ME, START()], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
   const k = page.getByTestId('zone-kitchen');
-  await k.getByRole('button', { name: 'Not OK' }).click();
+  await k.getByRole('button', { name: 'Not OK: Kitchen & appliances', exact: true }).click();
   await expect(k.getByRole('button', { name: 'Save' })).toBeDisabled();
 });
 
@@ -62,7 +62,7 @@ test('envoi de photo : le focus et la saisie restent en place', async ({ page })
   await bootInsp(page, [ME, START(), { status: 200, match: 'action=insp.uploadPhoto', delay: 700, body: { photo: { id: 1, zone: 'kitchen', kind: 'issue' } } }],
     { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
   const k = page.getByTestId('zone-kitchen');
-  await k.getByRole('button', { name: 'Not OK' }).click();
+  await k.getByRole('button', { name: 'Not OK: Kitchen & appliances', exact: true }).click();
   await k.locator('input[type=file]').first().setInputFiles(JPG);
   const ta = k.getByLabel('What is wrong?');
   await ta.click();
@@ -78,7 +78,7 @@ test('photo refusee par le serveur : Remove la retire', async ({ page }) => {
   await bootInsp(page, [ME, START(), { status: 400, match: 'action=insp.uploadPhoto', body: { error: 'Photo too big' } }],
     { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
   const k = page.getByTestId('zone-kitchen');
-  await k.getByRole('button', { name: 'Not OK' }).click();
+  await k.getByRole('button', { name: 'Not OK: Kitchen & appliances', exact: true }).click();
   await k.locator('input[type=file]').first().setInputFiles(JPG);
   await k.getByRole('button', { name: 'Remove' }).click();
   await expect(k.getByRole('button', { name: 'Remove' })).toHaveCount(0);
@@ -88,7 +88,7 @@ test('photo refusee par le serveur : Remove la retire', async ({ page }) => {
 test('fichier non image : pas d envoi', async ({ page }) => {
   await bootInsp(page, [ME, START()], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
   const k = page.getByTestId('zone-kitchen');
-  await k.getByRole('button', { name: 'Not OK' }).click();
+  await k.getByRole('button', { name: 'Not OK: Kitchen & appliances', exact: true }).click();
   await k.locator('input[type=file]').first().setInputFiles({ name: 'a.pdf', mimeType: 'application/pdf', buffer: Buffer.from('x') });
   await expect(page.getByText('Photo too large or unsupported. Take it again.')).toBeVisible();
   expect((await fetchLog(page)).some((l) => l.url.includes('insp.uploadPhoto'))).toBe(false);
@@ -99,14 +99,14 @@ test('brouillon conserve entre zones, ticket existant : pas de nouveau toast, "s
     { status: 200, match: 'action=insp.saveItem', body: { item: { zone: 'ac', status: 'ok', ticketId: 7 } } }],
     { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
   const k = page.getByTestId('zone-kitchen');
-  await k.getByRole('button', { name: 'Not OK' }).click();
+  await k.getByRole('button', { name: 'Not OK: Kitchen & appliances', exact: true }).click();
   await k.getByLabel('What is wrong?').fill('Draft text');
-  await page.getByTestId('zone-living').getByRole('button', { name: 'Not OK' }).click();
-  await k.getByRole('button', { name: 'Not OK' }).click();
+  await page.getByTestId('zone-living').getByRole('button', { name: 'Not OK: Living room', exact: true }).click();
+  await k.getByRole('button', { name: 'Not OK: Kitchen & appliances', exact: true }).click();
   await expect(k.getByLabel('What is wrong?')).toHaveValue('Draft text');
   const ac = page.getByTestId('zone-ac');
   await ac.getByRole('button', { name: 'Change' }).click();
-  await ac.getByRole('button', { name: 'OK', exact: true }).click();
+  await ac.getByRole('button', { name: 'OK: AC', exact: true }).click();
   await expect(ac).toContainText('Ticket #7 stays open');
   await expect(page.getByText('Ticket #7 created', { exact: true }).locator('visible=true')).toHaveCount(0);
 });
@@ -125,7 +125,7 @@ test('Cancel sur une zone deja enregistree : resume et Change reviennent', async
   await bootInsp(page, [ME, START([{ zone: 'kitchen', status: 'ok' }])], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
   const k = page.getByTestId('zone-kitchen');
   await k.getByRole('button', { name: 'Change' }).click();
-  await k.getByRole('button', { name: 'Not OK' }).click();
+  await k.getByRole('button', { name: 'Not OK: Kitchen & appliances', exact: true }).click();
   await k.getByRole('button', { name: 'Cancel' }).click();
   await expect(k.getByText('OK', { exact: true })).toBeVisible();
   await expect(k.getByRole('button', { name: 'Change' })).toBeVisible();
@@ -134,4 +134,36 @@ test('Cancel sur une zone deja enregistree : resume et Change reviennent', async
 test('ticket sur une zone corrigee : "stays open"', async ({ page }) => {
   await bootInsp(page, [ME, START([{ zone: 'ac', status: 'not_ok', note: 'Noisy', outcome: 'fixed', fixNote: 'Cleaned', ticketId: 9 }])], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
   await expect(page.getByTestId('zone-ac')).toContainText('Ticket #9 stays open');
+});
+
+test('accessibilite : zones nommees, boutons OK/Not OK explicites, compteur aria-live stable', async ({ page }) => {
+  await bootInsp(page, [ME, START(), OK], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
+  await expect(page.getByRole('region', { name: 'Kitchen & appliances' })).toHaveAttribute('data-testid', 'zone-kitchen');
+  await expect(page.locator('#view [aria-live]')).toHaveCount(1);
+  await page.evaluate(() => { (window as any).__cnt = document.querySelector('.count'); });
+  await page.getByTestId('zone-kitchen').getByRole('button', { name: 'OK: Kitchen & appliances', exact: true }).click();
+  await expect(page.getByText('1 / 10 zones')).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__cnt === document.querySelector('.count') && document.querySelectorAll('#view [aria-live]').length)).toBe(1);
+});
+
+test('miniatures : object URL revoquee a la suppression d une photo en echec et a la sortie', async ({ page }) => {
+  await page.addInitScript(() => {
+    const rev: string[] = []; (window as any).__rev = rev;
+    const orig = URL.revokeObjectURL.bind(URL);
+    URL.revokeObjectURL = (u: string) => { rev.push(u); orig(u); };
+  });
+  await bootInsp(page, [ME, START(),
+    { status: 500, match: 'action=insp.uploadPhoto', body: { error: 'boom' } },
+    { status: 200, match: 'action=insp.today', body: { day: '2026-10-06', target: 4, cachedAt: null, today: [], also: [] } }],
+    { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
+  const k = page.getByTestId('zone-kitchen');
+  await k.getByRole('button', { name: 'Not OK: Kitchen & appliances', exact: true }).click();
+  await k.locator('input[type=file]').first().setInputFiles({ name: 'a.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await k.getByRole('button', { name: 'Remove' }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__rev.length)).toBe(1);
+  await k.locator('input[type=file]').first().setInputFiles({ name: 'b.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await expect(k.getByRole('button', { name: 'Retry upload' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(page.getByText("Today's inspections")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__rev.length)).toBe(2);
 });

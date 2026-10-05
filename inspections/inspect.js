@@ -25,6 +25,12 @@ export async function renderInspect(ctx) {
   let busy = false;
   const st = { done: false, insp: null, z: {}, open: null, general: '', finishError: '', loadError: '' };
   const view = document.getElementById('view');
+  // Un seul element aria-live, cree une fois : repeint a chaque rendu sans etre recree.
+  const countEl = document.createElement('p');
+  countEl.className = 'count'; countEl.setAttribute('aria-live', 'polite');
+  const revoke = (p) => { if (p && p.url) { try { URL.revokeObjectURL(p.url); } catch (e) { /* ignore */ } p.url = null; } };
+  const releaseAll = () => { for (const k of Object.keys(st.z)) for (const p of st.z[k].photos) { revoke(p); p.blob = null; } };
+  if (ctx.onLeave) ctx.onLeave(releaseAll);
 
   const zoneOf = (k) => st.z[k] || (st.z[k] = { saved: null, editing: false, photos: [], draft: null });
   const issuePhotos = (z) => z.photos.filter((p) => p.kind === 'issue');
@@ -90,13 +96,13 @@ export async function renderInspect(ctx) {
     const z = zoneOf(zn.key), k = zn.key;
     const open = st.open === k;
     const cls = z.saved && !open && !z.editing ? (z.saved.status === 'ok' ? ' ok' : ' bad') : '';
-    let h = '<section class="card zone' + cls + '" data-testid="zone-' + k + '"><div class="card-top"><h3>' + esc(zn.label) + '</h3></div>';
+    let h = '<section class="card zone' + cls + '" data-testid="zone-' + k + '" aria-labelledby="zt-' + k + '"><div class="card-top"><h3 id="zt-' + k + '">' + esc(zn.label) + '</h3></div>';
     if (open) h += form(zn);
     else if (z.saved && !z.editing) {
       h += summary(z) + '<button class="btn ghost" data-act="edit" data-z="' + k + '"' + (busy ? ' disabled' : '') + '>Change</button>';
     } else {
-      h += '<div class="choices"><button class="btn okbtn" data-act="ok" data-z="' + k + '"' + (busy ? ' disabled' : '') + '>OK</button>'
-        + '<button class="btn notok" data-act="notok" data-z="' + k + '"' + (busy ? ' disabled' : '') + '>Not OK</button></div>';
+      h += '<div class="choices"><button class="btn okbtn" data-act="ok" data-z="' + k + '" aria-label="OK: ' + esc(zn.label) + '"' + (busy ? ' disabled' : '') + '>OK</button>'
+        + '<button class="btn notok" data-act="notok" data-z="' + k + '" aria-label="Not OK: ' + esc(zn.label) + '"' + (busy ? ' disabled' : '') + '>Not OK</button></div>';
     }
     return h + '</section>';
   }
@@ -114,12 +120,15 @@ export async function renderInspect(ctx) {
     const n = doneCount();
     render('<main class="wrap"><header class="top"><div><h1>' + esc(st.insp.name || 'Apartment') + '</h1><p class="mute">Started '
       + esc(clock(st.insp.startedAt)) + '</p></div><button class="btn ghost" data-act="home">Back</button></header>'
-      + '<p class="count" aria-live="polite">' + n + ' / ' + ZONES.length + ' zones</p>'
+      + '<span data-slot="count"></span>'
       + ZONES.map(zoneHtml).join('')
       + '<label class="lbl" for="general">General note (optional)</label>'
       + '<textarea id="general" class="ta" rows="3">' + esc(st.general) + '</textarea>'
       + (st.finishError ? '<p class="notice bad" role="alert">' + esc(st.finishError) + '</p>' : '')
       + '<button class="btn primary block" data-act="finish"' + (n === ZONES.length && !busy ? '' : ' disabled') + '>Finish inspection</button></main>');
+    const slot = view.querySelector('[data-slot="count"]');
+    const txt = n + ' / ' + ZONES.length + ' zones';
+    if (slot) { if (countEl.textContent !== txt) countEl.textContent = txt; slot.replaceWith(countEl); }
     if (keep) {
       const el = keep.g ? document.getElementById('general') : view.querySelector('[data-f="' + keep.f + '"][data-z="' + keep.z + '"]');
       if (el) { el.focus(); try { el.setSelectionRange(keep.s, keep.e); } catch (e) { /* ignore */ } }
@@ -161,7 +170,7 @@ export async function renderInspect(ctx) {
     f.set('idem', entry.idem); f.set('file', entry.blob, 'photo.jpg');
     try {
       const r = await upload('insp.uploadPhoto', f);
-      entry.id = r.photo && r.photo.id; entry.state = 'done';
+      entry.id = r.photo && r.photo.id; entry.state = 'done'; entry.blob = null; // envoyee : on libere le blob
     } catch (e) { entry.state = 'fail'; throw e; }
   }
 
@@ -196,7 +205,7 @@ export async function renderInspect(ctx) {
     if (a === 'cancel') { st.open = null; zoneOf(k).editing = false; return paint(); }
     if (a === 'remove-photo') {
       const z = zoneOf(k), p = z.photos[Number(b.dataset.i)];
-      if (p && p.state === 'fail') { z.photos.splice(z.photos.indexOf(p), 1); refreshZone(k); }
+      if (p && p.state === 'fail') { revoke(p); p.blob = null; z.photos.splice(z.photos.indexOf(p), 1); refreshZone(k); }
       return;
     }
     if (a === 'outcome') { zoneOf(k).draft.outcome = b.dataset.o; return paint(); }
@@ -217,7 +226,7 @@ export async function renderInspect(ctx) {
     if (a === 'finish') return run(async () => {
       st.finishError = '';
       await post('insp.finish', { inspectionId: st.insp.id, generalNote: st.general.trim() || undefined });
-      st.done = true; toast('Inspection saved'); go('#/');
+      st.done = true; releaseAll(); toast('Inspection saved'); go('#/');
     }, (m) => { st.finishError = m; });
   };
   // Saisie : on garde le brouillon en memoire sans repeindre (le focus reste en place).

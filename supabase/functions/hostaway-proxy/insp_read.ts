@@ -148,9 +148,10 @@ export async function inspToday(
   const cardFor = (id: string): InspCard => {
     if (rankedById[id]) return rankedById[id];
     const last = lastDone[id];
+    // Carte journalisee devenue occupee : "unavailable" (sauf si deja faite aujourd'hui).
     return {
       listingId: id, name: listingLabel(lById[id] ?? {}),
-      eligibility: eligibilityFor(id, reservations, day) ?? { kind: "vacant", nextArrival: null },
+      eligibility: eligibilityFor(id, reservations, day) ?? (doneToday[id] ? { kind: "vacant", nextArrival: null } : { kind: "unavailable" }),
       daysSince: last ? daysBetween(last.finishedAt, day) : null, lastInspector: last ? last.inspector : null,
       missed: missed[id] ?? 0, openIssue: id in issues,
     };

@@ -97,6 +97,18 @@ Deno.test("overview : couverture, couleurs, problemes ouverts, exclus a la fin",
   assertEquals(r.rows.find((x) => x.listingId === "X")!.excluded, true);
 });
 
+Deno.test("today : carte journalisee devenue occupee = unavailable, sauf si faite aujourd'hui", async () => {
+  const db = base();
+  await inspToday(db, D, [], null); // journalise C et A
+  db.tables.inspections.push({ id: 8, listing_id: "C", inspector_id: 2, inspection_date: D, finished_at: D + "T10:42:00+04:00", started_at: D + "T10:00:00+04:00", eligibility: "vacant" });
+  const occ = (id: string) => ({ listingId: id, arrival: "2026-10-04", departure: "2026-10-09", status: "confirmed", checkInTime: 15, checkOutTime: 11 });
+  const r = await inspToday(db, D, [occ("A"), occ("C")] as any, null);
+  assertEquals(r.today.find((c) => c.listingId === "A")!.eligibility, { kind: "unavailable" });
+  const c = r.today.find((c) => c.listingId === "C")!;
+  assertEquals(c.eligibility, { kind: "vacant", nextArrival: null });
+  assertEquals(c.doneToday !== null, true);
+});
+
 Deno.test("history : zones not_ok, ticket et photos signees", async () => {
   const db = base();
   const h = await inspHistory(db, "B");

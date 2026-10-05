@@ -14,6 +14,7 @@ function reason(e) {
     if (e.nextCheckIn && e.nextCheckIn.time != null) t += ' → Check-in ' + hh(e.nextCheckIn.time);
     return t;
   }
+  if (e.kind === 'unavailable') return 'Not free today';
   return 'Vacant' + (e.nextArrival ? ' · next arrival ' + dayMonth(e.nextArrival) : '');
 }
 function last(c) {
@@ -37,7 +38,11 @@ export async function renderToday(ctx) {
   const cardHtml = (c) => {
     const mine = c.claimedBy === me.cleaner_id;
     let actions = '';
-    if (c.doneToday) actions += '<span class="state">Done by ' + esc(c.doneToday.by) + ' at ' + esc(clock(c.doneToday.at)) + '</span>';
+    const unavail = !!(c.eligibility && c.eligibility.kind === 'unavailable') && !c.doneToday && !c.inProgressBy;
+    if (unavail) {
+      // Plus libre : ni prise, ni demarrage, ni assignation ; seul un relachement reste possible.
+      if (c.claimedBy != null && (mine || isMgr)) actions += '<button class="btn ghost" data-act="release" data-id="' + esc(c.listingId) + '">Release</button>';
+    } else if (c.doneToday) actions += '<span class="state">Done by ' + esc(c.doneToday.by) + ' at ' + esc(clock(c.doneToday.at)) + '</span>';
     else if (c.inProgressBy && c.inProgressById != null && c.inProgressById === me.cleaner_id) {
       actions += '<button class="btn primary" data-act="start" data-id="' + esc(c.listingId) + '" data-e="' + esc(c.eligibility && c.eligibility.kind) + '">Resume inspection</button>';
     } else if (c.inProgressBy) actions += '<span class="state">In progress by ' + esc(c.inProgressBy) + '</span>';
@@ -48,9 +53,9 @@ export async function renderToday(ctx) {
       actions += '<span class="state">Taken by ' + esc(c.claimedByName || 'a teammate') + '</span>';
       if (isMgr) actions += '<button class="btn ghost" data-act="release" data-id="' + esc(c.listingId) + '">Release</button>';
     }
-    if (isMgr && !c.doneToday) actions += '<button class="btn ghost" data-act="assign" data-id="' + esc(c.listingId) + '">Assign</button>';
+    if (isMgr && !c.doneToday && !unavail) actions += '<button class="btn ghost" data-act="assign" data-id="' + esc(c.listingId) + '">Assign</button>';
     return '<article class="card"><div class="card-top"><span class="dot ' + dot(c) + '" aria-hidden="true"></span><h3>' + esc(c.name) + '</h3></div>'
-      + '<p class="reason">' + esc(reason(c.eligibility)) + '</p>'
+      + '<p class="reason' + (unavail ? ' dim' : '') + '">' + esc(reason(c.eligibility)) + '</p>'
       + '<p class="mute">' + esc(last(c)) + '</p>'
       + '<div class="badges">' + (c.missed > 0 ? '<span class="badge warn">Missed ' + c.missed + '×</span>' : '')
       + (c.openIssue ? '<span class="badge bad">Open issue</span>' : '') + '</div>'
