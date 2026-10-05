@@ -3,7 +3,7 @@ import { get, post } from '/inspections/api.js';
 const TZ = 'Asia/Dubai';
 const hh = (n) => String(n).padStart(2, '0') + ':00';
 const dayMonth = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-const clock = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: TZ });
+const clock = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: TZ });
 const longDate = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
 
 function reason(e) {
@@ -28,6 +28,8 @@ function dot(c) {
 
 export async function renderToday(ctx) {
   const { me, go, toast, render, esc } = ctx;
+  const isCurrent = ctx.isCurrent || (() => true);
+  let busy = false;
   const isMgr = me.role === 'manager';
   const st = { data: null, error: null, picker: null, assign: null, cleaners: null, q: '' };
 
@@ -97,9 +99,20 @@ export async function renderToday(ctx) {
       if (c.listingId === p.listingId) { c.claimedBy = p.claimedBy; c.claimedByName = p.claimedByName; }
     }
   }
-  async function act(fn) {
-    try { await fn(); } catch (e) { toast(e.message || 'Something went wrong.'); }
-    paint();
+  // Un seul geste a la fois : un double appui n'envoie qu'une requete. Apres un
+  // refus (409 compris), on affiche le message du serveur et on recharge la liste.
+  async function act(fn, btn) {
+    if (busy) return;
+    busy = true;
+    if (btn) btn.disabled = true;
+    try { await fn(); } catch (e) {
+      toast(e.message || 'Something went wrong.');
+      if (e.kind === 'server') {
+        st.assign = null;
+        try { st.data = await get('insp.today'); st.error = null; } catch (e2) { /* on garde l'ecran actuel */ }
+      }
+    } finally { busy = false; }
+    if (isCurrent()) paint();
   }
 
   const view = document.getElementById('view');
@@ -111,27 +124,27 @@ export async function renderToday(ctx) {
     if (a === 'start') return go('#/inspect/' + encodeURIComponent(id) + '?e=' + (b.dataset.e || 'adhoc'));
     if (a === 'adhoc') return go('#/inspect/' + encodeURIComponent(id) + '?e=adhoc');
     if (a === 'back') { st.picker = null; st.assign = null; st.q = ''; return paint(); }
-    if (a === 'claim') return act(async () => { patch((await post('insp.claim', { listingId: id })).proposal); });
-    if (a === 'release') return act(async () => { patch((await post('insp.unclaim', { listingId: id })).proposal || { listingId: id, claimedBy: null, claimedByName: null }); });
+    if (a === 'claim') return act(async () => { patch((await post('insp.claim', { listingId: id })).proposal); }, b);
+    if (a === 'release') return act(async () => { patch((await post('insp.unclaim', { listingId: id })).proposal || { listingId: id, claimedBy: null, claimedByName: null }); }, b);
     if (a === 'picker') return act(async () => {
       if (!st.overview) st.overview = await get('insp.overview');
       st.picker = st.overview.rows || [];
-    });
+    }, b);
     if (a === 'assign') return act(async () => {
       if (!st.cleaners) {
         const r = await get('getCleaners');
         st.cleaners = (r.cleaners || []).filter((c) => c.is_active !== false && c.role !== 'subcontractor');
       }
       st.assign = id;
-    });
+    }, b);
     if (a === 'assign-to') return act(async () => {
       const p = (await post('insp.assign', { listingId: st.assign, cleanerId: Number(b.dataset.cid) })).proposal;
       patch(p); st.assign = null;
-    });
+    }, b);
   };
   view.oninput = (ev) => { if (ev.target.id === 'pq') { st.q = ev.target.value; paint(); } };
 
   paint();
   try { st.data = await get('insp.today'); } catch (e) { st.error = e.message || 'Could not load today\'s inspections.'; }
-  paint();
+  if (isCurrent()) paint();
 }

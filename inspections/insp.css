@@ -2,6 +2,7 @@
 .wrap { max-width: 720px; margin: 0 auto; padding: 16px 16px 40px; }
 h1 { font-family: var(--disp); font-size: 1.5rem; margin: 0 0 4px; line-height: 1.2; }
 h3 { margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+.reason, .mute, .badge, .state { overflow-wrap: anywhere; }
 .mute { color: var(--mute); margin: 4px 0; }
 .pad { padding: 12px; }
 .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }

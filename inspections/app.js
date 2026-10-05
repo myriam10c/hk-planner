@@ -33,7 +33,8 @@ function placeholder(title, extra) {
 async function route() {
   const mine = ++seq;
   const hash = location.hash || '#/';
-  const ctx = { me, go, toast, render, esc };
+  const ctx = { me, go, toast, render, esc, isCurrent: () => mine === seq };
+  view.onclick = null; view.oninput = null;
   const [path, query] = hash.slice(2).split('?');
   const parts = path.split('/');
   const q = new URLSearchParams(query || '');
@@ -60,6 +61,12 @@ async function load(path) {
   try { return await import(path); } catch (e) { return null; }
 }
 
+let listening = false;
+function loadError() {
+  render('<main class="wrap"><h1>HK Planner</h1><p class="notice bad" role="alert">Could not load. Check your connection and try again.</p>'
+    + '<button class="btn primary" data-act="retry">Retry</button></main>');
+  view.querySelector('[data-act="retry"]').onclick = () => { boot(); };
+}
 async function boot() {
   let s = null;
   try { s = await getSession(); } catch (e) { s = null; }
@@ -69,8 +76,11 @@ async function boot() {
     const c = r && r.cleaner;
     if (!c) { signIn(); return; }
     me = { cleaner_id: c.id, name: c.name, role: c.role };
-  } catch (e) { signIn(); return; }
-  window.addEventListener('hashchange', route);
+  } catch (e) {
+    if (e.kind === 'auth') signIn(); else loadError();
+    return;
+  }
+  if (!listening) { listening = true; window.addEventListener('hashchange', route); }
   await route();
 }
 boot().finally(() => { window.__inspReady = true; });
