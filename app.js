@@ -4578,6 +4578,62 @@ async function hkAuthBoot(){
   return ok;
 }
 
+// ============ INSPECTIONS ANNOUNCEMENT (one-time popup, 3 shows per device) ============
+const INSP_ANNOUNCE_KEY='hkInspAnnounceShown';
+let inspAnnounceDone=false; // at most once per page load
+function inspAnnounceCount(){
+  try{ const n=parseInt(localStorage.getItem(INSP_ANNOUNCE_KEY),10); return isNaN(n)?0:n; }catch(e){ return 0; }
+}
+function closeInspAnnounce(){
+  const el=document.getElementById('inspAnnounce');
+  if(el) el.remove();
+  document.removeEventListener('keydown',inspAnnounceKey,true);
+}
+function inspAnnounceKey(ev){
+  if(ev.key==='Escape'){ ev.preventDefault(); closeInspAnnounce(); }
+  else if(ev.key==='Tab'){
+    const btns=document.querySelectorAll('#inspAnnounce button');
+    if(!btns.length) return;
+    const first=btns[0], last=btns[btns.length-1];
+    if(ev.shiftKey&&document.activeElement===first){ ev.preventDefault(); last.focus(); }
+    else if(!ev.shiftKey&&document.activeElement===last){ ev.preventDefault(); first.focus(); }
+  }
+}
+function maybeShowInspAnnounce(){
+  if(inspAnnounceDone) return;
+  if(authScreen) return;
+  if(!(cleanerMode||cleanerToken||authAccessToken)) return;
+  if(!cleanerMode&&window.location.hash==='#cleaner') return; // PIN screen
+  const role=cleanerMode&&cleanerMode.role;
+  if(role==='subcontractor'||role==='system') return;
+  if(typeof onboardingOpen!=='undefined'&&onboardingOpen) return; // retry on a later render
+  const n=inspAnnounceCount();
+  if(n>=3){ inspAnnounceDone=true; return; }
+  if(document.getElementById('inspAnnounce')) return;
+  inspAnnounceDone=true;
+  try{ localStorage.setItem(INSP_ANNOUNCE_KEY,String(n+1)); }catch(e){}
+  const el=document.createElement('div');
+  el.id='inspAnnounce';
+  el.setAttribute('role','dialog');
+  el.setAttribute('aria-modal','true');
+  el.setAttribute('aria-labelledby','inspAnnounceTitle');
+  el.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;overflow-y:auto';
+  const btn='min-height:48px;padding:0 16px;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit;width:100%;box-sizing:border-box;';
+  el.innerHTML='<div style="background:#fff;color:#1f2937;border-radius:16px;max-width:400px;width:100%;box-sizing:border-box;padding:22px 20px;box-shadow:0 20px 50px rgba(0,0,0,.3);max-height:100%;overflow-y:auto">'+
+    '<h2 id="inspAnnounceTitle" style="margin:0 0 10px;font-size:20px;line-height:1.25;color:#b45309">New: Inspections</h2>'+
+    '<p style="margin:0 0 18px;font-size:15px;line-height:1.5">Every day the app now suggests 4 apartments to check: checkouts and empty apartments, the ones not checked for the longest first. Tap I\'ll take it, go through the 10 zones, add a photo for anything wrong, and mark it fixed or send it to maintenance. Everything is saved with your name.</p>'+
+    '<div style="display:flex;flex-direction:column;gap:10px">'+
+      '<button type="button" id="inspAnnounceOpen" style="'+btn+'border:0;background:#b45309;color:#fff">Open Inspections</button>'+
+      '<button type="button" id="inspAnnounceLater" style="'+btn+'border:1px solid #d1d5db;background:#fff;color:#374151">Later</button>'+
+    '</div></div>';
+  el.addEventListener('click',function(ev){ if(ev.target===el) closeInspAnnounce(); });
+  document.body.appendChild(el);
+  document.getElementById('inspAnnounceLater').addEventListener('click',closeInspAnnounce);
+  document.getElementById('inspAnnounceOpen').addEventListener('click',function(){ closeInspAnnounce(); setTab('inspections'); });
+  document.addEventListener('keydown',inspAnnounceKey,true);
+  document.getElementById('inspAnnounceOpen').focus();
+}
+
 // ============ RENDER ============
 function render(){
   if(authScreen==='createAccount'){renderAuthCreateAccount();return;}
@@ -4586,6 +4642,7 @@ function render(){
   // #6 PIN screen
   if(!cleanerMode&&window.location.hash==='#cleaner'){renderPinScreen();return;}
   if(cleanerMode&&window.location.hash!=='#cleaner')window.location.hash='#cleaner';
+  if(!inspAnnounceDone)setTimeout(maybeShowInspAnnounce,600);
   try { writeUrlState(); } catch(e) {}
   try { applyPlannerLayoutMode(); } catch(e) {}
   if(currentTab==='security'){if(securityData===null&&!securityLoading)loadSecurity();return renderSecurity();}
