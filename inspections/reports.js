@@ -37,7 +37,7 @@ const FILTERS = [{ id: 'all', label: 'All' }, { id: 'clean', label: 'No issues' 
 export async function renderReports(ctx) {
   const { go, render, esc } = ctx;
   const isCurrent = ctx.isCurrent || (() => true);
-  const st = { period: '7', filter: 'all', data: null, error: null, loading: true };
+  const st = { period: '7', filter: 'all', data: null, error: null, status: 0, loading: true };
   let reqSeq = 0;
 
   const chips = (list, cur, act) => '<div class="chips" role="group">' + list.map((c) =>
@@ -52,17 +52,18 @@ export async function renderReports(ctx) {
     const txt = t.length ? t.map((i) => 'Ticket #' + i.ticket.id + ' · ' + i.ticket.status).join(', ') : '';
     return '<span class="badge bad">Maintenance' + (txt ? ' · ' + esc(txt) : '') + '</span>';
   };
-  const rowHtml = (r) => '<article class="card rrow" data-testid="report-' + esc(r.id) + '">'
-    + '<p class="mute">' + esc(when(r.finishedAt)) + '</p>'
-    + '<button class="link" data-act="open" data-id="' + esc(r.listingId) + '">' + esc(r.name) + '</button>'
-    + '<p class="mute">by ' + esc(r.inspector || 'unknown') + '</p>'
-    + '<div class="badges">' + badge(r) + '</div></article>';
+  const rowHtml = (r) => '<button class="card rrow" data-act="open" data-id="' + esc(r.listingId) + '" data-testid="report-' + esc(r.id) + '">'
+    + '<span class="mute">' + esc(when(r.finishedAt)) + '</span>'
+    + '<span class="rname">' + esc(r.name) + '</span>'
+    + '<span class="mute">by ' + esc(r.inspector || 'unknown') + '</span>'
+    + '<span class="badges">' + badge(r) + '</span></button>';
 
   const body = () => {
     let h = '<main class="wrap"><header class="top"><div><h1>Reports</h1></div><button class="btn ghost" data-act="home">Today</button></header>';
     h += chips(PERIODS, st.period, 'period');
     if (st.loading) return h + '<p class="state">Loading…</p></main>';
-    if (st.error) return h + '<p class="notice bad" role="alert">' + esc(st.error) + '</p><button class="btn primary" data-act="retry">Retry</button></main>';
+    if (st.error) return h + '<p class="notice bad" role="alert">' + esc(st.error) + '</p>'
+      + (st.status === 403 ? '<button class="btn primary" data-act="home">Back</button>' : '<button class="btn primary" data-act="retry">Retry</button>') + '</main>';
     const d = st.data, t = d.totals || {};
     h += '<div class="tiles">' + tile('inspections', t.inspections || 0, 'Inspections', '') + tile('apartments', t.apartments || 0, 'Apartments checked', '')
       + tile('clean', t.clean || 0, 'No issues', 'good') + tile('issues', t.withIssues || 0, 'With issues', 'warn') + '</div>';
@@ -78,10 +79,10 @@ export async function renderReports(ctx) {
   async function load() {
     const mine = ++reqSeq;
     st.loading = true; st.error = null; paint();
-    let data = null, err = null;
-    try { data = await get('insp.reports', range(st.period)); } catch (e) { err = e.message || 'Could not load the reports.'; }
+    let data = null, err = null, status = 0;
+    try { data = await get('insp.reports', range(st.period)); } catch (e) { err = e.message || 'Could not load the reports.'; status = e.status || 0; }
     if (mine !== reqSeq || !isCurrent()) return;
-    st.loading = false; st.data = data; st.error = err;
+    st.loading = false; st.data = data; st.error = err; st.status = status;
     paint();
   }
 

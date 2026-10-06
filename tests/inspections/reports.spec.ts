@@ -61,27 +61,56 @@ test('rapports : filtres cote client', async ({ page }) => {
   expect((await fetchLog(page)).filter((l) => l.url.includes('insp.reports'))).toHaveLength(1);
 });
 
-test('rapports : changement de periode envoie from/to', async ({ page }) => {
+async function pick(page: any, label: string) { await page.locator('.chips').first().getByRole('button', { name: label }).click(); }
+async function sent(page: any, from: string, to: string) {
+  await expect.poll(async () => { const u = await lastReportsUrl(page); return u.searchParams.get('from') + '|' + u.searchParams.get('to'); }).toBe(from + '|' + to);
+}
+
+test('rapports : periodes, 00:30 Dubai le 6 oct (20:30Z la veille)', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-10-05T20:30:00Z'));
   await bootInsp(page, [MGR, REPORTS], { pinToken: 'tok', hash: '#/reports' });
-  const t = dubai();
-  await page.locator('.chips').first().getByRole('button', { name: 'Today' }).click();
-  await expect.poll(async () => (await lastReportsUrl(page)).searchParams.get('from')).toBe(t);
-  expect((await lastReportsUrl(page)).searchParams.get('to')).toBe(t);
-  await page.getByRole('button', { name: '30 days' }).click();
-  await expect.poll(async () => (await lastReportsUrl(page)).searchParams.get('from')).toBe(plus(t, -29));
-  await page.getByRole('button', { name: 'This month' }).click();
-  await expect.poll(async () => (await lastReportsUrl(page)).searchParams.get('from')).toBe(t.slice(0, 8) + '01');
-  expect((await lastReportsUrl(page)).searchParams.get('to')).toBe(t);
+  await sent(page, '2026-09-30', '2026-10-06');
+  await pick(page, 'Today'); await sent(page, '2026-10-06', '2026-10-06');
+  await pick(page, '30 days'); await sent(page, '2026-09-07', '2026-10-06');
+  await pick(page, 'This month'); await sent(page, '2026-10-01', '2026-10-06');
+  await pick(page, '7 days'); await sent(page, '2026-09-30', '2026-10-06');
+});
+
+test('rapports : This month le 1er nov Dubai (21:00Z le 31 oct)', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-10-31T21:00:00Z'));
+  await bootInsp(page, [MGR, REPORTS], { pinToken: 'tok', hash: '#/reports' });
+  await pick(page, 'This month'); await sent(page, '2026-11-01', '2026-11-01');
+});
+
+test('rapports : reponse lente obsolete ignoree', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-10-06T08:00:00Z'));
+  const slow = { ...REPORTS, match: 'from=2026-09-30', delay: 1500 };
+  const empty = { status: 200, match: 'from=2026-10-06', body: { from: '2026-10-06', to: '2026-10-06', totals: { inspections: 1, apartments: 1, clean: 1, withIssues: 0, fixedOnSpot: 0, sentToMaintenance: 0, openTickets: 0 }, reports: [REPORTS.body.reports[2]] } };
+  await bootInsp(page, [MGR, slow, empty], { pinToken: 'tok', hash: '#/reports' });
+  await pick(page, 'Today');
+  await expect(page.getByTestId('tile-inspections')).toContainText('1');
+  await page.waitForTimeout(2000);
+  await expect(page.getByTestId('tile-inspections')).toContainText('1');
+  await expect(page.getByTestId('report-2')).toBeVisible();
+  await expect(page.getByTestId('report-4')).toHaveCount(0);
+});
+
+test('rapports : 403 cleaner, message serveur et Back sans Retry', async ({ page }) => {
+  await bootInsp(page, [CLN, TODAY, { status: 403, match: 'action=insp.reports', body: { error: 'Managers only' } }], { pinToken: 'tok', hash: '#/reports' });
+  await expect(page.getByText('Managers only')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(page).toHaveURL(/#\/$/);
 });
 
 test('rapports : un appui ouvre l historique', async ({ page }) => {
   await bootInsp(page, [MGR, REPORTS, HISTORY], { pinToken: 'tok', hash: '#/reports' });
-  await page.getByTestId('report-4').getByRole('button', { name: /Apt 414/ }).click();
+  await page.getByTestId('report-4').click();
   await expect(page).toHaveURL(/#\/history\/A$/);
 });
 
 test('rapports : bouton visible pour manager, absent pour cleaner', async ({ page }) => {
-  await bootInsp(page, [MGR, TODAY], { pinToken: 'tok' });
+  await bootInsp(page, [MGR, TODAY, REPORTS], { pinToken: 'tok' });
   await expect(page.getByRole('button', { name: 'Reports' })).toBeVisible();
   await page.getByRole('button', { name: 'Reports' }).click();
   await expect(page).toHaveURL(/#\/reports$/);
@@ -98,8 +127,8 @@ test('rapports : etat vide', async ({ page }) => {
 });
 
 test('rapports : erreur serveur puis Retry', async ({ page }) => {
-  await bootInsp(page, [MGR, { status: 403, match: 'action=insp.reports', once: true, body: { error: 'Managers only' } }, REPORTS], { pinToken: 'tok', hash: '#/reports' });
-  await expect(page.getByText('Managers only')).toBeVisible();
+  await bootInsp(page, [MGR, { status: 500, match: 'action=insp.reports', once: true, body: { error: 'Database busy' } }, REPORTS], { pinToken: 'tok', hash: '#/reports' });
+  await expect(page.getByText('Database busy')).toBeVisible();
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByTestId('report-4')).toBeVisible();
 });
