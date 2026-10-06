@@ -2,7 +2,7 @@
 import type { ActionResult, SessionUser } from "./v3.ts";
 import { todayDubai, V3_PHOTO_BUCKET, validIdem } from "./v3.ts";
 import { V3_MAX_PHOTO_BYTES, V3_PHOTO_MIME } from "./v3_photos.ts";
-import { INSP_ZONE_KEYS, INSP_ZONES, listingLabel } from "./insp_rules.ts";
+import { INSP_DET_ITEMS, INSP_DET_KEYS, INSP_ZONE_KEYS, INSP_ZONES, listingLabel } from "./insp_rules.ts";
 
 const ELIGIBILITIES = new Set(["checkout", "vacant", "adhoc"]);
 const zoneLabel = (k: string) => INSP_ZONES.find((z) => z.key === k)?.label ?? k;
@@ -12,7 +12,17 @@ const bad = (status: number, error: string): ActionResult => ({ status, body: { 
 const itemOut = (r: any) => ({
   zone: r.zone, status: r.status, note: r.note ?? null, outcome: r.outcome ?? null,
   fixNote: r.fix_note ?? null, ticketId: r.ticket_id ?? null,
+  missingItems: Array.isArray(r.missing_items) ? r.missing_items : [],
 });
+
+const WHO_TEXT: Record<string, string> = {
+  owner: "Owner supplies (owner pays, tell Hillal before buying)",
+  medini: "Medini supplies",
+  both: "Owner buys, Medini restocks",
+};
+const detLabels = (keys: string[]) => keys.map((k) => INSP_DET_ITEMS.find((i) => i.key === k)?.label ?? k);
+// Memes statuts clos que insp_read.
+const TICKET_CLOSED = new Set(["resolved", "cancelled"]);
 
 async function loadOwned(sb: any, me: SessionUser, inspectionId: unknown) {
   const id = Number(inspectionId);
@@ -31,6 +41,7 @@ async function snapshot(sb: any, insp: any) {
     inspection: { id: insp.id, listingId: insp.listing_id, name: listingLabel(listing ?? {}), eligibility: insp.eligibility, startedAt: insp.started_at },
     items: (items ?? []).map(itemOut),
     photos: (photos ?? []).map((p: any) => ({ id: p.id, zone: p.zone, kind: p.kind })),
+    detItems: INSP_DET_ITEMS,
   };
 }
 
@@ -68,7 +79,22 @@ export async function startInspection(sb: any, me: SessionUser, body: any, now =
   return { status: 200, body: await snapshot(sb, data) };
 }
 
-async function ensureTicket(sb: any, me: SessionUser, insp: any, zone: string, note: string, now: number): Promise<number> {
+// Titre et description du ticket. Zone det : liste des manquants avec qui fournit, note libre a la suite.
+function ticketText(zone: string, note: string, missing: string[], by: string) {
+  const sig = "\n\nFound during inspection by " + by + ".";
+  if (zone !== "det") return { title: zoneLabel(zone) + ": " + note.slice(0, 80), description: note + sig };
+  const lines = missing.map((k) => {
+    const it = INSP_DET_ITEMS.find((i) => i.key === k);
+    return "- " + (it?.label ?? k) + " · " + (WHO_TEXT[it?.who ?? ""] ?? "");
+  });
+  return {
+    title: "DET equipment missing: " + detLabels(missing).join(", ").slice(0, 80),
+    description: lines.join("\n") + (note ? "\n\n" + note : "") + sig,
+  };
+}
+
+async function ensureTicket(sb: any, me: SessionUser, insp: any, zone: string, note: string, now: number,
+  missing: string[] = []): Promise<number> {
   const ref = "inspection:" + insp.id + ":" + zone;
   const { data: existing } = await sb.from("maintenance_tickets").select("id").eq("source_ref", ref).maybeSingle();
   if (existing) return existing.id;
@@ -80,10 +106,11 @@ async function ensureTicket(sb: any, me: SessionUser, insp: any, zone: string, n
     .eq("inspection_id", insp.id).eq("zone", zone).eq("kind", "issue");
   const first = (shots ?? []).slice().sort((a: any, b: any) =>
     String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || Number(a.id) - Number(b.id))[0];
+  const txt = ticketText(zone, note, missing, me.name);
   const { data, error } = await sb.from("maintenance_tickets").insert({
     listing_id: insp.listing_id,
-    title: zoneLabel(zone) + ": " + note.slice(0, 80),
-    description: note + "\n\nFound during inspection by " + me.name + ".",
+    title: txt.title,
+    description: txt.description,
     category: "general", priority: "medium", status: "open",
     reported_by: me.name, source: "inspection", source_ref: ref,
     sla_deadline: new Date(now + hours * 3600_000).toISOString(),
@@ -109,15 +136,40 @@ export async function saveItem(sb: any, me: SessionUser, body: any, now = Date.n
     .eq("inspection_id", insp.id).eq("zone", zone).maybeSingle();
   const row: any = { inspection_id: insp.id, zone, status, updated_at: new Date(now).toISOString(),
     note: null, outcome: null, fix_note: null, ticket_id: prev?.ticket_id ?? null };
+  // missing_items seulement pour det : les autres zones marchent meme sans la migration.
+  if (zone === "det") row.missing_items = [];
   if (status === "not_ok") {
+    let missing: string[] = [];
     const note = clean(body?.note);
-    if (!note) return bad(400, "Describe what is wrong.");
+    if (zone === "det") {
+      const raw = Array.isArray(body?.missing) ? body.missing.map(String) : [];
+      if (!raw.length || raw.some((k: string) => !INSP_DET_KEYS.has(k))) return bad(400, "Tick what is missing.");
+      // Dedoublonne et garde l'ordre de la liste.
+      missing = INSP_DET_ITEMS.filter((i) => raw.includes(i.key)).map((i) => i.key);
+    }
+    // det : la liste suffit, note libre facultative.
+    if (!note && zone !== "det") return bad(400, "Describe what is wrong.");
     const outcome = body?.outcome ?? null;
     if (outcome !== null && outcome !== "fixed" && outcome !== "maintenance") return bad(400, "invalid outcome");
     const fixNote = clean(body?.fixNote);
     if (outcome === "fixed" && !fixNote) return bad(400, "Describe the fix.");
-    row.note = note; row.outcome = outcome; row.fix_note = outcome === "fixed" ? fixNote : null;
-    if (outcome === "maintenance" && !row.ticket_id) row.ticket_id = await ensureTicket(sb, me, insp, zone, note, now);
+    row.note = note || null; row.outcome = outcome; row.fix_note = outcome === "fixed" ? fixNote : null;
+    if (zone === "det") row.missing_items = missing;
+    if (outcome === "maintenance" && !row.ticket_id) {
+      row.ticket_id = await ensureTicket(sb, me, insp, zone, note, now, missing);
+    } else if (outcome === "maintenance" && zone === "det") {
+      // Liste (ou note) modifiee : on remet a jour le ticket tant qu'il n'est pas clos.
+      const prevMissing = Array.isArray(prev?.missing_items) ? prev.missing_items : [];
+      if (prevMissing.join(",") !== missing.join(",") || (prev?.note ?? "") !== note) {
+        const { data: t } = await sb.from("maintenance_tickets").select("id, status").eq("id", row.ticket_id).maybeSingle();
+        if (t && !TICKET_CLOSED.has(String(t.status))) {
+          const txt = ticketText(zone, note, missing, me.name);
+          const { error: upErr } = await sb.from("maintenance_tickets")
+            .update({ title: txt.title, description: txt.description }).eq("id", row.ticket_id);
+          if (upErr) throw upErr;
+        }
+      }
+    }
   }
   const { error } = await sb.from("inspection_items").upsert(row, { onConflict: "inspection_id,zone" });
   if (error) throw error;
@@ -179,12 +231,17 @@ export async function finishInspection(sb: any, me: SessionUser, body: any, now 
   const { data: items } = await sb.from("inspection_items").select("*").eq("inspection_id", insp.id);
   const byZone: Record<string, any> = {};
   for (const i of items ?? []) byZone[i.zone] = i;
-  const missing = INSP_ZONES.filter((z) => !byZone[z.key]).map((z) => z.label);
-  if (missing.length) return bad(400, "Missing: " + missing.join(", "));
+  const missing = INSP_ZONES.filter((z) => !byZone[z.key]);
+  // Seule det manque : appli en cache sans la nouvelle zone.
+  if (missing.length === 1 && missing[0].key === "det") {
+    return bad(400, "Missing: DET equipment. Reload the app to see this new zone.");
+  }
+  if (missing.length) return bad(400, "Missing: " + missing.map((z) => z.label).join(", "));
   const { data: photos } = await sb.from("inspection_photos").select("zone, kind").eq("inspection_id", insp.id);
   const withPhoto = new Set((photos ?? []).filter((p: any) => p.kind === "issue").map((p: any) => p.zone));
   const notOk = INSP_ZONES.filter((z) => byZone[z.key].status === "not_ok");
-  const noPhoto = notOk.filter((z) => !withPhoto.has(z.key)).map((z) => z.label);
+  // Zone det : on ne photographie pas un absent, photo facultative.
+  const noPhoto = notOk.filter((z) => z.key !== "det" && !withPhoto.has(z.key)).map((z) => z.label);
   if (noPhoto.length) return bad(400, "Add a photo for: " + noPhoto.join(", "));
   const noOutcome = notOk.filter((z) => !byZone[z.key].outcome).map((z) => z.label);
   if (noOutcome.length) return bad(400, "Choose fixed or maintenance for: " + noOutcome.join(", "));

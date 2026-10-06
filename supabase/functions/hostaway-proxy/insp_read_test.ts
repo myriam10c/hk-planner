@@ -121,6 +121,14 @@ Deno.test("history : zones not_ok, ticket et photos signees", async () => {
   assertEquals(db.storage.signBatches.length, 1);
 });
 
+Deno.test("history : missingItems renvoye (det), [] par defaut", async () => {
+  const db = base();
+  db.tables.inspection_items.push({ inspection_id: 2, zone: "det", status: "not_ok", note: "Missing: Fridge", outcome: "fixed", missing_items: ["fridge"] });
+  const h = await inspHistory(db, "B");
+  const items = h.inspections[0].items;
+  assertEquals(items.map((x: any) => [x.zone, x.missingItems]), [["ac", []], ["det", ["fridge"]]]);
+});
+
 Deno.test("missed : propose le jour D et inspecte le jour D = 0 le lendemain", async () => {
   const db = base();
   db.tables.inspection_proposals = [{ proposal_date: "2026-10-05", listing_id: "C", rank: 1 }];

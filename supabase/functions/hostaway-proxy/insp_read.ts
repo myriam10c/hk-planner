@@ -1,7 +1,8 @@
 // Lectures du module Inspections : liste du jour, tableau du parc, historique.
 import { plusDays, V3_PHOTO_BUCKET } from "./v3.ts";
 import {
-  daysBetween, dubaiDay, eligibilityFor, fleetColor, INSP_DEFAULT_TARGET, INSP_GOAL_DAYS, INSP_ZONES, listingLabel, rankToday,
+  daysBetween, dubaiDay, eligibilityFor, fleetColor, INSP_DEFAULT_TARGET, INSP_DET_ITEMS, INSP_GOAL_DAYS, INSP_ZONES, listingLabel,
+  rankToday,
 } from "./insp_rules.ts";
 import type { InspCard, InspReservation } from "./insp_rules.ts";
 
@@ -225,6 +226,9 @@ export async function inspHistory(sb: any, listingId: string) {
         .sort((a: any, b: any) => INSP_ZONES.findIndex((z) => z.key === a.zone) - INSP_ZONES.findIndex((z) => z.key === b.zone))
         .map((it: any) => ({
           zone: it.zone, label: label(it.zone), status: it.status, note: it.note, outcome: it.outcome, fixNote: it.fix_note,
+          missingItems: Array.isArray(it.missing_items) ? it.missing_items : [],
+          missingLabels: (Array.isArray(it.missing_items) ? it.missing_items : [])
+            .map((k: string) => INSP_DET_ITEMS.find((d) => d.key === k)?.label ?? k),
           ticket: it.ticket_id && tById[String(it.ticket_id)]
             ? { id: it.ticket_id, status: tById[String(it.ticket_id)].status, title: tById[String(it.ticket_id)].title } : null,
           photos: (photos ?? []).filter((p: any) => p.inspection_id === i.id && p.zone === it.zone)

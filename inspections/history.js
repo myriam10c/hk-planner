@@ -15,6 +15,8 @@ export async function renderHistory(ctx) {
 
   const itemHtml = (it) => {
     let h = '<div class="zone-item"><strong>' + esc(it.label) + '</strong>';
+    const miss = it.missingLabels || [];
+    if (miss.length) h += '<p class="note">Missing: ' + miss.map(esc).join(', ') + '</p>';
     if (it.note) h += '<p class="note">' + esc(it.note) + '</p>';
     if (it.fixNote) h += '<p class="note">Fixed: ' + esc(it.fixNote) + '</p>';
     else if (it.ticket) h += '<p class="note">Ticket #' + esc(it.ticket.id) + ' · ' + esc(it.ticket.status) + '</p>';

@@ -1,16 +1,28 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  daysBetween, dubaiDay, eligibilityFor, fleetColor, INSP_ZONES, inspRoleAllowed, listingLabel, rankToday,
+  daysBetween, dubaiDay, eligibilityFor, fleetColor, INSP_DET_ITEMS, INSP_DET_KEYS, INSP_ZONES, inspRoleAllowed,
+  listingLabel, rankToday,
 } from "./insp_rules.ts";
 
 const R = (listingId: string, arrival: string, departure: string, extra: any = {}) =>
   ({ listingId, arrival, departure, status: "confirmed", checkInTime: 15, checkOutTime: 12, ...extra });
 const D = "2026-10-06";
 
-Deno.test("10 zones dans l'ordre", () => {
-  assertEquals(INSP_ZONES.length, 10);
+Deno.test("11 zones dans l'ordre, det en dernier", () => {
+  assertEquals(INSP_ZONES.length, 11);
   assertEquals(INSP_ZONES[0].key, "entrance");
   assertEquals(INSP_ZONES[9].key, "cleanliness");
+  assertEquals(INSP_ZONES[10], { key: "det", label: "DET equipment" });
+});
+
+Deno.test("liste DET : 42 elements, cles uniques, groupes et who valides", () => {
+  assertEquals(INSP_DET_ITEMS.length, 42);
+  assertEquals(INSP_DET_KEYS.size, 42);
+  assertEquals([...new Set(INSP_DET_ITEMS.map((i) => i.group))],
+    ["Displays", "Safety", "Unit", "Living room", "Bedroom", "Bathroom", "Kitchen"]);
+  for (const i of INSP_DET_ITEMS) assertEquals(["owner", "medini", "both"].includes(i.who), true);
+  assertEquals(INSP_DET_ITEMS.find((i) => i.key === "first_aid"), { key: "first_aid", group: "Safety", label: "First aid kit, complete", who: "both" });
+  assertEquals(INSP_DET_ITEMS[INSP_DET_ITEMS.length - 1].key, "hood");
 });
 
 Deno.test("checkout le jour J : eligible meme avec check-in le meme jour", () => {

@@ -13,8 +13,74 @@ export const INSP_ZONES = [
   { key: "balcony", label: "Balcony & windows" },
   { key: "inventory", label: "Inventory & consumables" },
   { key: "cleanliness", label: "General cleanliness" },
+  { key: "det", label: "DET equipment" },
 ] as const;
 export const INSP_ZONE_KEYS = new Set<string>(INSP_ZONES.map((z) => z.key));
+
+// Equipements obligatoires DET (Annexe 1, Standard). who = qui fournit : owner, medini, ou both
+// (le proprio achete, Medini reassort). Source unique, renvoyee au front dans le snapshot.
+export type InspDetItem = { key: string; group: string; label: string; who: "owner" | "medini" | "both" };
+const det = (group: string, rows: Array<[string, string, InspDetItem["who"]]>): InspDetItem[] =>
+  rows.map(([key, label, who]) => ({ key, group, label, who }));
+export const INSP_DET_ITEMS: InspDetItem[] = [
+  ...det("Displays", [
+    ["permit", "DET permit displayed", "medini"],
+    ["qr", "Unit QR code under the DEWA plaque", "medini"],
+    ["notice", "Emergency procedures and 24h numbers, Arabic and English", "medini"],
+    ["qibla", "Qibla direction", "medini"],
+    ["guide", "Visitor guide / Medini Guide QR", "medini"],
+    ["rules", "House and building rules for guests", "medini"],
+  ]),
+  ...det("Safety", [
+    ["extinguisher", "Fire extinguisher, in date", "owner"],
+    ["blanket", "Fire blanket", "owner"],
+    ["gloves_torch", "Gloves and working torch", "owner"],
+    ["first_aid", "First aid kit, complete", "both"],
+    ["peephole", "Peephole or intercom", "owner"],
+    ["smart_lock", "SIRA smart lock, Keyless", "owner"],
+  ]),
+  ...det("Unit", [
+    ["wifi", "Wi-Fi working", "owner"],
+    ["blackout", "Blackout curtains", "owner"],
+    ["bins", "Waste bin in kitchen and every room", "owner"],
+    ["iron", "Iron and ironing board", "owner"],
+    ["vacuum", "Vacuum cleaner", "owner"],
+    ["cleaning_tools", "Mop, bucket, cleaning tools", "owner"],
+    ["washer_dryer", "Washing machine with dryer", "owner"],
+  ]),
+  ...det("Living room", [
+    ["sofa", "Sofa for two per bedroom", "owner"],
+    ["dining", "Dining table, 2 chairs per bedroom", "owner"],
+    ["tv", "TV with remote", "owner"],
+    ["rug", "Rug or carpet", "owner"],
+  ]),
+  ...det("Bedroom", [
+    ["bed", "Bed with headboard, good mattress", "owner"],
+    ["bedding", "Pillows and duvet on every bed", "owner"],
+    ["bedside", "Bedside table and lamp", "owner"],
+    ["wardrobe", "Wardrobe with shelves and mirror", "owner"],
+    ["hangers", "At least 6 hangers", "owner"],
+    ["safe", "Safe box", "owner"],
+    ["sheets", "2 sets of sheets per bed", "both"],
+  ]),
+  ...det("Bathroom", [
+    ["bath_mirror", "Mirror with lighting", "owner"],
+    ["toiletries", "Soap and shampoo", "medini"],
+    ["towels", "2 sets of towels per room", "both"],
+    ["shattaf", "Shattaf or bidet", "owner"],
+    ["towel_holder", "Towel holder and hooks", "owner"],
+    ["bath_mat", "Bath mat", "both"],
+  ]),
+  ...det("Kitchen", [
+    ["sink", "Sink and draining board", "owner"],
+    ["hob", "Cooking hob", "owner"],
+    ["fridge", "Fridge", "owner"],
+    ["microwave", "Microwave", "owner"],
+    ["utensils", "Cooking utensils, 2 tableware sets per bedroom", "owner"],
+    ["hood", "Extractor hood", "owner"],
+  ]),
+];
+export const INSP_DET_KEYS = new Set<string>(INSP_DET_ITEMS.map((i) => i.key));
 
 export const INSP_DEFAULT_TARGET = 4;
 export const INSP_MIN_GAP_DAYS = 7;

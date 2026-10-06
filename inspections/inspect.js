@@ -14,7 +14,10 @@ const ZONES = [
   { key: 'balcony', label: 'Balcony & windows' },
   { key: 'inventory', label: 'Inventory & consumables' },
   { key: 'cleanliness', label: 'General cleanliness' },
+  { key: 'det', label: 'DET equipment' },
 ];
+// Zone det : la liste des equipements vient du serveur (snapshot detItems), jamais dupliquee ici.
+const WHO = { owner: 'Owner', medini: 'Medini', both: 'Owner + Medini' };
 const clock = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Dubai' });
 
 export async function renderInspect(ctx) {
@@ -23,7 +26,7 @@ export async function renderInspect(ctx) {
   const eligibility = ['checkout', 'vacant', 'adhoc'].includes(ctx.entry) ? ctx.entry : 'adhoc';
   const startIdem = newIdem('istart'); // gardee jusqu'au succes : un nouvel essai la reutilise
   let busy = false;
-  const st = { done: false, insp: null, z: {}, open: null, general: '', finishError: '', loadError: '' };
+  const st = { done: false, insp: null, z: {}, open: null, general: '', finishError: '', loadError: '', detItems: [] };
   const view = document.getElementById('view');
   // Un seul element aria-live, cree une fois : repeint a chaque rendu sans etre recree.
   const countEl = document.createElement('p');
@@ -38,11 +41,13 @@ export async function renderInspect(ctx) {
 
   function load(snap) {
     st.insp = snap.inspection;
+    st.detItems = Array.isArray(snap.detItems) ? snap.detItems : [];
     for (const it of snap.items || []) zoneOf(it.zone).saved = it;
     for (const p of snap.photos || []) zoneOf(p.zone).photos.push({ id: p.id, kind: p.kind, url: null, state: 'done' });
   }
-  const canSave = (z) => {
+  const canSave = (z, k) => {
     const d = z.draft;
+    if (k === 'det') return !!(d && d.missing.length && d.outcome && (d.outcome !== 'fixed' || d.fixNote.trim()));
     return !!(d && d.note.trim() && issuePhotos(z).some((p) => p.state === 'done') && d.outcome
       && (d.outcome !== 'fixed' || d.fixNote.trim()));
   };
@@ -60,7 +65,43 @@ export async function renderInspect(ctx) {
   const addBtn = (key, kind, label) => '<label class="btn ghost addphoto">' + esc(label)
     + '<input type="file" accept="image/*" capture="environment" class="filein" data-z="' + esc(key) + '" data-kind="' + kind + '"></label>';
 
+  const whoBadge = (w) => (WHO[w] ? '<span class="badge who">' + esc(WHO[w]) + '</span>' : '');
+  const detLabel = (key) => { const it = st.detItems.find((x) => x.key === key); return it ? it : { key, label: key, who: '' }; };
+
+  // Formulaire Not OK de la zone det : cases a cocher groupees, note et photo facultatives.
+  function detForm(z) {
+    const d = z.draft, k = 'det';
+    const pressed = (o) => (d.outcome === o ? 'true' : 'false');
+    let h = '<div class="zform"><fieldset class="detlist"><legend class="lbl">Tick what is missing</legend>';
+    let grp = null;
+    st.detItems.forEach((it, i) => {
+      if (it.group !== grp) { h += (grp === null ? '' : '</div>') + '<p class="detgrp">' + esc(it.group) + '</p><div class="detrows">'; grp = it.group; }
+      const id = 'miss-' + i;
+      h += '<div class="detrow"><input type="checkbox" id="' + id + '" data-miss="' + esc(it.key) + '" data-z="' + k + '"' + (d.missing.includes(it.key) ? ' checked' : '') + '>'
+        + '<label for="' + id + '"><span class="sr">Missing: </span>' + esc(it.label) + ' ' + whoBadge(it.who) + '</label></div>';
+    });
+    if (grp !== null) h += '</div>';
+    if (!st.detItems.length) h += '<p class="notice bad">The equipment list could not be loaded. Go back and open the inspection again.</p>';
+    h += '</fieldset><p class="mute">Owner items: tell Hillal before buying. Medini items: add them now if you have them.</p>'
+      + '<label class="lbl" for="note-' + k + '">Note (optional)</label>'
+      + '<textarea id="note-' + k + '" class="ta" rows="2" data-f="note" data-z="' + k + '">' + esc(d.note) + '</textarea>'
+      + '<p class="lbl">Photo (optional)</p>' + thumbs(z, 'issue', k) + addBtn(k, 'issue', 'Add photo')
+      + '<p class="lbl">What happened?</p><div class="choices">'
+      + '<button class="btn choice" data-act="outcome" data-z="' + k + '" data-o="fixed" aria-pressed="' + pressed('fixed') + '">Added on the spot</button>'
+      + '<button class="btn choice" data-act="outcome" data-z="' + k + '" data-o="maintenance" aria-pressed="' + pressed('maintenance') + '">Needs to be supplied</button></div>';
+    if (d.outcome === 'fixed') {
+      h += '<label class="lbl" for="fix-' + k + '">What did you add?</label>'
+        + '<textarea id="fix-' + k + '" class="ta" rows="2" data-f="fixNote" data-z="' + k + '">' + esc(d.fixNote) + '</textarea>';
+    } else if (d.outcome === 'maintenance') {
+      h += '<p class="mute">A ticket will be created with the list.</p>';
+    }
+    h += '<div class="actions"><button class="btn primary" data-act="save" data-z="' + k + '"' + (canSave(z, k) && !busy ? '' : ' disabled') + '>Save</button>'
+      + '<button class="btn ghost" data-act="cancel" data-z="' + k + '">Cancel</button></div></div>';
+    return h;
+  }
+
   function form(zn) {
+    if (zn.key === 'det') return detForm(zoneOf('det'));
     const z = zoneOf(zn.key), d = z.draft, k = zn.key;
     const pressed = (o) => (d.outcome === o ? 'true' : 'false');
     let h = '<div class="zform">'
@@ -77,17 +118,22 @@ export async function renderInspect(ctx) {
     } else if (d.outcome === 'maintenance') {
       h += '<p class="mute">A maintenance ticket will be created.</p>';
     }
-    h += '<div class="actions"><button class="btn primary" data-act="save" data-z="' + k + '"' + (canSave(z) && !busy ? '' : ' disabled') + '>Save</button>'
+    h += '<div class="actions"><button class="btn primary" data-act="save" data-z="' + k + '"' + (canSave(z, k) && !busy ? '' : ' disabled') + '>Save</button>'
       + '<button class="btn ghost" data-act="cancel" data-z="' + k + '">Cancel</button></div></div>';
     return h;
   }
 
-  function summary(z) {
-    const it = z.saved;
-    if (it.status === 'ok') return '<p class="mute">OK</p>' + (it.ticketId ? '<p class="badge">Ticket #' + esc(it.ticketId) + ' stays open</p>' : '');
-    let h = '<p class="sum">' + esc(it.note) + '</p>';
-    if (it.outcome === 'fixed') h += '<p class="mute">Fixed on the spot: ' + esc(it.fixNote) + '</p>';
-    else if (it.outcome === 'maintenance') h += '<p class="mute">Needs maintenance</p>';
+  function summary(z, k) {
+    const it = z.saved, det = k === 'det';
+    if (it.status === 'ok') return '<p class="mute">' + (det ? 'All present' : 'OK') + '</p>' + (it.ticketId ? '<p class="badge">Ticket #' + esc(it.ticketId) + ' stays open</p>' : '');
+    let h = '';
+    if (det) {
+      const miss = it.missingItems || [];
+      if (miss.length) h += '<p class="lbl">Missing</p><ul class="detsum">' + miss.map((m) => { const x = detLabel(m); return '<li>' + esc(x.label) + ' ' + whoBadge(x.who) + '</li>'; }).join('') + '</ul>';
+      if (it.note) h += '<p class="sum">' + esc(it.note) + '</p>';
+    } else h += '<p class="sum">' + esc(it.note) + '</p>';
+    if (it.outcome === 'fixed') h += '<p class="mute">' + (det ? 'Added on the spot: ' : 'Fixed on the spot: ') + esc(it.fixNote) + '</p>';
+    else if (it.outcome === 'maintenance') h += '<p class="mute">' + (det ? 'Needs to be supplied' : 'Needs maintenance') + '</p>';
     if (it.ticketId) h += '<p class="badge bad">Ticket #' + esc(it.ticketId) + (it.outcome === 'fixed' ? ' stays open' : ' created') + '</p>';
     return h;
   }
@@ -99,9 +145,10 @@ export async function renderInspect(ctx) {
     let h = '<section class="card zone' + cls + '" data-testid="zone-' + k + '" aria-labelledby="zt-' + k + '"><div class="card-top"><h3 id="zt-' + k + '">' + esc(zn.label) + '</h3></div>';
     if (open) h += form(zn);
     else if (z.saved && !z.editing) {
-      h += summary(z) + '<button class="btn ghost" data-act="edit" data-z="' + k + '"' + (busy ? ' disabled' : '') + '>Change</button>';
+      h += summary(z, k) + '<button class="btn ghost" data-act="edit" data-z="' + k + '"' + (busy ? ' disabled' : '') + '>Change</button>';
     } else {
-      h += '<div class="choices"><button class="btn okbtn" data-act="ok" data-z="' + k + '" aria-label="OK: ' + esc(zn.label) + '"' + (busy ? ' disabled' : '') + '>OK</button>'
+      const okTxt = k === 'det' ? 'All present' : 'OK';
+      h += '<div class="choices"><button class="btn okbtn" data-act="ok" data-z="' + k + '" aria-label="' + okTxt + ': ' + esc(zn.label) + '"' + (busy ? ' disabled' : '') + '>' + okTxt + '</button>'
         + '<button class="btn notok" data-act="notok" data-z="' + k + '" aria-label="Not OK: ' + esc(zn.label) + '"' + (busy ? ' disabled' : '') + '>Not OK</button></div>';
     }
     return h + '</section>';
@@ -148,7 +195,7 @@ export async function renderInspect(ctx) {
         if (el) el.outerHTML = thumbs(z, kind, k);
       }
       const sv = card.querySelector('[data-act="save"]');
-      if (sv) sv.disabled = busy || !canSave(z);
+      if (sv) sv.disabled = busy || !canSave(z, k);
     }
     const fin = view.querySelector('[data-act="finish"]');
     if (fin) fin.disabled = busy || doneCount() !== ZONES.length;
@@ -198,7 +245,11 @@ export async function renderInspect(ctx) {
     if (a === 'retry-start') { st.insp = null; paint(); return start(); }
     if (a === 'notok') {
       const z = zoneOf(k), s = z.saved;
-      if (!z.draft) z.draft = { note: s && s.note || '', outcome: s && s.outcome || null, fixNote: s && s.fixNote || '' };
+      if (!z.draft) {
+        const notOk = s && s.status === 'not_ok';
+        z.draft = { note: s && s.note || '', outcome: s && s.outcome || null, fixNote: s && s.fixNote || '',
+          missing: notOk && Array.isArray(s.missingItems) ? s.missingItems.slice() : [] };
+      }
       st.open = k; return paint();
     }
     if (a === 'edit') { const z = zoneOf(k); z.editing = true; return paint(); }
@@ -216,9 +267,10 @@ export async function renderInspect(ctx) {
     if (a === 'save') return run(async () => {
       const z = zoneOf(k), d = z.draft, hadTicket = !!(z.saved && z.saved.ticketId);
       const body = { inspectionId: st.insp.id, zone: k, status: 'not_ok', note: d.note.trim(), outcome: d.outcome || null };
+      if (k === 'det') body.missing = st.detItems.map((x) => x.key).filter((key) => d.missing.includes(key));
       if (d.outcome === 'fixed') body.fixNote = d.fixNote.trim();
       const r = await post('insp.saveItem', body);
-      z.saved = r.item || { zone: k, status: 'not_ok', ...body };
+      z.saved = r.item || { zone: k, status: 'not_ok', ...body, missingItems: body.missing || [] };
       z.editing = false; st.open = null; z.draft = null;
       if (z.saved.ticketId && !hadTicket) toast('Ticket #' + z.saved.ticketId + ' created');
     });
@@ -232,12 +284,13 @@ export async function renderInspect(ctx) {
   // Saisie : on garde le brouillon en memoire sans repeindre (le focus reste en place).
   view.oninput = async (ev) => {
     const t = ev.target;
+    if (t.dataset && t.dataset.miss) return; // cases det : traitees par onchange
     if (t.id === 'general') { st.general = t.value; return; }
     if (t.dataset && t.dataset.f) {
       const z = zoneOf(t.dataset.z);
       if (z.draft) z.draft[t.dataset.f] = t.value;
       const save = t.closest('.zone') && t.closest('.zone').querySelector('[data-act="save"]');
-      if (save) save.disabled = busy || !canSave(z);
+      if (save) save.disabled = busy || !canSave(z, t.dataset.z);
       return;
     }
     if (t.type === 'file') {
@@ -251,6 +304,18 @@ export async function renderInspect(ctx) {
       zoneOf(k).photos.push(entry);
       upOne(k, entry);
     }
+  };
+  // Cases det : meme principe, brouillon mis a jour et bouton Save recalcule sans repeindre.
+  view.onchange = (ev) => {
+    const t = ev.target;
+    if (!t.dataset || !t.dataset.miss) return;
+    const z = zoneOf(t.dataset.z), d = z.draft;
+    if (!d) return;
+    const key = t.dataset.miss;
+    d.missing = d.missing.filter((m) => m !== key);
+    if (t.checked) d.missing.push(key);
+    const save = t.closest('.zone') && t.closest('.zone').querySelector('[data-act="save"]');
+    if (save) save.disabled = busy || !canSave(z, t.dataset.z);
   };
 
   paint();

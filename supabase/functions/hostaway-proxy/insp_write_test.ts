@@ -4,7 +4,7 @@ import {
   assignProposal, claimProposal, finishInspection, saveItem, setExcluded, startInspection,
   unclaimProposal, uploadInspectionPhoto,
 } from "./insp_write.ts";
-import { INSP_ZONES } from "./insp_rules.ts";
+import { INSP_DET_ITEMS, INSP_ZONES } from "./insp_rules.ts";
 
 const WALTER = { cleaner_id: 2, name: "Walter", role: "manager", color: "#000" };
 const FAIZA = { cleaner_id: 3, name: "Faiza", role: "cleaner", color: "#e94560" };
@@ -288,5 +288,122 @@ Deno.test("ticket photo : erreur de mise a jour du ticket n'echoue pas l'upload"
   await maintItem(db, id);
   db.fail["maintenance_tickets.update"] = { code: "XX", message: "boom" };
   const r = await uploadInspectionPhoto(db, FAIZA, photoForm(id, "ac", "idem-photo-t7"));
+  assertEquals(r.status, 200);
+});
+
+// ---- Zone DET equipment ----
+
+Deno.test("det : snapshot renvoie detItems", async () => {
+  const db = seed();
+  const r = await startInspection(db, FAIZA, { listingId: "L1", eligibility: "checkout", idem: "idem-start-1" }, NOW);
+  assertEquals((r.body as any).detItems, INSP_DET_ITEMS);
+});
+
+Deno.test("det : not_ok sans missing ou cle inconnue refuse", async () => {
+  const db = seed(); const id = await started(db);
+  let r = await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", note: "x" });
+  assertEquals([r.status, (r.body as any).error], [400, "Tick what is missing."]);
+  r = await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: [] });
+  assertEquals(r.status, 400);
+  r = await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["iron", "jacuzzi"] });
+  assertEquals([r.status, (r.body as any).error], [400, "Tick what is missing."]);
+  r = await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: "iron" });
+  assertEquals(r.status, 400);
+});
+
+Deno.test("det : note vide stockee null, dedoublonnage et ordre de la liste", async () => {
+  const db = seed(); const id = await started(db);
+  const r = await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["iron", "permit", "iron"], outcome: "maintenance" }, NOW);
+  assertEquals(r.status, 200);
+  const item = (r.body as any).item;
+  assertEquals(item.missingItems, ["permit", "iron"]);
+  assertEquals(item.note, null);
+  assertEquals(db.tables.inspection_items[0].note, null);
+  assertEquals(db.tables.inspection_items[0].missing_items, ["permit", "iron"]);
+  // Le ticket liste quand meme les manquants.
+  assert((db.tables.maintenance_tickets[0].description as string).startsWith("- DET permit displayed · "));
+  assert((db.tables.maintenance_tickets[0].description as string).includes("\n- Iron and ironing board · "));
+});
+
+Deno.test("det : liste modifiee, ticket ouvert mis a jour ; ticket clos intact", async () => {
+  const db = seed(); const id = await started(db);
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["iron"], outcome: "maintenance" }, NOW);
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["safe", "iron"], note: "Safe gone", outcome: "maintenance" }, NOW);
+  assertEquals(db.tables.maintenance_tickets.length, 1);
+  const t = db.tables.maintenance_tickets[0];
+  const labels = INSP_DET_ITEMS.filter((i) => i.key === "iron" || i.key === "safe").map((i) => i.label);
+  assertEquals(t.title, "DET equipment missing: " + labels.join(", ").slice(0, 80));
+  assert((t.description as string).includes("Safe gone\n\nFound during inspection by Faiza."));
+  assertEquals((t.description as string).split("\n").filter((l) => l.startsWith("- ")).length, 2);
+  // Ticket resolu : plus de mise a jour.
+  t.status = "resolved";
+  const before = { title: t.title, description: t.description };
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["iron"], outcome: "maintenance" }, NOW);
+  assertEquals({ title: t.title, description: t.description }, before);
+});
+
+Deno.test("non det : missing_items jamais ecrit dans la ligne", async () => {
+  const db = seed(); const id = await started(db);
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "ac", status: "ok" });
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "kitchen", status: "not_ok", note: "Oven", outcome: "fixed", fixNote: "ok" });
+  for (const r of db.tables.inspection_items) assertEquals("missing_items" in r, false);
+});
+
+Deno.test("finish : seule det manque, message de rechargement", async () => {
+  const db = seed(); const id = await started(db);
+  for (const z of INSP_ZONES) if (z.key !== "det") await saveItem(db, FAIZA, { inspectionId: id, zone: z.key, status: "ok" });
+  const r = await finishInspection(db, FAIZA, { inspectionId: id }, NOW);
+  assertEquals((r.body as any).error, "Missing: DET equipment. Reload the app to see this new zone.");
+});
+
+Deno.test("det : note libre conservee", async () => {
+  const db = seed(); const id = await started(db);
+  const r = await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["safe"], note: "Safe removed by owner" });
+  assertEquals((r.body as any).item.note, "Safe removed by owner");
+});
+
+Deno.test("det : ticket titre et description avec qui fournit", async () => {
+  const db = seed(); const id = await started(db);
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["extinguisher", "toiletries", "towels"], outcome: "maintenance" }, NOW);
+  const t = db.tables.maintenance_tickets[0];
+  assertEquals(t.title, "DET equipment missing: " + "Fire extinguisher, in date, Soap and shampoo, 2 sets of towels per room".slice(0, 80));
+  assertEquals(t.description,
+    "- Fire extinguisher, in date · Owner supplies (owner pays, tell Hillal before buying)\n" +
+    "- Soap and shampoo · Medini supplies\n" +
+    "- 2 sets of towels per room · Owner buys, Medini restocks\n\nFound during inspection by Faiza.");
+  assertEquals(t.source_ref, "inspection:" + id + ":det");
+});
+
+Deno.test("det : ticket avec note libre, titre tronque a 80", async () => {
+  const db = seed(); const id = await started(db);
+  const all = INSP_DET_ITEMS.map((i) => i.key);
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["fridge"], note: "Fridge taken away", outcome: "maintenance" }, NOW);
+  const t = db.tables.maintenance_tickets[0];
+  assertEquals(t.description, "- Fridge · Owner supplies (owner pays, tell Hillal before buying)\n\nFridge taken away\n\nFound during inspection by Faiza.");
+  const db2 = seed(); const id2 = await started(db2);
+  await saveItem(db2, FAIZA, { inspectionId: id2, zone: "det", status: "not_ok", missing: all, outcome: "maintenance" }, NOW);
+  const t2 = db2.tables.maintenance_tickets[0].title as string;
+  assertEquals(t2.length, "DET equipment missing: ".length + 80);
+});
+
+Deno.test("det : ok efface missing ; autre zone toujours {}", async () => {
+  const db = seed(); const id = await started(db);
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["iron"], outcome: "fixed", fixNote: "Bought" });
+  const r = await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "ok", missing: ["iron"] });
+  assertEquals((r.body as any).item.missingItems, []);
+  assertEquals(db.tables.inspection_items.find((i: any) => i.zone === "det").missing_items, []);
+  assertEquals(db.tables.inspection_items.find((i: any) => i.zone === "det").note, null);
+  const k = await saveItem(db, FAIZA, { inspectionId: id, zone: "kitchen", status: "not_ok", note: "Oven", missing: ["iron"], outcome: "fixed", fixNote: "ok" });
+  assertEquals((k.body as any).item.missingItems, []);
+});
+
+Deno.test("det : finish sans photo accepte, outcome toujours exige", async () => {
+  const db = seed(); const id = await started(db);
+  for (const z of INSP_ZONES) if (z.key !== "det") await saveItem(db, FAIZA, { inspectionId: id, zone: z.key, status: "ok" });
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["iron"] });
+  let r = await finishInspection(db, FAIZA, { inspectionId: id }, NOW);
+  assertEquals((r.body as any).error, "Choose fixed or maintenance for: DET equipment");
+  await saveItem(db, FAIZA, { inspectionId: id, zone: "det", status: "not_ok", missing: ["iron"], outcome: "maintenance" }, NOW);
+  r = await finishInspection(db, FAIZA, { inspectionId: id }, NOW);
   assertEquals(r.status, 200);
 });

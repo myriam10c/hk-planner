@@ -37,7 +37,7 @@ async function route() {
   for (const fn of old) { try { fn(); } catch (e) { /* nettoyage best effort */ } }
   const hash = location.hash || '#/';
   const ctx = { me, go, toast, render, esc, isCurrent: () => mine === seq, onLeave: (fn) => { leaving.push(fn); } };
-  view.onclick = null; view.oninput = null;
+  view.onclick = null; view.oninput = null; view.onchange = null;
   const [path, query] = hash.slice(2).split('?');
   const parts = path.split('/');
   const q = new URLSearchParams(query || '');
