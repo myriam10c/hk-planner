@@ -22,8 +22,9 @@ const UNIQUE: Record<string, string[]> = {
 // Tables dont created_at est rempli par la base a l'insertion.
 const DEFAULT_NOW = new Set(['job_events']);
 
+// honorOrder : applique .order() (sinon no-op, comportement historique des tests).
 // maxRows : plafond de lignes par select comme le max_rows de PostgREST (defaut : aucun).
-export function fakeDb(seed: Record<string, any[]> = {}, opts: { maxRows?: number } = {}) {
+export function fakeDb(seed: Record<string, any[]> = {}, opts: { maxRows?: number; honorOrder?: boolean } = {}) {
   const tables: Record<string, any[]> = {};
   for (const [k, v] of Object.entries(seed)) tables[k] = v.map((r) => ({ ...r }));
   const writes: Array<{ table: string; op: string; values: any }> = [];
@@ -34,6 +35,7 @@ export function fakeDb(seed: Record<string, any[]> = {}, opts: { maxRows?: numbe
   function from(table: string) {
     const filters: Array<{ col: string; val: any; kind: "eq" | "in" | "or" | "gte" | "lte" | "lt" | "gt" | "isnull" }> = [];
     let pending: { op: string; values: any; opts?: any } | null = null;
+    const orders: Array<{ col: string; asc: boolean }> = [];
     let slice: [number, number] | null = null; // .range(a, b) : bornes incluses
     const list = () => (tables[table] ??= []);
     // « payload->>listingId » : chemin JSON texte de PostgREST, un seul niveau.
@@ -75,7 +77,17 @@ export function fakeDb(seed: Record<string, any[]> = {}, opts: { maxRows?: numbe
       const key = table + "." + (pending ? pending.op : "select");
       if (fail[key]) return { data: null, error: fail[key] };
       if (!pending) {
-        const all = selected();
+        let all = selected();
+        if (opts.honorOrder && orders.length) {
+          all = all.slice().sort((a, b) => {
+            for (const o of orders) {
+              const x = lire(a, o.col), y = lire(b, o.col);
+              const c = x === y ? 0 : (typeof x === "number" && typeof y === "number" ? x - y : String(x) < String(y) ? -1 : 1);
+              if (c) return o.asc ? c : -c;
+            }
+            return 0;
+          });
+        }
         const part = slice ? all.slice(slice[0], slice[1] + 1) : all;
         return { data: opts.maxRows ? part.slice(0, opts.maxRows) : part, error: null };
       }
@@ -127,7 +139,8 @@ export function fakeDb(seed: Record<string, any[]> = {}, opts: { maxRows?: numbe
       eq: (col: string, val: any) => { filters.push({ col, val, kind: "eq" }); return q; },
       or: (expr: string) => { filters.push({ col: "", val: expr, kind: "or" }); return q; },
       in: (col: string, val: any[]) => { filters.push({ col, val, kind: "in" }); return q; },
-      order: () => q, limit: () => q, not: () => q,
+      order: (col: string, o?: { ascending?: boolean }) => { orders.push({ col, asc: o?.ascending !== false }); return q; },
+      limit: () => q, not: () => q,
       range: (a: number, b: number) => { slice = [a, b]; return q; },
       is: (col: string, val: any) => { if (val === null) filters.push({ col, val, kind: "isnull" }); return q; },
       gte: (col: string, val: any) => { filters.push({ col, val, kind: "gte" }); return q; },

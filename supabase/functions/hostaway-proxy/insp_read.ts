@@ -329,7 +329,8 @@ async function inBatches(sb: any, table: string, cols: string, col: string, ids:
     for (let start = 0;; start += PAGE) {
       let q = sb.from(table).select(cols).in(col, batch);
       if (extra) q = extra(q);
-      const page = must(await q.range(start, start + PAGE - 1), table);
+      // Ordre total sur la cle primaire : sans lui, Postgres peut sauter ou doubler des lignes entre deux pages.
+      const page = must(await q.order("id", { ascending: true }).range(start, start + PAGE - 1), table);
       out.push(...page);
       if (page.length < PAGE) break;
     }

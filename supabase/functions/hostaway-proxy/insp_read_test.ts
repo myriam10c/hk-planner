@@ -396,3 +396,16 @@ for (const key of ["inspections.select", "inspection_items.select", "maintenance
     assertEquals(msg.includes("boom"), true);
   });
 }
+
+Deno.test("reports : lots pagines en ordre de cle, sans doublon ni omission (items hors ordre d'id)", async () => {
+  const insps = [], items = [];
+  for (let i = 1; i <= 100; i++) insps.push({ id: i, listing_id: "L" + i, inspector_id: 2, finished_at: "2026-10-03T08:00:00Z" });
+  let id = 1;
+  for (let i = 1; i <= 100; i++) for (let k = 0; k < 15; k++) items.push({ id: id++, inspection_id: i, zone: k % 2 ? "ac" : "living", status: "not_ok", outcome: k % 3 ? "fixed" : "maintenance" });
+  items.reverse(); // stockage hors ordre d'id : seule la lecture triee pagine correctement
+  const db = fakeDb({ cleaners: [], listing_config: [], inspections: insps, inspection_items: items }, { maxRows: 1000, honorOrder: true });
+  const r = await inspReports(db, "2026-10-03", "2026-10-03");
+  assertEquals(r.totals.fixedOnSpot + r.totals.sentToMaintenance, 1500);
+  assertEquals(r.totals.sentToMaintenance, 500);
+  assertEquals(r.reports.every((x: any) => x.issues.length === 15), true);
+});
