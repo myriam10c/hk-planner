@@ -65,7 +65,8 @@ export async function renderToday(ctx) {
 
   const head = () => '<header class="top"><div><h1>Today\'s inspections</h1><p class="mute">'
     + esc(st.data ? longDate(st.data.day) : '') + '</p></div>'
-    + '<div class="top-actions"><a class="btn ghost" href="/">Back to HK Planner</a><button class="btn ghost" data-act="fleet">Fleet</button></div></header>';
+    + '<div class="top-actions"><a class="btn ghost" href="/">Back to HK Planner</a><button class="btn ghost" data-act="fleet">Fleet</button>'
+    + (isMgr ? '<button class="btn ghost" data-act="reports">Reports</button>' : '') + '</div></header>';
 
   const body = () => {
     if (st.picker) {
@@ -131,6 +132,7 @@ export async function renderToday(ctx) {
     if (!b) return;
     const a = b.dataset.act, id = b.dataset.id;
     if (a === 'fleet') return go('#/fleet');
+    if (a === 'reports') return go('#/reports');
     if (a === 'start') return go('#/inspect/' + encodeURIComponent(id) + '?e=' + (b.dataset.e || 'adhoc'));
     if (a === 'adhoc') return go('#/inspect/' + encodeURIComponent(id) + '?e=adhoc');
     if (a === 'back') { st.picker = null; st.assign = null; st.q = ''; return paint(); }

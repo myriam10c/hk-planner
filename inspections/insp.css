@@ -66,3 +66,16 @@ dialog.photo { max-width: 96vw; max-height: 92vh; padding: 8px; border: 0; borde
 dialog.photo img { display: block; max-width: 100%; max-height: 80vh; margin: 0 auto 8px; }
 .dot-off { background: var(--mute); }
 .reason.dim { color: var(--mute); font-weight: 500; }
+/* Rapports */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.chip { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bone-hi); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--terra); border-color: var(--terra); color: var(--bone-hi); }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 4px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile strong { font-family: var(--disp); font-size: 1.6rem; line-height: 1.1; }
+.tile span { font-size: .85rem; color: var(--mute); overflow-wrap: anywhere; }
+.tile.good strong { color: var(--moss); }
+.tile.warn strong { color: var(--amber-ink); }
+.rrow .link { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--ink); text-align: left; cursor: pointer; min-height: 44px; overflow-wrap: anywhere; }
+.rrow .mute { margin: 0; }
+.badge.ok { color: var(--moss); }

@@ -50,6 +50,10 @@ async function route() {
     mod = await load('/inspections/fleet.js');
     if (!mod) return placeholder('Fleet');
     if (mine === seq) await mod.renderFleet(ctx);
+  } else if (parts[0] === 'reports') {
+    mod = await load('/inspections/reports.js');
+    if (!mod) return placeholder('Reports');
+    if (mine === seq) await mod.renderReports(ctx);
   } else if (parts[0] === 'history' && parts[1]) {
     mod = await load('/inspections/history.js');
     if (!mod) return placeholder('History');
