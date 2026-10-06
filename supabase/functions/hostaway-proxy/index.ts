@@ -23,7 +23,7 @@ import {
 
 import { inspRoleAllowed, type InspReservation } from "./insp_rules.ts";
 import { loadReservationsCached, normalizeReservations } from "./insp_reservations.ts";
-import { inspHistory, inspOverview, inspRecap, inspToday } from "./insp_read.ts";
+import { inspHistory, inspOverview, inspRecap, inspReports, inspToday, parseReportRange } from "./insp_read.ts";
 import {
   assignProposal, claimProposal, finishInspection, saveItem, setExcluded, startInspection,
   unclaimProposal, uploadInspectionPhoto,
@@ -848,7 +848,7 @@ async function getPhotoUrl(sb: any, path: string | null): Promise<string | null>
 // Used at request entry for 404 (unknown) + 405 (method mismatch) before reaching the dispatch logic below.
 const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   // ===== Inspections =====
-  ["insp.recap", "GET"], ["insp.today", "GET"], ["insp.overview", "GET"], ["insp.history", "GET"],
+  ["insp.recap", "GET"], ["insp.today", "GET"], ["insp.overview", "GET"], ["insp.history", "GET"], ["insp.reports", "GET"],
   ["insp.start", "POST"], ["insp.saveItem", "POST"], ["insp.uploadPhoto", "POST"], ["insp.finish", "POST"],
   ["insp.claim", "POST"], ["insp.unclaim", "POST"], ["insp.assign", "POST"], ["insp.setExcluded", "POST"],
   // ===== Checkouts / sync =====
@@ -1382,6 +1382,11 @@ Deno.serve(async (req: Request) => {
         return jsonResp(await inspToday(sb, day, loaded.reservations, loaded.cachedAt));
       }
       if (action === "insp.overview") return jsonResp(await inspOverview(sb, day));
+      if (action === "insp.reports") {
+        const range = parseReportRange(url.searchParams.get("from"), url.searchParams.get("to"), day);
+        if (!range) return jsonResp({ error: "Invalid date range" }, 400);
+        return jsonResp(await inspReports(sb, range.from, range.to));
+      }
       if (action === "insp.history") {
         const lid = url.searchParams.get("listingId") ?? "";
         if (!lid) return jsonResp({ error: "listingId required" }, 400);

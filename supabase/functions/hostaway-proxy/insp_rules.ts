@@ -27,7 +27,7 @@ export const INSP_ROLES: Record<string, string[]> = {
   "insp.today": TEAM, "insp.overview": TEAM, "insp.history": TEAM,
   "insp.claim": TEAM, "insp.unclaim": TEAM,
   "insp.start": TEAM, "insp.saveItem": TEAM, "insp.uploadPhoto": TEAM, "insp.finish": TEAM,
-  "insp.assign": ["manager"], "insp.setExcluded": ["manager"],
+  "insp.assign": ["manager"], "insp.reports": ["manager"], "insp.setExcluded": ["manager"],
 };
 export function inspRoleAllowed(action: string, role: string): boolean {
   const l = INSP_ROLES[action];

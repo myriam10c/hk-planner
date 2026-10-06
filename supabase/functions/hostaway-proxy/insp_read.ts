@@ -306,3 +306,91 @@ export async function inspRecap(sb: any, day: string) {
     openTickets: (openT ?? []).filter((t: any) => !CLOSED.has(String(t.status))).length,
   };
 }
+
+// Plage de l'ecran Reports : jours Dubai inclusifs. null si mal formee, inversee ou > 366 jours.
+export function parseReportRange(from: string | null, to: string | null, today: string): { from: string; to: string } | null {
+  const valid = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && plusDays(d, 0) === d;
+  const t = to || today;
+  const f = from || plusDays(t, -30);
+  if (!valid(f) || !valid(t) || f > t || plusDays(f, 366) < t) return null;
+  return { from: f, to: t };
+}
+
+const BATCH = 200;
+async function inBatches(sb: any, table: string, cols: string, col: string, ids: any[]): Promise<any[]> {
+  const out: any[] = [];
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const { data } = await sb.from(table).select(cols).in(col, ids.slice(i, i + BATCH));
+    out.push(...(data ?? []));
+  }
+  return out;
+}
+
+// Rapports d'inspection termines sur [from, to] (jours Dubai). finished_at est en UTC : fenetre elargie d'un jour, filtre exact en JS.
+export async function inspReports(sb: any, from: string, to: string) {
+  const lo = plusDays(from, -1) + "T00:00:00Z", hi = plusDays(to, 2) + "T00:00:00Z";
+  const fetchWindow = async () => {
+    const out: any[] = [];
+    for (let start = 0;; start += PAGE) {
+      const { data } = await sb.from("inspections").select("id, listing_id, inspector_id, finished_at, eligibility")
+        .not("finished_at", "is", null).gte("finished_at", lo).lt("finished_at", hi)
+        .order("id", { ascending: false }).range(start, start + PAGE - 1);
+      const page = data ?? [];
+      out.push(...page);
+      if (page.length < PAGE) break;
+    }
+    return out;
+  };
+  const [names, { data: listings }, window] = await Promise.all([
+    cleanerNames(sb),
+    sb.from("listing_config").select("listing_id, internal_name, listing_name"),
+    fetchWindow(),
+  ]);
+  const insps = window.filter((r: any) => r.finished_at && dubaiDay(r.finished_at) >= from && dubaiDay(r.finished_at) <= to)
+    .sort((a: any, b: any) => String(b.finished_at).localeCompare(String(a.finished_at)) || Number(b.id) - Number(a.id));
+  const items = (await inBatches(sb, "inspection_items", "inspection_id, zone, status, outcome, ticket_id", "inspection_id", insps.map((r: any) => r.id)))
+    .filter((i: any) => i.status === "not_ok");
+  const ticketIds = [...new Set(items.map((i: any) => i.ticket_id).filter(Boolean))];
+  const tickets = await inBatches(sb, "maintenance_tickets", "id, status", "id", ticketIds);
+  const tById: Record<string, any> = {};
+  for (const t of tickets) tById[String(t.id)] = t;
+  const lById: Record<string, any> = {};
+  for (const l of listings ?? []) lById[String(l.listing_id)] = l;
+  const zoneIdx = (z: string) => INSP_ZONES.findIndex((x) => x.key === z);
+
+  const reports = insps.map((r: any) => {
+    const issues = items.filter((i: any) => String(i.inspection_id) === String(r.id))
+      .sort((a: any, b: any) => zoneIdx(a.zone) - zoneIdx(b.zone))
+      .map((i: any) => ({
+        zone: i.zone as string, label: INSP_ZONES.find((x) => x.key === i.zone)?.label ?? i.zone as string,
+        outcome: (i.outcome === "fixed" || i.outcome === "maintenance" ? i.outcome : null) as "fixed" | "maintenance" | null,
+        ticket: i.ticket_id && tById[String(i.ticket_id)] ? { id: i.ticket_id, status: tById[String(i.ticket_id)].status } : null,
+      }));
+    const result = (!issues.length ? "clean" : issues.some((i: any) => i.outcome === "maintenance") ? "maintenance" : "fixed") as
+      "clean" | "fixed" | "maintenance";
+    return {
+      id: r.id, listingId: String(r.listing_id), name: listingLabel(lById[String(r.listing_id)] ?? {}),
+      inspector: names[String(r.inspector_id)] ?? "Someone", finishedAt: r.finished_at as string,
+      eligibility: r.eligibility ?? null, result, issues,
+    };
+  });
+
+  const lastByListing: Record<string, string> = {}; // reports est trie : la premiere rencontre est la derniere inspection
+  for (const r of reports) if (!(r.listingId in lastByListing)) lastByListing[r.listingId] = r.result;
+  const apartments = Object.keys(lastByListing);
+  const zones = reports.flatMap((r) => r.issues);
+  const openIds = new Set<string>();
+  for (const z of zones) if (z.ticket && !CLOSED.has(String(z.ticket.status))) openIds.add(String(z.ticket.id));
+  return {
+    from, to,
+    totals: {
+      inspections: reports.length, apartments: apartments.length,
+      clean: apartments.filter((a) => lastByListing[a] === "clean").length,
+      withIssues: apartments.filter((a) => lastByListing[a] !== "clean").length,
+      fixedOnSpot: zones.filter((z) => z.outcome === "fixed").length,
+      sentToMaintenance: zones.filter((z) => z.outcome === "maintenance").length,
+      openTickets: openIds.size,
+    },
+    reports,
+  };
+}

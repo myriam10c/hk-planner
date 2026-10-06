@@ -1,6 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { inspHistory, inspOverview, inspRecap, inspToday } from "./insp_read.ts";
+import { inspHistory, inspOverview, inspRecap, inspReports, inspToday, parseReportRange } from "./insp_read.ts";
+import { inspRoleAllowed } from "./insp_rules.ts";
 
 const D = "2026-10-06";
 const base = () => fakeDb({
@@ -267,4 +268,100 @@ Deno.test("recap : inspection en cours set by a le nom de l'inspecteur", async (
   assertEquals(bProposal?.status, "in_progress");
   assertEquals(bProposal?.by, "Walter");
   assertEquals(bProposal?.at, null);
+});
+
+// ---- insp.reports ----
+const repDb = () => fakeDb({
+  cleaners: [{ id: 2, name: "Walter" }, { id: 3, name: "Faiza" }],
+  listing_config: [
+    { listing_id: "A", internal_name: "101 - Tower A" },
+    { listing_id: "B", internal_name: "202 - Tower B" },
+    { listing_id: "C", internal_name: "303 - Tower C" },
+  ],
+  inspections: [
+    // 20:00 UTC le 09-30 = 00:00 Dubai le 10-01 : compte le 10-01
+    { id: 1, listing_id: "A", inspector_id: 2, finished_at: "2026-09-30T20:00:00Z", eligibility: "vacant" },
+    { id: 2, listing_id: "A", inspector_id: 3, finished_at: "2026-10-03T08:00:00Z", eligibility: "checkout" },
+    { id: 3, listing_id: "B", inspector_id: 2, finished_at: "2026-10-04T08:00:00Z", eligibility: "vacant" },
+    { id: 4, listing_id: "C", inspector_id: 2, finished_at: "2026-10-05T08:00:00Z", eligibility: "vacant" },
+    { id: 5, listing_id: "C", inspector_id: 2, finished_at: null, eligibility: "vacant" }, // en cours
+    { id: 6, listing_id: "B", inspector_id: 2, finished_at: "2026-09-30T19:59:00Z", eligibility: "vacant" }, // 09-30 Dubai : hors
+    { id: 7, listing_id: "B", inspector_id: 2, finished_at: "2026-10-05T20:00:00Z", eligibility: "vacant" }, // 10-06 Dubai : hors si to=10-05
+  ],
+  inspection_items: [
+    { inspection_id: 1, zone: "ac", status: "ok" },
+    { inspection_id: 2, zone: "ac", status: "not_ok", outcome: "maintenance", ticket_id: 50 },
+    { inspection_id: 2, zone: "living", status: "not_ok", outcome: "fixed", ticket_id: null },
+    { inspection_id: 3, zone: "kitchen", status: "not_ok", outcome: "fixed" },
+    { inspection_id: 4, zone: "balcony", status: "not_ok", outcome: "maintenance", ticket_id: 51 },
+    { inspection_id: 4, zone: "wifi_tv", status: "not_ok", outcome: "maintenance", ticket_id: 50 },
+  ],
+  maintenance_tickets: [{ id: 50, status: "open" }, { id: 51, status: "resolved" }],
+});
+
+Deno.test("reports : bornes Dubai, termine seulement, recent d'abord", async () => {
+  const r = await inspReports(repDb(), "2026-10-01", "2026-10-05");
+  assertEquals(r.reports.map((x: any) => x.id), [4, 3, 2, 1]);
+  assertEquals(r.reports[3].finishedAt, "2026-09-30T20:00:00Z");
+  assertEquals(r.reports[0].name, "Apt 303 · Tower C");
+  assertEquals(r.reports[0].inspector, "Walter");
+  assertEquals(r.from, "2026-10-01");
+  assertEquals(r.to, "2026-10-05");
+});
+
+Deno.test("reports : result clean / fixed / maintenance et zones", async () => {
+  const r = await inspReports(repDb(), "2026-10-01", "2026-10-05");
+  const by = (id: number) => r.reports.find((x: any) => x.id === id)!;
+  assertEquals(by(1).result, "clean");
+  assertEquals(by(1).issues, []);
+  assertEquals(by(3).result, "fixed");
+  assertEquals(by(2).result, "maintenance");
+  assertEquals(by(2).issues, [
+    { zone: "living", label: "Living room", outcome: "fixed", ticket: null },
+    { zone: "ac", label: "AC", outcome: "maintenance", ticket: { id: 50, status: "open" } },
+  ]);
+});
+
+Deno.test("reports : totaux, dernier resultat par appartement, tickets distincts ouverts", async () => {
+  const r = await inspReports(repDb(), "2026-10-01", "2026-10-05");
+  assertEquals(r.totals, {
+    inspections: 4, apartments: 3,
+    clean: 0, withIssues: 3, // A : derniere = #2 (maintenance), pas #1 propre
+    fixedOnSpot: 2, sentToMaintenance: 3,
+    openTickets: 1, // 50 compte une fois, 51 resolu
+  });
+});
+
+Deno.test("reports : propre compte un appartement", async () => {
+  const r = await inspReports(repDb(), "2026-09-30", "2026-10-01");
+  assertEquals(r.totals.clean, 2); // A (#1, 10-01 Dubai) et B (#6, 09-30 Dubai)
+  assertEquals(r.totals.apartments, 2);
+  assertEquals(r.totals.withIssues, 0);
+  assertEquals(r.totals.inspections, 2);
+});
+
+Deno.test("reports : plus de 200 inspections, items par lots", async () => {
+  const insps = [], items = [];
+  for (let i = 1; i <= 250; i++) {
+    insps.push({ id: i, listing_id: "L" + i, inspector_id: 2, finished_at: "2026-10-03T08:00:00Z" });
+    items.push({ inspection_id: i, zone: "ac", status: "not_ok", outcome: "fixed" });
+  }
+  const r = await inspReports(fakeDb({ cleaners: [], listing_config: [], inspections: insps, inspection_items: items }), "2026-10-03", "2026-10-03");
+  assertEquals(r.totals.inspections, 250);
+  assertEquals(r.totals.fixedOnSpot, 250);
+});
+
+Deno.test("reports : reserve aux managers", () => {
+  assertEquals(inspRoleAllowed("insp.reports", "manager"), true);
+  assertEquals(inspRoleAllowed("insp.reports", "cleaner"), false);
+  assertEquals(inspRoleAllowed("insp.reports", "maintenance"), false);
+});
+
+Deno.test("reports : plage invalide", () => {
+  assertEquals(parseReportRange("2026-10-05", "2026-10-01", "2026-10-06"), null);
+  assertEquals(parseReportRange("2025-01-01", "2026-10-01", "2026-10-06"), null);
+  assertEquals(parseReportRange("nope", "2026-10-01", "2026-10-06"), null);
+  assertEquals(parseReportRange("2026-02-30", "2026-03-01", "2026-10-06"), null);
+  assertEquals(parseReportRange(null, null, "2026-10-06"), { from: "2026-09-06", to: "2026-10-06" });
+  assertEquals(parseReportRange("2026-10-01", "2026-10-05", "2026-10-06"), { from: "2026-10-01", to: "2026-10-05" });
 });
