@@ -22,7 +22,8 @@ const UNIQUE: Record<string, string[]> = {
 // Tables dont created_at est rempli par la base a l'insertion.
 const DEFAULT_NOW = new Set(['job_events']);
 
-export function fakeDb(seed: Record<string, any[]> = {}) {
+// maxRows : plafond de lignes par select comme le max_rows de PostgREST (defaut : aucun).
+export function fakeDb(seed: Record<string, any[]> = {}, opts: { maxRows?: number } = {}) {
   const tables: Record<string, any[]> = {};
   for (const [k, v] of Object.entries(seed)) tables[k] = v.map((r) => ({ ...r }));
   const writes: Array<{ table: string; op: string; values: any }> = [];
@@ -75,7 +76,8 @@ export function fakeDb(seed: Record<string, any[]> = {}) {
       if (fail[key]) return { data: null, error: fail[key] };
       if (!pending) {
         const all = selected();
-        return { data: slice ? all.slice(slice[0], slice[1] + 1) : all, error: null };
+        const part = slice ? all.slice(slice[0], slice[1] + 1) : all;
+        return { data: opts.maxRows ? part.slice(0, opts.maxRows) : part, error: null };
       }
       const rows = Array.isArray(pending.values) ? pending.values : [pending.values];
       if (pending.op === "insert") {

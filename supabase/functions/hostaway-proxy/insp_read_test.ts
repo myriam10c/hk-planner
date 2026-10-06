@@ -365,3 +365,34 @@ Deno.test("reports : plage invalide", () => {
   assertEquals(parseReportRange(null, null, "2026-10-06"), { from: "2026-09-06", to: "2026-10-06" });
   assertEquals(parseReportRange("2026-10-01", "2026-10-05", "2026-10-06"), { from: "2026-10-01", to: "2026-10-05" });
 });
+
+Deno.test("reports : plafond PostgREST (maxRows) ne perd ni inspections ni zones", async () => {
+  const insps = [], items = [];
+  for (let i = 1; i <= 1500; i++) insps.push({ id: i, listing_id: "L" + (i % 50), inspector_id: 2, finished_at: "2026-10-03T08:00:00Z" });
+  for (let i = 1; i <= 1500; i++) for (const z of ["ac", "living", "kitchen"]) items.push({ inspection_id: i, zone: z, status: "not_ok", outcome: "fixed" });
+  for (let i = 1; i <= 1500; i++) items.push({ inspection_id: i, zone: "wifi_tv", status: "ok" });
+  const db = fakeDb({ cleaners: [], listing_config: [], inspections: insps, inspection_items: items }, { maxRows: 1000 });
+  const r = await inspReports(db, "2026-10-03", "2026-10-03");
+  assertEquals(r.totals.inspections, 1500);
+  assertEquals(r.totals.fixedOnSpot, 4500); // 600 items par lot de 200 ids, 1000 inspections par page
+  assertEquals(r.totals.apartments, 50);
+});
+
+Deno.test("reports : un lot d'items au dela du plafond est pagine", async () => {
+  const insps = [], items = [];
+  for (let i = 1; i <= 100; i++) insps.push({ id: i, listing_id: "L" + i, inspector_id: 2, finished_at: "2026-10-03T08:00:00Z" });
+  for (let i = 1; i <= 100; i++) for (let k = 0; k < 15; k++) items.push({ inspection_id: i, zone: "ac", status: "not_ok", outcome: "fixed" });
+  const db = fakeDb({ cleaners: [], listing_config: [], inspections: insps, inspection_items: items }, { maxRows: 1000 });
+  const r = await inspReports(db, "2026-10-03", "2026-10-03");
+  assertEquals(r.totals.fixedOnSpot, 1500); // 1500 lignes dans un seul lot de 100 ids
+});
+
+for (const key of ["inspections.select", "inspection_items.select", "maintenance_tickets.select", "cleaners.select", "listing_config.select"]) {
+  Deno.test("reports : lecture en erreur leve (" + key + ")", async () => {
+    const db = repDb();
+    db.fail[key] = { message: "boom" };
+    let msg = "";
+    try { await inspReports(db, "2026-10-01", "2026-10-05"); } catch (e) { msg = (e as Error).message; }
+    assertEquals(msg.includes("boom"), true);
+  });
+}

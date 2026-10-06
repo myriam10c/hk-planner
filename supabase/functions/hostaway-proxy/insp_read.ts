@@ -317,49 +317,75 @@ export function parseReportRange(from: string | null, to: string | null, today: 
 }
 
 const BATCH = 200;
-async function inBatches(sb: any, table: string, cols: string, col: string, ids: any[]): Promise<any[]> {
+const must = (r: { data: any; error: any }, what: string): any[] => {
+  if (r.error) throw new Error(what + ": " + (r.error.message ?? "read failed"));
+  return r.data ?? [];
+};
+// Lecture par lots d'ids, chaque lot pagine : un lot ne depasse jamais le plafond de PostgREST sans etre relu.
+async function inBatches(sb: any, table: string, cols: string, col: string, ids: any[], extra?: (q: any) => any): Promise<any[]> {
   const out: any[] = [];
   for (let i = 0; i < ids.length; i += BATCH) {
-    const { data } = await sb.from(table).select(cols).in(col, ids.slice(i, i + BATCH));
-    out.push(...(data ?? []));
+    const batch = ids.slice(i, i + BATCH);
+    for (let start = 0;; start += PAGE) {
+      let q = sb.from(table).select(cols).in(col, batch);
+      if (extra) q = extra(q);
+      const page = must(await q.range(start, start + PAGE - 1), table);
+      out.push(...page);
+      if (page.length < PAGE) break;
+    }
   }
   return out;
 }
 
 // Rapports d'inspection termines sur [from, to] (jours Dubai). finished_at est en UTC : fenetre elargie d'un jour, filtre exact en JS.
+// Toute lecture en erreur leve : un echec ne doit jamais ressembler a un rapport propre.
 export async function inspReports(sb: any, from: string, to: string) {
   const lo = plusDays(from, -1) + "T00:00:00Z", hi = plusDays(to, 2) + "T00:00:00Z";
   const fetchWindow = async () => {
     const out: any[] = [];
     for (let start = 0;; start += PAGE) {
-      const { data } = await sb.from("inspections").select("id, listing_id, inspector_id, finished_at, eligibility")
-        .not("finished_at", "is", null).gte("finished_at", lo).lt("finished_at", hi)
-        .order("id", { ascending: false }).range(start, start + PAGE - 1);
-      const page = data ?? [];
+      const page = must(
+        await sb.from("inspections").select("id, listing_id, inspector_id, finished_at, eligibility")
+          .not("finished_at", "is", null).gte("finished_at", lo).lt("finished_at", hi)
+          .order("id", { ascending: false }).range(start, start + PAGE - 1),
+        "inspections",
+      );
       out.push(...page);
       if (page.length < PAGE) break;
     }
     return out;
   };
-  const [names, { data: listings }, window] = await Promise.all([
-    cleanerNames(sb),
-    sb.from("listing_config").select("listing_id, internal_name, listing_name"),
+  const [cleaners, listings, window] = await Promise.all([
+    sb.from("cleaners").select("id, name").then((r: any) => must(r, "cleaners")),
+    sb.from("listing_config").select("listing_id, internal_name, listing_name").then((r: any) => must(r, "listing_config")),
     fetchWindow(),
   ]);
-  const insps = window.filter((r: any) => r.finished_at && dubaiDay(r.finished_at) >= from && dubaiDay(r.finished_at) <= to)
+  const names: Record<string, string> = {};
+  for (const c of cleaners) names[String(c.id)] = c.name;
+  const insps = window
+    .map((r: any) => ({ r, day: r.finished_at ? dubaiDay(r.finished_at) : "" }))
+    .filter((x: any) => x.day >= from && x.day <= to)
+    .map((x: any) => x.r)
     .sort((a: any, b: any) => String(b.finished_at).localeCompare(String(a.finished_at)) || Number(b.id) - Number(a.id));
-  const items = (await inBatches(sb, "inspection_items", "inspection_id, zone, status, outcome, ticket_id", "inspection_id", insps.map((r: any) => r.id)))
+  const items = (await inBatches(sb, "inspection_items", "inspection_id, zone, status, outcome, ticket_id", "inspection_id",
+    insps.map((r: any) => r.id), (q) => q.eq("status", "not_ok")))
     .filter((i: any) => i.status === "not_ok");
+  const itemsBy = new Map<string, any[]>();
+  for (const i of items) {
+    const k = String(i.inspection_id);
+    if (!itemsBy.has(k)) itemsBy.set(k, []);
+    itemsBy.get(k)!.push(i);
+  }
   const ticketIds = [...new Set(items.map((i: any) => i.ticket_id).filter(Boolean))];
   const tickets = await inBatches(sb, "maintenance_tickets", "id, status", "id", ticketIds);
   const tById: Record<string, any> = {};
   for (const t of tickets) tById[String(t.id)] = t;
   const lById: Record<string, any> = {};
-  for (const l of listings ?? []) lById[String(l.listing_id)] = l;
+  for (const l of listings) lById[String(l.listing_id)] = l;
   const zoneIdx = (z: string) => INSP_ZONES.findIndex((x) => x.key === z);
 
   const reports = insps.map((r: any) => {
-    const issues = items.filter((i: any) => String(i.inspection_id) === String(r.id))
+    const issues = (itemsBy.get(String(r.id)) ?? []).slice()
       .sort((a: any, b: any) => zoneIdx(a.zone) - zoneIdx(b.zone))
       .map((i: any) => ({
         zone: i.zone as string, label: INSP_ZONES.find((x) => x.key === i.zone)?.label ?? i.zone as string,
