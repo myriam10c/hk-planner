@@ -1013,6 +1013,14 @@ export async function loadDay({ silent = false } = {}) {
       vue.confirmed = true;
       if (vue.practice && practiceActive()) practiceDay(data);
     }
+    // Fin du PIN (07/10) : le proxy pose accountSetupRequired sur une session
+    // PIN dont la ligne n'a aucune adresse. La creation du compte, obligatoire,
+    // vit sur « / » (app racine) : pas de second ecran ici. Hors ligne, rien
+    // n'arrive et rien ne bloque.
+    if (!vue && !silent && data.accountSetupRequired === true && state.session && state.session.kind === 'pin') {
+      location.replace('/');
+      return;
+    }
     state.day = data;
     state.apartments = toApartments(data, data.me, { now: new Date() });
     state.jourGarde = false;

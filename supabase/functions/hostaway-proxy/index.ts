@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
 import {
-  applyInvite, applyLinkEmail, CLEANER_PUBLIC_SELECT, currentUser, currentUserDetailed,
+  applyInvite, applyLinkEmail, bearerToken, CLEANER_PUBLIC_SELECT, currentUser, currentUserDetailed,
   deleteCleanerAuthAccount, findCleanerByEmail, normalizeEmail, parseInviteInput,
   parseLinkEmailInput, planInvite, publicCleanerRows, saveCleanerUpdatePatch,
   systemRowGuard,
@@ -1255,6 +1255,17 @@ Deno.serve(async (req: Request) => {
         tickets: ticketRows,
         progress,
       });
+      // Fin du PIN (07/10) : une session PIN (aucun Bearer) dont la ligne n'a
+      // aucune adresse cree son compte sur « / », obligatoire. Le drapeau evite
+      // a la v3 un appel de plus au boot. Lecture ratee = drapeau absent, ce qui
+      // ne bloque jamais. View as : le manager est deja passe par « / ».
+      if (!bearerToken(req) && !vue.viewer && me.role !== "system") {
+        const { data: emailRow, error: emailErr } = await sb.from("cleaners")
+          .select("email").eq("id", me.cleaner_id).maybeSingle();
+        if (!emailErr && emailRow && !String(emailRow.email ?? "").trim()) {
+          return jsonResp({ ...body, accountSetupRequired: true });
+        }
+      }
       return jsonResp(body);
     }
 
@@ -1910,10 +1921,16 @@ Deno.serve(async (req: Request) => {
       // « compte non rattache » a un jeton expire (revue finale, constat 4).
       const { user: cleaner, reason } = await currentUserDetailed(sb, req);
       if (!cleaner) return jsonResp({ status: "success", cleaner: null, reason });
-      return jsonResp({
-        status: "success",
-        cleaner: { id: cleaner.cleaner_id, name: cleaner.name, color: cleaner.color, role: cleaner.role },
-      });
+      // `email` (07/10) : la v3 et Inspections renvoient une session PIN sans
+      // adresse vers « / », ou la creation du compte est obligatoire. Lecture
+      // ratee = champ absent, que les clients lisent « ne pas bloquer ».
+      const me: Record<string, unknown> = {
+        id: cleaner.cleaner_id, name: cleaner.name, color: cleaner.color, role: cleaner.role,
+      };
+      const { data: emailRow, error: emailErr } = await sb.from("cleaners")
+        .select("email").eq("id", cleaner.cleaner_id).maybeSingle();
+      if (!emailErr && emailRow) me.email = emailRow.email ?? null;
+      return jsonResp({ status: "success", cleaner: me });
     }
 
     // ==================== WEB PUSH ====================

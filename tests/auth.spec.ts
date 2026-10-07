@@ -440,20 +440,19 @@ test('le login par email propose de creer son compte et mene a l ecran PIN', asy
   await expect(page.locator('.pin-screen')).toContainText('Enter your PIN');
 });
 
-test('apres un PIN sans adresse, l ecran Create your account s ouvre et se saute', async ({ page }) => {
+test('apres un PIN sans adresse, l ecran Create your account est obligatoire', async ({ page }) => {
   await pinLoginFromCreateLink(page, dataRoutes(null));
   await expect(page.locator('#linkEmail')).toBeVisible({ timeout: 10_000 });
-  await expect(page.locator('.auth-card')).toContainText('Create your account');
+  await expect(page.locator('.auth-card')).toContainText('PIN sign-in is being retired');
   await expect(page.locator('#linkPassword')).toBeVisible();
   await expect(page.locator('#linkPassword2')).toBeVisible();
-  // Rien ne bloque : « Skip for now » rend la main a l'app.
-  await page.click('[data-action="skipAccountSetup"]');
-  await expect(page.locator('#linkEmail')).toHaveCount(0);
-  // Et l'ecran reste atteignable depuis la zone profil (le bandeau ou vit Logout).
-  const profil = page.locator('.header [data-action="openAccountSetup"]').first();
-  await expect(profil).toBeVisible({ timeout: 10_000 });
-  await profil.click();
+  // Plus de « Skip for now » : seule sortie, se deconnecter.
+  await expect(page.locator('[data-action="skipAccountSetup"]')).toHaveCount(0);
+  await page.evaluate(() => { location.hash = '#cleaner'; });
   await expect(page.locator('#linkEmail')).toBeVisible();
+  await page.click('.auth-card [data-action="cleanerLogout"]');
+  await expect(page.locator('#linkEmail')).toHaveCount(0);
+  await expect(page.locator('#pinInput')).toBeVisible();
 });
 
 test('un membre qui a deja une adresse n est pas invite a creer un compte', async ({ page }) => {

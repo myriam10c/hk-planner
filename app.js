@@ -1177,9 +1177,9 @@ en:{
   signIn:'Sign in',signingIn:'Signing in...',signingYouIn:'Signing you in...',email:'Email',password:'Password',
   forgotPassword:'Forgot password?',usePinInstead:'Use my PIN instead',useEmailInstead:'Sign in with email',
   firstTimeHere:'First time here? Create your account',createAccount:'Create your account',
-  creatingAccount:'Creating account...',skipForNow:'Skip for now',signInWithMyPin:'Sign in with my PIN',
+  creatingAccount:'Creating account...',signOut:'Sign out',signInWithMyPin:'Sign in with my PIN',
   yourAccountAdd:'Your account: add email and password',
-  createAccountHelp:'Add your email address and a password. You will then sign in with them instead of your PIN.',
+  createAccountHelp:'PIN sign-in is being retired. Add your email address and a password: from now on you will sign in with them.',
   setNewPassword:'Set a new password',newPassword:'New password',confirmPassword:'Confirm password',
   savePassword:'Save password',saving:'Saving...',passwordRule:'At least 8 characters.',
   welcome:'Welcome',logout:'Logout',refresh:'Refresh',
@@ -1335,6 +1335,8 @@ async function api(action,opts){
   if(resp.status===401 && cleanerToken){
     // Session expired or revoked — force re-login
     cleanerMode=null; cleanerToken=null;
+    // L'ecran Create your account suppose une session PIN vivante : on revient au PIN.
+    if(authScreen==='createAccount') authScreen=null;
     localStorage.removeItem('cleanerMode'); localStorage.removeItem('cleanerToken');
     window.location.hash='#cleaner'; render();
     return {error:'Session expired'};
@@ -3243,12 +3245,12 @@ async function cleanerLogin(){
     localStorage.setItem('cleanerMode',JSON.stringify(cleanerMode));
     toast('Welcome '+res.cleaner.name+'!','success');
     haptic('heavy');
-    // #10 First login onboarding
+    // #10 First login onboarding, apres la creation de compte obligatoire
+    const mustSetup=await maybeOfferAccountSetup();
     const hasSeenOnboarding = localStorage.getItem('onboardingSeen');
-    if(!hasSeenOnboarding){
+    if(!hasSeenOnboarding && !mustSetup){
       setTimeout(openOnboarding, 500);
     }
-    await maybeOfferAccountSetup();
     fetchAll();
   } else {
     const errEl=document.getElementById('pinError');
@@ -3264,6 +3266,9 @@ async function cleanerLogout(){
   try{ await disablePushForLogout(); }catch(e){}
   try{ await api('cleanerLogout',{body:{}}); }catch(e){}
   cleanerMode=null; cleanerToken=null; sessionCleanerId=null;
+  // « Sign out » de l'ecran Create your account : sans ca, render() le repeindrait.
+  if(authScreen==='createAccount') authScreen=null;
+  accountSetupError=''; accountSetupEmailDraft='';
   localStorage.removeItem('cleanerMode');
   localStorage.removeItem('cleanerToken');
   localStorage.removeItem(SESSION_CLEANER_KEY);
@@ -4224,9 +4229,11 @@ function renderAuthSetPassword(){
     '</div></div>';
 }
 
-// Ecran « Create your account ». Il s'ouvre apres un login PIN quand la ligne du
-// membre n'a aucune adresse, et depuis sa zone profil ensuite. Toujours sautable :
-// un membre sans boite mail ne doit jamais se retrouver coince ici.
+// Ecran « Create your account ». Il s'ouvre apres un login PIN, et au boot sur une
+// session PIN deja posee, quand la ligne du membre n'a aucune adresse. Obligatoire
+// (decision du 07/10, le PIN est en fin de vie) : plus de « Skip for now ».
+// render() le teste en premier, donc aucun onglet ni hash n'y echappe. Seule
+// sortie : « Sign out », pour liberer un telephone partage.
 function renderAuthCreateAccount(){
   document.getElementById('app').innerHTML=
     '<div class="auth-screen"><div class="auth-card">'+
@@ -4242,7 +4249,7 @@ function renderAuthCreateAccount(){
       '<p class="auth-help auth-help-bottom">'+t('passwordRule')+'</p>'+
       (accountSetupError?'<div class="auth-error" role="alert">'+esc(accountSetupError)+'</div>':'')+
       '<button class="auth-primary" data-action="submitLinkEmail"'+(accountSetupBusy?' disabled':'')+'>'+(accountSetupBusy?t('creatingAccount'):t('createAccount'))+'</button>'+
-      '<button class="auth-link" data-action="skipAccountSetup"'+(accountSetupBusy?' disabled':'')+'>'+t('skipForNow')+'</button>'+
+      '<button class="auth-link" data-action="cleanerLogout"'+(accountSetupBusy?' disabled':'')+'>'+t('signOut')+'</button>'+
     '</div></div>';
   const f=document.getElementById('linkEmail');
   if(f&&!f.value)f.focus();
@@ -4291,17 +4298,22 @@ function openAccountSetup(){
   render();
 }
 
-function skipAccountSetup(){
-  if(accountSetupBusy) return;
-  authScreen=null; accountSetupError='';
-  render();
-}
-
 // Apres un login PIN : la ligne a-t-elle deja une adresse ? getCleaners fait foi,
 // les donnees du planner ne sont pas encore chargees a ce moment.
 async function maybeOfferAccountSetup(){
   if(authAccessToken) return false;
-  const id=currentCleanerId();
+  let id=currentCleanerId();
+  if(id==null&&cleanerToken){
+    // Session PIN manager ouverte avant le hotfix du 12/09 : l'id n'a jamais ete
+    // memorise. cleanerMe le rend pour le jeton presente.
+    try{
+      const me=await api('cleanerMe');
+      if(me&&me.cleaner&&me.cleaner.id!=null){
+        id=sessionCleanerId=me.cleaner.id;
+        try{ localStorage.setItem(SESSION_CLEANER_KEY,String(id)); }catch(e){}
+      }
+    }catch(e){ return false; }
+  }
   if(id==null) return false;
   let row=null;
   try{
@@ -4310,6 +4322,9 @@ async function maybeOfferAccountSetup(){
   }catch(e){ return false; }
   if(!row||row.role==='system') return false;
   if(((row.email||'')+'').trim()) return false;
+  // Au boot la verification tourne pendant que l'app charge : entre-temps la
+  // personne a pu se deconnecter, ou une session email a pu s'ouvrir.
+  if(authAccessToken||!cleanerToken||authScreen) return false;
   openAccountSetup();
   return true;
 }
@@ -4564,6 +4579,14 @@ async function hkAuthBoot(){
     // Aucun compte email sur cet appareil : on laisse vivre la session PIN si
     // elle existe (deverrouillage rapide), sinon on ouvre le login par email.
     if(!cleanerToken){ authScreen='login'; render(); return false; }
+    // Session PIN deja posee : meme regle qu'apres cleanerLogin, sans adresse
+    // pas d'app. On n'attend pas plus que pour la session email (hors ligne ou
+    // proxy endormi, l'app s'ouvre) ; une reponse tardive ouvre l'ecran quand
+    // meme, et un echec de getCleaners ne bloque jamais.
+    await Promise.race([
+      maybeOfferAccountSetup().catch(function(){ return false; }),
+      new Promise(function(res){ setTimeout(function(){ res(false); },AUTH_SESSION_WAIT_MS); })
+    ]);
     return true;
   }
   // adoptEmailSession appelle api('cleanerMe'), qui THROW sur panne reseau ou
@@ -7750,6 +7773,8 @@ document.addEventListener('keydown', (e) => {
   if(tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable)) return;
   // Ignore if any modal/overlay open
   if(document.querySelector('.modal-overlay, .cmdk-overlay, .more-overlay, .mt-modal-overlay')) return;
+  // Ecrans de connexion / creation de compte : aucun raccourci vers l'app
+  if(authScreen) return;
   // Ignore modifier keys (Cmd+K handled separately)
   if(e.metaKey || e.ctrlKey || e.altKey) return;
 
@@ -7922,6 +7947,7 @@ setTimeout(checkUpcomingCheckouts,10000);
 let cmdkOpen=false, cmdkQuery='', cmdkIndex=0, cmdkResults=[];
 
 function openCmdk(){
+  if(authScreen) return; // ecrans de connexion / creation de compte : rien derriere
   cmdkOpen=true; cmdkQuery=''; cmdkIndex=0; cmdkResults=[];
   renderCmdk();
   setTimeout(()=>{const el=document.getElementById('cmdkInput');if(el)el.focus();},50);

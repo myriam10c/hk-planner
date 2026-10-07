@@ -197,3 +197,16 @@ export function onSessionRenewed(fn) { renouvellements.push(fn); }
 // verifier que le champ interne lastRefreshFailure existe toujours dans le
 // bundle (une montee de version qui le renomme doit casser un test).
 export function supabaseClientForTests() { return sbClient(); }
+
+// Fin du PIN (07/10) : une session PIN dont la ligne n'a aucune adresse doit
+// creer son compte email avant d'utiliser l'app. L'ecran vit sur « / » (app
+// racine), sans second ecran. Inspections s'en sert sur la reponse de
+// cleanerMe (la v3, elle, lit le drapeau accountSetupRequired de v3.myDay).
+// `email` absent (proxy d'avant, lecture ratee) ne bloque jamais, le role
+// `system` (agent CEO) non plus.
+export function mustCreateAccount(session, cleaner) {
+  if (!session || session.kind !== 'pin' || !cleaner) return false;
+  if (cleaner.role === 'system') return false;
+  if (!Object.prototype.hasOwnProperty.call(cleaner, 'email')) return false;
+  return !String(cleaner.email == null ? '' : cleaner.email).trim();
+}

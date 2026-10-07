@@ -1140,6 +1140,11 @@ export async function applyLinkEmail(
     console.warn("[linkEmail] lecture des comptes Auth impossible: " + String(e));
     return { status: 502, body: { error: "Could not reach the accounts service." } };
   }
+  if (existing && existing.last_sign_in_at) {
+    // Compte deja utilise : on ne remplace jamais son mot de passe sans preuve
+    // que la personne possede l'adresse.
+    return { status: 409, body: { error: "This email already has an account. Sign in with it, or use Forgot password." } };
+  }
   if (existing) {
     // Cas d'une invitation restee en plan : le compte existe deja, la personne
     // en reprend la main avec le mot de passe qu'elle vient de choisir. La ligne

@@ -1,4 +1,4 @@
-import { getSession } from '/v3/session.js';
+import { getSession, mustCreateAccount } from '/v3/session.js';
 import { get } from '/inspections/api.js';
 import { renderToday } from '/inspections/today.js';
 
@@ -83,6 +83,8 @@ async function boot() {
     const r = await get('cleanerMe');
     const c = r && r.cleaner;
     if (!c) { signIn(); return; }
+    // Fin du PIN : sans adresse, la creation du compte (obligatoire) se fait sur « / ».
+    if (mustCreateAccount(s, c)) { location.replace('/'); return; }
     me = { cleaner_id: c.id, name: c.name, role: c.role };
   } catch (e) {
     if (e.kind === 'auth') signIn(); else loadError();
