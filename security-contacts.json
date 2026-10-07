@@ -1,0 +1,3410 @@
+{
+  "generated": "2026-10-07",
+  "source": "security_contacts.xlsx",
+  "buildings": [
+    {
+      "name": "15NORTHSIDE",
+      "groups": [
+        {
+          "units": [
+            "705A",
+            "1412"
+          ],
+          "emails": [
+            "concierge.15northside@federalsecurity.ae"
+          ],
+          "phone": "971504723662",
+          "phoneDigits": "971504723662",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "705A",
+              "dtcm": "https://drive.google.com/file/d/1eDJmIDsJ2obeNI8rxcfYhIcFpW1oAl7c/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0C4T5&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "1412",
+              "dtcm": "https://drive.google.com/file/d/1q_LSUO-P8V1BRt4XgScsm49JAcBllGbc/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=00EZ0&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        },
+        {
+          "units": [
+            "1604"
+          ],
+          "emails": [
+            "concierge.15northside@federalsecurity.ae"
+          ],
+          "phone": "971504723662",
+          "phoneDigits": "971504723662",
+          "portal": "https://sg.iskaan.com/15northside",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1604",
+              "dtcm": "https://drive.google.com/file/d/1ehVLM6CBRPnFv3r_wmQWLvon-R1gJ1Gk/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=043VK&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "555 Parkview",
+      "groups": [
+        {
+          "units": [
+            "213",
+            "215"
+          ],
+          "emails": [
+            "noc@stratum.ae"
+          ],
+          "phone": "+971 55 380 3373",
+          "phoneDigits": "971553803373",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "213",
+              "dtcm": "https://drive.google.com/file/d/1NmjeHydsqe8izWVV0tgIlxX-TUTBfq2t/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=048JI&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "215",
+              "dtcm": "https://drive.google.com/file/d/13LHIgx10yyRBNwIva5sDkgEM0F6OOKiq/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=04P82&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Act 2",
+      "groups": [
+        {
+          "units": [
+            "506"
+          ],
+          "emails": [
+            "communities@ecm.ae"
+          ],
+          "phone": "971 50 899 3015",
+          "phoneDigits": "971508993015",
+          "portal": "https://portal.sakani.ae/",
+          "portalId": "mrbnbdubai@gmail.com",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "506",
+              "dtcm": "https://drive.google.com/file/d/1-10kgKaapd9NaO90xJiDcn_wOZZpIh1N/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=04OHR&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Act 2 (new)",
+      "groups": [
+        {
+          "units": [
+            "507"
+          ],
+          "emails": [
+            "communities@ecm.ae"
+          ],
+          "phone": "971 50 899 3015",
+          "phoneDigits": "971508993015",
+          "portal": "https://portal.sakani.ae/",
+          "portalId": "admi@medini-homes.com",
+          "portalPassword": "Hedi93150!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "507",
+              "dtcm": "https://drive.google.com/file/d/1O9iv6ui6Thyt3l78OMDvqFDLq2A9JkT6/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=050AL&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Act one Act Two (new)",
+      "groups": [
+        {
+          "units": [
+            "510"
+          ],
+          "emails": [
+            "communities@ecm.ae"
+          ],
+          "phone": "+971 50 899 3015",
+          "phoneDigits": "971508993015",
+          "portal": "https://portal.sakani.ae/",
+          "portalId": "mrbnbdubai@gmail.com",
+          "portalPassword": "Hedi93150!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "510",
+              "dtcm": "https://drive.google.com/file/d/14GNiE0tzTQBrHO-B7HUjvmXPKesAd0D4/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=04UOO&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ahad Residence",
+      "groups": [
+        {
+          "units": [
+            "2708"
+          ],
+          "emails": [
+            "Ahad@bcoam.com",
+            "Ahad@trustlinesecurity.ae"
+          ],
+          "phone": "971 52 443 1582",
+          "phoneDigits": "971524431582",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "2708",
+              "dtcm": "https://drive.google.com/file/d/1P43QVLMlLQsk_Ro3cZUTX8i40jk7B46l/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0AFWW&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Al khail Height",
+      "groups": [
+        {
+          "units": [
+            "404"
+          ],
+          "emails": [
+            "stratum@stratum.ae",
+            "admin15@stratum.ae"
+          ],
+          "phone": "+971 4 339 7560",
+          "phoneDigits": "97143397560",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "404",
+              "dtcm": "https://drive.google.com/file/d/1W2fng9U45ziCDKRpOEZFMM_adZZnvs3s/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0CNDJ&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Al Manara Tower",
+      "groups": [
+        {
+          "units": [
+            "2503"
+          ],
+          "emails": [
+            "almanara@alrustumanioam.com"
+          ],
+          "phone": "+971 52 823 6052",
+          "phoneDigits": "971528236052",
+          "portal": "https://aroam.iskaan.com/almanaratower",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "2503",
+              "dtcm": "https://drive.google.com/file/d/1BfOOXpdszYgp_GbJZYicr2aNdiuf6hYD/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0AKBX&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AURA by Grovy 1",
+      "groups": [
+        {
+          "units": [
+            "1407"
+          ],
+          "emails": [
+            "aura@bcoam.com"
+          ],
+          "phone": "971589937471",
+          "phoneDigits": "971589937471",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1407",
+              "dtcm": "https://drive.google.com/file/d/1ERXvcZ0QZ3gc_dMy1kUiD6JTuT47Rv1R/view?usp=sharing",
+              "det": null
+            }
+          ]
+        },
+        {
+          "units": [
+            "1407"
+          ],
+          "emails": [
+            "aura@bcoam.com"
+          ],
+          "phone": "971582611957",
+          "phoneDigits": "971582611957",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1407",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Aura",
+      "groups": [
+        {
+          "units": [
+            "915"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 261 1957",
+          "phoneDigits": "971582611957",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "915",
+              "dtcm": "https://drive.google.com/file/d/1CWukQOS8dL6ePmo5BoDXWX-0XSDN0y2w/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0B4J0&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Rivier 42",
+      "groups": [
+        {
+          "units": [
+            "210"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 679 5311",
+          "phoneDigits": "971586795311",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "210",
+              "dtcm": "https://drive.google.com/file/d/1mrcJSXMTDyBg_S-F7FDgczosRiaG1Ez4/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0BXQ9&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera",
+      "groups": [
+        {
+          "units": [
+            "717"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 679 5311",
+          "phoneDigits": "971586795311",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "717",
+              "dtcm": "https://drive.google.com/file/d/1IR8z80G6qnKbGXriKd7WR2_xZhNAyLqO/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=03QJ6&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera",
+      "groups": [
+        {
+          "units": [
+            "603"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 679 5109",
+          "phoneDigits": "971586795109",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "603",
+              "dtcm": "https://drive.google.com/file/d/1HnyCDCH6Z3DUSd8BHd3i36Cy7phkIqHA/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=05335&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 10",
+      "groups": [
+        {
+          "units": [
+            "204"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 55 801 7597",
+          "phoneDigits": "971558017597",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "204",
+              "dtcm": "https://drive.google.com/file/d/1BcWxsRdxAKERJQ_tAmhW6wwQ3K43gqnH/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0B3FX&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 11",
+      "groups": [
+        {
+          "units": [
+            "414"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 261 1475",
+          "phoneDigits": "971582611475",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "414",
+              "dtcm": "https://drive.google.com/file/d/1wvNjTw9PwPl2fyh86cZ_VkWiSn4X6kbi/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 18",
+      "groups": [
+        {
+          "units": [
+            "715"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 269 8350",
+          "phoneDigits": "971582698350",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "715",
+              "dtcm": "https://drive.google.com/file/d/1RnJGDQ02r25AN-r7kb96zBO9koOjZOIN/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0C9O5&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 20",
+      "groups": [
+        {
+          "units": [
+            "622",
+            "623"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "971588965043",
+          "phoneDigits": "971588965043",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "622",
+              "dtcm": "https://drive.google.com/file/d/1k-XtApefPQdMX51HNjD7aJkJSQfnWNNv/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0AFPM&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "623",
+              "dtcm": "https://drive.google.com/file/d/1Yxxr3ePQBzIdrHFFsYwZhVSF2v79m8-L/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0AFS2&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 28",
+      "groups": [
+        {
+          "units": [
+            "506|AZIZIRIVIERA28",
+            "511|AZIZIRIVIERA28"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 897 4230",
+          "phoneDigits": "971588974230",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "506|AZIZIRIVIERA28",
+              "dtcm": "https://drive.google.com/file/d/16kbWe0OLhmyNXLR6HXfWBBRSAMpWw3by/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0G6PQ&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "511|AZIZIRIVIERA28",
+              "dtcm": "https://drive.google.com/file/d/1rA-nfqsdgrwRyJFWjyojNXEzYclVeGOU/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0G6PG&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 32",
+      "groups": [
+        {
+          "units": [
+            "431",
+            "507",
+            "704"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 897 2106",
+          "phoneDigits": "971588972106",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "431",
+              "dtcm": "https://drive.google.com/file/d/1lYUaozZHKQifaOlzq16POqMZ8_Jc_EPL/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=0OCX9&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "507",
+              "dtcm": "https://drive.google.com/file/d/1V5TRGoUw8bjwR90_vIDjxFtmx_KS_DVV/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=0LPQS&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "704",
+              "dtcm": "https://drive.google.com/file/d/1Nc-lm-HCNZdxmXV0bzngp7FGFXwWj7e9/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=0OOK6&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 32 V2",
+      "groups": [
+        {
+          "units": [
+            "704"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 897 2106",
+          "phoneDigits": "971588972106",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "704",
+              "dtcm": "https://drive.google.com/file/d/11IJqV4OXcKwz0chyPYFpey9jKBh6gxSP/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=0OOK6&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 33",
+      "groups": [
+        {
+          "units": [
+            "315"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 897 1645",
+          "phoneDigits": "971588971645",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "315",
+              "dtcm": "https://drive.google.com/file/d/1GZDSjRFgSazHGko8kXbOaeqBQkSEP-Gu/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0EW5G&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 37",
+      "groups": [
+        {
+          "units": [
+            "210"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 679 5406",
+          "phoneDigits": "971586795406",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "210",
+              "dtcm": "https://drive.google.com/file/d/12DsuywhmAD3NVEe4xCxka9QF9OsAzF_V/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=05BRZ&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 39",
+      "groups": [
+        {
+          "units": [
+            "805",
+            "916"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 679 5317",
+          "phoneDigits": "971586795317",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "805",
+              "dtcm": "https://drive.google.com/file/d/1OpdvCBN9c94JGBp9DUwUgX4FHIxpqAJS/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=05X0P&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "916",
+              "dtcm": "https://drive.google.com/file/d/1DSyYwKFbBhHPUUSJSr0x_81fskFck2P4/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=07V7W&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 41",
+      "groups": [
+        {
+          "units": [
+            "414",
+            "617"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 679 5248",
+          "phoneDigits": "971586795248",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "414",
+              "dtcm": "https://drive.google.com/file/d/176Ho8OepSGY7er_4A7bHT9FR91fb7aF4/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=07650&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "617",
+              "dtcm": "https://drive.google.com/file/d/1BGf26nBylk2mTd2o3Y7EbrldFXr7y_Y9/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=0547N&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 43",
+      "groups": [
+        {
+          "units": [
+            "320"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "971 58 679 5409",
+          "phoneDigits": "971586795409",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "320",
+              "dtcm": "https://drive.google.com/file/d/1-ve8ZUoT7LF1yJdQRs1UMVDiJoQQ7JgO/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0ES89&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Riviera 46",
+      "groups": [
+        {
+          "units": [
+            "834"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 58 679 5814",
+          "phoneDigits": "971586795814",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "Under maintenance",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "834",
+              "dtcm": "https://drive.google.com/file/d/1hlgxg2hXtzsXjS244a_FotTV9ptXCmdU/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0BVFS&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Azizi Samia",
+      "groups": [
+        {
+          "units": [
+            "112"
+          ],
+          "emails": [
+            "community@vcmuae.ae",
+            "riviera@vcmuae.ae"
+          ],
+          "phone": "+971 54 355 0397",
+          "phoneDigits": "971543550397",
+          "portal": "https://hoa.vcmuae.ae/",
+          "portalId": "admin@medini-homes.com",
+          "portalPassword": "medini2023!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "112",
+              "dtcm": "https://drive.google.com/file/d/1g5QMYw5c0CKcEhDxAgwhK6daZPJpKvGq/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0B1UQ&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bahia",
+      "groups": [
+        {
+          "units": [
+            "605"
+          ],
+          "emails": [],
+          "phone": "971 54 580 6002",
+          "phoneDigits": "971545806002",
+          "portal": "https://hoam.iskaan.com/bahia2",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "605",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Belgravia Height",
+      "groups": [
+        {
+          "units": [
+            "905"
+          ],
+          "emails": [
+            "bh1frontdesk@kingfield.com"
+          ],
+          "phone": "971-45295080",
+          "phoneDigits": "97145295080",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "905",
+              "dtcm": "https://drive.google.com/file/d/1eB0hQ3e28XHZCRWpWMHA9zl5olrah_en/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=05MWR&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Beverly Residence",
+      "groups": [
+        {
+          "units": [
+            "204",
+            "311"
+          ],
+          "emails": [],
+          "phone": "971562975632",
+          "phoneDigits": "971562975632",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "204",
+              "dtcm": null,
+              "det": null
+            },
+            {
+              "unit": "311",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti Emerald",
+      "groups": [
+        {
+          "units": [
+            "507"
+          ],
+          "emails": [
+            "emerald@stealthoeners.com",
+            "cs@stealthowners.com"
+          ],
+          "phone": null,
+          "phoneDigits": null,
+          "portal": null,
+          "portalId": null,
+          "portalPassword": "509134592.0",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "507",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti Galaxy",
+      "groups": [
+        {
+          "units": [
+            "307"
+          ],
+          "emails": [
+            "galaxy@stealthowners.com",
+            "cs@stealthowners.com"
+          ],
+          "phone": "+971 50 966 8895",
+          "phoneDigits": "971509668895",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "307",
+              "dtcm": "https://drive.google.com/file/d/1iFxBcBA_GCaDfk8hQq0oBf6ZGw514-sh/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=014ZC&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti Galaxy V2",
+      "groups": [
+        {
+          "units": [
+            "205"
+          ],
+          "emails": [
+            "galaxy@stealthowners.com",
+            "cs@stealthowners.com"
+          ],
+          "phone": "+971 50 966 8895",
+          "phoneDigits": "971509668895",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "205",
+              "dtcm": "https://drive.google.com/file/d/1DiidfF9_bN6OR4RKVKHVplxd5zvERINe/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=014Z6&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti Galazy ( NEW)",
+      "groups": [
+        {
+          "units": [
+            "205"
+          ],
+          "emails": [
+            "galaxy@stealthowners.com",
+            "cs@stealthowners.com"
+          ],
+          "phone": "+971 56 408 7663",
+          "phoneDigits": "971564087663",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "205",
+              "dtcm": "https://drive.google.com/file/d/1O4R7JYcjp6xk-RA3-SeWkxFsuONlKpZs/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=014Z6&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti Height",
+      "groups": [
+        {
+          "units": [
+            "2310"
+          ],
+          "emails": [
+            "heightsbinghatti@gmail.com",
+            "cs@stealthowners.com"
+          ],
+          "phone": "+971 56 731 7340",
+          "phoneDigits": "971567317340",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "2310",
+              "dtcm": "https://drive.google.com/file/d/1qn49GYRDTuB_cIfhTS8ZRuvT7Fx30nD_/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=09VWQ&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        },
+        {
+          "units": [
+            "2602"
+          ],
+          "emails": [
+            "cs@stealthowners.com",
+            "heightsbinghatti@gmail.com"
+          ],
+          "phone": "+971 50 917 9734",
+          "phoneDigits": "971509179734",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "2602",
+              "dtcm": "https://drive.google.com/file/d/15Axgllr6veR2ge8nPaqRBj5SxZhRt9r9/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=00Q1J&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti House",
+      "groups": [
+        {
+          "units": [
+            "1301"
+          ],
+          "emails": [
+            "house@stealthowners.com"
+          ],
+          "phone": "971509179314",
+          "phoneDigits": "971509179314",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "stealthowners.com"
+          ],
+          "unitLinks": [
+            {
+              "unit": "1301",
+              "dtcm": "https://drive.google.com/file/d/1fIo-RvAwgUOOu0hgs4nMr0OTnwT6qQgP/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti Lavender",
+      "groups": [
+        {
+          "units": [
+            "308"
+          ],
+          "emails": [
+            "lavender@stealthowners.com",
+            "cs@stealthowners.com"
+          ],
+          "phone": "971 50 918 0734",
+          "phoneDigits": "971509180734",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "308",
+              "dtcm": "https://drive.google.com/file/d/1vmSnHukvuLxtB8dpjC9Ckv7-iuo72ME_/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=035JU&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti Nova",
+      "groups": [
+        {
+          "units": [
+            "508"
+          ],
+          "emails": [
+            "Nova@stealthowners.com",
+            "cs@stealthowners.com"
+          ],
+          "phone": "509179984",
+          "phoneDigits": "971509179984",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "508",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti Royale",
+      "groups": [
+        {
+          "units": [
+            "302"
+          ],
+          "emails": [
+            "royale@stealthowners.com"
+          ],
+          "phone": "+971 50 997 1562",
+          "phoneDigits": "971509971562",
+          "portal": "https://bunat.socienta.io/my-requests",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "302",
+              "dtcm": "https://drive.google.com/file/d/1Qz5GG2fbOOE64OBGHbxtx7i4P6xSYoiz/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Binghatti Tulip",
+      "groups": [
+        {
+          "units": [
+            "1206"
+          ],
+          "emails": [],
+          "phone": "566834018",
+          "phoneDigits": "971566834018",
+          "portal": "https://stealth.iskaan.com/binghattitulip",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1206",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bloom Height",
+      "groups": [
+        {
+          "units": [
+            "707A",
+            "812A",
+            "1008A",
+            "1911A",
+            "1913A",
+            "2201A"
+          ],
+          "emails": [
+            "Bloomheightss@gmail.com",
+            "bloomheights.sec@gmail.com",
+            "ritzelb@kingfield.com"
+          ],
+          "phone": "+971 52 197 7508",
+          "phoneDigits": "971521977508",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "707A",
+              "dtcm": "https://drive.google.com/file/d/1KvmxSUKQ4ZbvfIURU0hqvQgrhDvKrD3h/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0CD6F&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "812A",
+              "dtcm": "https://drive.google.com/file/d/1ae5f8lSz9tdG2w0OeYCT6DkRjgPQ_Q5x/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0BQX7&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "1008A",
+              "dtcm": "https://drive.google.com/file/d/1WdPdhkb8dmMhetTQOEX4zJje2hI3HnRr/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0DOAN&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "1911A",
+              "dtcm": "https://drive.google.com/file/d/1VQYOiwMeCs3FrNHr1BRtVA212GHnzgjD/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=07GPE&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "1913A",
+              "dtcm": "https://drive.google.com/file/d/1PrEdBpj-Ozh0r0vMWZk90_iclAAyaxxY/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=0N91J&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "2201A",
+              "dtcm": "https://drive.google.com/file/d/1rUKI4huJe3aqZ5RnhcTFBeESl0QLWuBh/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=04041&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        },
+        {
+          "units": [
+            "1809",
+            "2410B",
+            "2411B",
+            "2510B"
+          ],
+          "emails": [
+            "Bloomheightss@gmail.com",
+            "bloomheights.sec@gmail.com",
+            "ritzelb@kingfield.com"
+          ],
+          "phone": "+971 50 126 8941",
+          "phoneDigits": "971501268941",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1809",
+              "dtcm": "https://drive.google.com/file/d/16ZL6beXV5LxoftSHoOA4DqwtZcK6_xBZ/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=05GB3&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "2410B",
+              "dtcm": "https://drive.google.com/file/d/1F-AmCQ8KqJmIkf1ae-EKueE7BQVmG-xR/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=05GBE&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "2411B",
+              "dtcm": "https://drive.google.com/file/d/1945ZtQTpRd5kMCeFL6UFNJ92aEfwvau6/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=04KNR&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "2510B",
+              "dtcm": "https://drive.google.com/file/d/13QqXHEs_PmhyXcMEXb40XbVnnTq2d_0W/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/holidayhomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=05N1F&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bloom Height (new)",
+      "groups": [
+        {
+          "units": [
+            "3205A"
+          ],
+          "emails": [
+            "Bloomheightss@gmail.com",
+            "bloomheights.sec@gmail.com",
+            "ritzelb@kingfield.com"
+          ],
+          "phone": "+971 52 197 7508",
+          "phoneDigits": "971521977508",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "3205A",
+              "dtcm": "https://drive.google.com/file/d/1ajBUVCgy87W6Eh1t9sj5DbYvy93cDsof/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0F4CR&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bloom Tower",
+      "groups": [
+        {
+          "units": [
+            "904B"
+          ],
+          "emails": [
+            "btreceptionb@gmail.com",
+            "btreceptionc@gmail.com"
+          ],
+          "phone": "+971 50 970 9926",
+          "phoneDigits": "971509709926",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Richa Sharma <richas@kingfield.com"
+          ],
+          "unitLinks": [
+            {
+              "unit": "904B",
+              "dtcm": "https://drive.google.com/file/d/1Ixcew-R2T7NUvX0KzZqt8ce7jdEln9GH/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=009TK&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        },
+        {
+          "units": [
+            "1011C"
+          ],
+          "emails": [
+            "Bloomheightss@gmail.com",
+            "bloomheights.sec@gmail.com",
+            "ritzelb@kingfield.com"
+          ],
+          "phone": "+971 52 197 7508",
+          "phoneDigits": "971521977508",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1011C",
+              "dtcm": "https://drive.google.com/file/d/1RCfSyFwHbGamWpglzEVPyGZG8cYiLO9a/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=0600N&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Boutique XII by LMD",
+      "groups": [
+        {
+          "units": [
+            "1007"
+          ],
+          "emails": [
+            "helpdeskboutique_12@arncon.ae"
+          ],
+          "phone": "+971 54 400 1482",
+          "phoneDigits": "971544001482",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1007",
+              "dtcm": "https://drive.google.com/file/d/1RVfZsCbSDV2-8tlB4nxyQZaL9Dg9sujT/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0EDO7&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Carson B",
+      "groups": [
+        {
+          "units": [
+            "B2306"
+          ],
+          "emails": [
+            "carsonB.reception@loams.ae"
+          ],
+          "phone": "971543071302",
+          "phoneDigits": "971543071302",
+          "portal": "https://www.damacliving.com/login",
+          "portalId": "admin@medini-homes.com",
+          "portalPassword": "Medini2023!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "B2306",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Catch Residence",
+      "groups": [
+        {
+          "units": [
+            "804"
+          ],
+          "emails": [
+            "ghassan@infinitymgmt.ae",
+            "catchresidence@mansion.ae"
+          ],
+          "phone": "+971 55 583 6998",
+          "phoneDigits": "971555836998",
+          "portal": "https://mansions.iskaan.com/catchresidence/eservices/short-stay",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "804",
+              "dtcm": "https://drive.google.com/file/d/16RBBSzLGlRdHF164v7diTE2wnV8eZVK2/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0AKCD&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CENTRAL PARK JVC",
+      "groups": [
+        {
+          "units": [
+            "1607"
+          ],
+          "emails": [
+            "centralpark@alrustumanioam.com"
+          ],
+          "phone": "+971 50 100 3448",
+          "phoneDigits": "971501003448",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1607",
+              "dtcm": "https://drive.google.com/file/d/1ecJgg2wt8SIZoenNmx1FyKQiTU0Wjkv0/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=009PT&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cloud B",
+      "groups": [
+        {
+          "units": [
+            "510",
+            "903"
+          ],
+          "emails": [
+            "customercare@bunatalmustaqbal.ae"
+          ],
+          "phone": "+971 50 432 8609",
+          "phoneDigits": "971504328609",
+          "portal": "https://bunat.socienta.io/welcome-customer",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "510",
+              "dtcm": "https://drive.google.com/file/d/1vtSFQEyqoHlXLt5IhJqVeBA9DcXYVW66/view?usp=sharing",
+              "det": null
+            },
+            {
+              "unit": "903",
+              "dtcm": "https://drive.google.com/file/d/1ECxrlz24ns6H9-CHbKdI2cisRaj0VRev/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Condor Golf Links 18",
+      "groups": [
+        {
+          "units": [
+            "704"
+          ],
+          "emails": [
+            "condorgolf@trustlinesecurity.ae",
+            "info@kingroyaldubai.com"
+          ],
+          "phone": "521584354",
+          "phoneDigits": "971521584354",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "704",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Damac Paramount",
+      "groups": [
+        {
+          "units": [
+            "1802"
+          ],
+          "emails": [
+            "reception.dtp@luxury-fm.com"
+          ],
+          "phone": "+971 50 806 8495",
+          "phoneDigits": "971508068495",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "971 54 582 5488"
+          ],
+          "unitLinks": [
+            {
+              "unit": "1802",
+              "dtcm": "https://drive.google.com/file/d/1Zj85zbecuylQ-mI8xC1sfI4xH3cxlDRb/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Damac Reva",
+      "groups": [
+        {
+          "units": [
+            "103",
+            "318"
+          ],
+          "emails": [
+            "conceirage@loams.ae",
+            "security.reva@loams.ae",
+            "admin.vera@damacgroup.com"
+          ],
+          "phone": "+971 56 532 2804",
+          "phoneDigits": "971565322804",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "concierge.vera@whitespot.ae"
+          ],
+          "unitLinks": [
+            {
+              "unit": "103",
+              "dtcm": "https://drive.google.com/file/d/1PUUK7eEbgdPUDlWwbSqGhxdy-nCeBog0/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0G7MI&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "318",
+              "dtcm": "https://drive.google.com/file/d/1N81zKz1sP_0n2oDXFnGinOwwO1poZQd8/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=06KQZ&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Damac Zada",
+      "groups": [
+        {
+          "units": [
+            "1511",
+            "1701"
+          ],
+          "emails": [
+            "security.zada@loams.ae",
+            "Fm.zada@whitespot.ae",
+            "Concierge.Zada@loams.ae"
+          ],
+          "phone": null,
+          "phoneDigits": null,
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1511",
+              "dtcm": "https://drive.google.com/file/d/1CsOFpT_b0h_11Wtl2ZrhTxagh1jvEgYV/view?usp=sharing",
+              "det": null
+            },
+            {
+              "unit": "1701",
+              "dtcm": "https://drive.google.com/file/d/1Z1OTzgSNwa6RBU6nJJdtUM5t_bJloDvl/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "District One",
+      "groups": [
+        {
+          "units": [
+            "201"
+          ],
+          "emails": [
+            "districtone.security@nakheel.com"
+          ],
+          "phone": "971 56 526 4528",
+          "phoneDigits": "971565264528",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "201",
+              "dtcm": "https://drive.google.com/file/d/1wpLWuKm8_ZDg2BM0i8C-Qr1_t_2-6czR/view?usp=sharing",
+              "det": null
+            }
+          ]
+        },
+        {
+          "units": [
+            "508"
+          ],
+          "emails": [
+            "districtone.security@nakheel.com"
+          ],
+          "phone": "971 50 254 1933",
+          "phoneDigits": "971502541933",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "508",
+              "dtcm": "https://drive.google.com/file/d/1dnQ9WG3dHRnHZZqxLHR9tEpPROgJs1TV/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=07JG0&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        },
+        {
+          "units": [
+            "508"
+          ],
+          "emails": [
+            "districtone.security@nakheel.com"
+          ],
+          "phone": "971521223344",
+          "phoneDigits": "971521223344",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "508",
+              "dtcm": "https://drive.google.com/file/d/1F7qLAMR_XN4gmGY-ETCX1gB-bBQsy6z4/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=07JG0&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT one residence 11",
+      "groups": [
+        {
+          "units": [
+            "1807"
+          ],
+          "emails": [
+            "districtone.security@nakheel.com"
+          ],
+          "phone": "971521223344",
+          "phoneDigits": "971521223344",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1807",
+              "dtcm": "https://drive.google.com/file/d/1rc92rxfdG1u2tYaK5ne9Jszf5HtXT0Rt/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=05334&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Elysee 1",
+      "groups": [
+        {
+          "units": [
+            "261",
+            "418",
+            "439"
+          ],
+          "emails": [
+            "community@poam.ae"
+          ],
+          "phone": "971 54 206 0862",
+          "phoneDigits": "971542060862",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "261",
+              "dtcm": "https://drive.google.com/file/d/1MpCLYm4zH6L9Fufojmt7ED_LPWwQ6wdI/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=00WO0&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "418",
+              "dtcm": "https://drive.google.com/file/d/1n87vF9_X73FI_4A0HSAsz5sI8Vuwo03B/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01GGF&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "439",
+              "dtcm": "https://drive.google.com/file/d/1tCLY_Cw2XEKdmbBItAJauoZtSY881MbZ/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=0OFNI&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        },
+        {
+          "units": [
+            "322",
+            "421",
+            "G03"
+          ],
+          "emails": [
+            "community@poam.ae"
+          ],
+          "phone": "971 54 206 0862",
+          "phoneDigits": "971542060862",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Adda Application"
+          ],
+          "unitLinks": [
+            {
+              "unit": "322",
+              "dtcm": null,
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=01IV6&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "421",
+              "dtcm": "https://drive.google.com/file/d/1wQhJiM-RMGEwLxdWR3yWeZw84_C9_02K/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01O80&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "G03",
+              "dtcm": "https://drive.google.com/file/d/1xtE75nCqNEnvArgDNucg5CllbxOVeObJ/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0FBTW&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Elysee 1 (new)",
+      "groups": [
+        {
+          "units": [
+            "328"
+          ],
+          "emails": [
+            "community@poam.ae"
+          ],
+          "phone": "971 54 206 0862",
+          "phoneDigits": "971542060862",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Adda Application"
+          ],
+          "unitLinks": [
+            {
+              "unit": "328",
+              "dtcm": "https://drive.google.com/file/d/1WwsYeqyERURo9em0wdktGHiFFY9Pm69b/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=027PC&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Elysee 1 V2",
+      "groups": [
+        {
+          "units": [
+            "322"
+          ],
+          "emails": [
+            "community@poam.ae"
+          ],
+          "phone": "971 54 206 0862",
+          "phoneDigits": "971542060862",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Adda Application"
+          ],
+          "unitLinks": [
+            {
+              "unit": "322",
+              "dtcm": "https://drive.google.com/file/d/1ko3SlCtigXoVIV2FiX4mXeqsQ6HSCcig/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=01IV6&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Elysee 2",
+      "groups": [
+        {
+          "units": [
+            "407",
+            "G10"
+          ],
+          "emails": [
+            "community@poam.ae"
+          ],
+          "phone": "+971 54 206 0864",
+          "phoneDigits": "971542060864",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Adda Application"
+          ],
+          "unitLinks": [
+            {
+              "unit": "407",
+              "dtcm": "https://drive.google.com/file/d/1ix04dnEVWMBlZECSkZecx-KAkhDpz9E0/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=01JFR&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "G10",
+              "dtcm": "https://drive.google.com/file/d/1M8JfTw3TC-h_cvpXX9ajl539N2RYSHr8/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=041DN&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        },
+        {
+          "units": [
+            "G11"
+          ],
+          "emails": [
+            "community@poam.ae"
+          ],
+          "phone": "+971 54 206 0864",
+          "phoneDigits": "971542060864",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "G11",
+              "dtcm": "https://drive.google.com/file/d/1huA8Cvez55OhXOf_M68vbmWLk9r-_KVv/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=01JFR&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "elysee 2 V2",
+      "groups": [
+        {
+          "units": [
+            "407"
+          ],
+          "emails": [
+            "community@poam.ae"
+          ],
+          "phone": "+971 54 206 0864",
+          "phoneDigits": "971542060864",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Adda Application"
+          ],
+          "unitLinks": [
+            {
+              "unit": "407",
+              "dtcm": "https://drive.google.com/file/d/1Ndeb7nSnyidr6wnK8SrDkA8_JniTBFui/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=01JFR&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Elysee 3",
+      "groups": [
+        {
+          "units": [
+            "428",
+            "430",
+            "G8",
+            "G34"
+          ],
+          "emails": [
+            "community@poam.ae",
+            "collection@pered.ae",
+            "shivdas.b@pered.ae"
+          ],
+          "phone": "+971 54 206 0861",
+          "phoneDigits": "971542060861",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Adda Application"
+          ],
+          "unitLinks": [
+            {
+              "unit": "428",
+              "dtcm": "https://drive.google.com/file/d/1xXmDTO9xBiuN9Oj4qV98Y_ob-wXyUbuZ/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=06ZIU&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "430",
+              "dtcm": "https://drive.google.com/file/d/1g6yanNay99mOrzsmfm_RhD2fWmaiILM6/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=073GJ&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "G8",
+              "dtcm": "https://drive.google.com/file/d/1_MbJNorgXzTnWW8PuBNDyz12lEu_hycc/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=05LLR&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "G34",
+              "dtcm": "https://drive.google.com/file/d/1isVbIbI0AXPKnjTcDyexW7jfeoeH-IUK/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=02XUD&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Elysee 3 (New)",
+      "groups": [
+        {
+          "units": [
+            "119"
+          ],
+          "emails": [
+            "community@poam.ae",
+            "collection@pered.ae",
+            "shivdas.b@pered.ae"
+          ],
+          "phone": "+971 54 206 0861",
+          "phoneDigits": "971542060861",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Adda Application"
+          ],
+          "unitLinks": [
+            {
+              "unit": "119",
+              "dtcm": "https://drive.google.com/file/d/1V0NN8j9QkqcGsQziKn_exGK7hPWhjB3_/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=027O9&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Elysee III",
+      "groups": [
+        {
+          "units": [
+            "372"
+          ],
+          "emails": [
+            "community@poam.ae",
+            "collection@pered.ae",
+            "shivdas.b@pered.ae"
+          ],
+          "phone": "+971 54 206 0861",
+          "phoneDigits": "971542060861",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Adda Application"
+          ],
+          "unitLinks": [
+            {
+              "unit": "372",
+              "dtcm": "https://drive.google.com/file/d/1TrGbXXMll_KAp-UL-MQMH-yFBXr5kFcS/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=03KM4&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Emaar Act 2",
+      "groups": [
+        {
+          "units": [
+            "506"
+          ],
+          "emails": [
+            "communities@ecm.ae"
+          ],
+          "phone": "971 50 899 3015",
+          "phoneDigits": "971508993015",
+          "portal": "https://portal.sakani.ae/",
+          "portalId": "mrbnbdubai@gmail.com",
+          "portalPassword": "Hedi93150!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "506",
+              "dtcm": "https://drive.google.com/file/d/1-10kgKaapd9NaO90xJiDcn_wOZZpIh1N/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=04OHR&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        },
+        {
+          "units": [
+            "507"
+          ],
+          "emails": [
+            "communities@ecm.ae"
+          ],
+          "phone": "971 50 899 3015",
+          "phoneDigits": "971508993015",
+          "portal": "https://portal.sakani.ae/",
+          "portalId": "admi@medini-homes.com",
+          "portalPassword": "Hedi93150!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "507",
+              "dtcm": "https://drive.google.com/file/d/1M7UOYXA9dLnCBYu0heatiygzeBCE9vd8/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=050AL&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Emaar Breeze @ Crreek Harboor",
+      "groups": [
+        {
+          "units": [
+            "402"
+          ],
+          "emails": [],
+          "phone": "+971 50 899 2774",
+          "phoneDigits": "971508992774",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "402",
+              "dtcm": "https://drive.google.com/file/d/1wVC3hEHzP6vkU9JBqFaRmLHoNuDnf-7s/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0C9OJ&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Emaar Creekside 18a",
+      "groups": [
+        {
+          "units": [
+            "1506"
+          ],
+          "emails": [],
+          "phone": "+971 54 511 2959",
+          "phoneDigits": "971545112959",
+          "portal": "https://portal.sakani.ae/login",
+          "portalId": "mrbnbdubai@gmail.com",
+          "portalPassword": "Hedi93150!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1506",
+              "dtcm": "https://drive.google.com/file/d/1nyLQ3lU4UVpoImeIFQpYLLzENOgWKcaD/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=0200X&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Golf links",
+      "groups": [
+        {
+          "units": [
+            "VILLA76"
+          ],
+          "emails": [
+            "communities@ecm.ae"
+          ],
+          "phone": null,
+          "phoneDigits": null,
+          "portal": "https://portal.sakani.ae/",
+          "portalId": "mrbnbdubai@gmail.com",
+          "portalPassword": "Hedi93150!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "VILLA76",
+              "dtcm": "https://drive.google.com/file/d/1Rnb87cd1yW4R1QzWvr2ctTSkhGQ7RH-6/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Grand bleu by Elie Saab",
+      "groups": [
+        {
+          "units": [
+            "302"
+          ],
+          "emails": [
+            "communities@ecm.ae"
+          ],
+          "phone": "971 56 414 5390",
+          "phoneDigits": "971564145390",
+          "portal": "https://portal.sakani.ae/",
+          "portalId": "mrbnbdubai@gmail.com",
+          "portalPassword": "Hedi93150!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "302",
+              "dtcm": "https://drive.google.com/file/d/1iN6UgFkIGv2U4FNzSMrN9CaExoJ3EKhQ/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0G6IZ&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Grand Bleu by Elie Saab V2",
+      "groups": [
+        {
+          "units": [
+            "302"
+          ],
+          "emails": [
+            "communities@ecm.ae"
+          ],
+          "phone": "+971 56 414 5390",
+          "phoneDigits": "971564145390",
+          "portal": "https://portal.sakani.ae/",
+          "portalId": "admi@medini-homes.com",
+          "portalPassword": "Hedi93150!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "302",
+              "dtcm": "https://drive.google.com/file/d/1p6WkY74K2_JXCJrlCd98a4GfP4SrWCkS/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0G6IZ&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Grande",
+      "groups": [
+        {
+          "units": [
+            "2514"
+          ],
+          "emails": [
+            "communities@ecm.ae"
+          ],
+          "phone": null,
+          "phoneDigits": null,
+          "portal": "https://portal.sakani.ae/",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "2514",
+              "dtcm": "https://drive.google.com/file/d/1VRhYuSAyEX0phHC1c2g_dSegaSxxSwVe/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Hamilton Residency",
+      "groups": [
+        {
+          "units": [
+            "1109"
+          ],
+          "emails": [
+            "hamilton_fm@deyaar.ae"
+          ],
+          "phone": "+971 4 5530325",
+          "phoneDigits": "97145530325",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1109",
+              "dtcm": "https://drive.google.com/file/d/1AhxSrseRcKGtzR0Ellhg_RZBrhTthACo/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0EJSA&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Imperial Avenue",
+      "groups": [
+        {
+          "units": [
+            "1312"
+          ],
+          "emails": [
+            "Community@kaizenams.com",
+            "Mohamed.yahia@excellerate.co.za",
+            "Imperialavenueconcierge@gmail.com"
+          ],
+          "phone": "+971 50 857 3700",
+          "phoneDigits": "971508573700",
+          "portal": "https://www.kaizenams.com/forms/",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1312",
+              "dtcm": "https://drive.google.com/file/d/1huT9DDUwWV2xQDRTASR-4SYslEI9fam-/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=04HZ8&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Luma22",
+      "groups": [
+        {
+          "units": [
+            "359"
+          ],
+          "emails": [
+            "info@syoam.com"
+          ],
+          "phone": "+971 56 411 5031",
+          "phoneDigits": "971564115031",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "359",
+              "dtcm": "https://drive.google.com/file/d/12bZj8CmbJwJnQu0PPw5wpEAo0Q5ACUPc/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=06CZD&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Marwa Height",
+      "groups": [
+        {
+          "units": [
+            "206",
+            "208",
+            "508",
+            "608",
+            "708",
+            "808"
+          ],
+          "emails": [],
+          "phone": "+971 50 794 8650",
+          "phoneDigits": "971507948650",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Marwa Heights"
+          ],
+          "unitLinks": [
+            {
+              "unit": "206",
+              "dtcm": "https://drive.google.com/file/d/1Eg8oo2AhDTQn-TgYi57MfLolhXaSdzMh/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0C9OI&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "208",
+              "dtcm": "https://drive.google.com/file/d/1J3pLOFQYbJqeivbfNYsagV6D_gIV4hFN/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01S3L&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "508",
+              "dtcm": "https://drive.google.com/file/d/1V0y4z5lpX1NKO0YxU4FB5Zm4yVeFtOGl/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01PZ4&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "608",
+              "dtcm": null,
+              "det": null
+            },
+            {
+              "unit": "708",
+              "dtcm": "https://drive.google.com/file/d/13uW6cMHBG39jA0E8wjgesdUSU4Rxresu/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0G7VT&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "808",
+              "dtcm": "https://drive.google.com/file/d/1x2pX7OnXg90vrrJZXGvrqXRjGoeTCRm9/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0F5M6&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Marwa Heights V2",
+      "groups": [
+        {
+          "units": [
+            "208"
+          ],
+          "emails": [],
+          "phone": "+971 50 794 8650",
+          "phoneDigits": "971507948650",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Marwa Heights"
+          ],
+          "unitLinks": [
+            {
+              "unit": "208",
+              "dtcm": "https://drive.google.com/file/d/1FAjITgIKTD7lHFPAPU-Y10h5vVSgm97E/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01S3L&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Merano Tower",
+      "groups": [
+        {
+          "units": [
+            "503"
+          ],
+          "emails": [
+            "concierge.merano@luxury-fm.com",
+            "fmmerano@whitespot.ae",
+            "merano.security@luxury-fm.com"
+          ],
+          "phone": "+971 56 686 3729",
+          "phoneDigits": "971566863729",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Shaikha.alnaqbi@loams.ae"
+          ],
+          "unitLinks": [
+            {
+              "unit": "503",
+              "dtcm": "https://drive.google.com/file/d/1KKHPy3KrVs--pAkBiGHWDlaQz-xLSqPr/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0ERQO&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Miraclz by Danube",
+      "groups": [
+        {
+          "units": [
+            "1617"
+          ],
+          "emails": [
+            "noc@stratum.ae"
+          ],
+          "phone": "+971 52 275 8749",
+          "phoneDigits": "971522758749",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Elevator code 112233"
+          ],
+          "unitLinks": [
+            {
+              "unit": "1617",
+              "dtcm": "https://drive.google.com/file/d/14fYv5GoDCaTa9e1DkBPABMJwJcjqYZRs/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0B3FK&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Neva Residence",
+      "groups": [
+        {
+          "units": [
+            "305"
+          ],
+          "emails": [
+            "Customercares1@bunatalmustaqbal.ae"
+          ],
+          "phone": "971 50 894 3713",
+          "phoneDigits": "971508943713",
+          "portal": "https://bunat.socienta.io/my-requests/move-in",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "305",
+              "dtcm": "https://drive.google.com/file/d/1I85AG1ooUnjXf0VcIJVzFxyZymARYuke/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Nobles",
+      "groups": [
+        {
+          "units": [
+            "311"
+          ],
+          "emails": [
+            "tigersecc01@gmail.com"
+          ],
+          "phone": "+971 50 501 7572",
+          "phoneDigits": "971505017572",
+          "portal": "https://bunat.socienta.io/welcome-customer",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "311",
+              "dtcm": "https://drive.google.com/file/d/1ZcjelxtFXZcf-S08SeAzSzL3zu6gP7Dt/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Nobles By Tiger",
+      "groups": [
+        {
+          "units": [
+            "1509",
+            "2609"
+          ],
+          "emails": [
+            "tigersecc01@gmail.com"
+          ],
+          "phone": "+971 50 501 7572",
+          "phoneDigits": "971505017572",
+          "portal": "https://bunat.socienta.io/my-requests",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1509",
+              "dtcm": "https://drive.google.com/file/d/1kwAVYp_sY_XiAc67RXn1UlcSKwk7FCml/view?usp=sharing",
+              "det": null
+            },
+            {
+              "unit": "2609",
+              "dtcm": "https://drive.google.com/file/d/1FywSuksiFLX6mxUDmnWCDGPZKDAnn7sP/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0FMB8&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Oxford Boulevard",
+      "groups": [
+        {
+          "units": [
+            "122"
+          ],
+          "emails": [
+            "oxfordboulevard_fm@deyaar.ae"
+          ],
+          "phone": "+971 50 539 4576",
+          "phoneDigits": "971505394576",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "122",
+              "dtcm": null,
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0AFWW&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "PANTHEON ELYSEE 2",
+      "groups": [
+        {
+          "units": [
+            "134"
+          ],
+          "emails": [
+            "community@poam.ae"
+          ],
+          "phone": "+971 54 206 0864",
+          "phoneDigits": "971542060864",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [
+            "Adda Application"
+          ],
+          "unitLinks": [
+            {
+              "unit": "134",
+              "dtcm": "https://drive.google.com/file/d/1fBa4O8TdoBXC594nQGa0Hzch5em2M5X4/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=00NSB&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Paramount midtown",
+      "groups": [
+        {
+          "units": [
+            "5810"
+          ],
+          "emails": [
+            "concierge.pthr@whitespot.ae",
+            "pthr.admin@loams.ae",
+            "Security.PTHR@loams.ae"
+          ],
+          "phone": "971508068495",
+          "phoneDigits": "971508068495",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "5810",
+              "dtcm": "https://drive.google.com/file/d/1-dgdzO40DEzt0d0mAmwUjF8MoIBHgoso/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Peninsular",
+      "groups": [
+        {
+          "units": [
+            "4609"
+          ],
+          "emails": [
+            "community@kaizenams.com",
+            "peninsula3.reception@emrill.com",
+            "Dlp.peninsula3@emrill.com"
+          ],
+          "phone": "971588775566",
+          "phoneDigits": "971588775566",
+          "portal": "https://portal.kaizenams.com/welcome-customer",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "4609",
+              "dtcm": "https://drive.google.com/file/d/12IKq3y252VFhngTz__wOLAig3eNiaCxx/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Pulse Residence",
+      "groups": [
+        {
+          "units": [
+            "201"
+          ],
+          "emails": [],
+          "phone": "+971 52 281 6394",
+          "phoneDigits": "971522816394",
+          "portal": "https://portal.kaizenams.com/welcome-customer",
+          "portalId": "admin@medini-homes.com",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "201",
+              "dtcm": "https://drive.google.com/file/d/1A9yNmK4D1T98u_63V8F7ezT3xwe6Egsj/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=00MS3&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Regalia",
+      "groups": [
+        {
+          "units": [
+            "1012"
+          ],
+          "emails": [
+            "regalia_fm@ontgra.ae",
+            "fitout@nationwide.ae"
+          ],
+          "phone": null,
+          "phoneDigits": null,
+          "portal": "https://5843142.app.netsuite.com/app/login/secure/privatelogin.nl?c=5843142",
+          "portalId": "admin@medini-homes.com",
+          "portalPassword": "0*7JQn^$",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1012",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Samana Golf Avenue",
+      "groups": [
+        {
+          "units": [
+            "132",
+            "225"
+          ],
+          "emails": [
+            "samanagolf@alrustumanioam.com",
+            "Samanagolfhelpdesk@gmail.com"
+          ],
+          "phone": "524051662",
+          "phoneDigits": "971524051662",
+          "portal": "https://aroam.iskaan.com/samanagolfavenue",
+          "portalId": "admin@medini-homes.com",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "132",
+              "dtcm": "https://drive.google.com/file/d/1CXf1nh4mgfKhefvHeC_ooTfNvIBAHIDJ/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0C46F&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "225",
+              "dtcm": "https://drive.google.com/file/d/15UsUNllxJP5JSL1t4LDmC18RbeZPP0-T/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01CLM&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Samana Park View",
+      "groups": [
+        {
+          "units": [
+            "117",
+            "607",
+            "623"
+          ],
+          "emails": [
+            "samanaparkviews.cs@gmail.com"
+          ],
+          "phone": "+971 52 699 3256",
+          "phoneDigits": "971526993256",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "117",
+              "dtcm": "https://drive.google.com/file/d/1y2i58HCCyDm8IRpRpwWCKeOVKkMPltIw/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=04FFS&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "607",
+              "dtcm": "https://drive.google.com/file/d/1qod1pJWY993v_kEVyIfTySkAn3ueaJZH/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01NJ3&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "623",
+              "dtcm": "https://drive.google.com/file/d/1A8430oN-Jstf4_pKrPXlp4cqybsyBRUe/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=03CUA&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seven Palm",
+      "groups": [
+        {
+          "units": [
+            "1130"
+          ],
+          "emails": [
+            "RatheeshK@seventides.com",
+            "fmsa.ndpj@nhcollection.com",
+            "communities@stoam.me"
+          ],
+          "phone": "+971 50 527 8793",
+          "phoneDigits": "971505278793",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1130",
+              "dtcm": "https://drive.google.com/file/d/1pCAAJMElsQJUYtvTDbHsM8Gjfrf7fFPq/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0BDLL&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        },
+        {
+          "units": [
+            "M37"
+          ],
+          "emails": [
+            "communities@stoam.me",
+            "atheeshk@seventides.com"
+          ],
+          "phone": "+971 50 572 9677",
+          "phoneDigits": "971505729677",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "M37",
+              "dtcm": null,
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0AVEC&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Shamal Waves 2",
+      "groups": [
+        {
+          "units": [
+            "217"
+          ],
+          "emails": [],
+          "phone": "971 54 510 1304",
+          "phoneDigits": "971545101304",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "217",
+              "dtcm": "https://drive.google.com/file/d/1G6L3JC3Mv4HFL9XMJJthjocE9ZuRU3WH/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=07RW2&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Skyhills residence 2",
+      "groups": [
+        {
+          "units": [
+            "1102"
+          ],
+          "emails": [
+            "customercareSH1@hcmoa.ae"
+          ],
+          "phone": null,
+          "phoneDigits": null,
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1102",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sobha Creek Vistas Reservé",
+      "groups": [
+        {
+          "units": [
+            "B1103"
+          ],
+          "emails": [
+            "communities@sobharealty.com"
+          ],
+          "phone": "+971 56 537 8418",
+          "phoneDigits": "971565378418",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "B1103",
+              "dtcm": "https://drive.google.com/file/d/1QzSvBusxtSa7YvzHb_e-kakYEbrXplwA/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0CD6L&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sobha CVR (NEW)",
+      "groups": [
+        {
+          "units": [
+            "1214A"
+          ],
+          "emails": [
+            "communities@sobharealty.com"
+          ],
+          "phone": "971 56 689 2529",
+          "phoneDigits": "971566892529",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1214A",
+              "dtcm": "https://drive.google.com/file/d/1O-922o1976F0DG_F42YybT_0xv3Px16a/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=0200W&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sobha One Park Av",
+      "groups": [
+        {
+          "units": [
+            "1304"
+          ],
+          "emails": [
+            "communities@sobharealty.com"
+          ],
+          "phone": "971 800 76242",
+          "phoneDigits": "97180076242",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1304",
+              "dtcm": "https://drive.google.com/file/d/1ErUJqBY5AzCN_32lEWhMD9HlY3OmVo1Y/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=06NKA&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sobha Waves",
+      "groups": [
+        {
+          "units": [
+            "3106",
+            "3207"
+          ],
+          "emails": [
+            "communities@sobharealty.com"
+          ],
+          "phone": "+971 50 459 0518",
+          "phoneDigits": "971504590518",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "3106",
+              "dtcm": "https://drive.google.com/file/d/19IAQ4CdUuZJ0cKuASi4wudxjxZzd3H7b/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01UMX&agencyCode=DTCM&IsToShowInspection="
+            },
+            {
+              "unit": "3207",
+              "dtcm": "https://drive.google.com/file/d/1uwxELuxNLPnDo_a9JmoVYOakl9XF0M3o/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0BQR8&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sparkle Tower 2",
+      "groups": [
+        {
+          "units": [
+            "101"
+          ],
+          "emails": [],
+          "phone": "+971 58 580 0559",
+          "phoneDigits": "971585800559",
+          "portal": "https://portal.kaizenams.com/welcome-customer",
+          "portalId": "admin@medini-homes.com",
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "101",
+              "dtcm": "https://drive.google.com/file/d/1GgEdQtyM_6Vveod4UCK3vX_Qvv3sOdbq/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=03VOQ&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Studio One",
+      "groups": [
+        {
+          "units": [
+            "1310"
+          ],
+          "emails": [
+            "Studio1.security@kaizenams.co"
+          ],
+          "phone": "+971 56 548 4252",
+          "phoneDigits": "971565484252",
+          "portal": "https://portal.kaizenams.com/my-requests/move-in",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1310",
+              "dtcm": "https://drive.google.com/file/d/1AKjxvUxqjMwvURw_JnGAGNFptQI5oSFp/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=04048&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "The Grand Emaar",
+      "groups": [
+        {
+          "units": [
+            "1602"
+          ],
+          "emails": [],
+          "phone": "971 50 899 2982",
+          "phoneDigits": "971508992982",
+          "portal": "https://portal.sakani.ae/login",
+          "portalId": "mrbnbdubai@gmail.com",
+          "portalPassword": "Hedi93150!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1602",
+              "dtcm": "https://drive.google.com/file/d/1heCuY-CZdxRE3Q3CPZ98gwYc4eJi2F1y/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=045DD&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "The Square",
+      "groups": [
+        {
+          "units": [
+            "2009"
+          ],
+          "emails": [],
+          "phone": "971521863399",
+          "phoneDigits": "971521863399",
+          "portal": "https://bunat.socienta.io/my-requests/move-in",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "2009",
+              "dtcm": "https://drive.google.com/file/d/10MIhWYDvXsgfYzLvIlCV-qLn2zt7bEYg/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tiger V Tower",
+      "groups": [
+        {
+          "units": [
+            "1105"
+          ],
+          "emails": [],
+          "phone": "971565377690",
+          "phoneDigits": "971565377690",
+          "portal": "https://bunat.socienta.io/my-requests/move-in",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1105",
+              "dtcm": "https://drive.google.com/file/d/1VselKAE9e9vsQ48XaJ2CbAkJ-wXTz_6O/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=00WO5&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tilal Al Ghaf",
+      "groups": [
+        {
+          "units": [
+            "B206"
+          ],
+          "emails": [
+            "Customerhub@maf.ae"
+          ],
+          "phone": "971 50 254 1933",
+          "phoneDigits": "971502541933",
+          "portal": null,
+          "portalId": "mrbnbdubai@gmail.com",
+          "portalPassword": "Medini2023!",
+          "notes": [
+            "Belong App"
+          ],
+          "unitLinks": [
+            {
+              "unit": "B206",
+              "dtcm": "https://drive.google.com/file/d/1n7EIk2QnZyFnP53h16OfpKCiWDgXxqqP/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=24CAP&capID2=00000&capID3=0EZXO&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Torino by Oro24",
+      "groups": [
+        {
+          "units": [
+            "113"
+          ],
+          "emails": [],
+          "phone": "971 55 850 1159",
+          "phoneDigits": "971558501159",
+          "portal": "https://apps.apple.com/us/app/my-oro24/id6477820780",
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "113",
+              "dtcm": "https://drive.google.com/file/d/1sy961XiymKpVHH3xcBTB5bqsAoHGfwCq/view?usp=sharing",
+              "det": null
+            }
+          ]
+        },
+        {
+          "units": [
+            "304"
+          ],
+          "emails": [],
+          "phone": "971555935091",
+          "phoneDigits": "971555935091",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "304",
+              "dtcm": "https://drive.google.com/file/d/1f_oHUOsaAD0iyi3jeN9NnV0i99coh9Lv/view?usp=sharing",
+              "det": null
+            }
+          ]
+        },
+        {
+          "units": [
+            "308"
+          ],
+          "emails": [],
+          "phone": "502578926",
+          "phoneDigits": "971502578926",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "308",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tower - Wilton Residence",
+      "groups": [
+        {
+          "units": [
+            "205"
+          ],
+          "emails": [
+            "Wpr.cs@strivefm.com"
+          ],
+          "phone": "+971 55 204 9320",
+          "phoneDigits": "971552049320",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "205",
+              "dtcm": "https://drive.google.com/file/d/1IwDrno4btR_u1JN-fCvhMhUzemyXIN5X/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=07WLT&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Trillionnaire",
+      "groups": [
+        {
+          "units": [
+            "1014"
+          ],
+          "emails": [
+            "cs@stealthowners.com",
+            "trillionaire@stealthowners.com"
+          ],
+          "phone": "971 55 524 1669",
+          "phoneDigits": "971555241669",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1014",
+              "dtcm": "https://drive.google.com/file/d/1eHShltNRWSDeBUKmWpQ1k8rF-RSW_WdT/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=026C0&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Una Apartment",
+      "groups": [
+        {
+          "units": [
+            "747"
+          ],
+          "emails": [
+            "customercare@nshama.ae",
+            "m@nshama.ae",
+            "security@nshama.ae"
+          ],
+          "phone": "971 55 148 2594",
+          "phoneDigits": "971551482594",
+          "portal": "https://nshama.my.site.com/HolidayHomes/s/",
+          "portalId": "ID : hillal.medinihh6070@nshama.ae",
+          "portalPassword": "Medini2026!",
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "747",
+              "dtcm": "https://drive.google.com/file/d/1QkVfmFXc5eN7FyN7D8efewx0N3OgVj2b/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=23CAP&capID2=00000&capID3=0BXHR&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Uniestate Supreme Residence",
+      "groups": [
+        {
+          "units": [
+            "614"
+          ],
+          "emails": [
+            "noc@stratum.ae"
+          ],
+          "phone": "+971 55 803 4596",
+          "phoneDigits": "971558034596",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "614",
+              "dtcm": "https://drive.google.com/file/d/1piT-wPAqDtqhaI7h_4uTyEBIb__cBLBp/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01R79&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V Tower",
+      "groups": [
+        {
+          "units": [
+            "1105"
+          ],
+          "emails": [],
+          "phone": "971 56 537 7690",
+          "phoneDigits": "971565377690",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1105",
+              "dtcm": "https://drive.google.com/file/d/1VselKAE9e9vsQ48XaJ2CbAkJ-wXTz_6O/view?usp=sharing",
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Westwood Grande 2",
+      "groups": [
+        {
+          "units": [
+            "1509"
+          ],
+          "emails": [
+            "wwg2imtiaz@alrustumanioam.com"
+          ],
+          "phone": "971555648963",
+          "phoneDigits": "971555648963",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "1509",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "WILTON PARK 2",
+      "groups": [
+        {
+          "units": [
+            "503"
+          ],
+          "emails": [
+            "Wpr.cs@sahalahfm.com",
+            "Wpr.cs@strivefm.com"
+          ],
+          "phone": "+971 55 204 9320",
+          "phoneDigits": "971552049320",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "503",
+              "dtcm": "https://drive.google.com/file/d/1QT4AWEVW85xa1T4C5e_c0V3FSsMILnwc/view?usp=sharing",
+              "det": "https://hhpermits.det.gov.ae/HolidayHomes/Cap/CapDetail.aspx?Module=HolHomes&TabName=HolHomes&capID1=25CAP&capID2=00000&capID3=01RMW&agencyCode=DTCM&IsToShowInspection="
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Zada Tower",
+      "groups": [
+        {
+          "units": [
+            "2327"
+          ],
+          "emails": [
+            "security.zada@loams.ae,",
+            "fm.zada@loams.ae"
+          ],
+          "phone": "+971 4 704 9080",
+          "phoneDigits": "97147049080",
+          "portal": null,
+          "portalId": null,
+          "portalPassword": null,
+          "notes": [],
+          "unitLinks": [
+            {
+              "unit": "2327",
+              "dtcm": null,
+              "det": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
