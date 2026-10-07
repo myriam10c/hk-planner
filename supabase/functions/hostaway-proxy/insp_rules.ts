@@ -82,6 +82,19 @@ export const INSP_DET_ITEMS: InspDetItem[] = [
 ];
 export const INSP_DET_KEYS = new Set<string>(INSP_DET_ITEMS.map((i) => i.key));
 
+// Points a verifier en priorite (table inspection_focus), groupes par zone pour l'ecran d'inspection.
+export type InspFocus = { zone: string; title: string; check: string; reported: string | null; stays: number | null; lastSeen: string | null };
+export function focusOut(rows: any[]): InspFocus[] {
+  const order = (z: string) => { const i = INSP_ZONES.findIndex((x) => x.key === z); return i === -1 ? 99 : i; };
+  return (rows ?? [])
+    .filter((r) => r && r.active !== false && INSP_ZONE_KEYS.has(String(r.zone)))
+    .map((r) => ({
+      zone: String(r.zone), title: String(r.title), check: String(r.check_text),
+      reported: r.reported ?? null, stays: r.stays ?? null, lastSeen: r.last_seen ?? null,
+    }))
+    .sort((a, b) => order(a.zone) - order(b.zone) || (b.stays ?? 0) - (a.stays ?? 0) || a.title.localeCompare(b.title));
+}
+
 export const INSP_DEFAULT_TARGET = 4;
 export const INSP_MIN_GAP_DAYS = 7;
 export const INSP_GOAL_DAYS = 30;
@@ -160,7 +173,7 @@ export type RankInput = {
 };
 export type InspCard = {
   listingId: string; name: string; eligibility: Eligibility; daysSince: number | null;
-  lastInspector: string | null; missed: number; openIssue: boolean;
+  lastInspector: string | null; missed: number; openIssue: boolean; focusCount?: number;
 };
 
 export function rankToday(input: RankInput): { today: InspCard[]; also: InspCard[] } {

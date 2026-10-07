@@ -98,12 +98,15 @@ export async function inspToday(
     return data ?? [];
   };
   // Lectures independantes en parallele ; seuls issues et missed dependent des inspections terminees.
-  const [names, finished, target, { data: listings }, props0, { data: running }] = await Promise.all([
+  const [names, finished, target, { data: listings }, props0, { data: running }, { data: focusRows }] = await Promise.all([
     cleanerNames(sb), finishedInspections(sb), readTarget(sb),
     sb.from("listing_config").select("listing_id, internal_name, listing_name, inspection_excluded"),
     loggedRows(),
     sb.from("inspections").select("listing_id, inspector_id").eq("inspection_date", day).is("finished_at", null),
+    sb.from("inspection_focus").select("listing_id").eq("active", true),
   ]);
+  const focusCount: Record<string, number> = {};
+  for (const f of focusRows ?? []) focusCount[String(f.listing_id)] = (focusCount[String(f.listing_id)] ?? 0) + 1;
   const lastDone = await loadLastDone(sb, names, finished);
   const [issues, missed] = await Promise.all([openIssuesByListing(sb, lastDone), missedCounts(sb, day, lastDone)]);
   const ranked = rankToday({
@@ -139,7 +142,7 @@ export async function inspToday(
     return {
       ...c, claimedBy: by, claimedByName: by ? names[String(by)] ?? null : null,
       inProgressBy: runningBy[c.listingId] ?? null, inProgressById: runningById[c.listingId] ?? null,
-      doneToday: doneToday[c.listingId] ?? null,
+      doneToday: doneToday[c.listingId] ?? null, focusCount: focusCount[c.listingId] ?? 0,
     };
   };
   const rankedById: Record<string, InspCard> = {};

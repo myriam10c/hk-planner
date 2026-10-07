@@ -26,7 +26,7 @@ export async function renderInspect(ctx) {
   const eligibility = ['checkout', 'vacant', 'adhoc'].includes(ctx.entry) ? ctx.entry : 'adhoc';
   const startIdem = newIdem('istart'); // gardee jusqu'au succes : un nouvel essai la reutilise
   let busy = false;
-  const st = { done: false, insp: null, z: {}, open: null, general: '', finishError: '', loadError: '', detItems: [] };
+  const st = { done: false, insp: null, z: {}, open: null, general: '', finishError: '', loadError: '', detItems: [], focus: [] };
   const view = document.getElementById('view');
   // Un seul element aria-live, cree une fois : repeint a chaque rendu sans etre recree.
   const countEl = document.createElement('p');
@@ -42,6 +42,7 @@ export async function renderInspect(ctx) {
   function load(snap) {
     st.insp = snap.inspection;
     st.detItems = Array.isArray(snap.detItems) ? snap.detItems : [];
+    st.focus = Array.isArray(snap.focus) ? snap.focus : [];
     for (const it of snap.items || []) zoneOf(it.zone).saved = it;
     for (const p of snap.photos || []) zoneOf(p.zone).photos.push({ id: p.id, kind: p.kind, url: null, state: 'done' });
   }
@@ -138,11 +139,34 @@ export async function renderInspect(ctx) {
     return h;
   }
 
+  // Points a verifier en priorite (problemes recurrents remontes par les guests) : rappel dans la zone.
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monYear = (d) => (d && /^\d{4}-\d{2}/.test(d) ? MON[Number(d.slice(5, 7)) - 1] + ' ' + d.slice(0, 4) : '');
+  const focusOf = (k) => st.focus.filter((f) => f.zone === k);
+  function focusHtml(k) {
+    const list = focusOf(k);
+    if (!list.length) return '';
+    return '<div class="focus" role="note"><p class="focus-h">Check carefully</p>' + list.map((f) => {
+      const seen = [f.stays ? 'reported in ' + f.stays + ' stays' : '', f.lastSeen ? 'last ' + monYear(f.lastSeen) : ''].filter(Boolean).join(', ');
+      return '<div class="focus-item"><p><b>' + esc(f.title) + '</b>' + (seen ? ' <span class="mute">· ' + esc(seen) + '</span>' : '') + '</p>'
+        + (f.reported ? '<p class="focus-rep">Guests said: ' + esc(f.reported) + '</p>' : '')
+        + '<p class="focus-chk">' + esc(f.check) + '</p></div>';
+    }).join('') + '</div>';
+  }
+  function focusSummary() {
+    if (!st.focus.length) return '';
+    const label = (k) => (ZONES.find((z) => z.key === k) || { label: k }).label;
+    return '<section class="card focus-sum" aria-label="Points to check"><h2>' + st.focus.length + (st.focus.length > 1 ? ' points' : ' point')
+      + ' to check in this apartment</h2><p class="mute">Guests reported these problems several times. Check them in the zone, even if it looks fine.</p><ul>'
+      + st.focus.map((f) => '<li><b>' + esc(f.title) + '</b> <span class="mute">· ' + esc(label(f.zone)) + '</span></li>').join('') + '</ul></section>';
+  }
+
   function zoneHtml(zn) {
     const z = zoneOf(zn.key), k = zn.key;
     const open = st.open === k;
     const cls = z.saved && !open && !z.editing ? (z.saved.status === 'ok' ? ' ok' : ' bad') : '';
     let h = '<section class="card zone' + cls + '" data-testid="zone-' + k + '" aria-labelledby="zt-' + k + '"><div class="card-top"><h3 id="zt-' + k + '">' + esc(zn.label) + '</h3></div>';
+    if (!(z.saved && !open && !z.editing)) h += focusHtml(k);
     if (open) h += form(zn);
     else if (z.saved && !z.editing) {
       h += summary(z, k) + '<button class="btn ghost" data-act="edit" data-z="' + k + '"' + (busy ? ' disabled' : '') + '>Change</button>';
@@ -168,6 +192,7 @@ export async function renderInspect(ctx) {
     render('<main class="wrap"><header class="top"><div><h1>' + esc(st.insp.name || 'Apartment') + '</h1><p class="mute">Started '
       + esc(clock(st.insp.startedAt)) + '</p></div><button class="btn ghost" data-act="home">Back</button></header>'
       + '<span data-slot="count"></span>'
+      + focusSummary()
       + ZONES.map(zoneHtml).join('')
       + '<label class="lbl" for="general">General note (optional)</label>'
       + '<textarea id="general" class="ta" rows="3">' + esc(st.general) + '</textarea>'

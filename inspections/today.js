@@ -59,7 +59,8 @@ export async function renderToday(ctx) {
       + '<p class="reason' + (unavail ? ' dim' : '') + '">' + esc(reason(c.eligibility)) + '</p>'
       + '<p class="mute">' + esc(last(c)) + '</p>'
       + '<div class="badges">' + (c.missed > 0 ? '<span class="badge warn">Missed ' + c.missed + '×</span>' : '')
-      + (c.openIssue ? '<span class="badge bad">Open issue</span>' : '') + '</div>'
+      + (c.openIssue ? '<span class="badge bad">Open issue</span>' : '')
+      + (c.focusCount > 0 ? '<span class="badge warn">' + c.focusCount + (c.focusCount > 1 ? ' points' : ' point') + ' to check</span>' : '') + '</div>'
       + '<div class="actions">' + actions + '</div></article>';
   };
 

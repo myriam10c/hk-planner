@@ -417,3 +417,17 @@ Deno.test("reports : lots pagines en ordre de cle, sans doublon ni omission (ite
   assertEquals(r.totals.sentToMaintenance, 500);
   assertEquals(r.reports.every((x: any) => x.issues.length === 15), true);
 });
+
+Deno.test("today : focusCount = nombre de points actifs du logement", async () => {
+  const db = base();
+  db.tables.inspection_focus = [
+    { listing_id: "C", zone: "ac", title: "a", active: true },
+    { listing_id: "C", zone: "bathrooms", title: "b", active: true },
+    { listing_id: "C", zone: "kitchen", title: "c", active: false },
+    { listing_id: "B", zone: "ac", title: "d", active: true },
+  ];
+  const r = await inspToday(db, D, [], null);
+  const by: Record<string, number> = {};
+  for (const c of r.today.concat(r.also)) by[c.listingId] = c.focusCount ?? -1;
+  assertEquals(by, { C: 2, A: 0, B: 1 });
+});

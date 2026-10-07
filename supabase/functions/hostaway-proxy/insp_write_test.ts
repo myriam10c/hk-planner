@@ -407,3 +407,26 @@ Deno.test("det : finish sans photo accepte, outcome toujours exige", async () =>
   r = await finishInspection(db, FAIZA, { inspectionId: id }, NOW);
   assertEquals(r.status, 200);
 });
+
+// ---- Points a verifier (inspection_focus) ----
+
+Deno.test("focus : snapshot renvoie les points actifs du logement, tries par zone", async () => {
+  const db = seed();
+  db.tables.inspection_focus = [
+    { id: 1, listing_id: "L1", zone: "bathrooms", title: "Hot water", check_text: "Run hot water", reported: "No hot water", stays: 7, last_seen: "2026-08-01", active: true },
+    { id: 2, listing_id: "L1", zone: "entrance", title: "Door lock", check_text: "Lock from outside", reported: null, stays: 3, last_seen: null, active: true },
+    { id: 3, listing_id: "L1", zone: "ac", title: "Old", check_text: "x", stays: 9, active: false },
+    { id: 4, listing_id: "L2", zone: "ac", title: "Other flat", check_text: "x", stays: 9, active: true },
+    { id: 5, listing_id: "L1", zone: "pool", title: "Unknown zone", check_text: "x", stays: 9, active: true },
+  ];
+  const r = await startInspection(db, FAIZA, { listingId: "L1", eligibility: "checkout", idem: "idem-start-1" }, NOW);
+  const f = (r.body as any).focus;
+  assertEquals(f.map((x: any) => x.title), ["Door lock", "Hot water"]);
+  assertEquals(f[1], { zone: "bathrooms", title: "Hot water", check: "Run hot water", reported: "No hot water", stays: 7, lastSeen: "2026-08-01" });
+});
+
+Deno.test("focus : aucun point = liste vide", async () => {
+  const db = seed();
+  const r = await startInspection(db, FAIZA, { listingId: "L1", eligibility: "checkout", idem: "idem-start-1" }, NOW);
+  assertEquals((r.body as any).focus, []);
+});
