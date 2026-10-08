@@ -112,6 +112,12 @@ async function networkFirst(req) {
   } catch (err) {
     const cached = await cache.match(req);
     if (cached) return cached;
+    // Navigation hors ligne avec une query (/?legacy=1 des liens de secours de la
+    // bascule v3) : la coquille est une seule page, on sert celle en cache.
+    if (req.mode === 'navigate') {
+      const shell = (await cache.match(req, { ignoreSearch: true })) || (await cache.match('/'));
+      if (shell) return shell;
+    }
     throw err;
   }
 }

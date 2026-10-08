@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
 // Le reseau est bouchonne (window.fetch remplace avant app.js), /v3/ est servi
 // par une page de remplacement : aucune ecriture, aucun appel a la prod.
 
-type FakeRoute = { match: string; status: number; body: any };
+type FakeRoute = { match: string; status: number; body: any; fail?: boolean; delay?: number };
 
 // 08/10 23:59:30 et 09/10 00:00:30 a Dubai (UTC+4), puis 09/10 08:00.
 const AVANT = new Date('2026-10-08T19:59:30Z');
@@ -47,7 +47,7 @@ function routesFor(member: any, email: string | null, extra: FakeRoute[] = []): 
 }
 
 async function boot(page: any, opts: {
-  at: Date; routes: FakeRoute[]; pin?: any; email?: boolean; path?: string;
+  at: Date; routes: FakeRoute[]; pin?: any; email?: boolean; path?: string; offline?: boolean; mode?: any;
 }) {
   await page.clock.setFixedTime(opts.at);
   // /v3/ remplacee : on ne verifie ici que la decision de la racine.
@@ -60,17 +60,25 @@ async function boot(page: any, opts: {
         localStorage.setItem('hkSessionCleanerId', String(cfg.pin.id));
       }
       if (cfg.email) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.email));
+      // cleanerMode laisse par une session precedente (cas reel du telephone).
+      if (cfg.mode) localStorage.setItem('cleanerMode', JSON.stringify(cfg.mode));
       localStorage.setItem('onboardingSeen', '1');
       localStorage.setItem('hkInspAnnounceShown', '9');
     } catch (e) { /* ignore */ }
+    if (cfg.offline) Object.defineProperty(Navigator.prototype, 'onLine', { get: () => false, configurable: true });
     (window as any).__fetchLog = [];
     const real = window.fetch.bind(window);
     window.fetch = ((input: any, init: any) => {
       const url = typeof input === 'string' ? input : (input && input.url) || '';
       (window as any).__fetchLog.push(url);
+      // Journal qui survit au renvoi vers /v3/ (meme onglet).
+      try { sessionStorage.setItem('__log', (sessionStorage.getItem('__log') || '') + '\n' + url); } catch (e) { /* ignore */ }
       for (const r of cfg.routes) {
         if (url.indexOf(r.match) !== -1) {
-          return Promise.resolve(new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } }));
+          if (r.fail) return new Promise((_res, rej) => setTimeout(() => rej(new TypeError('Failed to fetch')), r.delay || 0));
+          const make = () => new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } });
+          if (r.delay) return new Promise((res) => setTimeout(() => res(make()), r.delay));
+          return Promise.resolve(make());
         }
       }
       if (url.indexOf(location.origin) === 0 || url.charAt(0) === '/') return real(input, init);
@@ -79,6 +87,8 @@ async function boot(page: any, opts: {
   }, {
     routes: opts.routes,
     pin: opts.pin || null,
+    offline: !!opts.offline,
+    mode: opts.mode || null,
     email: opts.email ? { ...SESSION, expires_at: Math.floor(opts.at.getTime() / 1000) + 3600 } : null,
   });
   await page.goto(opts.path || '/', { waitUntil: 'commit' });
@@ -241,4 +251,69 @@ test('garde anti-boucle : un second passage par la racine dans les 30 s ne renvo
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
   await reste(page);
+});
+
+// ===== Revue du 08/10 : jamais de renvoi sans role confirme par le serveur =====
+
+const journal = async (page: any) => String(await page.evaluate(() => sessionStorage.getItem('__log') || ''));
+
+test('hors ligne (navigator.onLine false), session PIN cleaner le 09/10 : pas de renvoi, ancienne app utilisable', async ({ page }) => {
+  await boot(page, { at: APRES, pin: FAIZA, offline: true, routes: routesFor(FAIZA, 'faiza@example.com') });
+  await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
+  await reste(page);
+  expect(await journal(page)).not.toContain('action=cleanerMe');
+});
+
+test('hors ligne, session email cleaner le 09/10 : pas de renvoi', async ({ page }) => {
+  await boot(page, { at: APRES, email: true, mode: FAIZA, offline: true, routes: routesFor(FAIZA, 'faiza@example.com') });
+  await reste(page, 3000);
+});
+
+test('cleanerMe en panne reseau, session PIN cleaner le 09/10 : pas de renvoi (role non confirme)', async ({ page }) => {
+  await boot(page, {
+    at: APRES, pin: FAIZA,
+    routes: [{ match: 'action=cleanerMe', status: 0, body: null, fail: true }, ...routesFor(FAIZA, 'faiza@example.com')],
+  });
+  await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
+  await reste(page);
+});
+
+test('cleanerMe en panne reseau, session email cleaner le 09/10 : pas de renvoi', async ({ page }) => {
+  await boot(page, {
+    at: APRES, email: true, mode: FAIZA,
+    routes: [{ match: 'action=cleanerMe', status: 0, body: null, fail: true }, ...routesFor(FAIZA, 'faiza@example.com')],
+  });
+  await reste(page, 3000);
+});
+
+test('cleanerMe trop lent (plus de 5 s), session PIN cleaner le 09/10 : l ancienne app s ouvre, pas de renvoi tardif', async ({ page }) => {
+  await boot(page, {
+    at: APRES, pin: FAIZA,
+    routes: [{ match: 'action=cleanerMe', status: 200, delay: 9000, body: { status: 'success', cleaner: FAIZA } }, ...routesFor(FAIZA, 'faiza@example.com')],
+  });
+  await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 12_000 });
+  await reste(page, 6000);
+});
+
+test('renvoi decide avant le premier fetchAll : aucune lecture du planning avant /v3/', async ({ page }) => {
+  await boot(page, { at: APRES, pin: FAIZA, routes: routesFor(FAIZA, 'faiza@example.com') });
+  await redirige(page);
+  const log = await journal(page);
+  expect(log).toContain('action=cleanerMe');
+  expect(log).not.toContain('action=getAllData');
+  expect(log).not.toContain('action=checkouts');
+});
+
+test('session email cleaner le 09/10 : renvoi avant le premier fetchAll', async ({ page }) => {
+  await boot(page, { at: APRES, email: true, routes: routesFor(FAIZA, 'faiza@example.com') });
+  await redirige(page);
+  expect(await journal(page)).not.toContain('action=getAllData');
+});
+
+test('role local cleaner mais serveur dit manager : pas de renvoi', async ({ page }) => {
+  await boot(page, {
+    at: APRES, pin: FAIZA,
+    routes: [{ match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: WALTER } }, ...routesFor(FAIZA, 'faiza@example.com')],
+  });
+  await reste(page, 3000);
 });

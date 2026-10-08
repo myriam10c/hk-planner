@@ -580,11 +580,18 @@ function v3CutoverDue(role,dubaiDate,legacy){ return role==='cleaner'&&!legacy&&
 }());
 function v3LegacyChosen(){ try{ return sessionStorage.getItem(V3_LEGACY_KEY)==='1'; }catch(e){ return false; } }
 let leavingForV3=false;
+// Role rendu par le serveur PENDANT cette page (cleanerLogin ou cleanerMe), jamais
+// celui garde en localStorage : hors ligne ou sans reponse, pas de renvoi (/v3/
+// n'est peut-etre pas en cache sur le telephone, revue du 08/10).
+let v3ConfirmedRole=null;
+function v3Offline(){ return typeof navigator!=='undefined'&&navigator.onLine===false; }
 // Renvoie vers /v3/ si la session courante y a droit. true = navigation lancee.
 function maybeGoV3(){
   if(leavingForV3) return true;
   if(authScreen) return false;
+  if(v3Offline()) return false;
   if(!(cleanerToken||authAccessToken)) return false;
+  if(v3ConfirmedRole!=='cleaner') return false;
   const role=cleanerMode&&cleanerMode.role;
   if(!v3CutoverDue(role,dubaiDateOf(Date.now()),v3LegacyChosen())) return false;
   // Garde anti-boucle : /v3/ renvoie vers la racine (compte a creer, session
@@ -597,23 +604,28 @@ function maybeGoV3(){
   location.replace(V3_CUTOVER_PATH);
   return true;
 }
-// Session PIN deja posee au boot : rien n'a encore ete verifie. On attend le
-// controle du compte obligatoire (pas d'adresse = Create your account, ici) et
-// cleanerMe (jeton revoque = retour au PIN) avant de renvoyer.
+// Session PIN deja posee au boot, decide AVANT le premier fetchAll (pas de renvoi
+// en plein geste). On attend, 5 s au plus, le controle du compte obligatoire (pas
+// d'adresse = Create your account, ici) et cleanerMe (role confirme par le
+// serveur). Sans reponse, hors ligne ou refus : l'ancienne app s'ouvre.
+const V3_BOOT_WAIT_MS=5000;
 async function v3BootCheck(setupCheck){
   const role=cleanerMode&&cleanerMode.role;
   if(!v3CutoverDue(role,dubaiDateOf(Date.now()),v3LegacyChosen())) return false;
-  let must=false, me=null;
+  if(v3Offline()) return false;
+  if(!authScreen) renderAuthPending();
+  const borne=function(p){ return Promise.race([p,new Promise(function(res){ setTimeout(function(){ res(null); },V3_BOOT_WAIT_MS); })]); };
+  let must=null, me=null;
   try{
     const r=await Promise.all([
-      Promise.resolve(setupCheck).catch(function(){ return false; }),
-      api('cleanerMe').catch(function(){ return null; })
+      borne(Promise.resolve(setupCheck).catch(function(){ return null; })),
+      borne(api('cleanerMe').catch(function(){ return null; }))
     ]);
     must=r[0]; me=r[1];
-  }catch(e){}
-  if(must) return false;
-  if(me&&me.error) return false;
-  if(me&&me.cleaner&&me.cleaner.role!=='cleaner') return false;
+  }catch(e){ return false; }
+  if(must!==false) return false;       // compte a creer, ou controle sans reponse
+  if(!me||me.error||!me.cleaner) return false;
+  v3ConfirmedRole=me.cleaner.role;
   return maybeGoV3();
 }
 // Migration : sessions pré-Phase1 (cleanerMode sans token) → forcer re-login
@@ -3277,6 +3289,7 @@ async function cleanerLogin(){
   if(pin.length!==4)return;
   const res=await api('cleanerLogin',{body:{pin}});
   if(res.status==='success'){
+    v3ConfirmedRole=res.cleaner?res.cleaner.role:null;
     cleanerToken=res.token||null;
     if(cleanerToken) localStorage.setItem('cleanerToken',cleanerToken);
     // Qui vient d'entrer : sert a lire sa ligne (a-t-elle une adresse ?) et a
@@ -4473,6 +4486,7 @@ async function adoptEmailSession(){
     return false;
   }
   sessionCleanerId=me.cleaner.id;
+  v3ConfirmedRole=me.cleaner.role;
   try{ localStorage.setItem(SESSION_CLEANER_KEY,String(sessionCleanerId)); }catch(e){}
   authPinPrompt=false;
   if(me.cleaner.role==='manager'){
@@ -7954,12 +7968,13 @@ window.addEventListener('popstate', () => {
   render();
 });
 initSwipe();
-hkAuthBoot().then(function(ok){
+hkAuthBoot().then(async function(ok){
   if(!ok) return;
-  // Session email : cleanerMe vient de la verifier (adoptEmailSession).
-  if(authAccessToken&&maybeGoV3()) return;
+  // Session email : cleanerMe vient de confirmer le role (adoptEmailSession).
+  // Session PIN : on le demande au serveur avant le premier fetchAll.
+  if(authAccessToken){ if(maybeGoV3()) return; }
+  else if(cleanerToken&&await v3BootCheck(bootSetupCheck)) return;
   fetchAll();
-  if(!authAccessToken&&cleanerToken) v3BootCheck(bootSetupCheck);
 });
 // Rafraichissement auto : jamais pendant que l'onglet RH est ouvert. fetchAll finit par
 // render(), qui remplace #app.innerHTML et viderait les formulaires RH (dossier salarie,
