@@ -1,7 +1,7 @@
 // Lectures du module Inspections : liste du jour, tableau du parc, historique.
-import { plusDays, V3_PHOTO_BUCKET } from "./v3.ts";
+import { plusDays, todayDubai, V3_PHOTO_BUCKET } from "./v3.ts";
 import {
-  daysBetween, dubaiDay, eligibilityFor, fleetColor, INSP_DEFAULT_TARGET, INSP_DET_ITEMS, INSP_GOAL_DAYS, INSP_ZONES, listingLabel,
+  daysBetween, dubaiDay, eligibilityFor, fixOverdue, fleetColor, INSP_DEFAULT_TARGET, INSP_DET_ITEMS, INSP_GOAL_DAYS, INSP_ZONES, listingLabel,
   rankToday,
 } from "./insp_rules.ts";
 import type { InspCard, InspReservation } from "./insp_rules.ts";
@@ -197,7 +197,7 @@ export async function inspOverview(sb: any, day: string) {
   };
 }
 
-export async function inspHistory(sb: any, listingId: string) {
+export async function inspHistory(sb: any, listingId: string, day = todayDubai()) {
   const [names, { data: l }, { data: insps }] = await Promise.all([
     cleanerNames(sb),
     sb.from("listing_config").select("listing_id, internal_name, listing_name").eq("listing_id", listingId).maybeSingle(),
@@ -223,7 +223,7 @@ export async function inspHistory(sb: any, listingId: string) {
   return {
     listingId, name: listingLabel(l ?? {}),
     inspections: list.map((i: any) => ({
-      id: i.id, inspector: names[String(i.inspector_id)] ?? "Someone", startedAt: i.started_at,
+      id: i.id, inspector: names[String(i.inspector_id)] ?? "Someone", inspectorId: Number(i.inspector_id), startedAt: i.started_at,
       finishedAt: i.finished_at ?? null, eligibility: i.eligibility, generalNote: i.general_note ?? null,
       items: (items ?? []).filter((it: any) => it.inspection_id === i.id && it.status === "not_ok")
         .sort((a: any, b: any) => INSP_ZONES.findIndex((z) => z.key === a.zone) - INSP_ZONES.findIndex((z) => z.key === b.zone))
@@ -234,6 +234,8 @@ export async function inspHistory(sb: any, listingId: string) {
             .map((k: string) => INSP_DET_ITEMS.find((d) => d.key === k)?.label ?? k),
           ticket: it.ticket_id && tById[String(it.ticket_id)]
             ? { id: it.ticket_id, status: tById[String(it.ticket_id)].status, title: tById[String(it.ticket_id)].title } : null,
+          fixScheduledFor: it.fix_scheduled_for ?? null, fixScheduledSlot: it.fix_scheduled_slot ?? null,
+          fixOverdue: fixOverdue(it.fix_scheduled_for, tById[String(it.ticket_id)]?.status ?? null, day),
           photos: (photos ?? []).filter((p: any) => p.inspection_id === i.id && p.zone === it.zone)
             .map((p: any) => ({ kind: p.kind, url: signed[p.storage_path] ?? null })).filter((p: any) => p.url),
         })),
@@ -347,7 +349,7 @@ async function inBatches(sb: any, table: string, cols: string, col: string, ids:
 
 // Rapports d'inspection termines sur [from, to] (jours Dubai). finished_at est en UTC : fenetre elargie d'un jour, filtre exact en JS.
 // Toute lecture en erreur leve : un echec ne doit jamais ressembler a un rapport propre.
-export async function inspReports(sb: any, from: string, to: string) {
+export async function inspReports(sb: any, from: string, to: string, day = todayDubai()) {
   const lo = plusDays(from, -1) + "T00:00:00Z", hi = plusDays(to, 2) + "T00:00:00Z";
   const fetchWindow = async () => {
     const out: any[] = [];
@@ -375,7 +377,7 @@ export async function inspReports(sb: any, from: string, to: string) {
     .filter((x: any) => x.day >= from && x.day <= to)
     .map((x: any) => x.r)
     .sort((a: any, b: any) => String(b.finished_at).localeCompare(String(a.finished_at)) || Number(b.id) - Number(a.id));
-  const items = (await inBatches(sb, "inspection_items", "inspection_id, zone, status, outcome, ticket_id", "inspection_id",
+  const items = (await inBatches(sb, "inspection_items", "inspection_id, zone, status, outcome, ticket_id, fix_scheduled_for, fix_scheduled_slot", "inspection_id",
     insps.map((r: any) => r.id), (q) => q.eq("status", "not_ok")))
     .filter((i: any) => i.status === "not_ok");
   const itemsBy = new Map<string, any[]>();
@@ -399,6 +401,8 @@ export async function inspReports(sb: any, from: string, to: string) {
         zone: i.zone as string, label: INSP_ZONES.find((x) => x.key === i.zone)?.label ?? i.zone as string,
         outcome: (i.outcome === "fixed" || i.outcome === "maintenance" ? i.outcome : null) as "fixed" | "maintenance" | null,
         ticket: i.ticket_id && tById[String(i.ticket_id)] ? { id: i.ticket_id, status: tById[String(i.ticket_id)].status } : null,
+        fixScheduledFor: (i.fix_scheduled_for ?? null) as string | null, fixScheduledSlot: (i.fix_scheduled_slot ?? null) as string | null,
+        fixOverdue: fixOverdue(i.fix_scheduled_for, tById[String(i.ticket_id)]?.status ?? null, day),
       }));
     const result = (!issues.length ? "clean" : issues.some((i: any) => i.outcome === "maintenance") ? "maintenance" : "fixed") as
       "clean" | "fixed" | "maintenance";

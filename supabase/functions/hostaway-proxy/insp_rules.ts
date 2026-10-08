@@ -106,6 +106,7 @@ export const INSP_ROLES: Record<string, string[]> = {
   "insp.today": TEAM, "insp.overview": TEAM, "insp.history": TEAM,
   "insp.claim": TEAM, "insp.unclaim": TEAM,
   "insp.start": TEAM, "insp.saveItem": TEAM, "insp.uploadPhoto": TEAM, "insp.finish": TEAM,
+  "insp.setFixSchedule": TEAM,
   "insp.assign": ["manager"], "insp.reports": ["manager"], "insp.setExcluded": ["manager"],
 };
 export function inspRoleAllowed(action: string, role: string): boolean {
@@ -197,4 +198,20 @@ export function rankToday(input: RankInput): { today: InspCard[]; also: InspCard
   cards.sort((a, b) => key(b) - key(a) || b.missed - a.missed || a.name.localeCompare(b.name));
   const n = Math.max(0, Math.floor(input.target));
   return { today: cards.slice(0, n), also: cards.slice(n) };
+}
+
+// Date de rectification programmee (zone envoyee en maintenance). Ligne ajoutee au ticket :
+// formulation neutre, aucun mot-cle du filtre anti-bruit des tickets (scheduled, booked, done...).
+const FIX_MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const FIX_LINE_PREFIX = "Fix date: ";
+export function fixLine(date: string | null | undefined, slot: string | null | undefined): string {
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
+  const txt = Number(date.slice(8, 10)) + " " + FIX_MON[Number(date.slice(5, 7)) - 1] + " " + date.slice(0, 4);
+  return FIX_LINE_PREFIX + txt + (slot ? ", " + slot : "");
+}
+// En retard : date strictement passee (jour Dubai) et ticket lie encore ouvert.
+export function fixOverdue(date: string | null | undefined, ticketStatus: string | null | undefined, day: string): boolean {
+  if (!date || !ticketStatus) return false;
+  if (ticketStatus === "resolved" || ticketStatus === "cancelled") return false;
+  return date < day;
 }

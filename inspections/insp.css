@@ -103,3 +103,13 @@ dialog.photo img { display: block; max-width: 100%; max-height: 80vh; margin: 0 
 .focus-sum h2 { font-size: 1rem; margin: 0 0 4px; }
 .focus-sum ul { margin: 6px 0 0; padding-left: 18px; }
 .focus-sum li { margin: 2px 0; }
+/* Date de rectification programmee */
+.fixsched { margin-top: 4px; }
+.fixrow { display: flex; flex-wrap: wrap; gap: 8px; }
+.inp { min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bone-hi); color: var(--ink); font: inherit; box-sizing: border-box; min-width: 0; }
+.fixrow input[type="date"] { flex: 1 1 160px; }
+.fixrow input[type="text"] { flex: 2 1 180px; }
+.badge.fix { color: var(--ink); }
+.badge.overdue { background: var(--ember-ink); color: var(--bone-hi); }
+.fixedit { margin-top: 6px; }
+.hist .zone-item .btn.small { margin-top: 6px; }

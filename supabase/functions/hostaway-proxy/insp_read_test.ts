@@ -325,8 +325,8 @@ Deno.test("reports : result clean / fixed / maintenance et zones", async () => {
   assertEquals(by(3).result, "fixed");
   assertEquals(by(2).result, "maintenance");
   assertEquals(by(2).issues, [
-    { zone: "living", label: "Living room", outcome: "fixed", ticket: null },
-    { zone: "ac", label: "AC", outcome: "maintenance", ticket: { id: 50, status: "open" } },
+    { zone: "living", label: "Living room", outcome: "fixed", ticket: null, fixScheduledFor: null, fixScheduledSlot: null, fixOverdue: false },
+    { zone: "ac", label: "AC", outcome: "maintenance", ticket: { id: 50, status: "open" }, fixScheduledFor: null, fixScheduledSlot: null, fixOverdue: false },
   ]);
 });
 

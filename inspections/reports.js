@@ -1,4 +1,5 @@
 import { get } from '/inspections/api.js';
+import { fixText } from '/inspections/fix.js';
 
 const TZ = 'Asia/Dubai';
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -50,8 +51,12 @@ export async function renderReports(ctx) {
     if (r.result === 'fixed') return '<span class="badge warn">Fixed on the spot</span>';
     const t = (r.issues || []).filter((i) => i && i.ticket);
     const txt = t.length ? t.map((i) => 'Ticket #' + i.ticket.id + ' · ' + i.ticket.status).join(', ') : '';
-    return '<span class="badge bad">Maintenance' + (txt ? ' · ' + esc(txt) : '') + '</span>';
+    return '<span class="badge bad">Maintenance' + (txt ? ' · ' + esc(txt) : '') + '</span>' + fixBadges(r);
   };
+  // Date de rectification par zone en maintenance, badge Overdue si passee et ticket encore ouvert.
+  const fixBadges = (r) => (r.issues || []).filter((i) => i && i.outcome === 'maintenance' && i.fixScheduledFor).map((i) =>
+    '<span class="badge fix">' + esc(i.label) + ' · Fix scheduled: ' + esc(fixText(i.fixScheduledFor, i.fixScheduledSlot)) + '</span>'
+    + (i.fixOverdue ? '<span class="badge bad overdue">Overdue</span>' : '')).join('');
   const rowHtml = (r) => '<button class="card rrow" data-act="open" data-id="' + esc(r.listingId) + '" data-testid="report-' + esc(r.id) + '">'
     + '<span class="mute">' + esc(when(r.finishedAt)) + '</span>'
     + '<span class="rname">' + esc(r.name) + '</span>'

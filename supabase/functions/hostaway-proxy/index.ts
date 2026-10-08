@@ -25,7 +25,7 @@ import { inspRoleAllowed, type InspReservation } from "./insp_rules.ts";
 import { loadReservationsCached, normalizeReservations } from "./insp_reservations.ts";
 import { inspHistory, inspOverview, inspRecap, inspReports, inspToday, parseReportRange } from "./insp_read.ts";
 import {
-  assignProposal, claimProposal, finishInspection, saveItem, setExcluded, startInspection,
+  assignProposal, claimProposal, finishInspection, saveItem, setExcluded, setFixSchedule, startInspection,
   unclaimProposal, uploadInspectionPhoto,
 } from "./insp_write.ts";
 
@@ -851,6 +851,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["insp.recap", "GET"], ["insp.today", "GET"], ["insp.overview", "GET"], ["insp.history", "GET"], ["insp.reports", "GET"],
   ["insp.start", "POST"], ["insp.saveItem", "POST"], ["insp.uploadPhoto", "POST"], ["insp.finish", "POST"],
   ["insp.claim", "POST"], ["insp.unclaim", "POST"], ["insp.assign", "POST"], ["insp.setExcluded", "POST"],
+  ["insp.setFixSchedule", "POST"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1396,12 +1397,12 @@ Deno.serve(async (req: Request) => {
       if (action === "insp.reports") {
         const range = parseReportRange(url.searchParams.get("from"), url.searchParams.get("to"), day);
         if (!range) return jsonResp({ error: "Invalid date range" }, 400);
-        return jsonResp(await inspReports(sb, range.from, range.to));
+        return jsonResp(await inspReports(sb, range.from, range.to, day));
       }
       if (action === "insp.history") {
         const lid = url.searchParams.get("listingId") ?? "";
         if (!lid) return jsonResp({ error: "listingId required" }, 400);
-        return jsonResp(await inspHistory(sb, lid));
+        return jsonResp(await inspHistory(sb, lid, day));
       }
       if (action === "insp.uploadPhoto") {
         const annonce = Number(req.headers.get("content-length") ?? "");
@@ -1416,7 +1417,7 @@ Deno.serve(async (req: Request) => {
       const handlers: Record<string, (sb: any, me: any, b: any) => Promise<{ status: number; body: any }>> = {
         "insp.start": startInspection, "insp.saveItem": saveItem, "insp.finish": finishInspection,
         "insp.claim": claimProposal, "insp.unclaim": unclaimProposal, "insp.assign": assignProposal,
-        "insp.setExcluded": setExcluded,
+        "insp.setExcluded": setExcluded, "insp.setFixSchedule": setFixSchedule,
       };
       const hd = handlers[action];
       if (!hd) return jsonResp({ error: "unknown action" }, 404);

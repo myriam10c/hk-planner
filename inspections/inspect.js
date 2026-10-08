@@ -1,5 +1,6 @@
 import { post, upload, newIdem } from '/inspections/api.js';
 import { shrink } from '/inspections/photo.js';
+import { fixFields, fixText } from '/inspections/fix.js';
 
 // Jumeau volontaire de INSP_ZONES dans supabase/functions/hostaway-proxy/insp_rules.ts :
 // memes cles, memes libelles, meme ordre. A modifier des deux cotes.
@@ -94,7 +95,7 @@ export async function renderInspect(ctx) {
       h += '<label class="lbl" for="fix-' + k + '">What did you add?</label>'
         + '<textarea id="fix-' + k + '" class="ta" rows="2" data-f="fixNote" data-z="' + k + '">' + esc(d.fixNote) + '</textarea>';
     } else if (d.outcome === 'maintenance') {
-      h += '<p class="mute">A ticket will be created with the list.</p>';
+      h += '<p class="mute">A ticket will be created with the list.</p>' + fixFields(esc, k, d.fixDate, d.fixSlot);
     }
     h += '<div class="actions"><button class="btn primary" data-act="save" data-z="' + k + '"' + (canSave(z, k) && !busy ? '' : ' disabled') + '>Save</button>'
       + '<button class="btn ghost" data-act="cancel" data-z="' + k + '">Cancel</button></div></div>';
@@ -117,7 +118,7 @@ export async function renderInspect(ctx) {
         + '<textarea id="fix-' + k + '" class="ta" rows="2" data-f="fixNote" data-z="' + k + '">' + esc(d.fixNote) + '</textarea>'
         + thumbs(z, 'after', k) + addBtn(k, 'after', 'Add after photo');
     } else if (d.outcome === 'maintenance') {
-      h += '<p class="mute">A maintenance ticket will be created.</p>';
+      h += '<p class="mute">A maintenance ticket will be created.</p>' + fixFields(esc, k, d.fixDate, d.fixSlot);
     }
     h += '<div class="actions"><button class="btn primary" data-act="save" data-z="' + k + '"' + (canSave(z, k) && !busy ? '' : ' disabled') + '>Save</button>'
       + '<button class="btn ghost" data-act="cancel" data-z="' + k + '">Cancel</button></div></div>';
@@ -134,7 +135,10 @@ export async function renderInspect(ctx) {
       if (it.note) h += '<p class="sum">' + esc(it.note) + '</p>';
     } else h += '<p class="sum">' + esc(it.note) + '</p>';
     if (it.outcome === 'fixed') h += '<p class="mute">' + (det ? 'Added on the spot: ' : 'Fixed on the spot: ') + esc(it.fixNote) + '</p>';
-    else if (it.outcome === 'maintenance') h += '<p class="mute">' + (det ? 'Needs to be supplied' : 'Needs maintenance') + '</p>';
+    else if (it.outcome === 'maintenance') {
+      h += '<p class="mute">' + (det ? 'Needs to be supplied' : 'Needs maintenance') + '</p>';
+      if (it.fixScheduledFor) h += '<p class="mute">Fix scheduled: ' + esc(fixText(it.fixScheduledFor, it.fixScheduledSlot)) + '</p>';
+    }
     if (it.ticketId) h += '<p class="badge bad">Ticket #' + esc(it.ticketId) + (it.outcome === 'fixed' ? ' stays open' : ' created') + '</p>';
     return h;
   }
@@ -273,6 +277,7 @@ export async function renderInspect(ctx) {
       if (!z.draft) {
         const notOk = s && s.status === 'not_ok';
         z.draft = { note: s && s.note || '', outcome: s && s.outcome || null, fixNote: s && s.fixNote || '',
+          fixDate: notOk && s.fixScheduledFor || '', fixSlot: notOk && s.fixScheduledSlot || '',
           missing: notOk && Array.isArray(s.missingItems) ? s.missingItems.slice() : [] };
       }
       st.open = k; return paint();
@@ -294,6 +299,7 @@ export async function renderInspect(ctx) {
       const body = { inspectionId: st.insp.id, zone: k, status: 'not_ok', note: d.note.trim(), outcome: d.outcome || null };
       if (k === 'det') body.missing = st.detItems.map((x) => x.key).filter((key) => d.missing.includes(key));
       if (d.outcome === 'fixed') body.fixNote = d.fixNote.trim();
+      if (d.outcome === 'maintenance') { body.fixScheduledFor = d.fixDate || null; body.fixScheduledSlot = d.fixDate ? d.fixSlot.trim() : null; }
       const r = await post('insp.saveItem', body);
       z.saved = r.item || { zone: k, status: 'not_ok', ...body, missingItems: body.missing || [] };
       z.editing = false; st.open = null; z.draft = null;
