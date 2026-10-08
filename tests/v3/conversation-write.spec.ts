@@ -21,6 +21,7 @@ test('studio : startJob, photos de pieces dans l ordre, finishJob avec linge et 
   await page.locator('[data-reply="no-damage"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
+  await expect(page.locator('[data-reply="leave:door"]')).toHaveText(/Door locked, keys & card left inside/);
   for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
   await page.locator('[data-reply="low-done"]').click();
   await page.locator('[data-reply="send"]').click();
@@ -38,6 +39,8 @@ test('studio : startJob, photos de pieces dans l ordre, finishJob avec linge et 
   const fin = e[7].body;
   expect(fin.linen).toEqual({ pillowcases: 4, bed_sheets: 1, duvet_covers: 1, large_towels: 3, small_towels: 0, face_towels: 0, bath_mats: 1 });
   expect(fin.report.text).toContain('READY · 1011C Bloom Towers');
+  expect(fin.report.text).toContain('Door locked, keys & card left inside ✓');
+  expect(fin.report.text).not.toContain('key back');
   expect(JSON.stringify(fin)).not.toContain('—');
   // Toutes les bulles de la cleaner passent a ✓✓, la liste dit Report sent ✓✓.
   await expect(page.locator('.msg.me .ticks').filter({ hasText: /^✓$/ })).toHaveCount(0);
@@ -148,4 +151,29 @@ test('mise en file ratee une fois (stockage plein) : la photo et son signalement
   expect(e[3].body).toMatchObject({ ticketIdem: e[1].body.idem, photoIdem: e[2].body.idem });
   expect(await page.evaluate(async () => (await (await import('/v3/offline.js')).deadEntries()).length)).toBe(0);
   await expect(page.locator('.msg.me.problem .ticks')).toHaveText('✓✓');
+});
+
+test('Gas smell : double appui sur la tuile puis nouvel appui plus tard = un seul reportProblem, consigne « manager on duty »', async ({ page }) => {
+  await demarrer(page);
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  await page.locator('.vf-problem').click();
+  await page.locator('[data-kind="Gas smell"]').dblclick();
+  await expect(page.locator('.gas-page .gas-text')).toHaveText('Open the windows. Do not touch switches. Leave and call your manager on duty.');
+  await page.waitForTimeout(600);
+  await page.locator('[data-flow="gas-ok"]').click();
+  await expect(page.locator('.gas-page')).toHaveCount(0);
+  // Elle croit que ca n'est pas parti et retouche Gas smell 2,5 s plus tard.
+  await page.waitForTimeout(2500);
+  await page.locator('.vf-problem').click();
+  await page.locator('[data-kind="Gas smell"]').click();
+  await expect(page.locator('.gas-page')).toBeVisible();
+  await page.waitForTimeout(600);
+  await page.locator('[data-flow="gas-ok"]').click();
+  await fileVide(page);
+  const rep = (await ecritures(page)).filter((x) => x.action === 'v3.reportProblem');
+  expect(rep.length).toBe(1);
+  expect(rep[0].body).toMatchObject({ kind: 'Gas smell', urgency: 'urgent' });
+  await expect(page.locator('.msg.me.problem')).toHaveCount(1);
+  await expect(page.getByText('Leave and call Walter')).toHaveCount(0);
 });

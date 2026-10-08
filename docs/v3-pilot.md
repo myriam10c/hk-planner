@@ -56,7 +56,7 @@ The top of the screen always says "Step N of 5" and shows the timer.
   - Lights off
   - Windows and balcony closed
   - Trash taken out
-  - Door locked, key back
+  - Door locked, keys & card left inside
 - "Running low?" Tap what is running low, or nothing.
 - Tap **Send to Housekeeping**. WhatsApp opens. Choose the group **Medini Homes
   Housekeeping** and send. The photos go with the message.

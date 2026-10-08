@@ -325,11 +325,19 @@ export function addPhoto(conv, photo) {
 // Second Gas smell à moins de 2 s du premier : double appui sur la tuile, ignoré (pas de doublon).
 export const GAS_DEBOUNCE_MS = 2000;
 
+// Gas smell est idempotent sur le ménage (décision Hillal du 08/10) : tant qu'un Gas smell
+// est dans la liste des problèmes, un nouvel appui ne crée ni problème ni ticket, il remontre
+// la consigne. Supprimé depuis sa page, il peut être resignalé.
+function existingSafety(conv, kind) {
+  return conv.problems.find(p => p.kind === kind) || null;
+}
+
 export function addProblem(conv, kind, photo, { now = new Date() } = {}) {
   if (conv.readOnly) return conv;
   if (kind === "Gas smell") {
     if (conv.lastGasAt !== null && now - conv.lastGasAt < GAS_DEBOUNCE_MS) return conv;
     conv.lastGasAt = now.getTime();
+    if (existingSafety(conv, kind)) return conv;
   }
   conv.gestures += 1;
   pushProblem(conv, kind, guessWhere(conv), photo ? [photo] : [], now);
@@ -402,6 +410,14 @@ export function chooseKind(conv, kind, { now = new Date() } = {}) {
   if (k.safety) {
     if (conv.lastGasAt !== null && now - conv.lastGasAt < GAS_DEBOUNCE_MS) return conv;
     conv.lastGasAt = now.getTime();
+    const prev = existingSafety(conv, kind);
+    if (prev) {
+      // Déjà signalé pendant ce ménage : la consigne revient en grand, sur le même problème.
+      conv.gestures += 1;
+      f.problem = prev;
+      f.stage = "gas";
+      return conv;
+    }
   }
   conv.gestures += 1;
   f.problem = pushProblem(conv, kind, f.where || guessWhere(conv), [], now);

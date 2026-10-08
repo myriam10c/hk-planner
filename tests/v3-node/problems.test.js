@@ -9,7 +9,7 @@ test("les dix types, gaz en tête", () => {
 test("odeur de gaz toujours urgente, avec consigne de sécurité", () => {
   assert.equal(autoUrgency("Gas smell", null), "urgent");
   assert.equal(autoUrgency("Gas smell", 500), "urgent");
-  assert.equal(KINDS[0].safety, "Open the windows. Do not touch switches. Leave and call Walter.");
+  assert.equal(KINDS[0].safety, "Open the windows. Do not touch switches. Leave and call your manager on duty.");
   assert.equal(SAFETY_GAS, KINDS[0].safety);
 });
 

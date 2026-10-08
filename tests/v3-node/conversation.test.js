@@ -176,7 +176,7 @@ test("odeur de gaz : urgent, consigne de sécurité dans le fil", () => {
   addProblem(c, "Gas smell", null, { now: at(10, 1) });
   assert.equal(c.problems[0].urgency, "urgent");
   assert.equal(c.messages.at(-1).from, "app");
-  assert.equal(c.messages.at(-1).text, "Open the windows. Do not touch switches. Leave and call Walter.");
+  assert.equal(c.messages.at(-1).text, "Open the windows. Do not touch switches. Leave and call your manager on duty.");
 });
 
 test("étape 4 : photo de fin, référence = ménage précédent, une photo par pièce", () => {
@@ -204,7 +204,7 @@ test("étape 5 : les sept coches, bascule, avance seule quand tout est coché", 
   assert.deepEqual(st.replies.map(r => [r.id, r.label]), [
     ["leave:gas", "Gas works, now off"], ["leave:gas-ko", "Gas not working"], ["leave:ac", "AC on, Auto mode"], ["leave:ac-ko", "AC not working"],
     ["leave:wifi", "Wi-Fi works"], ["leave:wifi-ko", "Wi-Fi not working"], ["leave:lights", "Lights off"],
-    ["leave:windows", "Windows & balcony closed"], ["leave:trash", "Trash taken out"], ["leave:door", "Door locked, key back"]]);
+    ["leave:windows", "Windows & balcony closed"], ["leave:trash", "Trash taken out"], ["leave:door", "Door locked, keys & card left inside"]]);
   reply(c, "leave:gas", { now: at(11, 1) });
   reply(c, "leave:gas", { now: at(11, 1) });
   assert.equal(c.leave.gas, false);
@@ -299,7 +299,7 @@ test("All checked : libellés joints par « · », la consigne AC reste d'un seu
   leaveAll(c, at(11, 2));
   const said = c.messages.filter(m => m.from === "me" && /^All checked/.test(m.text || ""));
   assert.equal(said.length, 1);
-  assert.equal(said[0].text, "All checked: Gas works, now off · AC on, Auto mode · Wi-Fi works · Lights off · Windows & balcony closed · Trash taken out · Door locked, key back");
+  assert.equal(said[0].text, "All checked: Gas works, now off · AC on, Auto mode · Wi-Fi works · Lights off · Windows & balcony closed · Trash taken out · Door locked, keys & card left inside");
 });
 
 test("étape 4, pièce sans photo d'annonce : « clean it, then take a photo », sans image", () => {
@@ -405,7 +405,7 @@ test("Wi-Fi not working, puis l'étape avance à 7 lignes traitées (true ou ko)
   reply(c, "leave:door", { now: at(11, 3) });
   assert.equal(currentStep(c).id, "low");
   const said = c.messages.filter(m => m.from === "me" && /^All checked/.test(m.text || ""));
-  assert.equal(said[0].text, "All checked: Gas not working · AC on, Auto mode · Wi-Fi not working · Lights off · Windows & balcony closed · Trash taken out · Door locked, key back");
+  assert.equal(said[0].text, "All checked: Gas not working · AC on, Auto mode · Wi-Fi not working · Lights off · Windows & balcony closed · Trash taken out · Door locked, keys & card left inside");
   assert.equal(c.problems.length, 2);
 });
 
@@ -495,9 +495,33 @@ test("double appui rapide sur Gas smell : pas de doublon à moins de 2 s", () =>
   assert.equal(c.gestures, g, "second appui ignoré : ni geste");
   assert.equal(c.messages.length, n, "ni bulle, ni seconde consigne");
   addProblem(c, "Gas smell", null, { now: plus(2000) });
-  assert.equal(c.problems.length, 2, "à 2 s : un vrai second signalement");
+  addProblem(c, "Gas smell", null, { now: plus(60000) });
+  assert.equal(c.problems.length, 1, "idempotent : un seul Gas smell par ménage, même après 2 s");
+  assert.equal(c.problems.filter(p => p.kind === "Gas smell").length, 1);
   addProblem(c, "Leak", null, { now: plus(2100) }); addProblem(c, "Leak", null, { now: plus(2200) });
-  assert.equal(c.problems.length, 4, "les autres types ne sont pas filtrés");
+  assert.equal(c.problems.length, 3, "les autres types ne sont pas filtrés");
+});
+
+test("Gas smell idempotent : retouché plus tard depuis les tuiles, la consigne revient sans second problème ; supprimé, il peut être resignalé", () => {
+  const c = createConversation(bloom, { me: ME, now: at(9, 0) });
+  reply(c, "here", { now: at(10, 0) });
+  const t0 = new Date(2026, 9, 2, 10, 1, 0, 0);
+  startProblem(c); chooseKind(c, "Gas smell", { now: t0 }); flowReply(c, "gas-ok");
+  const gas = c.problems[0];
+  const n = c.messages.length;
+  startProblem(c); chooseKind(c, "Gas smell", { now: new Date(t0.getTime() + 5 * 60000) });
+  assert.equal(c.problems.length, 1, "pas de doublon");
+  assert.equal(currentFlow(c).stage, "gas", "écran rouge remontré");
+  assert.equal(currentFlow(c).problem, gas, "sur le même problème");
+  assert.equal(c.messages.length, n, "ni bulle de problème, ni seconde consigne dans le fil");
+  flowReply(c, "gas-ok");
+  assert.equal(c.flow, null);
+  assert.equal(c.problems.length, 1);
+  // Supprimé depuis sa page : un nouveau signalement redevient possible.
+  removeProblem(c, 0);
+  startProblem(c); chooseKind(c, "Gas smell", { now: new Date(t0.getTime() + 10 * 60000) });
+  assert.equal(c.problems.length, 1);
+  assert.notEqual(c.problems[0], gas);
 });
 
 test("un problème non gaz depuis le viseur : Problem + tuile + photo + Done + No note = 5 gestes", () => {
@@ -558,7 +582,7 @@ test("Gas smell depuis les tuiles : enregistré tout de suite (urgent), écran r
   assert.deepEqual(c.problems.map(p => [p.kind, p.urgency, p.notified]), [["Gas smell", "urgent", true]]);
   assert.equal(currentFlow(c).stage, "gas");
   assert.deepEqual(currentFlow(c).replies.map(r => r.id), ["gas-ok"]);
-  assert.equal(c.messages.at(-1).text, "Open the windows. Do not touch switches. Leave and call Walter.");
+  assert.equal(c.messages.at(-1).text, "Open the windows. Do not touch switches. Leave and call your manager on duty.");
   chooseKind(c, "Gas smell", { now: new Date(t0.getTime() + 300) });
   assert.equal(c.problems.length, 1, "second appui : ignoré");
   const g = c.gestures;
@@ -746,7 +770,7 @@ test("AC not working : problème Soon « AC not working », Whole apartment, san
   ["gas", "wifi", "lights", "windows", "trash", "door"].forEach(k => reply(c, "leave:" + k, { now: at(11, 4) }));
   assert.equal(currentStep(c).id, "low");
   const said = c.messages.filter(m => m.from === "me" && /^All checked/.test(m.text || ""));
-  assert.equal(said[0].text, "All checked: Gas works, now off · AC not working · Wi-Fi works · Lights off · Windows & balcony closed · Trash taken out · Door locked, key back");
+  assert.equal(said[0].text, "All checked: Gas works, now off · AC not working · Wi-Fi works · Lights off · Windows & balcony closed · Trash taken out · Door locked, keys & card left inside");
 });
 
 test("ligne AC l'hiver : AC off / AC not working", () => {

@@ -138,7 +138,7 @@ test("odeur de gaz : bulle d'alerte dans le fil ; bandeau « Saved » sans bouto
   const c = createConversation(bloom, { me: ME, now });
   reply(c, "here", { now });
   addProblem(c, "Gas smell", null, { now });
-  assert.match(renderConversation(c, { now }), /class="msg app alert"[\s\S]*Open the windows\. Do not touch switches\. Leave and call Walter\./);
+  assert.match(renderConversation(c, { now }), /class="msg app alert"[\s\S]*Open the windows\. Do not touch switches\. Leave and call your manager on duty\./);
   addProblem(c, "Leak", null, { now });
   const t = renderToast(c.problems[1]);
   assert.equal(t, '<div class="toast saved" role="status">Saved: Leak · Bed</div>');
@@ -278,7 +278,7 @@ test("écran rouge du gaz : consigne en très grand et OK", () => {
   startProblem(c); chooseKind(c, "Gas smell", { now });
   const html = renderGasScreen(c);
   assert.match(html, /^<section class="page gas-page" role="alert">/);
-  assert.match(html, /<p class="gas-text">Open the windows\. Do not touch switches\. Leave and call Walter\.<\/p>/);
+  assert.match(html, /<p class="gas-text">Open the windows\. Do not touch switches\. Leave and call your manager on duty\.<\/p>/);
   assert.match(html, /<button class="gas-ok" data-flow="gas-ok">OK<\/button>/);
   assert.equal(renderFlow(c, { live: true }), html);
 });

@@ -25,7 +25,7 @@ export const LEAVE_CHECKS = [
   { key: "lights", label: "Lights off" },
   { key: "windows", label: "Windows & balcony closed" },
   { key: "trash", label: "Trash taken out" },
-  { key: "door", label: "Door locked, key back" },
+  { key: "door", label: "Door locked, keys & card left inside" },
 ];
 
 // Consigne de Hillal : AC eteinte l'hiver, allumee en mode auto l'ete (avril a octobre a Dubai).

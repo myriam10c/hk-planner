@@ -36,7 +36,7 @@ test("rapport exact d'un studio sans problème", () => {
     "*Walls:* OK",
     "*3 Dirty linen:* 4 pillowcases, 1 bed sheet, 1 duvet cover, 3 bath towels, 1 bath mat",
     "*4 Rooms cleaned:* Bed 📷 1 · Bathroom 📷 1 · Kitchen 📷 1",
-    "*5 Leave:* Gas works, now off ✓ · AC on, Auto mode ✓ · Wi-Fi works ✓ · Lights off ✓ · Windows & balcony closed ✓ · Trash taken out ✓ · Door locked, key back ✓",
+    "*5 Leave:* Gas works, now off ✓ · AC on, Auto mode ✓ · Wi-Fi works ✓ · Lights off ✓ · Windows & balcony closed ✓ · Trash taken out ✓ · Door locked, keys & card left inside ✓",
     "*Running low:* nothing",
     "*Problems:* none",
     "📷 3 arrival · 3 end · 0 of problems",

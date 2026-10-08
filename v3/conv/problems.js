@@ -1,5 +1,5 @@
 // Types de problème, urgence par défaut (jamais demandée à la cleaner), fabrique d'un problème.
-export const SAFETY_GAS = "Open the windows. Do not touch switches. Leave and call Walter.";
+export const SAFETY_GAS = "Open the windows. Do not touch switches. Leave and call your manager on duty.";
 
 // Ordre de la grille 5 × 2 : la sécurité d'abord.
 export const KINDS = [
