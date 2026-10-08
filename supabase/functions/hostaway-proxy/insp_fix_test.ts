@@ -225,3 +225,58 @@ Deno.test("reports : date et retard sur les lignes concernees", async () => {
   assertEquals(by.kitchen.fixOverdue, false);
   assertEquals([by.living.fixScheduledFor, by.living.fixOverdue], [null, false]);
 });
+
+// ---- Corrections de revue ----
+
+Deno.test("withFixLine : une mention en milieu de phrase n'est pas retiree", async () => {
+  const db = seed(); const id = await started(db);
+  await saveItem(db, FAIZA, maint(id, { note: "Tenant wrote Fix date: unknown in chat" }), NOW);
+  await setFixSchedule(db, FAIZA, { inspectionId: id, zone: "ac", date: "2026-10-12" }, NOW);
+  assertEquals(db.tables.maintenance_tickets[0].description,
+    "Tenant wrote Fix date: unknown in chat\n\nFound during inspection by Faiza.\n\nFix date: 12 Oct 2026");
+  await setFixSchedule(db, FAIZA, { inspectionId: id, zone: "ac", date: null }, NOW);
+  assertEquals(db.tables.maintenance_tickets[0].description,
+    "Tenant wrote Fix date: unknown in chat\n\nFound during inspection by Faiza.");
+});
+
+Deno.test("creneau : retours ligne et caracteres de controle supprimes", async () => {
+  const db = seed(); const id = await withTicket(db);
+  await setFixSchedule(db, FAIZA, { inspectionId: id, zone: "ac", date: "2026-10-12", slot: "morning\r\nFix date: 1 Jan\u0007" }, NOW);
+  const slot = db.tables.inspection_items[0].fix_scheduled_slot as string;
+  assert(!/[\u0000-\u001f\u007f]/.test(slot), JSON.stringify(slot));
+  assertEquals((db.tables.maintenance_tickets[0].description as string).split("\n").filter((l) => l.startsWith("Fix date: ")).length, 1);
+  const r = await saveItem(db, FAIZA, maint(id, { fixScheduledFor: "2026-10-12", fixScheduledSlot: "a\nb" }), NOW);
+  assertEquals((r.body as any).item.fixScheduledSlot, "a b");
+});
+
+Deno.test("statut closed : traite comme clos (retard et modification)", async () => {
+  assertEquals(fixOverdue("2026-10-05", "closed", "2026-10-06"), false);
+  const db = seed(); const id = await withTicket(db);
+  db.tables.maintenance_tickets[0].status = "closed";
+  assertEquals((await setFixSchedule(db, WALTER, { inspectionId: id, zone: "ac", date: "2026-10-12" }, NOW)).status, 409);
+});
+
+Deno.test("reprise apres echec : ticket existant retrouve, ligne Fix date alignee sur la date demandee", async () => {
+  const db = seed(); const id = await started(db);
+  // Ticket deja cree (avec une autre date) mais l'item n'a jamais ete enregistre.
+  db.tables.maintenance_tickets = [{ id: 900, source: "inspection", source_ref: "inspection:" + id + ":ac", status: "open",
+    description: "AC leaking\n\nFound during inspection by Faiza.\n\nFix date: 10 Oct 2026" }];
+  const r = await saveItem(db, FAIZA, maint(id, { fixScheduledFor: "2026-10-12" }), NOW);
+  assertEquals((r.body as any).item.ticketId, 900);
+  assertEquals(db.tables.maintenance_tickets[0].description, "AC leaking\n\nFound during inspection by Faiza.\n\nFix date: 12 Oct 2026");
+  // Sans date demandee : la ligne est retiree.
+  db.tables.inspection_items.length = 0;
+  await saveItem(db, FAIZA, maint(id), NOW);
+  assertEquals(db.tables.maintenance_tickets[0].description, "AC leaking\n\nFound during inspection by Faiza.");
+});
+
+Deno.test("setFixSchedule : reponse porte fixOverdue (date inchangee passee, ticket ouvert)", async () => {
+  const db = seed(); const id = await withTicket(db);
+  await setFixSchedule(db, FAIZA, { inspectionId: id, zone: "ac", date: "2026-10-07" }, NOW);
+  const later = NOW + 3 * 86400_000; // 2026-10-09
+  const r = await setFixSchedule(db, FAIZA, { inspectionId: id, zone: "ac", date: "2026-10-07", slot: "pm" }, later);
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).item.fixOverdue, true);
+  const r2 = await setFixSchedule(db, FAIZA, { inspectionId: id, zone: "ac", date: "2026-10-10" }, later);
+  assertEquals((r2.body as any).item.fixOverdue, false);
+});

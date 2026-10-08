@@ -1,5 +1,5 @@
 import { get, post } from '/inspections/api.js';
-import { fixBadge, fixFields } from '/inspections/fix.js';
+import { fixBadge, fixFields, todayDubai } from '/inspections/fix.js';
 
 const TZ = 'Asia/Dubai';
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -14,7 +14,7 @@ export async function renderHistory(ctx) {
   const isCurrent = ctx.isCurrent || (() => true);
   const st = { data: null, error: null, edit: null, busy: false, editError: '' };
   const me = ctx.me || {};
-  const CLOSED = ['resolved', 'cancelled'];
+  const CLOSED = ['resolved', 'cancelled', 'closed'];
   // Date de rectification modifiable : manager ou inspecteur auteur, zone en maintenance, ticket encore ouvert.
   const canFix = (it, i) => it.outcome === 'maintenance' && !(it.ticket && CLOSED.includes(it.ticket.status))
     && (me.role === 'manager' || (me.cleaner_id != null && me.cleaner_id === i.inspectorId));
@@ -81,7 +81,9 @@ export async function renderHistory(ctx) {
       const r = await post('insp.setFixSchedule', { inspectionId: f.i.id, zone: f.it.zone, date: date || null, slot: date ? slot : null });
       const item = r.item || {};
       f.it.fixScheduledFor = item.fixScheduledFor || null; f.it.fixScheduledSlot = item.fixScheduledSlot || null;
-      f.it.fixOverdue = false; // une date posee n'est jamais dans le passe
+      // Retard : celui du serveur s'il le donne, sinon date passee (jour Dubai) et ticket encore ouvert.
+      f.it.fixOverdue = typeof item.fixOverdue === 'boolean' ? item.fixOverdue
+        : !!(f.it.fixScheduledFor && f.it.fixScheduledFor < todayDubai() && f.it.ticket && !CLOSED.includes(f.it.ticket.status));
       st.edit = null;
       ctx.toast && ctx.toast(f.it.fixScheduledFor ? 'Fix date saved' : 'Fix date removed');
     } catch (e) { st.editError = e.message || 'Could not save the fix date.'; }

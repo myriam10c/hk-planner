@@ -212,6 +212,6 @@ export function fixLine(date: string | null | undefined, slot: string | null | u
 // En retard : date strictement passee (jour Dubai) et ticket lie encore ouvert.
 export function fixOverdue(date: string | null | undefined, ticketStatus: string | null | undefined, day: string): boolean {
   if (!date || !ticketStatus) return false;
-  if (ticketStatus === "resolved" || ticketStatus === "cancelled") return false;
+  if (ticketStatus === "resolved" || ticketStatus === "cancelled" || ticketStatus === "closed") return false;
   return date < day;
 }

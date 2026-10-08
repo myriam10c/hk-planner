@@ -3,12 +3,15 @@ import type { ActionResult, SessionUser } from "./v3.ts";
 import { plusDays, todayDubai, V3_PHOTO_BUCKET, validIdem } from "./v3.ts";
 import { V3_MAX_PHOTO_BYTES, V3_PHOTO_MIME } from "./v3_photos.ts";
 import {
-  FIX_LINE_PREFIX, fixLine, focusOut, INSP_DET_ITEMS, INSP_DET_KEYS, INSP_ZONE_KEYS, INSP_ZONES, listingLabel,
+  FIX_LINE_PREFIX, fixLine, fixOverdue, focusOut, INSP_DET_ITEMS, INSP_DET_KEYS, INSP_ZONE_KEYS, INSP_ZONES, listingLabel,
 } from "./insp_rules.ts";
 
 const ELIGIBILITIES = new Set(["checkout", "vacant", "adhoc"]);
 const zoneLabel = (k: string) => INSP_ZONES.find((z) => z.key === k)?.label ?? k;
 const clean = (v: unknown, max = 1000) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+// Texte sur une seule ligne : retours ligne et caracteres de controle remplaces par un espace.
+const cleanLine = (v: unknown, max: number) =>
+  (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "");
 const bad = (status: number, error: string): ActionResult => ({ status, body: { error } });
 
 const itemOut = (r: any) => ({
@@ -34,11 +37,12 @@ function parseFix(rawDate: unknown, rawSlot: unknown, day: string, prevDate: str
   if (!validDay(d)) return { err: bad(400, "Invalid fix date.") };
   if (d < day && d !== prevDate) return { err: bad(400, "The fix date cannot be in the past.") };
   if (d > plusDays(day, FIX_MAX_AHEAD_DAYS)) return { err: bad(400, "The fix date is too far ahead.") };
-  return { date: d, slot: clean(rawSlot, 40) || null };
+  return { date: d, slot: cleanLine(rawSlot, 40) || null };
 }
 // Remplace (ou retire) la ligne "Fix date" de la description du ticket, sans toucher au reste.
 function withFixLine(desc: unknown, line: string): string {
-  const base = String(desc ?? "").replace(new RegExp("\\n*" + FIX_LINE_PREFIX + "[^\\n]*", "g"), "").replace(/\s+$/, "");
+  // Ligne entiere seulement (mode multi-lignes) : une mention en milieu de phrase reste intacte.
+  const base = String(desc ?? "").replace(new RegExp("\\n*^" + FIX_LINE_PREFIX + "[^\\n]*$", "gm"), "").replace(/\s+$/, "");
   return line ? (base ? base + "\n\n" : "") + line : base;
 }
 
@@ -49,7 +53,7 @@ const WHO_TEXT: Record<string, string> = {
 };
 const detLabels = (keys: string[]) => keys.map((k) => INSP_DET_ITEMS.find((i) => i.key === k)?.label ?? k);
 // Memes statuts clos que insp_read.
-const TICKET_CLOSED = new Set(["resolved", "cancelled"]);
+const TICKET_CLOSED = new Set(["resolved", "cancelled", "closed"]);
 
 async function loadOwned(sb: any, me: SessionUser, inspectionId: unknown) {
   const id = Number(inspectionId);
@@ -126,7 +130,8 @@ async function ensureTicket(sb: any, me: SessionUser, insp: any, zone: string, n
   missing: string[] = [], fix = ""): Promise<number> {
   const ref = "inspection:" + insp.id + ":" + zone;
   const { data: existing } = await sb.from("maintenance_tickets").select("id").eq("source_ref", ref).maybeSingle();
-  if (existing) return existing.id;
+  // Ticket deja cree (reprise apres echec) : sa ligne Fix date suit la date demandee.
+  if (existing) { await rewriteFixOnTicket(sb, existing.id, fix, now); return existing.id; }
   const { data: sla } = await sb.from("maintenance_sla").select("max_hours")
     .eq("category", "general").eq("priority", "medium").maybeSingle();
   const hours = sla?.max_hours ?? 72;
@@ -149,6 +154,7 @@ async function ensureTicket(sb: any, me: SessionUser, insp: any, zone: string, n
   if (String(error.code) !== "23505") throw error;
   const { data: race } = await sb.from("maintenance_tickets").select("id").eq("source_ref", ref).maybeSingle();
   if (!race) throw error;
+  await rewriteFixOnTicket(sb, race.id, fix, now);
   return race.id;
 }
 
@@ -225,8 +231,10 @@ export async function saveItem(sb: any, me: SessionUser, body: any, now = Date.n
 async function rewriteFixOnTicket(sb: any, ticketId: number, line: string, now: number): Promise<boolean> {
   const { data: t } = await sb.from("maintenance_tickets").select("id, status, description").eq("id", ticketId).maybeSingle();
   if (!t || TICKET_CLOSED.has(String(t.status))) return false;
+  const next = withFixLine(t.description, line);
+  if (next === String(t.description ?? "")) return true;
   const { error } = await sb.from("maintenance_tickets")
-    .update({ description: withFixLine(t.description, line), last_update: new Date(now).toISOString() }).eq("id", ticketId);
+    .update({ description: next, last_update: new Date(now).toISOString() }).eq("id", ticketId);
   if (error) throw error;
   return true;
 }
@@ -248,15 +256,17 @@ export async function setFixSchedule(sb: any, me: SessionUser, body: any, now = 
   }
   const fx = parseFix(body?.date, body?.slot, todayDubai(now), item.fix_scheduled_for ?? null);
   if (fx.err) return fx.err;
+  let ticketStatus: string | null = null;
   if (item.ticket_id) {
     const { data: t } = await sb.from("maintenance_tickets").select("id, status").eq("id", item.ticket_id).maybeSingle();
     if (t && TICKET_CLOSED.has(String(t.status))) return bad(409, "This ticket is already closed.");
+    ticketStatus = t ? String(t.status) : null;
   }
   const patch = { fix_scheduled_for: fx.date, fix_scheduled_slot: fx.slot, updated_at: new Date(now).toISOString() };
   const { error } = await sb.from("inspection_items").update(patch).eq("inspection_id", id).eq("zone", zone);
   if (error) throw error;
   if (item.ticket_id) await rewriteFixOnTicket(sb, item.ticket_id, fixLine(fx.date, fx.slot), now);
-  return { status: 200, body: { item: itemOut({ ...item, ...patch }) } };
+  return { status: 200, body: { item: { ...itemOut({ ...item, ...patch }), fixOverdue: fixOverdue(fx.date, ticketStatus, todayDubai(now)) } } };
 }
 
 export async function uploadInspectionPhoto(sb: any, me: SessionUser, form: FormData): Promise<ActionResult> {

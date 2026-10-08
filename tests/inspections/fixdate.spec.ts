@@ -108,3 +108,16 @@ test('reports : date de rectification et Overdue sur la ligne', async ({ page })
   await expect(row.getByText('Overdue', { exact: true })).toBeVisible();
   await expect(row).not.toContainText('Living room · Fix scheduled');
 });
+
+test('historique : apres sauvegarde, Overdue suit la reponse du serveur ; ticket closed sans bouton', async ({ page }) => {
+  await bootInsp(page, [ME(2, 'manager'),
+    hist([AC({ fixScheduledFor: '2026-10-03', fixOverdue: true }), AC({ zone: 'kitchen', label: 'Kitchen & appliances', ticket: { id: 51, status: 'closed', title: 'x' } })]),
+    { status: 200, match: 'action=insp.setFixSchedule', body: { item: { zone: 'ac', fixScheduledFor: '2026-10-03', fixScheduledSlot: 'pm', fixOverdue: true } } },
+  ], { pinToken: 'tok', hash: '#/history/B' });
+  await expect(page.getByRole('button', { name: /fix date/ })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Change fix date' }).click();
+  await page.getByLabel('Time (optional)').fill('pm');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Fix scheduled: 3 Oct, pm')).toBeVisible();
+  await expect(page.getByText('Overdue', { exact: true })).toBeVisible();
+});
