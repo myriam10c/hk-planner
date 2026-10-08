@@ -13,4 +13,4 @@ if (window.caches) {
   const keys = await caches.keys();
   await Promise.all(keys.filter((k) => k.indexOf('hk-v3-') === 0).map((k) => caches.delete(k)));
 }
-location.replace('/#cleaner');
+location.replace('/?legacy=1#cleaner');

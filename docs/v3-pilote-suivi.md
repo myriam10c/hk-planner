@@ -268,5 +268,21 @@ son cache `hk-v3-*` et renvoie vers l'app actuelle. Les tables et les actions
 `v3.*` peuvent rester en place : personne d'autre ne les appelle.
 
 Un retour arriere partiel est possible et souvent suffisant : dire aux deux
-cleaners de rouvrir l'app actuelle et de ne plus toucher a `/v3/`. Rien a
-deployer, rien a defaire, leurs menages sont les memes des deux cotes.
+cleaners de rouvrir l'app actuelle avec `/?legacy=1` (le lien « Open the old
+app » de `/v3/` y mene). Rien a deployer, rien a defaire, leurs menages sont
+les memes des deux cotes.
+
+### Bascule automatique (depuis le 09/10/2026)
+
+Decision de Hillal du 08/10 : a partir de `V3_CUTOVER_DATE` (`app.js`, jour
+Dubai, des 00:00), une session `role = 'cleaner'` qui ouvre la racine est
+renvoyee vers `/v3/` (login PIN, session PIN posee, session email, compte cree,
+mot de passe redefini). Jamais un manager, ni Elite (`subcontractor`), ni la
+maintenance, ni `system`. Ne renvoie pas tant que « Create your account » est
+obligatoire (session PIN sans adresse), ni sur un jeton refuse par `cleanerMe`.
+Garde anti-boucle : un second renvoi dans les 30 s laisse l'ancienne app
+s'ouvrir. `?legacy=1` coupe le renvoi pour l'onglet, `?legacy=0` le rend.
+
+Pour un retour arriere complet, repousser `V3_CUTOVER_DATE` (ex. `9999-12-31`)
+en plus de la page de repli, puis `./deploy-front.sh`. Tests :
+`HK_PLANNER_URL=http://localhost:8890 npx playwright test tests/v3-cutover.spec.ts --project=desktop --project=mobile`.

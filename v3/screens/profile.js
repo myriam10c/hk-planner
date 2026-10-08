@@ -67,7 +67,7 @@ function view(state) {
       '<p class="muted" style="margin-top:18px">Leave requests, linen at the store and your history are still in ' +
         'the main app. Everything you do here is saved in the same place.</p>' +
       '<a class="btn-primary" style="text-align:center;text-decoration:none;line-height:58px" ' +
-        'href="/#cleaner">Open HK Planner</a>' +
+        'href="/?legacy=1#cleaner">Open HK Planner</a>' +
       '<button class="btn-ghost" type="button" data-act="signout">Sign out</button>' +
     '</div></div>' +
     '<nav class="cl-bar">' +

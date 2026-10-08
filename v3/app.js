@@ -276,7 +276,8 @@ export function render() {
   if (state.error) {
     closeCamera();
     porte(modeBar() + queueStrip() + '<div class="gate"><h1>HK Planner</h1><p class="muted">' + esc(state.error) +
-      '</p><button class="btn-primary" data-act="reload">Try again</button></div>');
+      '</p><button class="btn-primary" data-act="reload">Try again</button>' +
+      '<a class="gate-alt" href="/?legacy=1#cleaner">Open the old app</a></div>');
     return;
   }
   if (routeName() === 'profile') {

@@ -30,7 +30,7 @@ const ROUTES = [
 test('Profile renvoie vers l app actuelle et permet de se deconnecter', async ({ page }) => {
   await bootV3(page, ROUTES, { pinToken: 'jeton-pin', hash: '#/profile' });
   await expect(page.getByRole('heading', { name: 'Faiza' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open HK Planner' })).toHaveAttribute('href', '/#cleaner');
+  await expect(page.getByRole('link', { name: 'Open HK Planner' })).toHaveAttribute('href', '/?legacy=1#cleaner');
   // Aucune action refusee dans ce parcours : le bloc « Not sent » reste absent.
   await expect(page.getByText('Not sent')).toHaveCount(0);
   const { scrollWidth, clientWidth } = await noHorizontalScroll(page);

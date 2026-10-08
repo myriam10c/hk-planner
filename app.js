@@ -558,6 +558,64 @@ let postponed={}; // {key: {original_date,new_date,postponed_by,postponed_at}} �
 let swipeState=null; // {key,startX,startY,el,swiping}
 let cleanerMode=JSON.parse(localStorage.getItem('cleanerMode')||'null'); // null=manager, {id,name,color,role}=logged in user (#6)
 let cleanerToken=localStorage.getItem('cleanerToken')||null; // Phase 1: server-signed session token
+// ===== Bascule des cleaners internes vers /v3/ (decision Hillal du 08/10/2026) =====
+// A partir de V3_CUTOVER_DATE (jour Dubai, UTC+4, des 00:00), une session role
+// 'cleaner' qui ouvre cette app est renvoyee vers /v3/. Jamais un manager, ni
+// Elite (subcontractor), ni la maintenance, ni system. Pour changer la date de
+// bascule : modifier la constante, redeployer. `?legacy=1` garde l'ancienne app
+// pour l'onglet (sessionStorage), `?legacy=0` rend la bascule. La decision ne se
+// prend qu'apres une identite verifiee (login PIN, cleanerMe) et jamais pendant
+// un ecran d'authentification (Create your account obligatoire compris).
+const V3_CUTOVER_DATE='2026-10-09';
+const V3_CUTOVER_PATH='/v3/';
+const V3_LEGACY_KEY='hkV3Legacy', V3_REDIRECT_KEY='hkV3RedirectAt', V3_LOOP_MS=30000;
+function dubaiDateOf(ms){ return new Date(ms+4*3600e3).toISOString().slice(0,10); }
+function v3CutoverDue(role,dubaiDate,legacy){ return role==='cleaner'&&!legacy&&String(dubaiDate)>=V3_CUTOVER_DATE; }
+(function(){
+  try{
+    const q=new URLSearchParams(location.search).get('legacy');
+    if(q==='1') sessionStorage.setItem(V3_LEGACY_KEY,'1');
+    else if(q==='0'){ sessionStorage.removeItem(V3_LEGACY_KEY); sessionStorage.removeItem(V3_REDIRECT_KEY); }
+  }catch(e){}
+}());
+function v3LegacyChosen(){ try{ return sessionStorage.getItem(V3_LEGACY_KEY)==='1'; }catch(e){ return false; } }
+let leavingForV3=false;
+// Renvoie vers /v3/ si la session courante y a droit. true = navigation lancee.
+function maybeGoV3(){
+  if(leavingForV3) return true;
+  if(authScreen) return false;
+  if(!(cleanerToken||authAccessToken)) return false;
+  const role=cleanerMode&&cleanerMode.role;
+  if(!v3CutoverDue(role,dubaiDateOf(Date.now()),v3LegacyChosen())) return false;
+  // Garde anti-boucle : /v3/ renvoie vers la racine (compte a creer, session
+  // refusee) ; un second renvoi dans les 30 s laisse l'ancienne app s'ouvrir.
+  let last=0;
+  try{ last=Number(sessionStorage.getItem(V3_REDIRECT_KEY))||0; }catch(e){}
+  if(last&&Date.now()-last>=0&&Date.now()-last<V3_LOOP_MS) return false;
+  try{ sessionStorage.setItem(V3_REDIRECT_KEY,String(Date.now())); }catch(e){}
+  leavingForV3=true;
+  location.replace(V3_CUTOVER_PATH);
+  return true;
+}
+// Session PIN deja posee au boot : rien n'a encore ete verifie. On attend le
+// controle du compte obligatoire (pas d'adresse = Create your account, ici) et
+// cleanerMe (jeton revoque = retour au PIN) avant de renvoyer.
+async function v3BootCheck(setupCheck){
+  const role=cleanerMode&&cleanerMode.role;
+  if(!v3CutoverDue(role,dubaiDateOf(Date.now()),v3LegacyChosen())) return false;
+  let must=false, me=null;
+  try{
+    const r=await Promise.all([
+      Promise.resolve(setupCheck).catch(function(){ return false; }),
+      api('cleanerMe').catch(function(){ return null; })
+    ]);
+    must=r[0]; me=r[1];
+  }catch(e){}
+  if(must) return false;
+  if(me&&me.error) return false;
+  if(me&&me.cleaner&&me.cleaner.role!=='cleaner') return false;
+  return maybeGoV3();
+}
 // Migration : sessions pré-Phase1 (cleanerMode sans token) → forcer re-login
 if(cleanerMode && !cleanerToken){
   cleanerMode=null;
@@ -1367,6 +1425,7 @@ let plannerRefreshing=false;
 function readPlannerCache(range){try{const c=JSON.parse(localStorage.getItem(PLANNER_CACHE_KEY)||'null');return(c&&c.range===range&&c.coRes&&c.allRes)?c:null;}catch(e){return null;}}
 function writePlannerCache(range,coRes,allRes){try{localStorage.setItem(PLANNER_CACHE_KEY,JSON.stringify({range:range,coRes:coRes,allRes:allRes,ts:Date.now()}));}catch(e){/* quota plein : on vit sans cache */}}
 async function fetchAll(){
+  if(leavingForV3) return;
   if(savingDone)return;
   const myReq=++__fetchAllReqId;
   const{startDate,endDate}=getWeekRange();
@@ -3247,6 +3306,7 @@ async function cleanerLogin(){
     haptic('heavy');
     // #10 First login onboarding, apres la creation de compte obligatoire
     const mustSetup=await maybeOfferAccountSetup();
+    if(!mustSetup&&maybeGoV3()) return;
     const hasSeenOnboarding = localStorage.getItem('onboardingSeen');
     if(!hasSeenOnboarding && !mustSetup){
       setTimeout(openOnboarding, 500);
@@ -4364,6 +4424,7 @@ async function submitLinkEmail(){
     const ok=await adoptEmailSession();
     accountSetupBusy=false;
     if(ok&&authScreen==='createAccount') authScreen=null;
+    if(ok&&maybeGoV3()) return;
     render();
     if(ok){ toast('Account created. You can sign in with your email now.','success'); fetchAll(); }
   }catch(err2){
@@ -4442,6 +4503,7 @@ async function emailLogin(){
     authAccessToken=r.data&&r.data.session?r.data.session.access_token:null;
     const ok=await adoptEmailSession();
     authBusy=false;
+    if(ok&&maybeGoV3()) return;
     render();
     if(ok) fetchAll();
   }catch(e){ authBusy=false; authError=authErrorMessage(e); render(); }
@@ -4481,6 +4543,7 @@ async function submitNewPassword(){
     authAccessToken=s.data&&s.data.session?s.data.session.access_token:null;
     const ok=await adoptEmailSession();
     authBusy=false;
+    if(ok&&maybeGoV3()) return;
     render();
     if(ok){ toast('Password saved','success'); fetchAll(); }
   }catch(e){ authBusy=false; authError=authErrorMessage(e); render(); }
@@ -4541,6 +4604,7 @@ function hkClearAuthHash(h){
 
 // Boot : decide quel ecran ouvrir avant le premier fetchAll().
 // Retourne true si l'app peut charger ses donnees.
+let bootSetupCheck=null; // controle du compte obligatoire d'une session PIN posee (bascule v3)
 async function hkAuthBoot(){
   const h=parseAuthHash(BOOT_HASH);
   hkClearAuthHash(h);
@@ -4583,8 +4647,9 @@ async function hkAuthBoot(){
     // pas d'app. On n'attend pas plus que pour la session email (hors ligne ou
     // proxy endormi, l'app s'ouvre) ; une reponse tardive ouvre l'ecran quand
     // meme, et un echec de getCleaners ne bloque jamais.
+    bootSetupCheck=maybeOfferAccountSetup().catch(function(){ return false; });
     await Promise.race([
-      maybeOfferAccountSetup().catch(function(){ return false; }),
+      bootSetupCheck,
       new Promise(function(res){ setTimeout(function(){ res(false); },AUTH_SESSION_WAIT_MS); })
     ]);
     return true;
@@ -4659,6 +4724,7 @@ function maybeShowInspAnnounce(){
 
 // ============ RENDER ============
 function render(){
+  if(leavingForV3) return; // bascule v3 en cours : ne rien repeindre
   if(authScreen==='createAccount'){renderAuthCreateAccount();return;}
   if(authScreen==='setPassword'){renderAuthSetPassword();return;}
   if(authScreen==='login'){renderAuthLogin();return;}
@@ -7888,7 +7954,13 @@ window.addEventListener('popstate', () => {
   render();
 });
 initSwipe();
-hkAuthBoot().then(function(ok){ if(ok) fetchAll(); });
+hkAuthBoot().then(function(ok){
+  if(!ok) return;
+  // Session email : cleanerMe vient de la verifier (adoptEmailSession).
+  if(authAccessToken&&maybeGoV3()) return;
+  fetchAll();
+  if(!authAccessToken&&cleanerToken) v3BootCheck(bootSetupCheck);
+});
 // Rafraichissement auto : jamais pendant que l'onglet RH est ouvert. fetchAll finit par
 // render(), qui remplace #app.innerHTML et viderait les formulaires RH (dossier salarie,
 // document, remuneration) en pleine saisie. Comportement inchange sur les autres onglets.

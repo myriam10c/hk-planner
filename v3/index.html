@@ -19,7 +19,10 @@
 <body>
 <!-- #view est le seul conteneur reecrit a chaque rendu ; la video du viseur est
      permanente (jamais recreee par un rendu, le flux n'est branche qu'une fois). -->
-<div id="app" tabindex="-1"><div id="view"></div><video id="vf" autoplay playsinline muted hidden></video></div>
+<!-- .boot-fallback : visible seulement si le module ne prend pas la main (le premier
+     rendu remplace #view). Le lien apparait apres 4 s : /?legacy=1 garde l'ancienne
+     app pour l'onglet (bascule des cleaners du 09/10). -->
+<div id="app" tabindex="-1"><div id="view"><div class="gate boot-fallback"><h1>HK Planner</h1><p class="muted">Loading your day.</p><a href="/?legacy=1#cleaner">Open the old app</a></div></div><video id="vf" autoplay playsinline muted hidden></video></div>
 <div id="toast-host" aria-live="polite" role="status"></div>
 <input id="cam-fallback" type="file" accept="image/*" capture="environment" hidden>
 <!-- supabase-js avant le module : la v3 partage le client de session de l'app

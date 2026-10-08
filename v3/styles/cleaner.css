@@ -35,6 +35,11 @@
    de l'ecran de connexion se colle a gauche au lieu de suivre le centrage. */
 .gate svg { margin: 0 auto 12px; }
 .gate a { display: block; min-height: 58px; line-height: 58px; margin: 20px 0 0; border-radius: 15px; background: var(--terra); color: #FFF; font-size: 17px; font-weight: 800; text-decoration: none; }
+/* Lien de secours vers l'ancienne app (bascule du 09/10) : discret, sous le bouton principal. */
+.gate a.gate-alt { background: transparent; color: var(--ink); border: 2px solid currentColor; }
+/* Coquille statique : le lien n'apparait que si /v3/app.js n'a pas pris la main en 4 s. */
+.boot-fallback a { visibility: hidden; animation: boot-fallback-show 0s linear 4s forwards; }
+@keyframes boot-fallback-show { to { visibility: visible; } }
 #toast-host { position: fixed; left: 12px; right: 12px; bottom: 90px; z-index: 40; display: grid; gap: 8px; pointer-events: none; }
 .toast { background: var(--ink); color: var(--bone); border-radius: 12px; padding: 12px 14px; font-size: 14.5px; font-weight: 700; }
 .toast.err { background: var(--ember-ink); }
