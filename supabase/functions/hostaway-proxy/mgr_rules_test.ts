@@ -139,3 +139,20 @@ Deno.test("annule, reporte, aucun depart connu", () => {
   assertEquals(st(null, at("11:00"), { urgent: [GAS] }),
     { tone: "bad", word: "Blocked", cause: "Urgent ticket open: Gas not working (#429)." });
 });
+
+import { mgrAccess, parseRiskHours } from "./mgr_rules.ts";
+
+Deno.test("acces manager : session email obligatoire, role manager seulement", () => {
+  assertEquals(mgrAccess(false, null), { ok: false, status: 401, error: "auth required" });
+  assertEquals(mgrAccess(true, null), { ok: false, status: 401, error: "auth required" });
+  assertEquals(mgrAccess(false, { role: "manager" }), { ok: false, status: 403, error: "email sign-in required" });
+  assertEquals(mgrAccess(true, { role: "cleaner" }), { ok: false, status: 403, error: "forbidden" });
+  assertEquals(mgrAccess(true, { role: "maintenance" }), { ok: false, status: 403, error: "forbidden" });
+  assertEquals(mgrAccess(true, { role: "manager" }), { ok: true });
+});
+
+Deno.test("seuil a risque : app_config.mgr_risk_hours, defaut 6", () => {
+  assertEquals(parseRiskHours("3"), 3);
+  assertEquals(parseRiskHours("2.5"), 2.5);
+  for (const v of [null, undefined, "", "abc", "0", "-1", "25"]) assertEquals(parseRiskHours(v), 6);
+});

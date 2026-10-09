@@ -30,6 +30,8 @@ import {
 } from "./insp_write.ts";
 import { getSecurityContacts, setSecurityContacts } from "./security_contacts.ts";
 import { sessionActor } from "./actor.ts";
+import { mgrAccess, MGR_LOOKBACK_DAYS, normalizeMgrReservations, type MgrReservation } from "./mgr_rules.ts";
+import { mgrToday } from "./mgr_api.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -285,6 +287,25 @@ async function loadInspReservations(sb: any, day: string): Promise<{ reservation
       return normalizeReservations([...touching, ...upcoming]);
     },
     waitUntil: (p) => { try { (globalThis as any).EdgeRuntime?.waitUntil?.(p); } catch (_e) {} },
+  });
+}
+
+// Reservations de l'app manager : departs des 14 derniers jours (menage precedent
+// de chaque arrivee) et arrivees des 14 prochains jours (prochain guest de chaque
+// menage). Meme cache au chaud qu'Inspections, sous sa propre cle.
+async function loadMgrReservations(sb: any, day: string): Promise<{ reservations: MgrReservation[]; cachedAt: string | null }> {
+  return loadReservationsCached<MgrReservation>(sb, day, {
+    cacheKey: "mgr:res:" + day,
+    fetchHostaway: async (d) => {
+      const token = await getAccessToken();
+      const h = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
+      const [deps, arrs] = await Promise.all([
+        fetchAllPages(API_BASE + "/reservations?departureStartDate=" + plusDays(d, -MGR_LOOKBACK_DAYS) + "&departureEndDate=" + d, h),
+        fetchAllPages(API_BASE + "/reservations?arrivalStartDate=" + d + "&arrivalEndDate=" + plusDays(d, MGR_LOOKBACK_DAYS), h),
+      ]);
+      return normalizeMgrReservations([...deps, ...arrs]);
+    },
+    waitUntil: (p) => { try { (globalThis as any).EdgeRuntime?.waitUntil?.(p); } catch (_e) { /* best effort */ } },
   });
 }
 
@@ -855,6 +876,8 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["insp.start", "POST"], ["insp.saveItem", "POST"], ["insp.uploadPhoto", "POST"], ["insp.finish", "POST"],
   ["insp.claim", "POST"], ["insp.unclaim", "POST"], ["insp.assign", "POST"], ["insp.setExcluded", "POST"],
   ["insp.setFixSchedule", "POST"],
+  // ===== App manager /manager/ (spec 2026-10-09) =====
+  ["mgr.today", "GET"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1379,6 +1402,19 @@ Deno.serve(async (req: Request) => {
       const cleFin = await resolveJob(sb, String(body.jobId ?? ""));
       const ctx = await loadFinishContext(sb, cleFin ?? "");
       const r = await finishJob(sb, me, body, ctx);
+      return jsonResp(r.body, r.status);
+    }
+
+    // ==================== MANAGER (/manager/) ====================
+    // Today en un appel. Session email obligatoire (Bearer), role manager.
+    if (action === "mgr.today") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const r = await mgrToday(sb, {
+        day: todayDubai(), nowMs: Date.now(), me: me!,
+        loadReservations: (d) => loadMgrReservations(sb, d),
+      });
       return jsonResp(r.body, r.status);
     }
 

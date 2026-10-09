@@ -177,3 +177,20 @@ export function arrivalStatus(i: {
   }
   return { tone: "idle", word: "Scheduled", cause: "Not cleaned yet, " + who + " assigned. Guest in " + fmtDur(left) + "." };
 }
+
+// Acces a mgr.today (spec section 6) : managers seulement, session email
+// obligatoire. hasBearer = un en-tete Authorization: Bearer est present ; s'il
+// est invalide, currentUser rend null (401), jamais un repli sur le PIN.
+export type MgrAccess = { ok: true } | { ok: false; status: number; error: string };
+export function mgrAccess(hasBearer: boolean, me: { role: string } | null): MgrAccess {
+  if (!me) return { ok: false, status: 401, error: "auth required" };
+  if (!hasBearer) return { ok: false, status: 403, error: "email sign-in required" };
+  if (me.role !== "manager") return { ok: false, status: 403, error: "forbidden" };
+  return { ok: true };
+}
+
+export function parseRiskHours(v: unknown): number {
+  if (v === null || v === undefined || v === "") return MGR_DEFAULT_RISK_HOURS;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 && n <= 24 ? n : MGR_DEFAULT_RISK_HOURS;
+}

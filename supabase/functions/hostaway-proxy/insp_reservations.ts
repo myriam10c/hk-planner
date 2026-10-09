@@ -29,16 +29,19 @@ const RES_FRESH_MS = 2 * 60 * 1000;
 const revalidating = new Set<string>();
 export function _resetInflightForTests() { revalidating.clear(); }
 
-export async function loadReservationsCached(
+export async function loadReservationsCached<T = InspReservation>(
   sb: any, day: string,
   deps: {
-    fetchHostaway: (day: string) => Promise<InspReservation[]>;
+    fetchHostaway: (day: string) => Promise<T[]>;
     now?: () => number;
     waitUntil?: (p: Promise<unknown>) => void;
+    // Cle proxy_cache. Defaut : celle d'Inspections. L'app manager garde son propre
+    // instantane (guest et fenetre de 14 jours en plus) sous mgr:res:<day>.
+    cacheKey?: string;
   },
-): Promise<{ reservations: InspReservation[]; cachedAt: string | null }> {
+): Promise<{ reservations: T[]; cachedAt: string | null }> {
   const now = deps.now ?? Date.now;
-  const key = "insp:res:" + day;
+  const key = deps.cacheKey ?? "insp:res:" + day;
   const write = async (payload: unknown, updated_at: string) => {
     const { error } = await sb.from("proxy_cache").upsert({ key, payload, updated_at });
     if (error) console.error("[insp] proxy_cache upsert failed:", error);

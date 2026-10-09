@@ -127,3 +127,12 @@ Deno.test("upsert en erreur dans la revalidation : console.error, pas d'exceptio
   } finally { console.error = err; }
   assertEquals(logs.length, 1);
 });
+
+Deno.test("cacheKey : instantane separe, celui d'Inspections intact", async () => {
+  _resetInflightForTests();
+  const sb = seed(1);
+  const out = await loadReservationsCached(sb, DAY, { cacheKey: "mgr:res:" + DAY, fetchHostaway: async () => [R("mgr")], now: () => NOW });
+  assertEquals(out, { reservations: [R("mgr")], cachedAt: null });
+  assertEquals(cached(sb).payload, { reservations: [R("old")] });
+  assertEquals(sb.tables.proxy_cache.find((r: any) => r.key === "mgr:res:" + DAY).payload, { reservations: [R("mgr")] });
+});
