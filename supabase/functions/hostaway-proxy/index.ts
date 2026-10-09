@@ -28,6 +28,7 @@ import {
   assignProposal, claimProposal, finishInspection, saveItem, setExcluded, setFixSchedule, startInspection,
   unclaimProposal, uploadInspectionPhoto,
 } from "./insp_write.ts";
+import { getSecurityContacts, setSecurityContacts } from "./security_contacts.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -57,6 +58,7 @@ const SERVER_ONLY_ACTIONS = new Set([
   "getMacCommands",
   "getHermesCommands",
   "hrCheckExpiries",
+  "setSecurityContacts",
 ]);
 const TOKEN_URL = "https://api.hostaway.com/v1/accessTokens";
 const API_BASE = "https://api.hostaway.com/v1";
@@ -1016,6 +1018,9 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["v3.deleteProblem", "POST"],
   // Suppression d'une photo depuis sa miniature (branchement 2026-10-05, tache 3)
   ["v3.deletePhoto", "POST"],
+  // ===== Security contacts (onglet Security, ex security-contacts.json public) =====
+  ["getSecurityContacts", "GET"],
+  ["setSecurityContacts", "POST"],
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -4353,6 +4358,19 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
       return jsonResp({ status: "success", data: data || null });
     }
+    // ========== SECURITY CONTACTS ==========
+    // Lecture : session d'equipe reelle (le X-App-Secret seul ne suffit pas).
+    // Ecriture : server-only (SERVER_ONLY_ACTIONS), job VPS hk_security_contacts.
+    if (action === "getSecurityContacts") {
+      const r = await getSecurityContacts(sb, req);
+      return jsonResp(r.body, r.status);
+    }
+    if (action === "setSecurityContacts" && req.method === "POST") {
+      const body = await req.json().catch(() => null);
+      const r = await setSecurityContacts(sb, req, body, SERVER_SHARED_SECRET);
+      return jsonResp(r.body, r.status);
+    }
+
     if (action === "syncCleanerRatings" && req.method === "POST") {
       const body = await req.json().catch(() => ({}));
       const row = {

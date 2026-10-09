@@ -3788,9 +3788,11 @@ let securitySearch='';
 async function loadSecurity(){
   securityLoading=true; securityError=null; render();
   try{
-    const res=await fetch('security-contacts.json');
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    securityData=await res.json();
+    // Plus de fichier public : le proxy ne rend les contacts qu'a une session
+    // d'equipe. api() rend les erreurs serveur en {error} sans lever.
+    const r=await api('getSecurityContacts');
+    if(!r||r.error) throw new Error((r&&r.error)||'Failed to load security contacts.');
+    securityData=r;
   }catch(e){
     securityError=(e&&e.message)||'Failed to load security contacts.';
   }

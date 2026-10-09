@@ -6,3 +6,12 @@
 # Pas de redirect SPA catch-all : le routing est 100% query-param (app.js),
 # et le catch-all faisait répondre index.html (200) aux assets 404,
 # que le service worker mettait ensuite en cache.
+
+# security-contacts.json n'est plus public (contacts servis par le proxy,
+# action getSecurityContacts, session d'equipe obligatoire). force=true : 404
+# meme si une vieille copie du fichier traine dans un deploiement.
+[[redirects]]
+  from = "/security-contacts.json"
+  to = "/404.html"
+  status = 404
+  force = true
