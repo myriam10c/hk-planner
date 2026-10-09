@@ -29,6 +29,7 @@ import {
   unclaimProposal, uploadInspectionPhoto,
 } from "./insp_write.ts";
 import { getSecurityContacts, setSecurityContacts } from "./security_contacts.ts";
+import { sessionActor } from "./actor.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -1515,8 +1516,11 @@ Deno.serve(async (req: Request) => {
     }
     if (action === "setDone" && req.method === "POST") {
       const body = await req.json();
-      const { key, done: isDone, actor } = body;
+      const { key, done: isDone } = body;
       if (!key || typeof isDone !== "boolean") return jsonResp({ error: "key and done required" }, 400);
+      // Auteur pris dans la session (spec manager, section 6), body.actor ignore
+      // sauf pour les jobs serveur Hermes sans session.
+      const actor = sessionActor(await currentUser(sb, req), body.actor);
       if (isDone) {
         const { error } = await sb.from("menage_done").upsert({ reservation_key: key, done: true, updated_at: new Date().toISOString() }, { onConflict: "reservation_key" });
         if (error) throw error;
@@ -1535,10 +1539,11 @@ Deno.serve(async (req: Request) => {
       const me = await currentUser(sb, req);
       if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
       const body = await req.json();
-      const { key, cancelled, reason, actor } = body;
+      const { key, cancelled, reason } = body;
+      const actor = sessionActor(me, body.actor);
       if (!key || typeof cancelled !== "boolean") return jsonResp({ error: "key and cancelled required" }, 400);
       if (cancelled) {
-        const { error } = await sb.from("cleaning_cancelled").upsert({ reservation_key: key, reason: reason || "", cancelled_by: actor || "Manager", cancelled_at: new Date().toISOString() }, { onConflict: "reservation_key" });
+        const { error } = await sb.from("cleaning_cancelled").upsert({ reservation_key: key, reason: reason || "", cancelled_by: actor, cancelled_at: new Date().toISOString() }, { onConflict: "reservation_key" });
         if (error) throw error;
       } else {
         const { error } = await sb.from("cleaning_cancelled").delete().eq("reservation_key", key);
@@ -1556,11 +1561,12 @@ Deno.serve(async (req: Request) => {
       const me = await currentUser(sb, req);
       if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
       const body = await req.json();
-      const { key, postpone, new_date, original_date, actor } = body;
+      const { key, postpone, new_date, original_date } = body;
+      const actor = sessionActor(me, body.actor);
       if (!key || typeof postpone !== "boolean") return jsonResp({ error: "key and postpone required" }, 400);
       if (postpone) {
         if (!new_date || !original_date) return jsonResp({ error: "new_date and original_date required" }, 400);
-        const { error } = await sb.from("cleaning_postponed").upsert({ reservation_key: key, original_date, new_date, postponed_by: actor || "Manager", postponed_at: new Date().toISOString() }, { onConflict: "reservation_key" });
+        const { error } = await sb.from("cleaning_postponed").upsert({ reservation_key: key, original_date, new_date, postponed_by: actor, postponed_at: new Date().toISOString() }, { onConflict: "reservation_key" });
         if (error) throw error;
       } else {
         const { error } = await sb.from("cleaning_postponed").delete().eq("reservation_key", key);
@@ -2069,8 +2075,11 @@ Deno.serve(async (req: Request) => {
     }
     if (action === "assignCleaner" && req.method === "POST") {
       const body = await req.json();
-      const { reservation_key, cleaner_id, cleaner_ids, mode, actor, service_type } = body;
+      const { reservation_key, cleaner_id, cleaner_ids, mode, service_type } = body;
       if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
+      // Auteur pris dans la session (spec manager, section 6), body.actor ignore
+      // sauf pour les jobs serveur Hermes sans session.
+      const actor = sessionActor(await currentUser(sb, req), body.actor);
 
       // service_type optionnel : applique à la NOUVELLE row insérée (add/set). Default CHC.
       const ALLOWED_SERVICES = new Set(['CHC','INSTAY','INSTAY_WITH_LINENS','REFRESH','REFRESH_LINEN','CARPET_LAUNDRY','BALCONY','CHC_MATTRESS','STRIP_CLEAN','DEEP_CLEAN','CANCELLED','CANCELLED_WITH_FEE','RECTIFICATION','INSPECTION']);
