@@ -1,9 +1,9 @@
 // Ecran Today : un appel mgr.today, rendu, panneaux, navigation au clavier,
 // cache local du dernier Today (spec section 7).
-import { get } from '/manager/api.js';
+import { get, post } from '/manager/api.js';
 import { clearToday, loadToday, saveToday } from '/manager/today-cache.js';
-import { dubaiTime, esc, openSheet, sheetIsOpen } from '/manager/ui/dom.js';
-import { arrivalSheet, boardHtml, jobSheet, problemSheet } from '/manager/screens/today-view.js';
+import { closeSheet, dubaiTime, esc, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
+import { arrivalSheet, boardHtml, jobSheet, pickerSheet, problemSheet } from '/manager/screens/today-view.js';
 
 function dubaiParts(ms) {
   const p = {};
@@ -17,7 +17,7 @@ function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div
 
 export async function renderToday(ctx) {
   const main = ctx.main;
-  const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null };
+  const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false };
   const cached = loadToday();
   // Hors ligne au demarrage (ctx.me inconnu) : le cache de l'appareil. Sinon,
   // seulement celui du manager connecte.
@@ -85,11 +85,89 @@ export async function renderToday(ctx) {
     paint();
   }
 
+  // Cible d'une ecriture : un menage du jour, ou le menage precedent d'une arrivee.
+  function targetFor(key) {
+    const j = st.data.who.jobs.find((x) => x.key === key);
+    if (j) return { key, apt: j.apt, bld: j.bld, assigned: j.assigned, serviceType: j.serviceType, sub: j.checkout ? 'checkout ' + j.checkout : '' };
+    const a = st.data.arrivals.rows.find((x) => x.prevKey === key);
+    if (a) return { key, apt: a.apt, bld: a.bld, assigned: a.assigned, serviceType: a.serviceType, sub: a.kind + ' at ' + a.time };
+    return null;
+  }
+  function nameOf(id) {
+    const p = st.data.assignable.find((x) => x.id === Number(id));
+    return p ? p.name : 'Member ' + id;
+  }
+  function sheetBusy(on) {
+    document.querySelectorAll('#sheet button:not([data-close])').forEach((b) => { b.disabled = on; });
+  }
+  function sheetError(msg) {
+    const body = document.querySelector('#sheet .sheet-b');
+    if (!body) return;
+    let el = body.querySelector('.sheet-err');
+    if (!el) {
+      el = document.createElement('p');
+      el.className = 'sheet-err';
+      el.setAttribute('role', 'alert');
+      body.prepend(el);
+    }
+    el.textContent = msg;
+  }
+  async function undo(fn) {
+    try { await fn(); } catch (e) { toast(e.message); }
+    refresh();
+  }
+
+  async function write(t, call, okMsg, undoCall) {
+    if (st.busy) return;
+    st.busy = true;
+    sheetBusy(true);
+    try {
+      await call();
+    } catch (e) {
+      st.busy = false;
+      sheetBusy(false);
+      if (handleAccess(e)) return;
+      sheetError(e.message);
+      return;
+    }
+    st.busy = false;
+    closeSheet();
+    toast(okMsg, () => undo(undoCall));
+    refresh();
+  }
+
+  function assign(key, id) {
+    const t = targetFor(key);
+    if (!t) return;
+    const prev = t.assigned.slice();
+    const service = t.serviceType || 'CHC';
+    return write(t,
+      () => post('assignCleaner', { reservation_key: key, cleaner_ids: [Number(id)], mode: 'set', service_type: service }),
+      placeLabel(t) + ' assigned to ' + nameOf(id),
+      () => post('assignCleaner', { reservation_key: key, cleaner_ids: prev, mode: 'set', service_type: service }));
+  }
+
+  function setDone(key, val) {
+    const t = targetFor(key);
+    if (!t) return;
+    return write(t,
+      () => post('setDone', { key, done: val }),
+      placeLabel(t) + (val ? ' marked done' : ' back to not done'),
+      () => post('setDone', { key, done: !val }));
+  }
+
   function onClick(e) {
-    const el = e.target && e.target.closest ? e.target.closest('[data-retry],[data-open]') : null;
+    const el = e.target && e.target.closest ? e.target.closest('[data-retry],[data-open],[data-assign],[data-pick],[data-done]') : null;
     if (!el) return;
     if (el.hasAttribute('data-retry')) { refresh(); return; }
     if (!st.data) return;
+    if (el.hasAttribute('data-pick')) { assign(el.getAttribute('data-key'), el.getAttribute('data-pick')); return; }
+    if (el.hasAttribute('data-assign')) {
+      const t = targetFor(el.getAttribute('data-assign'));
+      if (t) openSheet(pickerSheet(st.data, t));
+      return;
+    }
+    if (el.hasAttribute('data-done')) { setDone(el.getAttribute('data-done'), el.getAttribute('data-val') === '1'); return; }
     const op = el.getAttribute('data-open');
     const now = Date.now();
     if (op === 'job') {

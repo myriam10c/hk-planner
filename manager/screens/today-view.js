@@ -31,12 +31,15 @@ function jobsByKey(data) {
   return m;
 }
 
-// --- remplaces a la tache 10 (actions reelles) ---
+// Actions reelles (assignCleaner, setDone) : branchees dans today.js.
 function actionsFoot(key, assigned, done) {
-  return '<div class="sheet-f"><button class="btn" type="button" data-close>Close</button></div>';
+  return '<div class="sheet-f"><button class="btn primary" type="button" data-assign="' + esc(key) + '">' + (assigned.length ? 'Reassign' : 'Assign cleaner') + '</button>'
+    + '<button class="btn" type="button" data-done="' + esc(key) + '" data-val="' + (done ? '0' : '1') + '">' + (done ? 'Undo done' : 'Mark done') + '</button>'
+    + '<button class="btn" type="button" data-close>Close</button></div>';
 }
-function assignBtn(j) { return ''; }
-// --- fin ---
+function assignBtn(j) {
+  return j.state === 'done' ? '' : '<button class="btn sm primary" type="button" data-assign="' + esc(j.key) + '">Assign</button>';
+}
 
 function header(data, banner, stale) {
   return '<header class="top"><div><h1>Today</h1><div class="date">' + esc(longDate(data.day)) + '</div>'
@@ -246,4 +249,19 @@ export function problemSheet(p) {
     + '<div class="sheet-b">' + statusBox(p.tone, p.label, p.why)
     + '<div class="blk"><h3>Next step</h3><div class="empty">Assign, Schedule and Close come with the Problems screen. Until then, handle it in the current app.</div></div></div>'
     + '<div class="sheet-f"><a class="btn primary" href="/?legacy=1">Open in the current app</a><button class="btn" type="button" data-close>Close</button></div>';
+}
+
+export function pickerSheet(data, t) {
+  const count = {};
+  for (const p of data.who.people) count[p.id] = p.keys.length;
+  const opts = data.assignable.map((p) => {
+    const n = count[p.id] || 0;
+    const current = t.assigned.length === 1 && t.assigned[0] === p.id;
+    return '<button type="button" data-pick="' + p.id + '" data-key="' + esc(t.key) + '"' + (current ? ' aria-current="true"' : '') + '>'
+      + '<span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><span><b>' + esc(p.name) + '</b><small>'
+      + esc(ROLE[p.role] || p.role) + ' · ' + n + ' job' + (n === 1 ? '' : 's') + ' today</small></span></button>';
+  }).join('');
+  return sheetHead('Assign a cleaner', placeLabel(t) + (t.sub ? ' · ' + t.sub : ''))
+    + '<div class="sheet-b"><div class="pick">' + opts + '</div></div>'
+    + '<div class="sheet-f"><button class="btn" type="button" data-close>Cancel</button></div>';
 }
