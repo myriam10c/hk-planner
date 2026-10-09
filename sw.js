@@ -42,6 +42,9 @@ self.addEventListener('fetch', (e) => {
   // la racine mettrait en cache les modules de la v3 avant que le sien ne
   // prenne la main, et servirait une version perimee apres un deploiement.
   if (url.pathname.indexOf('/v3/') === 0) return;
+  // /manager/ (nouvelle app manager) : aucun service worker en phase 1. Reseau
+  // seul, avec les en-tetes no-cache de _headers : jamais de module perime.
+  if (url.pathname.indexOf('/manager/') === 0) return;
   // Bypass dynamic API calls
   if (url.hostname.includes('supabase.co')) return;
   if (url.hostname.includes('hostaway.com')) return;

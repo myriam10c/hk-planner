@@ -27,3 +27,10 @@
   Content-Type: application/octet-stream
   Content-Disposition: attachment; filename="HK-Planner.apk"
   Cache-Control: no-transform
+
+# App manager /manager/ (phase 1) : pas de service worker, jamais de module
+# perime dans le cache HTTP.
+/manager/
+  Cache-Control: no-cache
+/manager/*
+  Cache-Control: no-cache

@@ -1,0 +1,52 @@
+/* HK Planner manager · tokens du prototype Today valide le 09/10/2026 (ADN Flighty).
+ * Statuts : vert #039855, ambre #F79009 sur #FEF0C7, rouge #D92D20 sur #FEE4E2. */
+:root{
+  --bg:#f3f4f7; --surface:#ffffff; --surface-2:#f7f8fa; --sunk:#eceef2;
+  --ink:#0c0e13; --ink-2:#454c5a; --ink-3:#6b7282; --line:#e2e5ea; --line-2:#d3d7de;
+  --accent:#0a6fd6; --accent-ink:#ffffff; --accent-tint:#e5f1fd;
+  --ok:#039855; --ok-ink:#05603a; --ok-tint:#e2f5ea;
+  --warn:#f79009; --warn-ink:#93370d; --warn-tint:#fef0c7;
+  --bad:#d92d20; --bad-ink:#912018; --bad-tint:#fee4e2;
+  --scrim:rgba(10,12,18,.42); --shadow:0 1px 2px rgba(16,20,30,.06),0 8px 28px rgba(16,20,30,.08);
+  --focus:#0a6fd6;
+  --font-ui:"Onest",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"Fragment Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --r-sm:8px; --r-md:12px; --r-lg:18px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px;
+  --ease-out:cubic-bezier(.16,1,.3,1); --ease-in:cubic-bezier(.7,0,.84,0);
+  --sidebar:232px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0a0b0e; --surface:#14161b; --surface-2:#1a1d23; --sunk:#202329;
+    --ink:#f2f4f7; --ink-2:#b4bac5; --ink-3:#8a919e; --line:#252830; --line-2:#323641;
+    --accent:#4ea8ff; --accent-ink:#06121f; --accent-tint:#10243a;
+    --ok:#32d583; --ok-ink:#6ce9a6; --ok-tint:#0d2a1d;
+    --warn:#fdb022; --warn-ink:#fec84b; --warn-tint:#2e2109;
+    --bad:#f97066; --bad-ink:#fda29b; --bad-tint:#33130f;
+    --scrim:rgba(0,0,0,.6); --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
+    --focus:#4ea8ff; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0a0b0e; --surface:#14161b; --surface-2:#1a1d23; --sunk:#202329;
+  --ink:#f2f4f7; --ink-2:#b4bac5; --ink-3:#8a919e; --line:#252830; --line-2:#323641;
+  --accent:#4ea8ff; --accent-ink:#06121f; --accent-tint:#10243a;
+  --ok:#32d583; --ok-ink:#6ce9a6; --ok-tint:#0d2a1d;
+  --warn:#fdb022; --warn-ink:#fec84b; --warn-tint:#2e2109;
+  --bad:#f97066; --bad-ink:#fda29b; --bad-tint:#33130f;
+  --scrim:rgba(0,0,0,.6); --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
+  --focus:#4ea8ff; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;overflow-x:clip}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1}
+button{font:inherit;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--font-mono);font-size:14px;letter-spacing:0}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion: reduce){
+  *{transition-duration:.01ms !important;animation-duration:.01ms !important}
+}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}

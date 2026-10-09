@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f3f4f7">
+<title>HK Planner · Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Fragment+Mono&display=swap">
+<link rel="stylesheet" href="/manager/ui/tokens.css">
+<link rel="stylesheet" href="/manager/ui/components.css">
+<link rel="stylesheet" href="/manager/ui/today.css">
+<script src="/manager/ui/theme.js"></script>
+</head>
+<body>
+<div class="app">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand"><i></i>HK Planner</div>
+    <div id="sideNav"></div>
+    <div class="side-foot" id="sideFoot"></div>
+  </nav>
+  <main id="main"><p class="boot" role="status">Loading…</p></main>
+</div>
+<nav class="tabbar" id="tabbar" aria-label="Main"></nav>
+<div class="scrim" id="scrim"></div>
+<aside class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" aria-hidden="true">
+  <div class="grab"></div>
+  <div id="sheetInner" class="sheet-inner"></div>
+</aside>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/vendor/supabase-js-2.116.0.umd.js"></script>
+<script type="module" src="/manager/app.js"></script>
+</body>
+</html>
