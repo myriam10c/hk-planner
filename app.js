@@ -3305,20 +3305,20 @@ async function cleanerLogin(){
       cleanerMode=null;
       localStorage.removeItem('cleanerMode');
       if(window.location.hash==='#cleaner') window.location.hash='';
-      toast('Welcome '+res.cleaner.name+'!','success');
       haptic('heavy');
       // L'ecran de creation de compte prime sur le rendu de fetchAll : render()
-      // le teste en premier, le chargement continue derriere.
-      await maybeOfferAccountSetup();
+      // le teste en premier, le chargement continue derriere. Pas de Welcome
+      // par-dessus l'ecran obligatoire (ferait croire que c'est fini).
+      if(!(await maybeOfferAccountSetup())) toast('Welcome '+res.cleaner.name+'!','success');
       fetchAll();
       return;
     }
     cleanerMode=res.cleaner;
     localStorage.setItem('cleanerMode',JSON.stringify(cleanerMode));
-    toast('Welcome '+res.cleaner.name+'!','success');
     haptic('heavy');
     // #10 First login onboarding, apres la creation de compte obligatoire
     const mustSetup=await maybeOfferAccountSetup();
+    if(!mustSetup) toast('Welcome '+res.cleaner.name+'!','success');
     if(!mustSetup&&maybeGoV3()) return;
     const hasSeenOnboarding = localStorage.getItem('onboardingSeen');
     if(!hasSeenOnboarding && !mustSetup){
@@ -4268,7 +4268,6 @@ function renderAuthLogin(){
       (authPinPrompt?'<button id="authPinButton" class="auth-secondary" data-action="usePinInstead">'+t('signInWithMyPin')+'</button>':'')+
       '<button class="auth-link" data-action="forgotPassword">'+t('forgotPassword')+'</button>'+
       '<button class="auth-link" data-action="startAccountSetup">'+t('firstTimeHere')+'</button>'+
-      '<button class="auth-link" data-action="usePinInstead">'+t('usePinInstead')+'</button>'+
     '</div></div>';
   const f=document.getElementById('authEmail');
   if(f&&!f.value)f.focus();

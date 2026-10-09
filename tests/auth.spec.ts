@@ -226,7 +226,7 @@ test('deux mots de passe differents sont refuses sans appel reseau', async ({ pa
 
 test('l ecran PIN reste atteignable depuis le login par email', async ({ page }) => {
   await bootWithFakeNetwork(page, []);
-  await page.click('[data-action="usePinInstead"]');
+  await page.click('[data-action="startAccountSetup"]');
   await expect(page.locator('#pinInput')).toBeVisible();
   await page.click('[data-action="useEmailInstead"]');
   await expect(page.locator('#authEmail')).toBeVisible();
@@ -293,7 +293,7 @@ test('constat 6 : email_not_confirmed ne revele plus qu un compte existe', async
 
 test('constat 7 : l ecran PIN est presente comme un deverrouillage rapide', async ({ page }) => {
   await bootWithFakeNetwork(page, []);
-  await page.click('[data-action="usePinInstead"]');
+  await page.click('[data-action="startAccountSetup"]');
   await expect(page.locator('.pin-screen')).toContainText('Quick unlock');
   await expect(page.locator('.pin-screen')).toContainText('Enter your 4-digit PIN');
   await expect(page.locator('.pin-screen')).not.toContainText('Cleaner Login');

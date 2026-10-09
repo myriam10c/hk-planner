@@ -139,7 +139,7 @@ test('session PIN cleaner deja posee, 09/10 00:00 Dubai : renvoyee vers /v3/', a
 
 test('PIN tape (Quick unlock) par une cleaner le 09/10 : renvoyee vers /v3/', async ({ page }) => {
   await boot(page, { at: APRES, routes: routesFor(FAIZA, 'faiza@example.com') });
-  await page.click('.auth-link[data-action="usePinInstead"]');
+  await page.click('.auth-link[data-action="startAccountSetup"]');
   await expect(page.locator('#pinInput')).toBeVisible({ timeout: 10_000 });
   await page.fill('#pinInput', '1234');
   await redirige(page);
@@ -147,7 +147,7 @@ test('PIN tape (Quick unlock) par une cleaner le 09/10 : renvoyee vers /v3/', as
 
 test('PIN tape le 08/10 : reste sur l ancienne app', async ({ page }) => {
   await boot(page, { at: AVANT, routes: routesFor(FAIZA, 'faiza@example.com') });
-  await page.click('.auth-link[data-action="usePinInstead"]');
+  await page.click('.auth-link[data-action="startAccountSetup"]');
   await expect(page.locator('#pinInput')).toBeVisible({ timeout: 10_000 });
   await page.fill('#pinInput', '1234');
   await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
@@ -216,7 +216,7 @@ for (const [nom, membre] of [['manager (email)', WALTER], ['Elite subcontractor 
 
 test('manager connecte par PIN le 09/10 : reste', async ({ page }) => {
   await boot(page, { at: APRES, routes: routesFor(WALTER, 'walter@example.com') });
-  await page.click('.auth-link[data-action="usePinInstead"]');
+  await page.click('.auth-link[data-action="startAccountSetup"]');
   await expect(page.locator('#pinInput')).toBeVisible({ timeout: 10_000 });
   await page.fill('#pinInput', '1234');
   await reste(page, 3000);
