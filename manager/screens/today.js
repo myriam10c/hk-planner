@@ -1,9 +1,17 @@
 // Ecran Today : un appel mgr.today, rendu, panneaux, navigation au clavier,
 // cache local du dernier Today (spec section 7).
 import { get } from '/manager/api.js';
-import { loadToday, saveToday } from '/manager/today-cache.js';
+import { clearToday, loadToday, saveToday } from '/manager/today-cache.js';
 import { dubaiTime, esc, openSheet, sheetIsOpen } from '/manager/ui/dom.js';
 import { arrivalSheet, boardHtml, jobSheet, problemSheet } from '/manager/screens/today-view.js';
+
+function dubaiParts(ms) {
+  const p = {};
+  new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dubai', weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
+    .formatToParts(new Date(ms)).forEach((x) => { p[x.type] = x.value; });
+  return p;
+}
+function dubaiDay(ms) { const p = dubaiParts(ms); return p.year + '-' + p.month + '-' + p.day; }
 
 function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div></header>' + inner; }
 
@@ -21,12 +29,15 @@ export async function renderToday(ctx) {
   function banner() {
     let h = '';
     if (st.data && !st.fresh) {
-      const when = dubaiTime(new Date(st.savedAt).toISOString());
+      let when = dubaiTime(new Date(st.savedAt).toISOString());
+      const old = st.data.day !== dubaiDay(Date.now());
+      if (old) { const p = dubaiParts(st.savedAt); when = p.weekday + ' ' + p.day + '/' + p.month + ' ' + when; }
+      const note = old ? ' Not today\'s data.' : '';
       if (st.error) {
-        h += '<div class="banner warn" role="status"><span>Data from ' + esc(when) + '. ' + esc(st.error.message)
+        h += '<div class="banner warn" role="status"><span>Data from ' + esc(when) + '. ' + esc(st.error.message) + esc(note)
           + '</span><button class="btn sm" type="button" data-retry>Retry</button></div>';
       } else if (st.loading) {
-        h += '<div class="banner" role="status"><span>Data from ' + esc(when) + ', updating.</span></div>';
+        h += '<div class="banner" role="status"><span>Data from ' + esc(when) + ', updating.' + esc(note) + '</span></div>';
       }
     }
     if (st.data && st.data.bookingsCachedAt) {
@@ -46,6 +57,7 @@ export async function renderToday(ctx) {
 
   // true quand l'erreur a deja ete traitee par une sortie de l'ecran.
   function handleAccess(e) {
+    if (e.kind === 'auth' || e.kind === 'forbidden') clearToday();
     if (e.kind === 'auth') { location.replace('/'); return true; }
     if (e.kind === 'forbidden') {
       if (e.message === 'email sign-in required') ctx.emailRequired(); else location.replace('/');
