@@ -1,23 +1,44 @@
-// Ecran Today : un appel mgr.today, rendu, panneaux, navigation au clavier.
+// Ecran Today : un appel mgr.today, rendu, panneaux, navigation au clavier,
+// cache local du dernier Today (spec section 7).
 import { get } from '/manager/api.js';
-import { esc, openSheet, sheetIsOpen } from '/manager/ui/dom.js';
+import { loadToday, saveToday } from '/manager/today-cache.js';
+import { dubaiTime, esc, openSheet, sheetIsOpen } from '/manager/ui/dom.js';
 import { arrivalSheet, boardHtml, jobSheet, problemSheet } from '/manager/screens/today-view.js';
 
 function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div></header>' + inner; }
 
 export async function renderToday(ctx) {
   const main = ctx.main;
-  const st = { data: null, loading: true, error: null };
+  const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null };
+  const cached = loadToday();
+  // Hors ligne au demarrage (ctx.me inconnu) : le cache de l'appareil. Sinon,
+  // seulement celui du manager connecte.
+  if (cached && (!ctx.me || (cached.data.me && cached.data.me.id === ctx.me.id))) {
+    st.data = cached.data;
+    st.savedAt = cached.savedAt;
+  }
+
+  function banner() {
+    let h = '';
+    if (st.data && !st.fresh) {
+      const when = dubaiTime(new Date(st.savedAt).toISOString());
+      if (st.error) {
+        h += '<div class="banner warn" role="status"><span>Data from ' + esc(when) + '. ' + esc(st.error.message)
+          + '</span><button class="btn sm" type="button" data-retry>Retry</button></div>';
+      } else if (st.loading) {
+        h += '<div class="banner" role="status"><span>Data from ' + esc(when) + ', updating.</span></div>';
+      }
+    }
+    if (st.data && st.data.bookingsCachedAt) {
+      h += '<div class="banner warn" role="status"><span>Bookings data from ' + esc(dubaiTime(st.data.bookingsCachedAt))
+        + '. Hostaway is not answering, statuses may be late.</span></div>';
+    }
+    return h;
+  }
 
   function paint() {
     if (!ctx.isCurrent()) return;
-    if (st.data) {
-      const banner = st.error
-        ? '<div class="banner warn" role="status"><span>Could not refresh. ' + esc(st.error.message) + '</span><button class="btn sm" type="button" data-retry>Retry</button></div>'
-        : '';
-      main.innerHTML = boardHtml(st.data, Date.now(), banner, !!st.error);
-      return;
-    }
+    if (st.data) { main.innerHTML = boardHtml(st.data, Date.now(), banner(), !st.fresh); return; }
     if (st.loading) { main.innerHTML = shellHtml('<p class="boot" role="status">Loading today…</p>'); return; }
     main.innerHTML = shellHtml('<div class="err-card" role="alert"><p>' + esc(st.error ? st.error.message : 'Could not load.')
       + '</p><button class="btn primary" type="button" data-retry>Retry</button></div>');
@@ -38,10 +59,15 @@ export async function renderToday(ctx) {
     st.error = null;
     paint();
     try {
-      st.data = await get('mgr.today');
+      const d = await get('mgr.today');
+      st.data = d;
+      st.savedAt = Date.now();
+      st.fresh = true;
+      saveToday(d, st.savedAt);
     } catch (e) {
       if (handleAccess(e)) return;
       st.error = e;
+      st.fresh = false;
     }
     st.loading = false;
     paint();
