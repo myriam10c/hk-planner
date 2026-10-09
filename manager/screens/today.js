@@ -17,7 +17,7 @@ function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div
 
 export async function renderToday(ctx) {
   const main = ctx.main;
-  const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false };
+  const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null };
   const cached = loadToday();
   // Hors ligne au demarrage (ctx.me inconnu) : le cache de l'appareil. Sinon,
   // seulement celui du manager connecte.
@@ -25,6 +25,10 @@ export async function renderToday(ctx) {
     st.data = cached.data;
     st.savedAt = cached.savedAt;
   }
+
+  // Donnees en cache ou d'un autre jour : aucune ecriture possible.
+  function readOnly() { return !st.fresh || !st.data || st.data.day !== dubaiDay(Date.now()); }
+  function refuseRo() { toast('Reconnect to make changes.'); }
 
   function banner() {
     let h = '';
@@ -49,7 +53,7 @@ export async function renderToday(ctx) {
 
   function paint() {
     if (!ctx.isCurrent()) return;
-    if (st.data) { main.innerHTML = boardHtml(st.data, Date.now(), banner(), !st.fresh); return; }
+    if (st.data) { main.innerHTML = boardHtml(st.data, Date.now(), banner(), !st.fresh, readOnly()); return; }
     if (st.loading) { main.innerHTML = shellHtml('<p class="boot" role="status">Loading today…</p>'); return; }
     main.innerHTML = shellHtml('<div class="err-card" role="alert"><p>' + esc(st.error ? st.error.message : 'Could not load.')
       + '</p><button class="btn primary" type="button" data-retry>Retry</button></div>');
@@ -112,13 +116,21 @@ export async function renderToday(ctx) {
     }
     el.textContent = msg;
   }
+  function heldHere(key) { return sheetIsOpen() && st.sheetKey === key; }
+  function busyToast() { toast('Saving, wait a second.'); }
   async function undo(fn) {
+    if (st.busy) { busyToast(); return; }
+    if (readOnly()) { refuseRo(); return; }
+    st.busy = true;
     try { await fn(); } catch (e) { toast(e.message); }
+    st.busy = false;
     refresh();
   }
 
   async function write(t, call, okMsg, undoCall) {
-    if (st.busy) return;
+    if (st.busy) { busyToast(); return; }
+    if (readOnly()) { refuseRo(); return; }
+    const key = t.key;
     st.busy = true;
     sheetBusy(true);
     try {
@@ -127,11 +139,11 @@ export async function renderToday(ctx) {
       st.busy = false;
       sheetBusy(false);
       if (handleAccess(e)) return;
-      sheetError(e.message);
+      if (heldHere(key)) sheetError(e.message); else toast(e.message);
       return;
     }
     st.busy = false;
-    closeSheet();
+    if (heldHere(key)) closeSheet();
     toast(okMsg, () => undo(undoCall));
     refresh();
   }
@@ -161,10 +173,14 @@ export async function renderToday(ctx) {
     if (!el) return;
     if (el.hasAttribute('data-retry')) { refresh(); return; }
     if (!st.data) return;
+    if (el.hasAttribute('data-pick') || el.hasAttribute('data-assign') || el.hasAttribute('data-done')) {
+      if (st.busy) { busyToast(); return; }
+      if (readOnly()) { refuseRo(); return; }
+    }
     if (el.hasAttribute('data-pick')) { assign(el.getAttribute('data-key'), el.getAttribute('data-pick')); return; }
     if (el.hasAttribute('data-assign')) {
       const t = targetFor(el.getAttribute('data-assign'));
-      if (t) openSheet(pickerSheet(st.data, t));
+      if (t) { st.sheetKey = t.key; openSheet(pickerSheet(st.data, t, readOnly())); }
       return;
     }
     if (el.hasAttribute('data-done')) { setDone(el.getAttribute('data-done'), el.getAttribute('data-val') === '1'); return; }
@@ -172,13 +188,13 @@ export async function renderToday(ctx) {
     const now = Date.now();
     if (op === 'job') {
       const j = st.data.who.jobs.find((x) => x.key === el.getAttribute('data-key'));
-      if (j) openSheet(jobSheet(st.data, j, now));
+      if (j) { st.sheetKey = j.key; openSheet(jobSheet(st.data, j, now, readOnly())); }
     } else if (op === 'arr') {
       const a = st.data.arrivals.rows.find((x) => x.id === el.getAttribute('data-id'));
-      if (a) openSheet(arrivalSheet(st.data, a, now));
+      if (a) { st.sheetKey = a.prevKey || null; openSheet(arrivalSheet(st.data, a, now, readOnly())); }
     } else if (op === 'prob') {
       const p = st.data.problems.top.find((x) => x.ref === el.getAttribute('data-ref'));
-      if (p) openSheet(problemSheet(p));
+      if (p) { st.sheetKey = null; openSheet(problemSheet(p)); }
     }
   }
 

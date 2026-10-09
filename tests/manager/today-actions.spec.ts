@@ -79,3 +79,40 @@ test('Undo done depuis une arrivee deja prete', async ({ page }) => {
   await expect(page.locator('#toast')).toContainText('back to not done');
   expect(await writes(page, 'setDone')).toEqual([{ key: '2026-10-05_Fa Ho', done: false }]);
 });
+
+test('ecriture lente, fiche fermee puis autre fiche, refus 409 : toast, pas d erreur dans l autre fiche', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 409, body: { error: 'Faiza is on approved leave on 2026-10-09' }, delay: 600 }], { email: true, clock: NOW });
+  await page.locator('.person.unassigned .job', { hasText: 'Apt 308' }).getByRole('button', { name: 'Assign' }).click();
+  await page.locator('#sheet [data-pick="4"]').click();
+  await page.locator('#sheet [data-close]').first().click();
+  await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
+  await page.locator('.arr', { hasText: 'Apt 103' }).click();
+  await expect(page.locator('#sheet').getByRole('heading', { name: /Apt 103/ })).toBeVisible();
+  await expect(page.locator('#toast')).toContainText('Faiza is on approved leave on 2026-10-09');
+  await expect(page.locator('#sheet .sheet-err')).toHaveCount(0);
+});
+
+test('ecriture lente, fiche fermee puis autre fiche, succes : l autre fiche reste ouverte', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK, delay: 600 }], { email: true, clock: NOW });
+  await page.locator('.person.unassigned .job', { hasText: 'Apt 308' }).getByRole('button', { name: 'Assign' }).click();
+  await page.locator('#sheet [data-pick="4"]').click();
+  await page.locator('#sheet [data-close]').first().click();
+  await page.locator('.arr', { hasText: 'Apt 103' }).click();
+  await expect(page.locator('#toast')).toContainText('assigned to Faiza');
+  await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#sheet').getByRole('heading', { name: /Apt 103/ })).toBeVisible();
+});
+
+test('tap pendant une ecriture : toast Saving, wait a second', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK, delay: 800 }, { match: 'action=setDone', status: 200, body: OK }], { email: true, clock: NOW });
+  await page.locator('.person.unassigned .job', { hasText: 'Apt 308' }).getByRole('button', { name: 'Assign' }).click();
+  await page.locator('#sheet [data-pick="4"]').click();
+  await page.evaluate(() => {
+    const b = document.createElement('button');
+    b.setAttribute('data-done', '2026-10-09_Cy Doe'); b.setAttribute('data-val', '1'); b.id = 'fake2';
+    document.body.appendChild(b);
+    b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(page.locator('#toast')).toContainText('Saving, wait a second.');
+  expect((await writes(page, 'setDone')).length).toBe(0);
+});

@@ -18,7 +18,7 @@ export function currentOwner() {
 export function saveToday(data, savedAt) {
   const owner = currentOwner();
   if (!owner) return;
-  try { localStorage.setItem(KEY, JSON.stringify({ savedAt, owner, data })); } catch (e) { /* quota ou stockage bloque */ }
+  try { localStorage.setItem(KEY, JSON.stringify({ v: 1, savedAt, owner, data })); } catch (e) { /* quota ou stockage bloque */ }
 }
 
 export function clearToday() {
@@ -28,7 +28,7 @@ export function clearToday() {
 export function loadToday() {
   try {
     const o = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (!o || typeof o.savedAt !== 'number' || !o.data || !o.data.who || !o.data.arrivals) return null;
+    if (!o || o.v !== 1 || typeof o.savedAt !== 'number' || !o.data || !o.data.who || !o.data.arrivals) return null;
     const owner = currentOwner();
     return owner && o.owner === owner ? o : null;
   } catch (e) { return null; }

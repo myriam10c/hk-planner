@@ -32,13 +32,15 @@ function jobsByKey(data) {
 }
 
 // Actions reelles (assignCleaner, setDone) : branchees dans today.js.
-function actionsFoot(key, assigned, done) {
+const RO_LINE = 'Reconnect to make changes.';
+function actionsFoot(key, assigned, done, ro) {
+  if (ro) return '<div class="sheet-f"><p class="ro-note" role="status">' + RO_LINE + '</p><button class="btn" type="button" data-close>Close</button></div>';
   return '<div class="sheet-f"><button class="btn primary" type="button" data-assign="' + esc(key) + '">' + (assigned.length ? 'Reassign' : 'Assign cleaner') + '</button>'
     + '<button class="btn" type="button" data-done="' + esc(key) + '" data-val="' + (done ? '0' : '1') + '">' + (done ? 'Undo done' : 'Mark done') + '</button>'
     + '<button class="btn" type="button" data-close>Close</button></div>';
 }
-function assignBtn(j) {
-  return j.state === 'done' ? '' : '<button class="btn sm primary" type="button" data-assign="' + esc(j.key) + '">Assign</button>';
+function assignBtn(j, ro) {
+  return ro || j.state === 'done' ? '' : '<button class="btn sm primary" type="button" data-assign="' + esc(j.key) + '">Assign</button>';
 }
 
 function header(data, banner, stale) {
@@ -87,7 +89,7 @@ function jobBtn(j) {
     + esc(nextLine(j) + jobNotes(j)) + '</span></span></button>';
 }
 
-function whoHtml(data) {
+function whoHtml(data, ro) {
   const byKey = jobsByKey(data);
   const w = data.who;
   let h = '<section class="card o1" aria-labelledby="h-who"><div class="sec-head"><h2 id="h-who">Who does what today</h2><span class="meta tnum">'
@@ -101,7 +103,7 @@ function whoHtml(data) {
         : j.state === 'done' ? '<span class="st ok">Done</span> · ' : '';
       h += '<div class="job static"><span class="tm">' + esc(coTime(j)) + '<small>' + coSmall(j) + '</small></span>'
         + '<button class="ap linklike" type="button" data-open="job" data-key="' + esc(j.key) + '"><b>' + esc(placeLabel(j)) + '</b><span>'
-        + lead + esc(nextLine(j) + jobNotes(j)) + '</span></button>' + assignBtn(j) + '</div>';
+        + lead + esc(nextLine(j) + jobNotes(j)) + '</span></button>' + assignBtn(j, ro) + '</div>';
     }
     h += '</div>';
     if (list.some((j) => j.tone === 'warn')) {
@@ -184,9 +186,9 @@ function arrivalsHtml(data) {
   return h + '</section>';
 }
 
-export function boardHtml(data, nowMs, banner, stale) {
+export function boardHtml(data, nowMs, banner, stale, ro) {
   return header(data, banner, stale) + alertHtml(data, nowMs) + stripHtml(data)
-    + '<div class="board"><div class="col">' + whoHtml(data) + controlHtml(data) + '</div><div class="col">'
+    + '<div class="board"><div class="col">' + whoHtml(data, ro) + controlHtml(data) + '</div><div class="col">'
     + problemsHtml(data) + arrivalsHtml(data) + '</div></div>';
 }
 
@@ -207,7 +209,7 @@ function ticketsBlk(list) {
     + esc(t.priority) + ' · since ' + esc(t.since) + ' · ' + (t.tech ? 'assigned to ' + esc(t.tech) : 'no technician') + '</small></li>').join('') + '</ul></div>';
 }
 
-export function jobSheet(data, job, nowMs) {
+export function jobSheet(data, job, nowMs, ro) {
   const arr = data.arrivals.rows.find((a) => a.prevKey === job.key) || null;
   const names = namesOf(data, job.assigned);
   const box = arr ? statusBox(arr.tone, arr.word, arr.cause)
@@ -225,10 +227,10 @@ export function jobSheet(data, job, nowMs) {
     + '<div class="sheet-b">' + box + tl
     + '<div class="blk"><h3>Cleaner</h3><div>' + (job.assigned.length ? esc(names) : '<span class="st bad">Nobody</span>') + '</div></div>'
     + ticketsBlk(data.ticketsByListing[job.listingId]) + '</div>'
-    + actionsFoot(job.key, job.assigned, job.state === 'done');
+    + actionsFoot(job.key, job.assigned, job.state === 'done', ro);
 }
 
-export function arrivalSheet(data, a, nowMs) {
+export function arrivalSheet(data, a, nowMs, ro) {
   const left = arrivalMs(data.day, a.time) - nowMs;
   const pc = a.prevCheckout;
   const prevItem = pc ? tlItem(pc.date === data.day ? (pc.time || '--:--') : ddmm(pc.date), 'ok', 'Previous checkout',
@@ -241,7 +243,7 @@ export function arrivalSheet(data, a, nowMs) {
     + '<div class="sheet-b">' + statusBox(a.tone, a.word, a.cause) + tl
     + '<div class="blk"><h3>Cleaner</h3><div>' + (a.cleaners.length ? esc(a.cleaners.join(' and ')) : '<span class="st bad">Nobody</span>') + '</div></div>'
     + ticketsBlk(data.ticketsByListing[a.listingId]) + '</div>'
-    + (a.prevKey ? actionsFoot(a.prevKey, a.assigned, a.done) : '<div class="sheet-f"><button class="btn" type="button" data-close>Close</button></div>');
+    + (a.prevKey ? actionsFoot(a.prevKey, a.assigned, a.done, ro) : '<div class="sheet-f"><button class="btn" type="button" data-close>Close</button></div>');
 }
 
 export function problemSheet(p) {
@@ -251,10 +253,10 @@ export function problemSheet(p) {
     + '<div class="sheet-f"><a class="btn primary" href="/?legacy=1">Open in the current app</a><button class="btn" type="button" data-close>Close</button></div>';
 }
 
-export function pickerSheet(data, t) {
+export function pickerSheet(data, t, ro) {
   const count = {};
   for (const p of data.who.people) count[p.id] = p.keys.length;
-  const opts = data.assignable.map((p) => {
+  const opts = ro ? '<p class="ro-note" role="status">' + RO_LINE + '</p>' : data.assignable.map((p) => {
     const n = count[p.id] || 0;
     const current = t.assigned.length === 1 && t.assigned[0] === p.id;
     return '<button type="button" data-pick="' + p.id + '" data-key="' + esc(t.key) + '"' + (current ? ' aria-current="true"' : '') + '>'
