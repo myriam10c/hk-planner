@@ -242,6 +242,43 @@ export async function renderPlanning(ctx) {
   document.addEventListener('input', onInput);
   ctx.onLeave(() => document.removeEventListener('input', onInput));
 
+  // Tache 9 : menages en plus. Prix facture obligatoire (regle de l'ancienne fiche).
+  function extraBody() {
+    const v = (id) => { const el = document.getElementById(id); return el ? String(el.value).trim() : ''; };
+    const listing = v('xListing'), date = v('xDate'), price = v('xPrice'), rate = v('xRate');
+    if (!listing) return { error: 'Choose an apartment.' };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'Choose a date.' };
+    if (price === '' || !Number.isFinite(Number(price)) || Number(price) < 0) return { error: 'Price billed is required.' };
+    if (rate !== '' && (!Number.isFinite(Number(rate)) || Number(rate) < 0)) return { error: 'Cleaner rate must be a number.' };
+    return { body: {
+      listing_id: listing, cleaning_date: date, label: v('xLabel') || null, guest_name: v('xGuest') || null,
+      price_billed: Number(price), cleaner_price: rate === '' ? null : Number(rate), notes: v('xNotes') || null,
+    } };
+  }
+  ACT.addExtra = () => {
+    if (readOnly()) { toast(RO_LINE); return; }
+    show('__new', 'extra');
+  };
+  ACT['edit-extra'] = (j) => { if (j && j.extra) show(j.key, 'extra'); };
+  ACT['x-save'] = (j) => {
+    const r = extraBody();
+    if (r.error) { sheetError(r.error); return; }
+    if (!j) {
+      const whoEl = document.getElementById('xWho');
+      const who = whoEl ? whoEl.value : '';
+      const l = st.data.listings.find((x) => x.id === r.body.listing_id) || {};
+      write('__new', 'addExtraCleaning', { ...r.body, assigned_cleaner_id: who ? Number(who) : null },
+        'Extra cleaning added for ' + (placeLabel(l) || 'the apartment') + ' on ' + dayShort(r.body.cleaning_date));
+      return;
+    }
+    if (!j.extra) return;
+    write(j.key, 'updateExtraCleaning', { id: j.extra.id, ...r.body }, 'Extra cleaning saved for ' + placeLabel(j));
+  };
+  ACT['x-delete'] = (j) => { if (j && j.extra) show(j.key, 'delete'); };
+  ACT['x-delete-confirm'] = (j) => {
+    if (j && j.extra) write(j.key, 'deleteExtraCleaning', { id: j.extra.id }, 'Extra cleaning deleted');
+  };
+
   function onClick(e) {
     const t = e.target && e.target.closest ? e.target : null;
     const el = t ? t.closest('[data-retry],[data-week],[data-day],[data-filter],[data-job],[data-add-extra],#sheet [data-pa]') : null;

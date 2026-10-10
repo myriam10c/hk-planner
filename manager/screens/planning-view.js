@@ -218,3 +218,44 @@ export function laundrySheet(d, j, ro) {
   return head('Linen collected', placeLabel(j) + ' · ' + dayShort(j.date))
     + '<div class="sheet-b"><p class="note">Every field is needed. Type 0 when there is none.</p><div class="lq">' + rows + '</div></div>' + foot;
 }
+
+// Memes types que la fiche de l'ancienne app.
+const EXTRA_TYPES = ['Mid-stay', 'Owner turnover', 'Deep clean', 'Post-construction', 'Other'];
+
+// Creation (j null) ou modification d'un menage en plus. L'assignation d'un extra
+// existant passe par Assign, comme tout menage.
+export function extraSheet(d, j, ro) {
+  const x = j && j.extra ? j.extra : null;
+  const f = x
+    ? { listing: j.listingId, date: x.cleaningDate, label: x.label || '', guest: x.guestName || '',
+      price: x.priceBilled == null ? '' : String(x.priceBilled), rate: x.cleanerPrice == null ? '' : String(x.cleanerPrice), notes: x.notes || '' }
+    : { listing: '', date: d.today >= d.start && d.today <= d.end ? d.today : d.start, label: '', guest: '', price: '', rate: '', notes: '' };
+  const opt = (v, label, cur) => '<option value="' + esc(v) + '"' + (String(v) === String(cur) ? ' selected' : '') + '>' + esc(label) + '</option>';
+  const listings = opt('', 'Choose an apartment', f.listing) + d.listings.map((l) => opt(l.id, placeLabel(l) || l.id, f.listing)).join('');
+  const types = opt('', 'Choose a type', f.label) + EXTRA_TYPES.map((t) => opt(t, t, f.label)).join('')
+    + (f.label && !EXTRA_TYPES.includes(f.label) ? opt(f.label, f.label, f.label) : '');
+  const who = x ? '' : '<label class="fl">Assign to<select id="xWho">' + opt('', 'Nobody yet', '')
+    + d.people.filter((p) => p.assignable).map((p) => opt(String(p.id), p.name, '')).join('') + '</select></label>';
+  const body = '<div class="sheet-b"><div class="form">'
+    + '<label class="fl">Apartment<select id="xListing">' + listings + '</select></label>'
+    + '<label class="fl">Date<input id="xDate" type="date" value="' + esc(f.date) + '"></label>'
+    + '<label class="fl">Type<select id="xLabel">' + types + '</select></label>'
+    + '<label class="fl">Guest or client<input id="xGuest" type="text" maxlength="120" autocomplete="off" value="' + esc(f.guest) + '"></label>'
+    + '<label class="fl">Price billed (AED)<input id="xPrice" type="number" inputmode="decimal" min="0" step="1" value="' + esc(f.price) + '"></label>'
+    + '<label class="fl">Cleaner rate (AED, optional)<input id="xRate" type="number" inputmode="decimal" min="0" step="1" value="' + esc(f.rate) + '"></label>'
+    + who
+    + '<label class="fl">Notes<textarea id="xNotes" rows="2" maxlength="500">' + esc(f.notes) + '</textarea></label>'
+    + '</div></div>';
+  let foot;
+  if (ro) foot = roFoot();
+  else if (x) foot = '<div class="sheet-f">' + B('x-save', 'Save', 'primary') + B('x-delete', 'Delete') + B('back', 'Back') + '</div>';
+  else foot = '<div class="sheet-f">' + B('x-save', 'Create extra', 'primary') + '<button class="btn" type="button" data-close>Cancel</button></div>';
+  return head(x ? 'Edit extra cleaning' : 'Add an extra cleaning', x ? placeLabel(j) : weekLabel(d.start)) + body + foot;
+}
+
+export function deleteSheet(d, j, ro) {
+  if (ro) return head('Delete extra', placeLabel(j)) + '<div class="sheet-b"></div>' + roFoot();
+  return head('Delete this extra cleaning?', placeLabel(j) + ' · ' + dayShort(j.date))
+    + '<div class="sheet-b"><p>The extra cleaning, its assignment and its done state are removed. This cannot be undone.</p></div>'
+    + '<div class="sheet-f">' + B('x-delete-confirm', 'Delete extra', 'primary') + B('back', 'Back') + '</div>';
+}
