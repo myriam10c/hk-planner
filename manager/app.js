@@ -15,6 +15,7 @@ const SCREENS = {
   today: ['/manager/screens/today.js', 'renderToday'],
   planning: ['/manager/screens/planning.js', 'renderPlanning'],
   problems: ['/manager/screens/problems.js', 'renderProblems'],
+  inspections: ['/manager/screens/inspections.js', 'renderInspections'],
 };
 const main = document.getElementById('main');
 let me = null;

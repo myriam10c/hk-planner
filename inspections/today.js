@@ -66,7 +66,7 @@ export async function renderToday(ctx) {
 
   const head = () => '<header class="top"><div><h1>Today\'s inspections</h1><p class="mute">'
     + esc(st.data ? longDate(st.data.day) : '') + '</p></div>'
-    + '<div class="top-actions"><a class="btn ghost" href="/">Back to HK Planner</a><button class="btn ghost" data-act="fleet">Fleet</button>'
+    + '<div class="top-actions">' + (ctx.embedded ? '' : '<a class="btn ghost" href="/">Back to HK Planner</a>') + '<button class="btn ghost" data-act="fleet">Fleet</button>'
     + (isMgr ? '<button class="btn ghost" data-act="reports">Reports</button>' : '') + '</div></header>';
 
   const body = () => {

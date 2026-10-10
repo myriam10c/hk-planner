@@ -152,7 +152,7 @@ function controlHtml(data) {
       + esc(ins.unfinished.map((u) => placeLabel(u) + ' (' + u.inspector + ', ' + u.date + ')').join(', '))
       + '</span></span><b class="tnum">' + ins.unfinished.length + '</b></div></div>';
   }
-  h += '</div>';
+  h += '<a class="link" href="#/inspections">Open inspections</a></div>';
   h += '<div class="ctl"><h3>Missing linen counts, ' + esc(c.linen.window) + '</h3>' + (c.linen.rows.length
     ? '<div class="kv">' + c.linen.rows.map((r) => '<span class="k">' + esc(r.name) + '</span><span class="v"><span class="'
       + (r.total && r.missing / r.total > 0.5 ? 'num-bad' : '') + '">' + r.missing + '</span><span class="of"> of ' + r.total + ' cleanings</span></span>').join('') + '</div>'

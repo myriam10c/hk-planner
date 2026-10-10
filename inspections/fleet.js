@@ -36,7 +36,7 @@ export async function renderFleet(ctx) {
   };
 
   const body = () => {
-    let h = '<main class="wrap"><header class="top"><div><h1>Fleet</h1></div><button class="btn ghost" data-act="home">Today</button></header>';
+    let h = '<main class="wrap"><header class="top"><div><h1>Fleet</h1></div><button class="btn ghost" data-act="home">' + (ctx.embedded ? 'Back' : 'Today') + '</button></header>';
     if (st.error && !st.data) return h + '<p class="notice bad" role="alert">' + esc(st.error) + '</p></main>';
     if (!st.data) return h + '<p class="mute">Loading…</p></main>';
     const d = st.data;

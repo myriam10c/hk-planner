@@ -64,7 +64,7 @@ export async function renderReports(ctx) {
     + '<span class="badges">' + badge(r) + '</span></button>';
 
   const body = () => {
-    let h = '<main class="wrap"><header class="top"><div><h1>Reports</h1></div><button class="btn ghost" data-act="home">Today</button></header>';
+    let h = '<main class="wrap"><header class="top"><div><h1>Reports</h1></div><button class="btn ghost" data-act="home">' + (ctx.embedded ? 'Back' : 'Today') + '</button></header>';
     h += chips(PERIODS, st.period, 'period');
     if (st.loading) return h + '<p class="state">Loading…</p></main>';
     if (st.error) return h + '<p class="notice bad" role="alert">' + esc(st.error) + '</p>'
