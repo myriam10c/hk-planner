@@ -182,6 +182,33 @@ export async function renderPlanning(ctx) {
   ACT.done = (j) => { if (j) markDone(j, true); };
   ACT.undone = (j) => { if (j) markDone(j, false); };
 
+  // Tache 7 : Cancel (raison facultative) / Restore, Postpone d'un jour / Restore date.
+  ACT.cancel = (j) => { if (j) show(j.key, 'cancel'); };
+  ACT['confirm-cancel'] = (j) => {
+    if (!j) return;
+    const inp = document.getElementById('pReason');
+    const reason = inp ? inp.value.trim() : '';
+    const where = placeLabel(j);
+    write(j.key, 'setCancelled', { key: j.key, cancelled: true, reason }, where + ' cancelled',
+      () => write(j.key, 'setCancelled', { key: j.key, cancelled: false }, where + ' restored'));
+  };
+  ACT.restore = (j) => { if (j) write(j.key, 'setCancelled', { key: j.key, cancelled: false }, placeLabel(j) + ' restored'); };
+  ACT.postpone = (j) => { if (j) show(j.key, 'postpone'); };
+  // Toujours la premiere date d'origine : deux reports de suite gardent le vrai depart.
+  ACT['confirm-postpone'] = (j) => {
+    if (!j) return;
+    const to = addDays(j.date, 1);
+    const from = j.postponedFrom || j.date;
+    const where = placeLabel(j);
+    const back = j.postponedFrom
+      ? () => write(j.key, 'setPostponed', { key: j.key, postpone: true, new_date: j.date, original_date: from }, where + ' back to ' + dayShort(j.date))
+      : () => write(j.key, 'setPostponed', { key: j.key, postpone: false }, where + ' back to ' + dayShort(j.date));
+    write(j.key, 'setPostponed', { key: j.key, postpone: true, new_date: to, original_date: from }, where + ' moved to ' + dayShort(to), back);
+  };
+  ACT['restore-date'] = (j) => {
+    if (j && j.postponedFrom) write(j.key, 'setPostponed', { key: j.key, postpone: false }, placeLabel(j) + ' back to ' + dayShort(j.postponedFrom));
+  };
+
   function onClick(e) {
     const t = e.target && e.target.closest ? e.target : null;
     const el = t ? t.closest('[data-retry],[data-week],[data-day],[data-filter],[data-job],[data-add-extra],#sheet [data-pa]') : null;

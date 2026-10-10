@@ -179,3 +179,27 @@ export function assignSheet(d, j, ro, s) {
     + '<div class="sheet-b"><p class="note">Pick one or more people, then Save.</p><div class="pick">' + opts + '</div></div>'
     + '<div class="sheet-f">' + B('save-assign', 'Save', 'primary') + (j.assigned.length ? B('clear-assign', 'Clear all') : '') + B('back', 'Back') + '</div>';
 }
+
+export function cancelSheet(d, j, ro) {
+  if (ro) return head('Cancel cleaning', placeLabel(j)) + '<div class="sheet-b"></div>' + roFoot();
+  return head('Cancel this cleaning?', placeLabel(j) + ' · ' + dayShort(j.date))
+    + '<div class="sheet-b"><p>The cleaning stays on the planning, struck through, and can be restored.</p>'
+    + '<label class="fl">Reason (optional)<input id="pReason" type="text" maxlength="200" autocomplete="off"></label></div>'
+    + '<div class="sheet-f">' + B('confirm-cancel', 'Confirm cancel', 'primary') + B('back', 'Back') + '</div>';
+}
+
+// Report d'un jour (19 reports sur 19 depuis juillet etaient d'un jour).
+export function postponeSheet(d, j, ro) {
+  if (ro) return head('Postpone', placeLabel(j)) + '<div class="sheet-b"></div>' + roFoot();
+  const to = addDays(j.date, 1);
+  let warn = '';
+  if (j.next && j.next.date <= to) {
+    const when = dayShort(j.next.date) + (j.next.time ? ' at ' + j.next.time : '');
+    warn = '<p class="sheet-warn" role="status">Next guest checks in ' + esc(when)
+      + (j.next.date < to ? ', before the new date.' : '. The cleaning must be done before.') + '</p>';
+  }
+  return head('Postpone this cleaning?', placeLabel(j))
+    + '<div class="sheet-b"><p>Move from <b>' + esc(dayShort(j.date)) + '</b> to <b>' + esc(dayShort(to))
+    + '</b>. Assignment and linen stay with the cleaning.</p>' + warn + '</div>'
+    + '<div class="sheet-f">' + B('confirm-postpone', 'Move to ' + dayShort(to), 'primary') + B('back', 'Back') + '</div>';
+}
