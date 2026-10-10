@@ -68,7 +68,7 @@ export async function renderTeam(ctx) {
         + inactive.map((m) => '<div class="tm-row ro" data-inactive-row="' + esc(m.id) + '">' + rowBody(m) + '</div>').join('')
         + '</div></details>'
       : '';
-    main.innerHTML = header() + '<div class="tm">' + groups + empty + off + '</div>';
+    main.innerHTML = header() + '<div class="tm-page">' + groups + empty + off + '</div>';
   }
 
   function paintLoading() { main.innerHTML = header() + '<div class="ph"><p role="status">Loading team...</p></div>'; }

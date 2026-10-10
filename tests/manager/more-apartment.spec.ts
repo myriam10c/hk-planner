@@ -12,15 +12,16 @@ const LIST_BODY = {
   ],
 };
 const LINEN = { pillowcases: 4, bed_sheets: 2, duvet_covers: 2, small_towels: 4, face_towels: 4, large_towels: 4, bath_mats: 2, total: 22 };
+const CLEANINGS = [
+  { date: '2026-10-12', guest: 'Bo Ray', by: [], done: false, cancelled: false, linen: null, extra: null },
+  { date: '2026-10-08', guest: 'Owner', by: ['Faiza'], done: false, cancelled: false, linen: null, extra: 'Deep clean' },
+  { date: '2026-10-06', guest: 'Ann Lee', by: ['Faiza'], done: true, cancelled: false, linen: LINEN, extra: null },
+  { date: '2026-10-01', guest: 'Cy Doe', by: [], done: false, cancelled: true, linen: null, extra: null },
+];
 const SHEET = {
   listing: { id: 'L1', apt: '308', bld: 'Binghatti Lavender' },
   health: { score: 62, openTickets: 3, urgentOpen: 1, overdueService: 1, ratingPenalty: 5 },
-  cleanings: [
-    { date: '2026-10-12', guest: 'Bo Ray', by: [], done: false, cancelled: false, linen: null, extra: null },
-    { date: '2026-10-08', guest: 'Owner', by: ['Faiza'], done: false, cancelled: false, linen: null, extra: 'Deep clean' },
-    { date: '2026-10-06', guest: 'Ann Lee', by: ['Faiza'], done: true, cancelled: false, linen: LINEN, extra: null },
-    { date: '2026-10-01', guest: 'Cy Doe', by: [], done: false, cancelled: true, linen: null, extra: null },
-  ],
+  cleanings: null,
   tickets: {
     open: [
       { ref: 'MNT-429', title: 'Gas not working', priority: 'urgent', createdAt: '2026-10-01T08:00:00Z', assignee: null },
@@ -42,10 +43,13 @@ const SHEET = {
 const EMPTY = {
   ...SHEET, listing: { id: 'L3', apt: '905', bld: 'Tower New' },
   health: { score: 100, openTickets: 0, urgentOpen: 0, overdueService: 0, ratingPenalty: 0 },
-  cleanings: [], tickets: { open: [], recent: [] }, inspections: [], security: null,
+  cleanings: null, tickets: { open: [], recent: [] }, inspections: [], security: null,
 };
 const LIST: FakeRoute = { match: 'action=mgr.apartments', status: 200, body: LIST_BODY };
 const ONE = (body: any = SHEET): FakeRoute => ({ match: 'action=mgr.apartment&', status: 200, body });
+// Second appel de la fiche : declare avant ONE (la premiere route qui correspond gagne).
+const CL = (cleanings: any[] = CLEANINGS, extra: any = {}, delay = 0): FakeRoute =>
+  ({ match: 'part=cleanings', status: 200, delay, body: { listing: SHEET.listing, cleanings, unavailable: [], generatedAt: SHEET.generatedAt, ...extra } });
 const boot = (page: any, hash: string, routes: FakeRoute[]) => bootMgr(page, [me(MANAGER), ...routes], { email: true, hash, clock: PNOW });
 
 test('recherche : filtre par numero et par immeuble, pastille Excluded, lien vers la fiche', async ({ page }) => {
@@ -72,10 +76,12 @@ test('recherche : filtre par numero et par immeuble, pastille Excluded, lien ver
 });
 
 test('fiche : en-tete, sante et ses parts, menages, tickets, inspections, contacts securite', async ({ page }) => {
-  await boot(page, '#/more/apartment/L1', [LIST, ONE()]);
+  await boot(page, '#/more/apartment/L1', [LIST, CL(), ONE()]);
   await expect(page.getByRole('heading', { name: 'Apt 308 · Binghatti Lavender', exact: true })).toBeVisible();
   const urls = (await fetchLog(page)).filter((l) => l.url.includes('action=mgr.apartment&')).map((l) => l.url);
   expect(urls[0]).toContain('listingId=L1');
+  expect(urls[0]).not.toContain('part=');
+  expect(urls[1]).toContain('part=cleanings');
   const health = page.locator('main [data-sec="health"]');
   await expect(health.locator('.ap-score')).toHaveText('62');
   await expect(health).toContainText('3 open tickets');
@@ -92,6 +98,7 @@ test('fiche : en-tete, sante et ses parts, menages, tickets, inspections, contac
   await expect(cl.nth(2).locator('.pill')).toHaveText('Done');
   await expect(cl.nth(2)).toContainText('Linen 22');
   await expect(cl.nth(3).locator('.pill')).toHaveText('Cancelled');
+  await expect(cl.nth(3)).not.toContainText('Unassigned');
 
   const open = page.locator('main [data-sec="open"] .ap-item');
   await expect(open).toHaveCount(2);
@@ -119,7 +126,7 @@ test('fiche : en-tete, sante et ses parts, menages, tickets, inspections, contac
 });
 
 test('logement sans donnees : les quatre etats vides', async ({ page }) => {
-  await boot(page, '#/more/apartment/L3', [LIST, ONE(EMPTY)]);
+  await boot(page, '#/more/apartment/L3', [LIST, CL([]), ONE(EMPTY)]);
   await expect(page.getByRole('heading', { name: 'Apt 905 · Tower New', exact: true })).toBeVisible();
   await expect(page.locator('main [data-sec="health"] .ap-score')).toHaveText('100');
   await expect(page.locator('main')).toContainText('No cleaning in the last 30 days.');
@@ -129,14 +136,36 @@ test('logement sans donnees : les quatre etats vides', async ({ page }) => {
 });
 
 test('source indisponible : la section le dit au lieu de l etat vide', async ({ page }) => {
-  await boot(page, '#/more/apartment/L1', [LIST, ONE({ ...EMPTY, unavailable: ['cleanings'] })]);
+  await boot(page, '#/more/apartment/L1', [LIST, CL([], { unavailable: ['cleanings'] }), ONE(EMPTY)]);
   await expect(page.locator('main [data-sec="cleanings"]')).toContainText('Could not load cleanings right now.');
   await expect(page.locator('main [data-sec="cleanings"]')).not.toContainText('No cleaning in the last 30 days.');
 });
 
+test('menages : la fiche s affiche tout de suite, « Loading cleanings... » puis les menages', async ({ page }) => {
+  await boot(page, '#/more/apartment/L1', [LIST, CL(CLEANINGS, {}, 1200), ONE()]);
+  await expect(page.locator('main [data-sec="open"] .ap-item').first()).toContainText('MNT-429');
+  await expect(page.locator('main [data-sec="cleanings"]')).toContainText('Loading cleanings...');
+  await expect(page.locator('main [data-sec="security"]')).toBeVisible();
+  await expect(page.locator('main [data-sec="cleanings"] .ap-item')).toHaveCount(4);
+  await expect(page.locator('main [data-sec="cleanings"]')).not.toContainText('Loading cleanings...');
+});
+
+test('menages : echec du second appel, Retry propre a la section sans toucher le reste', async ({ page }) => {
+  await boot(page, '#/more/apartment/L1', [LIST,
+    { match: 'part=cleanings', status: 502, body: { error: 'Hostaway is slow' }, once: true }, CL(), ONE()]);
+  const sec = page.locator('main [data-sec="cleanings"]');
+  await expect(sec).toContainText('Hostaway is slow');
+  await expect(page.locator('main [data-sec="open"] .ap-item').first()).toContainText('MNT-429');
+  await sec.getByRole('button', { name: 'Retry' }).click();
+  await expect(sec.locator('.ap-item')).toHaveCount(4);
+  const urls = (await fetchLog(page)).map((l) => l.url).filter((u) => u.includes('action=mgr.apartment&'));
+  expect(urls.filter((u) => !u.includes('part=')).length).toBe(1);
+  expect(urls.filter((u) => u.includes('part=cleanings')).length).toBe(2);
+});
+
 test('erreur du serveur affichee telle quelle, Retry relit la fiche', async ({ page }) => {
   await boot(page, '#/more/apartment/L9', [LIST,
-    { match: 'action=mgr.apartment&', status: 404, body: { error: 'Apartment not found' }, once: true }, ONE()]);
+    { match: 'action=mgr.apartment&', status: 404, body: { error: 'Apartment not found' }, once: true }, CL(), ONE()]);
   await expect(page.locator('main [role="alert"]')).toHaveText('Apartment not found');
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByRole('heading', { name: 'Apt 308 · Binghatti Lavender', exact: true })).toBeVisible();
@@ -150,7 +179,7 @@ test('Planning : la fiche d un menage renvoie a la fiche logement', async ({ pag
 
 test('Problems : la fiche d un probleme renvoie a la fiche logement', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), { match: 'action=mgr.problems', status: 200, body: listBody() },
-    { match: 'action=mgr.problem.get', status: 200, body: detailBody() }, LIST, ONE()], { email: true, clock: PNOW, hash: '#/problems' });
+    { match: 'action=mgr.problem.get', status: 200, body: detailBody() }, LIST, CL(), ONE()], { email: true, clock: PNOW, hash: '#/problems' });
   await page.locator('.prow').first().click();
   const link = page.locator('#sheet').getByRole('link', { name: 'Apartment sheet' });
   await expect(link).toHaveAttribute('href', '#/more/apartment/L1');
@@ -163,7 +192,7 @@ for (const scheme of ['light', 'dark'] as const) {
   test('telephone ' + scheme + ' : aucun defilement horizontal, cibles de 44 px', async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme });
     await page.setViewportSize({ width: 390, height: 800 });
-    await boot(page, '#/more/apartment/L1', [LIST, ONE()]);
+    await boot(page, '#/more/apartment/L1', [LIST, CL(), ONE()]);
     await expect(page.locator('main [data-sec="security"]')).toBeVisible();
     let s = await noHorizontalScroll(page);
     expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);

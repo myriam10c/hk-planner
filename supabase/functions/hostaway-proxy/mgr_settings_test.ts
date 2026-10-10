@@ -91,3 +91,11 @@ Deno.test("mgr.settings.set: refus 400 sans ecriture", async () => {
   assertEquals(r, { status: 400, body: { error: TARGET_ERROR } });
   assertEquals(db.writes.length, 0);
 });
+
+Deno.test("mgr.settings: les etapes d un modele stocke en texte JSON sont comptees", async () => {
+  const db = seed();
+  db.tables.checklist_templates.push({ id: 3, name: "Texte", items: JSON.stringify(["A", "B"]) });
+  db.tables.checklist_templates.push({ id: 4, name: "Casse", items: "{pas du json" });
+  const s = await mgrSettings(db, null);
+  assertEquals(s.templates.map((t: any) => [t.id, t.items]), [[1, 3], [2, 0], [3, 2], [4, 0]]);
+});

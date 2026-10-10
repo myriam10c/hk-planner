@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import type { CheckoutRow } from "./mgr_planning.ts";
-import { healthScore, mgrApartment, mgrApartments, readHealthInputs, type MgrApartment } from "./mgr_apartment.ts";
+import { healthScore, mgrApartment, mgrApartmentCleanings, mgrApartments, readHealthInputs, type MgrApartment, type MgrApartmentCleanings } from "./mgr_apartment.ts";
 
 const TODAY = "2026-10-09";
 const NOW = Date.parse("2026-10-09T07:00:00Z"); // 11:00 Dubai
@@ -111,33 +111,45 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T> {
   try { return await fn(); } finally { console.error = orig; }
 }
 
-async function run(listingId: string, db: any = seed(), checkouts: () => Promise<any> = async () => ({ reservations: CHECKOUTS, cachedAt: null })) {
+async function run(listingId: string, db: any = seed()) {
+  return await mgrApartment(db, { listingId, today: TODAY, nowMs: NOW, me: ME, req: REQ });
+}
+// Second appel (?part=cleanings) : les menages, avec les departs injectes.
+async function runCleanings(listingId: string, db: any = seed(), checkouts: () => Promise<any> = async () => ({ reservations: CHECKOUTS, cachedAt: null })) {
   const seen: Array<[string, string]> = [];
-  const r = await mgrApartment(db, {
-    listingId, today: TODAY, nowMs: NOW, me: ME, req: REQ,
+  const r = await mgrApartmentCleanings(db, {
+    listingId, today: TODAY, nowMs: NOW,
     loadCheckouts: (s, e) => { seen.push([s, e]); return checkouts(); },
   });
   return { r, seen };
 }
 
 Deno.test("mgr.apartment : fiche complete (menages, tickets, inspections, contacts, sante)", async () => {
-  const { r, seen } = await run("L1");
+  const r = await run("L1");
   assertEquals(r.status, 200);
   const b = r.body as MgrApartment;
-  assertEquals(seen, [["2026-09-09", "2026-10-16"]]);
   assertEquals(b.listing, { id: "L1", apt: "308", bld: "Binghatti Lavender" });
   assertEquals(b.unavailable, []);
-  assertEquals(b.cleanings.map((c) => [c.date, c.guest, c.by, c.done, c.cancelled]), [
+  // La fiche ne attend pas Hostaway : menages dans le second appel.
+  assertEquals(b.cleanings, null);
+  const { r: rc, seen } = await runCleanings("L1");
+  assertEquals(seen, [["2026-09-09", "2026-10-16"]]);
+  assertEquals(rc.status, 200);
+  const c = rc.body as MgrApartmentCleanings;
+  assertEquals(c.listing, b.listing);
+  assertEquals(c.unavailable, []);
+  assertEquals(c.generatedAt, new Date(NOW).toISOString());
+  assertEquals(c.cleanings.map((c) => [c.date, c.guest, c.by, c.done, c.cancelled]), [
     ["2026-10-12", "Bo Ray", [], false, false],
     ["2026-10-08", "Owner", ["Faiza"], false, false],
     ["2026-10-06", "Ann Lee", ["Faiza"], true, false],
     ["2026-10-04", "Di Fox", ["Pionah"], false, false],
     ["2026-10-01", "Cy Doe", [], false, true],
   ]);
-  assertEquals(b.cleanings[2].linen, { total: 22, pillowcases: 4, bed_sheets: 2, duvet_covers: 2, small_towels: 4, face_towels: 4, large_towels: 4, bath_mats: 2 });
-  assertEquals(b.cleanings[0].linen, null);
-  assertEquals(b.cleanings[1].extra, "Deep clean");
-  assertEquals(b.cleanings[0].extra, null);
+  assertEquals(c.cleanings[2].linen, { total: 22, pillowcases: 4, bed_sheets: 2, duvet_covers: 2, small_towels: 4, face_towels: 4, large_towels: 4, bath_mats: 2 });
+  assertEquals(c.cleanings[0].linen, null);
+  assertEquals(c.cleanings[1].extra, "Deep clean");
+  assertEquals(c.cleanings[0].extra, null);
 
   assertEquals(b.tickets.open, [
     { ref: "MNT-429", title: "Gas not working", priority: "urgent", createdAt: "2026-10-01T08:00:00Z", assignee: null },
@@ -168,38 +180,78 @@ Deno.test("mgr.apartment : fiche complete (menages, tickets, inspections, contac
 });
 
 Deno.test("mgr.apartment : logement neuf sans donnees, chaque section vide, sante 100", async () => {
-  const { r } = await run("L3", seed(), async () => ({ reservations: [], cachedAt: null }));
+  const r = await run("L3");
   assertEquals(r.status, 200);
   const b = r.body as MgrApartment;
   assertEquals(b.listing, { id: "L3", apt: "905", bld: "Tower New" });
-  assertEquals([b.cleanings, b.tickets, b.inspections, b.security], [[], { open: [], recent: [] }, [], null]);
+  assertEquals([b.cleanings, b.tickets, b.inspections, b.security], [null, { open: [], recent: [] }, [], null]);
+  const { r: rc } = await runCleanings("L3", seed(), async () => ({ reservations: [], cachedAt: null }));
+  assertEquals((rc.body as MgrApartmentCleanings).cleanings, []);
   assertEquals(b.health, { score: 100, openTickets: 0, urgentOpen: 0, overdueService: 0, ratingPenalty: 0 });
   assertEquals(b.unavailable, []);
 });
 
 Deno.test("mgr.apartment : listingId absent 400, logement inconnu 404", async () => {
-  assertEquals((await run("")).r, { status: 400, body: { error: "listingId required" } });
-  assertEquals((await run("L404")).r, { status: 404, body: { error: "Apartment not found" } });
+  assertEquals(await run(""), { status: 400, body: { error: "listingId required" } });
+  assertEquals(await run("L404"), { status: 404, body: { error: "Apartment not found" } });
+  assertEquals((await runCleanings("")).r, { status: 400, body: { error: "listingId required" } });
+  assertEquals((await runCleanings("L404")).r, { status: 404, body: { error: "Apartment not found" } });
 });
 
 Deno.test("mgr.apartment : une source en panne vide sa section, jamais de 500", async () => {
   const db = seed();
   db.fail["maintenance_tickets.select"] = { message: "boom" };
   db.fail["security_contacts_doc.select"] = { message: "boom" };
-  db.fail["cleaning_assignments.select"] = { message: "boom" };
-  const { r } = await quiet(() => run("L1", db, async () => { throw new Error("Hostaway API error 502"); }));
+  const r = await quiet(() => run("L1", db));
   assertEquals(r.status, 200);
   const b = r.body as MgrApartment;
-  assertEquals(b.cleanings, []);
   assertEquals(b.tickets, { open: [], recent: [] });
   assertEquals(b.security, null);
   assertEquals(b.inspections.length, 3);
-  assertEquals(b.unavailable.sort(), ["cleanings", "health", "security", "tickets"]);
+  assertEquals(b.unavailable.sort(), ["health", "security", "tickets"]);
+});
+
+Deno.test("mgr.apartment?part=cleanings : Hostaway en panne ou base en panne = section indisponible, jamais de 500", async () => {
+  const { r } = await quiet(() => runCleanings("L1", seed(), async () => { throw new Error("Hostaway API error 502"); }));
+  assertEquals(r.status, 200);
+  const b = r.body as MgrApartmentCleanings;
+  assertEquals(b.unavailable, ["cleanings"]);
+  assertEquals(b.cleanings.map((c) => c.extra), ["Deep clean"]); // les extras viennent de la base
+  const db = seed();
+  db.fail["cleaning_assignments.select"] = { message: "boom" };
+  const { r: r2 } = await quiet(() => runCleanings("L1", db));
+  assertEquals(r2.status, 200);
+  assertEquals((r2.body as MgrApartmentCleanings).unavailable, ["cleanings"]);
+  assertEquals((r2.body as MgrApartmentCleanings).cleanings, []);
+});
+
+Deno.test("mgr.apartment : lecture des inspections en erreur = unavailable inspections, pas une liste vide", async () => {
+  const db = seed();
+  db.fail["inspections.select"] = { message: "boom" };
+  const r = await quiet(() => run("L1", db));
+  const b = r.body as MgrApartment;
+  assertEquals(b.inspections, []);
+  assertEquals(b.unavailable, ["inspections"]);
+  const db2 = seed();
+  db2.fail["inspection_items.select"] = { message: "boom" };
+  assertEquals(((await quiet(() => run("L1", db2))).body as MgrApartment).unavailable, ["inspections"]);
+});
+
+Deno.test("mgr.apartment : ticket sans statut ou priorite High compte pareil dans le score et dans la liste", async () => {
+  const db = seed();
+  db.tables.maintenance_tickets = [
+    { id: 600, listing_id: "L1", title: "No status", priority: "normal", status: null, source: "manual", created_at: "2026-10-01T08:00:00Z" },
+    { id: 601, listing_id: "L1", title: "Shouting", priority: "High", status: "open", source: "manual", created_at: "2026-10-02T08:00:00Z" },
+  ];
+  const b = (await run("L1", db)).body as MgrApartment;
+  assertEquals(b.tickets.open.map((t) => [t.ref, t.priority]), [["MNT-601", "high"], ["MNT-600", "normal"]]);
+  // 2 ouverts (-10), 1 haut (-10), entretien en retard (-8), note 3.5 (-5).
+  assertEquals(b.health, { score: 67, openTickets: 2, urgentOpen: 1, overdueService: 1, ratingPenalty: 5 });
+  assertEquals(b.health.openTickets, b.tickets.open.length);
 });
 
 Deno.test("mgr.apartment : contacts securite, immeuble trouve sans casse ni accents, sans mot de passe", async () => {
-  const { r } = await run("L2", seed(), async () => ({ reservations: [], cachedAt: null }));
-  const b = r.body as MgrApartment;
+  const b = (await run("L2")).body as MgrApartment;
   assertEquals(b.listing.bld, "ELYSEE 1");
   assertEquals(b.security, {
     building: "Élysée 1",
@@ -210,8 +262,8 @@ Deno.test("mgr.apartment : contacts securite, immeuble trouve sans casse ni acce
   const db = seed();
   db.tables.security_contacts_doc = [];
   const r2 = await run("L1", db);
-  assertEquals((r2.r.body as MgrApartment).security, null);
-  assertEquals((r2.r.body as MgrApartment).unavailable, []);
+  assertEquals((r2.body as MgrApartment).security, null);
+  assertEquals((r2.body as MgrApartment).unavailable, []);
 });
 
 // Formule de l'ancien getPropertyHealth (index.ts avant cette tache), recopiee telle
@@ -247,6 +299,9 @@ Deno.test("healthScore : memes nombres que l'ancien getPropertyHealth", () => {
   // to_confirm compte comme ouvert (liste unique MGR_OPEN_TICKET_STATUSES, comme Problems).
   assertEquals(healthScore({ tickets: [{ status: "to_confirm", priority: "low" }], equipment: [], costs: [], feedback: [], today: TODAY }).openTickets, 1);
   assertEquals(healthScore({ tickets: [], equipment: [], costs: [], feedback: [{ rating: 3.5 }], today: TODAY }).ratingPenalty, 5);
+  // Statut absent = open, priorite normalisee (High, espaces) comme dans la liste.
+  const n = healthScore({ tickets: [{ status: null, priority: "high" }, { priority: " URGENT " }, { status: "open", priority: "weird" }], equipment: [], costs: [], feedback: [], today: TODAY });
+  assertEquals([n.openTickets, n.urgentOpen], [3, 2]);
 });
 
 Deno.test("readHealthInputs : lit les quatre tables du logement, une table en panne est signalee", async () => {

@@ -43,7 +43,7 @@ import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
 import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
 import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
 import { buildDisputeUpdate, disputeAccess } from "./disputes.ts";
-import { healthScore, mgrApartment, mgrApartments, readHealthInputs } from "./mgr_apartment.ts";
+import { healthScore, mgrApartment, mgrApartmentCleanings, mgrApartments, readHealthInputs } from "./mgr_apartment.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -1540,13 +1540,19 @@ Deno.serve(async (req: Request) => {
         const r = await mgrApartments(sb);
         return jsonResp(r.body, r.status);
       }
-      const r = await mgrApartment(sb, {
-        listingId: url.searchParams.get("listingId") ?? "", today: todayDubai(), nowMs: Date.now(), me: me!, req,
-        loadCheckouts: async (s, e) => {
-          const p = await loadCheckoutsCached(sb, s, e, false);
-          return { reservations: Array.isArray(p?.reservations) ? p.reservations : [], cachedAt: p?.cachedAt ?? null };
-        },
-      });
+      const listingId = url.searchParams.get("listingId") ?? "";
+      // ?part=cleanings : les menages seuls (departs Hostaway) ; sans part, la fiche base de donnees.
+      if (url.searchParams.get("part") === "cleanings") {
+        const rc = await mgrApartmentCleanings(sb, {
+          listingId, today: todayDubai(), nowMs: Date.now(),
+          loadCheckouts: async (s, e) => {
+            const p = await loadCheckoutsCached(sb, s, e, false);
+            return { reservations: Array.isArray(p?.reservations) ? p.reservations : [], cachedAt: p?.cachedAt ?? null };
+          },
+        });
+        return jsonResp(rc.body, rc.status);
+      }
+      const r = await mgrApartment(sb, { listingId, today: todayDubai(), nowMs: Date.now(), me: me!, req });
       return jsonResp(r.body, r.status);
     }
 

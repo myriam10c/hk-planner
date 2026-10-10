@@ -74,3 +74,12 @@ test('erreur du proxy sans donnees : message et Retry, jamais d ecran blanc', as
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByRole('heading', { name: 'Who does what today' })).toBeVisible();
 });
+
+test('les classes de More ne fuient pas sur les lignes de Today (.tm sans flex ni gap)', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY()], { email: true, clock: NOW });
+  const tm = page.locator('.job .tm').first();
+  await expect(tm).toBeVisible();
+  const css = await tm.evaluate((n) => { const c = getComputedStyle(n); return { display: c.display, gap: c.rowGap }; });
+  expect(css.display).not.toBe('flex');
+  expect(['normal', '0px']).toContain(css.gap);
+});

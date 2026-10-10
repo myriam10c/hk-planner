@@ -117,6 +117,7 @@ export async function renderReviews(ctx) {
   }
 
   async function load() {
+    if (!ctx.isCurrent()) return;
     main.innerHTML = header() + '<div class="ph"><p role="status">Loading reviews...</p></div>';
     try {
       const d = await get('getDisputes');
@@ -155,7 +156,8 @@ export async function renderReviews(ctx) {
     } catch (e) { toast('Could not copy. Select the text instead.'); }
   }
 
-  main.addEventListener('click', (ev) => {
+  const onClick = (ev) => {
+    if (!ctx.isCurrent()) return;
     const t = ev.target.closest('button');
     if (!t || !main.contains(t)) return;
     if (t.hasAttribute('data-retry')) { load(); return; }
@@ -170,7 +172,10 @@ export async function renderReviews(ctx) {
       const next = !(r && r.dispute && r.dispute.reply_posted);
       write(id, { reply_posted: next }, { reply_posted: next });
     }
-  });
+  };
+  // L'ecouteur vit sur <main>, partage entre les ecrans : on le retire en quittant.
+  main.addEventListener('click', onClick);
+  ctx.onLeave(() => main.removeEventListener('click', onClick));
 
   await load();
 }

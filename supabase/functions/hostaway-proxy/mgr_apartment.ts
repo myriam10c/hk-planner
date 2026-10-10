@@ -5,7 +5,8 @@
 //     assignations, fait, annule, laundryRow), departs via loadCheckouts injecte
 //     par index.ts (cache serveur des checkouts) ;
 //   - tickets : reference MNT-<id> de ticketRow (mgr_inbox.ts) ;
-//   - inspections : inspHistory (insp_read.ts), comme insp.history ;
+//   - inspections : lecture legere des tables inspections et inspection_items ;
+//   - menages : second appel (?part=cleanings), les departs Hostaway ne bloquent pas la fiche ;
 //   - contacts securite : getSecurityContacts (security_contacts.ts), sans
 //     portalPassword ni portalId ;
 //   - sante : healthScore, la seule formule (l'ancien getPropertyHealth l'appelle).
@@ -13,7 +14,6 @@
 import type { SessionUser } from "./auth.ts";
 import { plusDays } from "./v3.ts";
 import { dubaiDay, INSP_VALID_STATUSES } from "./insp_rules.ts";
-import { inspHistory } from "./insp_read.ts";
 import { getSecurityContacts } from "./security_contacts.ts";
 import { MGR_OPEN_TICKET_STATUSES, normPriority, ticketRow, type RawTicket } from "./mgr_inbox.ts";
 import { MGR_TICKET_COLS, vendorNames } from "./mgr_problems.ts";
@@ -48,8 +48,10 @@ export type Health = {
 // sous 4 etoiles, borne 0..100. Les statuts ouverts sont la liste unique de mgr_inbox.ts
 // (to_confirm compris, comme Today et Problems).
 export function healthScore(i: HealthInput): Health {
-  const open = i.tickets.filter((t) => MGR_OPEN_TICKET_STATUSES.includes(String(t.status ?? "")));
-  const urgent = open.filter((t) => t.priority === "urgent" || t.priority === "high");
+  // Statut absent = « open » et priorite normalisee, comme la liste des tickets ouverts
+  // (ticketRow) : le score et la liste ne peuvent plus diverger.
+  const open = i.tickets.filter((t) => MGR_OPEN_TICKET_STATUSES.includes(String(t.status ?? "open")));
+  const urgent = open.filter((t) => { const p = normPriority(t.priority); return p === "urgent" || p === "high"; });
   const totalCost = i.costs.reduce((s, c) => s + Number(c.amount), 0);
   const avg = i.feedback.length > 0 ? i.feedback.reduce((s, f) => s + Number(f.rating), 0) / i.feedback.length : 0;
   const overdue = i.equipment.filter((e) => e.next_service && String(e.next_service) < i.today);
@@ -107,7 +109,8 @@ export type AptSection = "cleanings" | "tickets" | "inspections" | "security" | 
 export type MgrApartment = {
   listing: { id: string; apt: string; bld: string };
   health: { score: number; openTickets: number; urgentOpen: number; overdueService: number; ratingPenalty: number };
-  cleanings: AptCleaning[];
+  // null = non charge (la fiche seule) ; les menages viennent de part=cleanings.
+  cleanings: AptCleaning[] | null;
   tickets: {
     open: Array<{ ref: string; title: string; priority: string; createdAt: string; assignee: string | null }>;
     recent: Array<{ ref: string; title: string; resolvedAt: string }>;
@@ -201,19 +204,88 @@ async function loadCleanings(sb: any, o: {
   return { rows: out.map(({ key: _k, ...c }) => c), bookingsFailed };
 }
 
-export async function mgrApartment(sb: any, o: {
-  listingId: string; today: string; nowMs: number; me: SessionUser; req: Request;
-  loadCheckouts: (start: string, end: string) => Promise<{ reservations: CheckoutRow[]; cachedAt: string | null }>;
-}): Promise<{ status: number; body: MgrApartment | { error: string } }> {
-  const id = String(o.listingId ?? "").trim();
-  if (!id) return { status: 400, body: { error: "listingId required" } };
+async function readListingRow(sb: any, id: string): Promise<{ row?: any; fail?: { status: number; body: { error: string } } }> {
+  if (!id) return { fail: { status: 400, body: { error: "listingId required" } } };
   const { data: row, error } = await sb.from("listing_config")
     .select("listing_id, internal_name, listing_name, apt_number").eq("listing_id", id).maybeSingle();
   if (error) {
     console.error("[mgr.apartment] listing_config:", error);
-    return { status: 503, body: { error: "Could not load this apartment. Try again." } };
+    return { fail: { status: 503, body: { error: "Could not load this apartment. Try again." } } };
   }
-  if (!row) return { status: 404, body: { error: "Apartment not found" } };
+  if (!row) return { fail: { status: 404, body: { error: "Apartment not found" } } };
+  return { row };
+}
+
+// Second appel de la fiche (?part=cleanings) : les menages seuls, car ils attendent
+// les departs Hostaway (fenetre de 37 jours) alors que le reste ne lit que la base.
+export type MgrApartmentCleanings = {
+  listing: { id: string; apt: string; bld: string };
+  cleanings: AptCleaning[];
+  unavailable: AptSection[];
+  generatedAt: string;
+};
+export async function mgrApartmentCleanings(sb: any, o: {
+  listingId: string; today: string; nowMs: number;
+  loadCheckouts: (start: string, end: string) => Promise<{ reservations: CheckoutRow[]; cachedAt: string | null }>;
+}): Promise<{ status: number; body: MgrApartmentCleanings | { error: string } }> {
+  const id = String(o.listingId ?? "").trim();
+  const l = await readListingRow(sb, id);
+  if (l.fail) return l.fail;
+  const place = splitListing(l.row);
+  let unavailable: AptSection[] = [];
+  let cleanings: AptCleaning[] = [];
+  try {
+    // Noms des cleaners : une panne laisse des noms generiques, pas une section vide.
+    let people: any[] = [];
+    try {
+      people = await readAllRows((a: number, b: number) => sb.from("cleaners").select("id, name, role, is_active").order("id").range(a, b), "cleaners");
+    } catch (e) { console.error("[mgr.apartment] cleaners:", e); }
+    const r = await loadCleanings(sb, {
+      listingId: id, from: plusDays(o.today, -APT_CLEAN_PAST_DAYS), to: plusDays(o.today, APT_CLEAN_NEXT_DAYS),
+      people: peopleMap(people), loadCheckouts: o.loadCheckouts,
+    });
+    cleanings = r.rows;
+    if (r.bookingsFailed) unavailable = ["cleanings"];
+  } catch (e) {
+    console.error("[mgr.apartment] cleanings:", e);
+    unavailable = ["cleanings"];
+  }
+  return { status: 200, body: { listing: { id, apt: place.apt, bld: place.bld }, cleanings, unavailable, generatedAt: new Date(o.nowMs).toISOString() } };
+}
+
+// Inspections terminees du logement : lecture legere (pas de photos ni d'URL signees).
+// Une erreur de lecture remonte (la section passe en `unavailable`), jamais une liste vide.
+async function readInspections(sb: any, listingId: string, people: Record<string, { name: string }>): Promise<MgrApartment["inspections"]> {
+  const rd = async (q: any, what: string) => {
+    const r = await q;
+    if (r?.error) throw new Error(what + ": " + String(r.error.message ?? "read failed"));
+    return r?.data ?? [];
+  };
+  const insps: any[] = await rd(sb.from("inspections").select("id, inspector_id, started_at, finished_at")
+    .eq("listing_id", listingId).order("started_at", { ascending: false }).limit(20), "inspections");
+  const done = insps.filter((i) => i.finished_at)
+    .sort((a, b) => String(b.finished_at).localeCompare(String(a.finished_at))).slice(0, APT_INSPECTIONS_MAX);
+  const ids = done.map((i) => i.id);
+  const items: any[] = ids.length
+    ? await rd(sb.from("inspection_items").select("inspection_id, status, outcome").in("inspection_id", ids), "inspection_items") : [];
+  return done.map((i) => {
+    const mine = items.filter((it) => it.inspection_id === i.id && it.status === "not_ok");
+    const result: "clean" | "fixed" | "maintenance" = !mine.length ? "clean"
+      : mine.some((it) => it.outcome === "maintenance") ? "maintenance" : "fixed";
+    return {
+      id: Number(i.id), finishedAt: String(i.finished_at), inspector: people[String(i.inspector_id)]?.name || "Someone",
+      result, issues: mine.length,
+    };
+  });
+}
+
+export async function mgrApartment(sb: any, o: {
+  listingId: string; today: string; nowMs: number; me: SessionUser; req: Request;
+}): Promise<{ status: number; body: MgrApartment | { error: string } }> {
+  const id = String(o.listingId ?? "").trim();
+  const l = await readListingRow(sb, id);
+  if (l.fail) return l.fail;
+  const row = l.row;
   const place = splitListing(row);
   const unavailable = new Set<AptSection>();
   const guard = async <T>(section: AptSection, empty: T, p: () => Promise<T>): Promise<T> => {
@@ -222,34 +294,16 @@ export async function mgrApartment(sb: any, o: {
 
   // Noms (cleaners et prestataires) : une panne laisse des noms generiques, pas une section vide.
   const [people, vendors] = await Promise.all([
-    guard("cleanings", [] as any[], () => readAllRows((a: number, b: number) => sb.from("cleaners")
-      .select("id, name, role, is_active").order("id").range(a, b), "cleaners")),
+    readAllRows((a: number, b: number) => sb.from("cleaners").select("id, name, role, is_active").order("id").range(a, b), "cleaners")
+      .catch((e: unknown) => { console.error("[mgr.apartment] cleaners:", e); return [] as any[]; }),
     guard("tickets", [] as any[], () => readAllRows((a: number, b: number) => sb.from("vendors")
       .select("id, name, specialty, is_active").order("id").range(a, b), "vendors")),
   ]);
   const ppl = peopleMap(people);
-  const from = plusDays(o.today, -APT_CLEAN_PAST_DAYS);
-  const to = plusDays(o.today, APT_CLEAN_NEXT_DAYS);
 
-  const [hin, cleanings, inspections, security] = await Promise.all([
+  const [hin, inspections, security] = await Promise.all([
     readHealthInputs(sb, id),
-    guard("cleanings", [] as AptCleaning[], async () => {
-      const r = await loadCleanings(sb, { listingId: id, from, to, people: ppl, loadCheckouts: o.loadCheckouts });
-      if (r.bookingsFailed) unavailable.add("cleanings");
-      return r.rows;
-    }),
-    guard("inspections", [] as MgrApartment["inspections"], async () => {
-      const h = await inspHistory(sb, id, o.today);
-      return (h.inspections ?? []).filter((i: any) => i.finishedAt)
-        .sort((a: any, b: any) => String(b.finishedAt).localeCompare(String(a.finishedAt)))
-        .slice(0, APT_INSPECTIONS_MAX)
-        .map((i: any) => {
-          const items = Array.isArray(i.items) ? i.items : [];
-          const result: "clean" | "fixed" | "maintenance" = !items.length ? "clean"
-            : items.some((it: any) => it.outcome === "maintenance") ? "maintenance" : "fixed";
-          return { id: Number(i.id), finishedAt: String(i.finishedAt), inspector: String(i.inspector), result, issues: items.length };
-        });
-    }),
+    guard("inspections", [] as MgrApartment["inspections"], () => readInspections(sb, id, ppl)),
     guard("security", null as MgrApartment["security"], async () => {
       const r = await getSecurityContacts(sb, o.req, async () => o.me);
       if (r.status === 404) return null;
@@ -289,7 +343,7 @@ export async function mgrApartment(sb: any, o: {
     body: {
       listing: { id, apt: place.apt, bld: place.bld },
       health: { score: h.score, openTickets: h.openTickets, urgentOpen: h.urgentOpen, overdueService: h.overdueService, ratingPenalty: h.ratingPenalty },
-      cleanings, tickets: { open, recent }, inspections, security,
+      cleanings: null, tickets: { open, recent }, inspections, security,
       unavailable: [...unavailable].sort() as AptSection[],
       generatedAt: new Date(o.nowMs).toISOString(),
     },

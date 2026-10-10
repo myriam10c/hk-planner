@@ -2433,7 +2433,9 @@ async function saveCleaner(id,name,phone,color,pin,role,silentError){
   return '';
 }
 async function deleteCleaner(id){
-  await api('deleteCleaner',{body:{id}});
+  try{
+    await apiWrite('deleteCleaner',{body:{id}});
+  }catch(err){ toast((err&&err.message)||'Could not remove this member','error'); return; }
   const res=await api('getCleaners');cleaners=res.cleaners||[];render();toast('Removed','success');
 }
 

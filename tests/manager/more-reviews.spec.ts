@@ -131,3 +131,17 @@ test('mobile 390 : pas de defilement horizontal, cibles 44 px', async ({ page })
     expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(43.5);
   }
 });
+
+test('revenir sur Reviews apres More : un seul ecouteur, une seule requete par changement', async ({ page }) => {
+  const upd: FakeRoute = { match: 'action=updateDisputeStatus', status: 200, body: { status: 'success', dispute: { ...DATA.reviews[0].dispute, dispute_status: 'submitted' } } };
+  await boot(page, [upd]);
+  await expect(page.locator('main [data-review="1"]')).toBeVisible();
+  await page.getByRole('link', { name: 'More', exact: true }).first().click();
+  await expect(page.getByRole('heading', { name: 'More', exact: true })).toBeVisible();
+  await page.locator('main a[href="#/more/reviews"]').click();
+  await expect(page.locator('main [data-review="1"]')).toBeVisible();
+  await page.locator('main [data-review="1"]').getByRole('button', { name: 'Submitted' }).click();
+  await expect(page.locator('main .rv-chip', { hasText: 'To do' })).toContainText('2');
+  await expect(page.locator('main [data-review="1"]')).toHaveCount(0);
+  expect(await posts(page)).toHaveLength(1);
+});

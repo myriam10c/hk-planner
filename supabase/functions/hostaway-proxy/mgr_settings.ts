@@ -3,6 +3,7 @@
 import type { SessionUser } from "./auth.ts";
 import { sessionActor } from "./actor.ts";
 import { readTarget } from "./insp_read.ts";
+import { templateItems } from "./v3.ts";
 
 export const TARGET_ERROR = "Inspection target must be a whole number from 0 to 50.";
 const AUTOPILOT_ERROR = "Autopilot must be true or false.";
@@ -51,7 +52,7 @@ export async function mgrSettings(sb: any, vapidPublicKey: string | null): Promi
     inspectionTarget,
     excludedCount: (excluded ?? []).length,
     templates: (tpl ?? []).map((t: any) => ({
-      id: t.id, name: String(t.name ?? ""), items: Array.isArray(t.items) ? t.items.length : 0,
+      id: t.id, name: String(t.name ?? ""), items: templateItems(t).items.length,
     })),
     push: { vapidPublicKey: vapidPublicKey || null },
   };

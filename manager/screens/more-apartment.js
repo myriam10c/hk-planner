@@ -67,7 +67,7 @@ async function renderList(ctx) {
       main.innerHTML = errorHtml('Apartment', e.message || 'Could not load the apartments.');
       return;
     }
-    main.innerHTML = header('Apartment') + '<div class="ap">'
+    main.innerHTML = header('Apartment') + '<div class="ap-page">'
       + '<label class="ap-search"><span class="ap-lbl">Search apartment or building</span>'
       + '<input id="apSearch" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(st.q) + '"></label>'
       + '<div class="ap-list" id="apList">' + listRows(st.listings, st.q) + '</div></div>';
@@ -112,13 +112,24 @@ function healthHtml(d) {
   return section('health', 'Health', '', body);
 }
 
-function cleaningsHtml(d) {
-  return section('cleanings', 'Cleanings', 'Last 30 days and next 7', emptyOr(d, 'cleanings', d.cleanings, 'No cleaning in the last 30 days.', (c) => {
+// Menages : second appel (?part=cleanings), la fiche s'affiche sans attendre Hostaway.
+// state = { loading } | { error } | { data: reponse du second appel }.
+function cleaningsHtml(d, state) {
+  const meta = 'Last 30 days and next 7';
+  if (!state || state.loading) return section('cleanings', 'Cleanings', meta, '<p class="ap-gap" role="status">Loading cleanings...</p>');
+  if (state.error) {
+    return section('cleanings', 'Cleanings', meta, '<p class="ap-gap" role="alert">' + esc(state.error) + '</p>'
+      + '<button class="btn" type="button" data-retry-cleanings>Retry</button>');
+  }
+  const c = state.data;
+  return section('cleanings', 'Cleanings', meta, emptyOr(c, 'cleanings', c.cleanings || [], 'No cleaning in the last 30 days.', (c) => {
     const st = c.cancelled ? pill('idle', 'Cancelled') : c.done ? pill('ok', 'Done') : '';
     const what = [c.extra, c.guest].filter(Boolean).join(' · ') || 'Checkout cleaning';
-    const meta = [c.by.length ? c.by.join(', ') : 'Unassigned', c.linen ? 'Linen ' + c.linen.total : ''].filter(Boolean).join(' · ');
+    // Un menage annule n'a plus de personne a afficher : pas de « Unassigned ».
+    const who = c.cancelled ? '' : (c.by.length ? c.by.join(', ') : 'Unassigned');
+    const meta = [who, c.linen ? 'Linen ' + c.linen.total : ''].filter(Boolean).join(' · ');
     return '<div class="ap-line"><span class="ap-date mono">' + esc(dayOf(c.date)) + '</span>' + st + '</div>'
-      + '<div class="ap-main">' + esc(what) + '</div><div class="ap-sub">' + esc(meta) + '</div>';
+      + '<div class="ap-main">' + esc(what) + '</div>' + (meta ? '<div class="ap-sub">' + esc(meta) + '</div>' : '');
   }));
 }
 
@@ -179,6 +190,26 @@ function securityHtml(d) {
 
 async function renderSheet(ctx, id) {
   const main = ctx.main;
+  let cl = { loading: true };
+  let sheet = null;
+  function paintSheet() {
+    main.innerHTML = header(placeLabel(sheet.listing) || 'Apartment')
+      + '<div class="ap-page">' + healthHtml(sheet) + cleaningsHtml(sheet, cl) + ticketsHtml(sheet) + inspectionsHtml(sheet) + securityHtml(sheet) + '</div>';
+  }
+  async function loadCleanings() {
+    cl = { loading: true };
+    const el = main.querySelector('[data-sec="cleanings"]');
+    if (el && sheet) paintSheet();
+    try {
+      const c = await get('mgr.apartment', { listingId: id, part: 'cleanings' });
+      if (!ctx.isCurrent()) return;
+      cl = { data: c };
+    } catch (e) {
+      if (!ctx.isCurrent() || handleAccess(ctx, e)) return;
+      cl = { error: e.message || 'Could not load the cleanings.' };
+    }
+    if (sheet) paintSheet();
+  }
   async function load() {
     main.innerHTML = header('Apartment') + '<div class="ph"><p role="status">Loading apartment...</p></div>';
     let d;
@@ -190,12 +221,17 @@ async function renderSheet(ctx, id) {
       return;
     }
     if (!ctx.isCurrent()) return;
-    main.innerHTML = header(placeLabel(d.listing) || 'Apartment')
-      + '<div class="ap">' + healthHtml(d) + cleaningsHtml(d) + ticketsHtml(d) + inspectionsHtml(d) + securityHtml(d) + '</div>';
+    sheet = d;
+    cl = { loading: true };
+    paintSheet();
+    loadCleanings();
   }
   main.onclick = (ev) => {
-    const t = ev.target.closest && ev.target.closest('[data-retry]');
-    if (t && main.contains(t) && ctx.isCurrent()) load();
+    if (!ctx.isCurrent() || !ev.target.closest) return;
+    const t = ev.target.closest('[data-retry]');
+    if (t && main.contains(t)) { load(); return; }
+    const c = ev.target.closest('[data-retry-cleanings]');
+    if (c && main.contains(c)) loadCleanings();
   };
   ctx.onLeave(() => { main.onclick = null; });
   await load();
