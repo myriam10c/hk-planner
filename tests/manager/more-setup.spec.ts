@@ -254,3 +254,15 @@ test('aucun defilement horizontal et cibles de 44 px, tous les onglets et un pan
     expect((await el.boundingBox())!.height, await el.evaluate((n) => n.outerHTML.slice(0, 90))).toBeGreaterThanOrEqual(43.99);
   }
 });
+
+test('preventif : echec partiel du serveur, message tel quel et liste relue', async ({ page }) => {
+  await boot(page, '#/more/setup/preventive', [{ match: 'action=completePreventive', status: 500,
+    body: { error: 'Task marked done, but the cost was not recorded. Add it in Costs.' } }]);
+  await page.locator('main [data-schedule="7"]').getByRole('button', { name: 'Mark done' }).click();
+  const sheet = page.locator('#sheet');
+  await sheet.getByLabel('Actual cost (AED)').fill('100');
+  await sheet.getByRole('button', { name: 'Mark done' }).click();
+  await expect(sheet.getByRole('alert')).toHaveText('Task marked done, but the cost was not recorded. Add it in Costs.');
+  await expect.poll(async () => (await reads(page)).length).toBe(2);
+  await expect(page.locator('#sheet.on')).toHaveCount(1);
+});

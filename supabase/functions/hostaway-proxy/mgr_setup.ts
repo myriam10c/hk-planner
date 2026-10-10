@@ -10,6 +10,7 @@
 // la lecture : index.ts rend alors 503, jamais une liste partielle presentee comme complete.
 import { mgrApartments } from "./mgr_apartment.ts";
 import { readAllRows } from "./mgr_today.ts";
+import { todayDubai } from "./v3.ts";
 
 export function setupAccess(me: { role: string } | null): { status: number; error: string } | null {
   if (!me) return { status: 401, error: "auth required" };
@@ -65,4 +66,54 @@ export async function mgrSetup(sb: any, month: string) {
   const cs = costs.map((c: any) => ({ ...c, listingLabel: setupLabel(map, c.listing_id), vendorName: vendorName(c.vendor_id) }))
     .sort((a: any, b: any) => byStr(b.date, a.date) || Number(b.id) - Number(a.id));
   return { vendors, equipment: eq, schedules: sch, costs: cs, listings, month };
+}
+
+// ==================== completePreventive ====================
+// Logique de l'action historique completePreventive (appelee par « Mark done » et par
+// l'ancienne app), session deja verifiee par index.ts. preventive_maintenance n'a pas de
+// colonne de notes : elles vont dans la description du cout et dans le journal.
+// L'echeance est ecrite d'abord ; si elle echoue, rien d'autre n'est ecrit.
+const DAY_MS = 86_400_000;
+export async function completePreventiveRun(sb: any, a: {
+  id: unknown; actualCost: unknown; notes: unknown; actor: string; nowMs: number;
+  log: (key: string, action: string, actor: string, details: any) => Promise<void>;
+}): Promise<{ status: number; body: any }> {
+  const { data: pm, error: readErr } = await sb.from("preventive_maintenance").select("*").eq("id", a.id).maybeSingle();
+  if (readErr) { console.error("[completePreventive] read:", readErr); return { status: 500, body: { error: "Could not read this task. Try again." } }; }
+  if (!pm) return { status: 404, body: { error: "Not found" } };
+  const notes = typeof a.notes === "string" ? a.notes.trim() : "";
+  const today = todayDubai(a.nowMs);
+  const nextDue = new Date(a.nowMs + (Number(pm.frequency_days) || 90) * DAY_MS).toISOString();
+  const { error: upErr } = await sb.from("preventive_maintenance")
+    .update({ last_done_at: new Date(a.nowMs).toISOString(), next_due_at: nextDue }).eq("id", a.id);
+  if (upErr) { console.error("[completePreventive] update:", upErr); return { status: 500, body: { error: "Could not mark this task done. Try again." } }; }
+  if (a.actualCost) {
+    const { error } = await sb.from("maintenance_costs").insert({
+      listing_id: pm.listing_id, category: pm.category || "preventive",
+      description: "Preventive: " + pm.task_name + (notes ? " · " + notes : ""),
+      amount: a.actualCost, vendor_id: pm.assigned_vendor_id, date: today,
+    });
+    if (error) {
+      console.error("[completePreventive] cost:", error);
+      return { status: 500, body: { error: "Task marked done, but the cost was not recorded. Add it in Costs." } };
+    }
+  }
+  if (pm.equipment_id) {
+    const { error } = await sb.from("equipment").update({ last_service: today }).eq("id", pm.equipment_id);
+    if (error) {
+      console.error("[completePreventive] equipment:", error);
+      return { status: 500, body: { error: "Task marked done, but the equipment service date was not updated." } };
+    }
+  }
+  await a.log("preventive_" + a.id, "preventive_completed", a.actor, notes ? { task_name: pm.task_name, notes } : { task_name: pm.task_name });
+  return { status: 200, body: { status: "success" } };
+}
+
+// Frequence modifiee : prochaine echeance = derniere realisation + nouvelle frequence.
+// Jamais faite (ou frequence absente) : null, l'echeance en base est gardee.
+export function nextDueAfterEdit(lastDoneAt: unknown, frequencyDays: unknown): string | null {
+  const f = Number(frequencyDays);
+  if (!lastDoneAt || !Number.isFinite(f) || f <= 0) return null;
+  const t = Date.parse(String(lastDoneAt));
+  return Number.isFinite(t) ? new Date(t + f * DAY_MS).toISOString() : null;
 }

@@ -244,7 +244,10 @@ export async function renderSetup(ctx, id) {
     } catch (e) {
       st.busy = false;
       sheetBusy(false);
-      if (!handleAccess(e)) sheetError((e && e.message) || 'Something went wrong. Try again.');
+      if (handleAccess(e)) return;
+      sheetError((e && e.message) || 'Something went wrong. Try again.');
+      // Mark done peut echouer apres l'echeance ecrite (cout ou equipement) : on relit la liste.
+      if (action === 'completePreventive' && e && e.kind === 'server') load(st.month === st.current ? '' : st.month, true);
       return;
     }
     st.busy = false;

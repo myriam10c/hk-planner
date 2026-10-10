@@ -42,7 +42,7 @@ import { mgrPlanning } from "./mgr_planning.ts";
 import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
 import { dashboardKpis } from "./kpis.ts";
 import { mgrPeople, parsePeopleMonth } from "./mgr_people.ts";
-import { mgrSetup, setupAccess } from "./mgr_setup.ts";
+import { completePreventiveRun, mgrSetup, nextDueAfterEdit, setupAccess } from "./mgr_setup.ts";
 import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
 import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
 import { buildDisputeUpdate, disputeAccess } from "./disputes.ts";
@@ -2876,7 +2876,15 @@ Deno.serve(async (req: Request) => {
       if (setupRefusal) return jsonResp({ error: setupRefusal.error }, setupRefusal.status);
       const nextDue = new Date(); nextDue.setDate(nextDue.getDate() + (frequency_days || 90));
       if (id) {
-        const { error } = await sb.from("preventive_maintenance").update({ listing_id, equipment_id, task_name, description, category, frequency_days, assigned_vendor_id, estimated_cost }).eq("id", id);
+        // Frequence changee : l'echeance repart de la derniere realisation (nextDueAfterEdit).
+        const { data: cur, error: curErr } = await sb.from("preventive_maintenance").select("last_done_at, frequency_days").eq("id", id).maybeSingle();
+        if (curErr) throw curErr;
+        const patch: Record<string, unknown> = { listing_id, equipment_id, task_name, description, category, frequency_days, assigned_vendor_id, estimated_cost };
+        if (cur && frequency_days && Number(frequency_days) !== Number(cur.frequency_days)) {
+          const due = nextDueAfterEdit(cur.last_done_at, frequency_days);
+          if (due) patch.next_due_at = due;
+        }
+        const { error } = await sb.from("preventive_maintenance").update(patch).eq("id", id);
         if (error) throw error;
       } else {
         const { error } = await sb.from("preventive_maintenance").insert({ listing_id, equipment_id, task_name, description, category, frequency_days: frequency_days || 90, assigned_vendor_id, estimated_cost, next_due_at: nextDue.toISOString() });
@@ -2893,20 +2901,11 @@ Deno.serve(async (req: Request) => {
       const setupRefusal = setupAccess(pmMe);
       if (setupRefusal) return jsonResp({ error: setupRefusal.error }, setupRefusal.status);
       const actor = sessionActor(pmMe, body.actor);
-      const { data: pm } = await sb.from("preventive_maintenance").select("*").eq("id", id).single();
-      if (!pm) return jsonResp({ error: "Not found" }, 404);
-      const nextDue = new Date(); nextDue.setDate(nextDue.getDate() + (pm.frequency_days || 90));
-      await sb.from("preventive_maintenance").update({ last_done_at: new Date().toISOString(), next_due_at: nextDue.toISOString() }).eq("id", id);
-      // Log cost
-      if (actual_cost) {
-        await sb.from("maintenance_costs").insert({ listing_id: pm.listing_id, category: pm.category || 'preventive', description: 'Preventive: ' + pm.task_name, amount: actual_cost, vendor_id: pm.assigned_vendor_id });
-      }
-      // Update equipment last_service if linked
-      if (pm.equipment_id) {
-        await sb.from("equipment").update({ last_service: new Date().toISOString().split('T')[0] }).eq("id", pm.equipment_id);
-      }
-      await addLog(sb, 'preventive_' + id, 'preventive_completed', actor, { task_name: pm.task_name });
-      return jsonResp({ status: "success" });
+      const r = await completePreventiveRun(sb, {
+        id, actualCost: actual_cost, notes, actor, nowMs: Date.now(),
+        log: (key, act, who, details) => addLog(sb, key, act, who, details),
+      });
+      return jsonResp(r.body, r.status);
     }
 
     // ==================== MAINTENANCE SLA ====================
