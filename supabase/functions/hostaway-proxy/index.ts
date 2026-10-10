@@ -41,7 +41,7 @@ import { LAUNDRY_FIELDS, parsePlanningStart } from "./mgr_planning_rules.ts";
 import { mgrPlanning } from "./mgr_planning.ts";
 import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
 import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
-import { mgrTeam } from "./mgr_team.ts";
+import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -1892,6 +1892,17 @@ Deno.serve(async (req: Request) => {
     if (action === "deleteCleaner" && req.method === "POST") {
       const body = await req.json();
       if (!body.id) return jsonResp({ error: "id required" }, 400);
+      // Session manager exigee AVANT toute ecriture (desactivation, sessions, push, compte Auth).
+      const me = await currentUser(sb, req);
+      // Le role de la cible est lu avant : une lecture en echec refuse (garde fermee).
+      let targetRole: unknown = null;
+      if (me && me.role === "manager") {
+        const { data: tr, error: trErr } = await sb.from("cleaners").select("role").eq("id", body.id).maybeSingle();
+        if (trErr) return jsonResp({ error: "Could not verify the member." }, 500);
+        targetRole = tr?.role;
+      }
+      const refusal = deactivateRefusal(me, body.id, targetRole);
+      if (refusal) return jsonResp({ error: refusal.error }, refusal.status);
       const { error } = await sb.from("cleaners").update({ is_active: false }).eq("id", body.id);
       if (error) throw error;
       // Revoke all sessions of this cleaner
@@ -1910,17 +1921,7 @@ Deno.serve(async (req: Request) => {
       // is_active), mais on supprime aussi son compte Auth : un JWT encore valide
       // ne doit pas survivre a un depart, et une reactivation repassera par une
       // invitation propre.
-      // Ecart assume par rapport au brief : cette route n'a que la porte
-      // X-App-Secret, qui voyage dans le bundle public. La desactivation douce
-      // reste telle quelle (comportement historique inchange), mais la
-      // destruction d'un compte Auth, elle, exige une session manager, comme
-      // saveCleaner et inviteCleaner. Le parcours reel (ecran Team) en a une.
       try {
-        const me = await currentUser(sb, req);
-        if (!me || me.role !== "manager") {
-          console.log("[deleteCleaner] desactivation sans session manager : compte Auth conserve");
-          return jsonResp({ status: "success" });
-        }
         const { data: gone } = await sb.from("cleaners").select("email").eq("id", body.id).maybeSingle();
         const goneEmail = normalizeEmail(gone?.email);
         if (goneEmail) {

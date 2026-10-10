@@ -77,7 +77,7 @@ export async function renderTeam(ctx) {
       + '<button class="btn primary" type="button" data-retry>Retry</button></div>';
   }
 
-  async function load(quiet) {
+  async function load(quiet, afterWrite) {
     if (!quiet) paintLoading();
     try {
       const d = await get('mgr.team');
@@ -86,7 +86,11 @@ export async function renderTeam(ctx) {
       paintList();
     } catch (e) {
       if (!ctx.isCurrent() || handleAccess(e)) return;
-      if (!quiet || !st.members) paintError(e.message || 'Could not load the team.');
+      if (afterWrite) {
+        // L'ecriture a reussi : on le dit, et la liste perimee laisse place a Retry.
+        toast('Saved, but the list could not be refreshed.');
+        paintError(e.message || 'Could not load the team.');
+      } else if (!quiet || !st.members) paintError(e.message || 'Could not load the team.');
     }
   }
 
@@ -144,7 +148,7 @@ export async function renderTeam(ctx) {
     sheetBusy(false);
     if (st.sheet) { st.sheet = null; closeSheet(); }
     toast(okMsg);
-    load(true);
+    load(true, true);
     return true;
   }
 

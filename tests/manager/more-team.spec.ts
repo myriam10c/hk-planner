@@ -190,3 +190,45 @@ test('aucun defilement horizontal et cibles de 44 px (telephone, panneau ouvert)
     expect((await el.boundingBox())!.height, await el.evaluate((n) => n.outerHTML.slice(0, 90))).toBeGreaterThanOrEqual(43.99);
   }
 });
+
+test('ajout avec email et PIN : invite puis saveCleaner avec l id renvoye', async ({ page }) => {
+  await boot(page, [
+    { match: 'action=inviteCleaner', status: 200, body: { status: 'success', id: 22, mode: 'invite' } },
+    { match: 'action=saveCleaner', status: 200, body: { status: 'success', id: 22 } },
+  ]);
+  await page.getByRole('button', { name: 'Add member' }).click();
+  const sheet = page.locator('#sheet');
+  await sheet.getByLabel('Name').fill('Layla');
+  await sheet.getByLabel('Email (optional)').fill('layla@example.com');
+  await sheet.getByLabel('PIN').fill('4821');
+  await sheet.getByRole('button', { name: 'Add and invite' }).click();
+  await expect(page.locator('#sheet.on')).toHaveCount(0);
+  expect(await posts(page, 'inviteCleaner')).toHaveLength(1);
+  const saves = await posts(page, 'saveCleaner');
+  expect(saves).toHaveLength(1);
+  expect(saves[0]).toMatchObject({ id: 22, name: 'Layla', pin: '4821', role: 'cleaner' });
+});
+
+test('ajout avec email et PIN : le PIN refuse est dit, le panneau reste', async ({ page }) => {
+  await boot(page, [
+    { match: 'action=inviteCleaner', status: 200, body: { status: 'success', id: 22, mode: 'invite' } },
+    { match: 'action=saveCleaner', status: 400, body: { error: 'pin must be 3-8 digits' } },
+  ]);
+  await page.getByRole('button', { name: 'Add member' }).click();
+  const sheet = page.locator('#sheet');
+  await sheet.getByLabel('Name').fill('Layla');
+  await sheet.getByLabel('Email (optional)').fill('layla@example.com');
+  await sheet.getByLabel('PIN').fill('4821');
+  await sheet.getByRole('button', { name: 'Add and invite' }).click();
+  await expect(sheet.getByRole('alert')).toContainText('Member invited, but the PIN was not saved: pin must be 3-8 digits');
+});
+
+test('rechargement apres ecriture en echec : toast et carte Retry', async ({ page }) => {
+  await boot(page, [{ match: 'action=saveCleaner', status: 200, body: { status: 'success', id: 4 } }],
+    [{ match: 'action=mgr.team', status: 200, body: TEAM, once: true }, { match: 'action=mgr.team', status: 500, body: { error: 'Internal error' }, once: true }, THE_READ]);
+  await page.locator('main [data-member="4"]').click();
+  await page.locator('#sheet').getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('#toast')).toContainText('Saved, but the list could not be refreshed.');
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.locator('main [data-member="4"]')).toBeVisible();
+});

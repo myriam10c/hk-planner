@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import { mgrAccess } from "./mgr_rules.ts";
-import { mgrTeam } from "./mgr_team.ts";
+import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
 
 const seed = () => fakeDb({
   cleaners: [
@@ -70,4 +70,17 @@ Deno.test("mgr.team: acces refuse hors manager (meme garde que le handler)", () 
   assertEquals(mgrAccess(false, { role: "manager" }), { ok: false, status: 403, error: "email sign-in required" });
   assertEquals(mgrAccess(true, { role: "cleaner" }), { ok: false, status: 403, error: "forbidden" });
   assertEquals(mgrAccess(true, { role: "manager" }), { ok: true });
+});
+
+Deno.test("deactivateRefusal: session, role, soi-meme, ligne system", () => {
+  const mgr = { cleaner_id: 8, role: "manager" };
+  const forbidden = { status: 403, error: "Only managers can do this." };
+  assertEquals(deactivateRefusal(null, 4, "cleaner"), forbidden);
+  assertEquals(deactivateRefusal({ cleaner_id: 3, role: "cleaner" }, 4, "cleaner"), forbidden);
+  // Session PIN d'un manager : meme forme de SessionUser, autorisee.
+  assertEquals(deactivateRefusal(mgr, 4, "cleaner"), null);
+  assertEquals(deactivateRefusal(mgr, "4", "subcontractor"), null);
+  assertEquals(deactivateRefusal(mgr, 8, "manager"), { status: 400, error: "You cannot deactivate yourself." });
+  assertEquals(deactivateRefusal(mgr, "8", "manager")?.status, 400);
+  assertEquals(deactivateRefusal(mgr, 6, "system"), { status: 400, error: "This account cannot be modified." });
 });

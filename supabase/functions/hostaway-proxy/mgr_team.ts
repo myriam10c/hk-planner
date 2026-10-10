@@ -2,6 +2,8 @@
 // saveCleaner, inviteCleaner et deleteCleaner (gardes de session deja en place).
 // pin_hash n'est lu que pour en tirer un booleen : le hash ne sort jamais d'ici.
 
+import { systemRowError } from "./auth.ts";
+
 const ROLE_ORDER: Record<string, number> = { manager: 0, cleaner: 1, subcontractor: 2, maintenance: 3 };
 const rank = (role: string) => (role in ROLE_ORDER ? ROLE_ORDER[role] : 99);
 
@@ -45,4 +47,15 @@ export async function mgrTeam(sb: any): Promise<{ members: TeamMember[] }> {
   members.sort((a, b) =>
     Number(b.active) - Number(a.active) || rank(a.role) - rank(b.role) || a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
   return { members };
+}
+
+// Decision de deleteCleaner avant toute ecriture : null = autorise. Une session manager (JWT ou
+// jeton PIN) suffit, l'ancienne app passe par un PIN. Pur, pour qu'un test verrouille les refus.
+export function deactivateRefusal(
+  me: { cleaner_id: number; role: string } | null, targetId: unknown, targetRole: unknown,
+): { status: number; error: string } | null {
+  if (!me || me.role !== "manager") return { status: 403, error: "Only managers can do this." };
+  if (String(targetId) === String(me.cleaner_id)) return { status: 400, error: "You cannot deactivate yourself." };
+  const sys = systemRowError(targetRole, undefined);
+  return sys ? { status: 400, error: sys } : null;
 }
