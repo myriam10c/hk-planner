@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { loadProblems } from "./mgr_problems.ts";
+import { loadProblems, mgrProblems } from "./mgr_problems.ts";
 import type { MgrCore } from "./mgr_today.ts";
 
 export const DAY = "2026-10-09";
@@ -80,4 +80,58 @@ Deno.test("lecture team_tasks en erreur : leve", async () => {
   let msg = "";
   try { await loadProblems(sb, core, jobs, arrivals); } catch (e) { msg = (e as Error).message; }
   assertEquals(msg, "[mgr] team_tasks: boom");
+});
+
+const ME = { cleaner_id: 8, name: "Walter", role: "manager", color: "#000" };
+const RESV = [
+  { id: "r1", listingId: "L1", guest: "G", arrival: DAY, departure: "2026-10-12", status: "confirmed", checkInTime: 15, checkOutTime: 11 },
+  { id: "r2", listingId: "L2", guest: "H", arrival: "2026-10-05", departure: DAY, status: "confirmed", checkInTime: 15, checkOutTime: 12 },
+];
+const Q = (o: Record<string, unknown> = {}) =>
+  ({ urgent: false, mine: false, unassigned: false, listingId: null, source: null, q: "", offset: 0, limit: 50, ...o }) as any;
+const list = (sb: any, o: Record<string, unknown> = {}, load: any = async () => ({ reservations: RESV, cachedAt: null })) =>
+  mgrProblems(sb, { day: DAY, nowMs: NOW, me: ME, query: Q(o), loadReservations: load });
+
+Deno.test("mgr.problems : meme tri que Today, compteurs globaux, logements, options d'affectation", async () => {
+  const r = await list(db());
+  assertEquals(r.status, 200);
+  const b: any = r.body;
+  assertEquals(Object.keys(b).sort(), [
+    "apartments", "assignees", "bookingsCachedAt", "bookingsUnavailable", "counts", "day", "generatedAt", "limit", "me",
+    "offset", "rows", "total", "vendors",
+  ]);
+  assertEquals(b.rows.map((x: any) => x.ref), [
+    "MNT-429", "MNT-411", "TSK-13", "MNT-502", "MNT-440", "TSK-18", "MNT-501", "MNT-500", "TSK-14", "MNT-106", "TSK-15",
+  ]);
+  assertEquals([b.total, b.offset, b.limit, b.bookingsUnavailable, b.bookingsCachedAt, b.me], [11, 0, 50, false, null, { id: 8, name: "Walter" }]);
+  assertEquals(b.counts, {
+    open: 11, urgent: 3, mine: 1, unassigned: 7, overdue: 1,
+    bySource: { Maintenance: 5, Inspection: 1, "Cleaner report": 1, "Team task": 4 },
+  });
+  assertEquals(b.apartments, [
+    { listingId: "L1", apt: "103", bld: "Damac Reva", n: 2 },
+    { listingId: "L3", apt: "1607", bld: "Central Park JVC", n: 2 },
+    { listingId: "L2", apt: "2609", bld: "Nobles by Tiger", n: 2 },
+  ]);
+  assertEquals(b.assignees, [
+    { id: 7, name: "Semax", role: "manager", takesTasks: true },
+    { id: 8, name: "Walter", role: "manager", takesTasks: true },
+    { id: 4, name: "Faiza", role: "cleaner", takesTasks: false },
+  ]);
+  assertEquals(b.vendors, [{ id: 3, name: "CoolFix", specialty: "AC" }]);
+});
+
+Deno.test("mgr.problems : filtres et pages ; total apres filtre, compteurs avant filtre", async () => {
+  const b: any = (await list(db(), { urgent: true, offset: 1, limit: 1 })).body;
+  assertEquals([b.total, b.rows.map((x: any) => x.ref), b.counts.open], [3, ["MNT-411"], 11]);
+  const m: any = (await list(db(), { mine: true })).body;
+  assertEquals(m.rows.map((x: any) => x.ref), ["TSK-18"]);
+  const z: any = (await list(db(), { limit: 0 })).body;
+  assertEquals([z.rows, z.total, z.counts.urgent], [[], 11, 3]);
+});
+
+Deno.test("mgr.problems : Hostaway indisponible, liste servie sans le coup de pouce du jour", async () => {
+  const b: any = (await list(db(), {}, async () => { throw new Error("down"); })).body;
+  assertEquals(b.bookingsUnavailable, true);
+  assertEquals(b.rows.slice(0, 3).map((x: any) => x.ref), ["TSK-13", "MNT-411", "MNT-429"]);
 });

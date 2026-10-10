@@ -2,11 +2,16 @@
 // prestataires) et bloc « Open problems » de Today. Les regles (references,
 // priorites, tri, filtres) vivent dans mgr_inbox.ts ; la meme boite sert Today
 // (5 premiers) et l'ecran Problems (mgr.problems, ajoute par la tache 4).
+import type { SessionUser } from "./auth.ts";
+import type { MgrReservation } from "./mgr_rules.ts";
 import {
-  buildInbox, MGR_OPEN_TASK_STATUSES, MGR_OPEN_TICKET_STATUSES, todayFromBoard,
-  type InboxRow, type RawTask, type RawTicket,
+  apartmentsOf, buildInbox, filterRows, inboxCounts, MGR_OPEN_TASK_STATUSES, MGR_OPEN_TICKET_STATUSES,
+  MGR_TASK_ASSIGNEE_ROLES, MGR_TICKET_ASSIGNEE_ROLES, todayFromBoard, todayFromReservations,
+  type InboxCounts, type InboxQuery, type InboxRow, type RawTask, type RawTicket, type TodayIdx,
 } from "./mgr_inbox.ts";
-import { readAllRows, type MgrArrival, type MgrCore, type MgrJob } from "./mgr_today.ts";
+import {
+  listingMap, peopleMap, readAllRows, type MgrArrival, type MgrCore, type MgrJob, type MgrPerson,
+} from "./mgr_today.ts";
 
 export const MGR_TICKET_COLS =
   "id, listing_id, title, priority, status, source, assigned_technician_id, assigned_vendor_id, created_at, sla_deadline, resolved_at";
@@ -59,4 +64,67 @@ export async function loadProblems(sb: any, c: MgrCore, jobs: MgrJob[], arrivals
     today: todayFromBoard(jobs, arrivals),
   });
   return { counts: todayCounts(rows), top: rows.slice(0, 5) };
+}
+
+export type AssigneeOption = { id: number; name: string; role: string; takesTasks: boolean };
+export type VendorOption = { id: number; name: string; specialty: string };
+const ROLE_ORDER: Record<string, number> = { manager: 0, maintenance: 1, cleaner: 2 };
+
+export function assigneeOptions(people: Record<string, MgrPerson>): AssigneeOption[] {
+  return Object.values(people)
+    .filter((p) => p.active && MGR_TICKET_ASSIGNEE_ROLES.includes(p.role))
+    .sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9) || a.name.localeCompare(b.name))
+    .map((p) => ({ id: p.id, name: p.name, role: p.role, takesTasks: MGR_TASK_ASSIGNEE_ROLES.includes(p.role) }));
+}
+export function vendorOptions(vs: RawVendor[]): VendorOption[] {
+  return vs.filter((v) => v.is_active !== false)
+    .map((v) => ({ id: Number(v.id), name: String(v.name ?? "").trim() || "Vendor " + v.id, specialty: String(v.specialty ?? "") }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+export async function loadRefs(sb: any): Promise<{ listings: Record<string, { apt: string; bld: string }>; people: Record<string, MgrPerson> }> {
+  const [l, p] = await Promise.all([
+    readAllRows((a: number, b: number) => sb.from("listing_config")
+      .select("listing_id, internal_name, listing_name, apt_number").order("listing_id").range(a, b), "listing_config"),
+    readAllRows((a: number, b: number) => sb.from("cleaners").select("id, name, role, is_active").order("id").range(a, b), "cleaners"),
+  ]);
+  return { listings: listingMap(l), people: peopleMap(p) };
+}
+
+export type MgrProblemsList = {
+  day: string; generatedAt: string; bookingsCachedAt: string | null; bookingsUnavailable: boolean;
+  me: { id: number; name: string };
+  counts: InboxCounts; apartments: Array<{ listingId: string; apt: string; bld: string; n: number }>;
+  total: number; offset: number; limit: number; rows: InboxRow[];
+  assignees: AssigneeOption[]; vendors: VendorOption[];
+};
+
+// Action mgr.problems. Hostaway (cache mgr:res:<jour>) ne sert qu'a remonter ce
+// qui touche une arrivee ou un depart du jour : s'il manque, la liste est servie
+// quand meme, triee sans ce coup de pouce, et le front le signale.
+export async function mgrProblems(sb: any, o: {
+  day: string; nowMs: number; me: SessionUser; query: InboxQuery;
+  loadReservations: (day: string) => Promise<{ reservations: MgrReservation[]; cachedAt: string | null }>;
+}): Promise<{ status: 200; body: MgrProblemsList }> {
+  const [booked, raw, refs] = await Promise.all([
+    o.loadReservations(o.day).then((r) => ({ ok: true as const, r }), () => ({ ok: false as const, r: null })),
+    loadInboxRaw(sb),
+    loadRefs(sb),
+  ]);
+  const today: TodayIdx = booked.ok ? todayFromReservations(booked.r.reservations, o.day) : { arrivals: {}, checkouts: {} };
+  const all = buildInbox(raw.tickets, raw.tasks, {
+    nowMs: o.nowMs, listings: refs.listings, people: refs.people, vendors: vendorNames(raw.vendors), today,
+  });
+  const rows = filterRows(all, o.query, o.me.cleaner_id);
+  return {
+    status: 200,
+    body: {
+      day: o.day, generatedAt: new Date(o.nowMs).toISOString(),
+      bookingsCachedAt: booked.ok ? booked.r.cachedAt : null, bookingsUnavailable: !booked.ok,
+      me: { id: o.me.cleaner_id, name: o.me.name },
+      counts: inboxCounts(all, o.me.cleaner_id), apartments: apartmentsOf(all),
+      total: rows.length, offset: o.query.offset, limit: o.query.limit,
+      rows: rows.slice(o.query.offset, o.query.offset + o.query.limit),
+      assignees: assigneeOptions(refs.people), vendors: vendorOptions(raw.vendors),
+    },
+  };
 }

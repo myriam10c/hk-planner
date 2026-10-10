@@ -32,6 +32,8 @@ import { getSecurityContacts, setSecurityContacts } from "./security_contacts.ts
 import { sessionActor } from "./actor.ts";
 import { mgrAccess, MGR_LOOKBACK_DAYS, normalizeMgrReservations, type MgrReservation } from "./mgr_rules.ts";
 import { mgrToday } from "./mgr_api.ts";
+import { parseInboxQuery } from "./mgr_inbox.ts";
+import { mgrProblems } from "./mgr_problems.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -877,7 +879,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["insp.claim", "POST"], ["insp.unclaim", "POST"], ["insp.assign", "POST"], ["insp.setExcluded", "POST"],
   ["insp.setFixSchedule", "POST"],
   // ===== App manager /manager/ (spec 2026-10-09) =====
-  ["mgr.today", "GET"],
+  ["mgr.today", "GET"], ["mgr.problems", "GET"], ["mgr.problem.get", "GET"], ["mgr.problem.act", "POST"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1413,6 +1415,20 @@ Deno.serve(async (req: Request) => {
       if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
       const r = await mgrToday(sb, {
         day: todayDubai(), nowMs: Date.now(), me: me!,
+        loadReservations: (d) => loadMgrReservations(sb, d),
+      });
+      return jsonResp(r.body, r.status);
+    }
+
+    // Boite Problems : liste filtree et paginee. Memes regles d'acces que Today.
+    if (action === "mgr.problems") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const pq = parseInboxQuery(url.searchParams);
+      if (!pq.ok) return jsonResp({ error: pq.error }, 400);
+      const r = await mgrProblems(sb, {
+        day: todayDubai(), nowMs: Date.now(), me: me!, query: pq.q,
         loadReservations: (d) => loadMgrReservations(sb, d),
       });
       return jsonResp(r.body, r.status);
