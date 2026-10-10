@@ -203,3 +203,18 @@ export function postponeSheet(d, j, ro) {
     + '</b>. Assignment and linen stay with the cleaning.</p>' + warn + '</div>'
     + '<div class="sheet-f">' + B('confirm-postpone', 'Move to ' + dayShort(to), 'primary') + B('back', 'Back') + '</div>';
 }
+
+// Linge ramasse : sept champs, tous obligatoires (0 quand il n'y en a pas).
+export function laundrySheet(d, j, ro) {
+  const v = j.laundry || {};
+  const rows = LAUNDRY_ITEMS.map((it) => {
+    const val = v[it.key] != null ? String(v[it.key]) : '';
+    return '<div class="lq-row"><label for="lq_' + it.key + '">' + esc(it.label) + '</label>'
+      + '<button type="button" class="iconbtn" data-pa="lq-step" data-field="' + it.key + '" data-d="-1" aria-label="Less ' + esc(it.label) + '">&minus;</button>'
+      + '<input id="lq_' + it.key + '" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="' + esc(val) + '">'
+      + '<button type="button" class="iconbtn" data-pa="lq-step" data-field="' + it.key + '" data-d="1" aria-label="More ' + esc(it.label) + '">+</button></div>';
+  }).join('');
+  const foot = ro ? roFoot() : '<div class="sheet-f">' + B('save-laundry', j.laundry ? 'Save changes' : 'Save count', 'primary') + B('back', 'Back') + '</div>';
+  return head('Linen collected', placeLabel(j) + ' · ' + dayShort(j.date))
+    + '<div class="sheet-b"><p class="note">Every field is needed. Type 0 when there is none.</p><div class="lq">' + rows + '</div></div>' + foot;
+}

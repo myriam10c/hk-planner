@@ -209,6 +209,39 @@ export async function renderPlanning(ctx) {
     if (j && j.postponedFrom) write(j.key, 'setPostponed', { key: j.key, postpone: false }, placeLabel(j) + ' back to ' + dayShort(j.postponedFrom));
   };
 
+  // Tache 8 : linge du menage (meme regle que l'ancienne fiche : sept champs, un vide n'est pas un zero).
+  function laundryValues() {
+    const out = {};
+    for (const it of LAUNDRY_ITEMS) {
+      const inp = document.getElementById('lq_' + it.key);
+      out[it.key] = inp ? inp.value.trim() : '';
+    }
+    return out;
+  }
+  function syncLaundry() {
+    const b = document.querySelector('#sheet [data-pa="save-laundry"]');
+    if (b && !st.busy) b.disabled = !laundryParse(laundryValues()).ok;
+  }
+  hooks.resync = syncLaundry;
+  ACT.laundry = (j) => { if (j) { show(j.key, 'laundry'); syncLaundry(); } };
+  ACT['lq-step'] = (j, el) => {
+    const inp = document.getElementById('lq_' + el.getAttribute('data-field'));
+    if (!inp) return;
+    const cur = inp.value.trim() === '' ? 0 : Number(inp.value);
+    const next = (Number.isFinite(cur) ? Math.round(cur) : 0) + Number(el.getAttribute('data-d'));
+    inp.value = String(Math.max(0, Math.min(999, next)));
+    syncLaundry();
+  };
+  ACT['save-laundry'] = (j) => {
+    if (!j) return;
+    const p = laundryParse(laundryValues());
+    if (!p.ok) { sheetError('Check the ' + p.label + ' field.'); return; }
+    write(j.key, 'saveLaundryCount', { reservation_key: j.key, ...p.values }, 'Linen count saved for ' + placeLabel(j));
+  };
+  const onInput = (e) => { if (e.target && e.target.closest && e.target.closest('#sheet .lq')) syncLaundry(); };
+  document.addEventListener('input', onInput);
+  ctx.onLeave(() => document.removeEventListener('input', onInput));
+
   function onClick(e) {
     const t = e.target && e.target.closest ? e.target : null;
     const el = t ? t.closest('[data-retry],[data-week],[data-day],[data-filter],[data-job],[data-add-extra],#sheet [data-pa]') : null;
