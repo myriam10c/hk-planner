@@ -2581,8 +2581,11 @@ Deno.serve(async (req: Request) => {
     }
     if (action === "updateTicket" && req.method === "POST") {
       const body = await req.json();
-      const { id, status: newStatus, assigned_vendor_id, assigned_technician_id, resolution_notes, resolution_photo, actual_cost, actor } = body;
+      const { id, status: newStatus, assigned_vendor_id, assigned_technician_id, resolution_notes, resolution_photo, actual_cost } = body;
       if (!id) return jsonResp({ error: "id required" }, 400);
+      // Auteur pris dans la session (spec manager, section 6), body.actor ignore
+      // sauf pour les jobs serveur Hermes sans session.
+      const actor = sessionActor(await currentUser(sb, req), body.actor);
       const upd: any = {};
       if (newStatus) {
         upd.status = newStatus;
@@ -2721,8 +2724,9 @@ Deno.serve(async (req: Request) => {
     }
     if (action === "completePreventive" && req.method === "POST") {
       const body = await req.json();
-      const { id, actual_cost, notes, actor } = body;
+      const { id, actual_cost, notes } = body;
       if (!id) return jsonResp({ error: "id required" }, 400);
+      const actor = sessionActor(await currentUser(sb, req), body.actor);
       const { data: pm } = await sb.from("preventive_maintenance").select("*").eq("id", id).single();
       if (!pm) return jsonResp({ error: "Not found" }, 404);
       const nextDue = new Date(); nextDue.setDate(nextDue.getDate() + (pm.frequency_days || 90));

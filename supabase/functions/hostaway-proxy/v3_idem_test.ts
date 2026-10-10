@@ -40,12 +40,18 @@ Deno.test("claimEvent refuse un type d'evenement absent de la contrainte CHECK",
   );
   // Rien n'a ete ecrit : la cle reste disponible pour le vrai geste.
   assertEquals(sb.tables.job_events.length, 0);
-  assertEquals(V3_EVENT_TYPES.length, 13);
+  assertEquals(V3_EVENT_TYPES.length, 14);
   assertEquals([...V3_EVENT_TYPES], [
     "start_job", "tick", "upload_photo", "finish_job", "report_problem", "check_ticket",
     "delete_photo", "add_problem_photo", "set_problem_note", "upload_voice",
-    "set_problem_voice", "update_problem", "delete_problem",
+    "set_problem_voice", "update_problem", "delete_problem", "mgr_problem_act",
   ]);
+});
+
+Deno.test("la migration 20261010090000 autorise exactement V3_EVENT_TYPES", async () => {
+  const sql = await Deno.readTextFile(new URL("../../migrations/20261010090000_mgr_problem_events.sql", import.meta.url));
+  const listed = [...sql.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort();
+  assertEquals(listed, [...V3_EVENT_TYPES].sort());
 });
 
 Deno.test("replayResponse distingue un rejeu abouti d'un rejeu sans resultat", () => {

@@ -15,6 +15,8 @@ export const V3_EVENT_TYPES = [
   "start_job", "tick", "upload_photo", "finish_job", "report_problem", "check_ticket",
   "delete_photo", "add_problem_photo", "set_problem_note", "upload_voice",
   "set_problem_voice", "update_problem", "delete_problem",
+  // App manager, phase 2 (mgr_problem_act.ts), migration 20261010090000.
+  "mgr_problem_act",
 ] as const;
 
 export type V3EventType = typeof V3_EVENT_TYPES[number];
