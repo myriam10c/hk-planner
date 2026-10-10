@@ -72,7 +72,8 @@ export async function byKeys(sb: any, table: string, cols: string, keys: string[
   return out;
 }
 
-function monthsBack(day: string, days: number): string[] {
+// Mois (AAAA-MM) couverts par les `days` jours avant `day` : cle de cleaning_accounting_cache.
+export function monthsBack(day: string, days: number): string[] {
   const out = new Set<string>();
   for (let d = plusDays(day, -days); d <= day; d = plusDays(d, 1)) out.add(d.slice(0, 7));
   return [...out];
