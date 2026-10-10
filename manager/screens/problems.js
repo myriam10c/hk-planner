@@ -3,7 +3,8 @@
 // Puces de filtre, recherche, pages de 50, fiche et gestes partages avec Today.
 import { get } from '/manager/api.js';
 import { clearCache, loadCache, saveCache } from '/manager/today-cache.js';
-import { announceBadge, closeSheet, dubaiTime, dubaiToday, esc, openSheet, toast } from '/manager/ui/dom.js';
+import { announceBadge, closeSheet, dubaiTime, dubaiToday, esc, openSheet, sheetIsOpen, toast } from '/manager/ui/dom.js';
+import { attachSwipe } from '/manager/ui/swipe.js';
 import { createProblemPanel } from '/manager/problem-panel.js';
 import { apartmentSheet, chipsHtml, listHtml, problemsShell } from '/manager/screens/problems-view.js';
 
@@ -79,6 +80,18 @@ export async function renderProblems(ctx) {
     $('pBanner').innerHTML = banner();
     $('pChips').innerHTML = st.data ? chipsHtml(st.data, st.f) : '';
     $('pList').innerHTML = listHtml(st, hasFilter(st.f));
+    restoreFocus();
+  }
+
+  // Apres un rendu, le focus revient sur la ligne suivie (celle d'apres un Close),
+  // jamais vole a la recherche ni au panneau.
+  function restoreFocus() {
+    if (!st.focusRef || sheetIsOpen()) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && !(a.closest && a.closest('#pList'))) return;
+    const all = Array.from(document.querySelectorAll('#pList [data-row]'));
+    const el = all.find((x) => x.getAttribute('data-ref') === st.focusRef) || all[0];
+    if (el) el.focus();
   }
 
   async function refresh() {
@@ -157,12 +170,75 @@ export async function renderProblems(ctx) {
     }, SEARCH_DELAY_MS);
   }
 
+  function typing(t) {
+    return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+  }
+  function rowEls() { return Array.from(document.querySelectorAll('#pList [data-row]')); }
+  function focusedRow() {
+    const a = document.activeElement;
+    return a && a.closest ? a.closest('#pList [data-row]') : null;
+  }
+  function nextRef(ref) {
+    const i = st.rows.findIndex((r) => r.ref === ref);
+    const n = st.rows[i + 1] || st.rows[i - 1];
+    return n ? n.ref : null;
+  }
+  // Clavier (ordinateur) : j/k et fleches, Entree (bouton natif), A, S, C, /.
+  function onKey(e) {
+    if (!ctx.isCurrent() || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
+    const k = e.key;
+    if (k === '/') {
+      if (sheetIsOpen()) return;
+      e.preventDefault();
+      search.focus();
+      return;
+    }
+    const open = panel.current();
+    if (sheetIsOpen() && !open) return;
+    const l = k.length === 1 ? k.toLowerCase() : k;
+    if (l === 'a' || l === 's' || l === 'c') {
+      const fr = focusedRow();
+      const ref = open || (fr && fr.getAttribute('data-ref'));
+      if (!ref) return;
+      e.preventDefault();
+      const row = rowOf(ref);
+      if (l === 'a') panel.assign(ref, row);
+      else if (l === 's') panel.schedule(ref, row);
+      else { st.focusRef = nextRef(ref); panel.close(ref, row); }
+      return;
+    }
+    if (sheetIsOpen()) return;
+    if (k === 'ArrowDown' || k === 'j' || k === 'ArrowUp' || k === 'k') {
+      const all = rowEls();
+      if (!all.length) return;
+      e.preventDefault();
+      const cur = focusedRow();
+      const down = k === 'ArrowDown' || k === 'j';
+      const i = cur ? all.indexOf(cur) : -1;
+      const next = cur ? all[Math.max(0, Math.min(all.length - 1, i + (down ? 1 : -1)))] : all[0];
+      next.focus();
+      st.focusRef = next.getAttribute('data-ref');
+    }
+  }
+  // Glisser (telephone, moins de 960 px) : gauche Close, droite Assign.
+  const detachSwipe = attachSwipe($('pList'), {
+    enabled: () => window.matchMedia('(max-width: 959px)').matches,
+    onSwipe: (ref, intent) => {
+      const row = rowOf(ref);
+      if (!row) return;
+      if (intent === 'close') { st.focusRef = nextRef(ref); panel.close(ref, row); } else panel.assign(ref, row);
+    },
+  });
+
   document.addEventListener('click', onClick);
+  document.addEventListener('keydown', onKey);
   search.addEventListener('input', onInput);
   ctx.onLeave(() => {
     document.removeEventListener('click', onClick);
+    document.removeEventListener('keydown', onKey);
     search.removeEventListener('input', onInput);
     clearTimeout(st.typing);
+    detachSwipe();
     panel.dispose();
   });
   await refresh();

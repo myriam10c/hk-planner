@@ -46,3 +46,8 @@
   .prow .bar{grid-row:auto}
   .pside{flex-direction:column;align-items:flex-end;gap:2px}
 }
+
+/* Glisser une ligne (telephone) : la ligne suit le doigt, la couleur annonce le geste. */
+.prow.swiping{transition:none}
+.prow.swipe-close{background:var(--bad-tint)}
+.prow.swipe-assign{background:var(--accent-tint)}
