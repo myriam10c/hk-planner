@@ -1,14 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { bootInsp, fetchLog } from './helpers';
 
-const ZONES = ['Entrance, door & lock','Living room','Kitchen & appliances','Bedroom(s) & bedding','Bathroom(s) & plumbing','AC','Wi-Fi & TV','Balcony & windows','Inventory & consumables','General cleanliness'];
-const KEYS = ['entrance','living','kitchen','bedrooms','bathrooms','ac','wifi_tv','balcony','inventory','cleanliness'];
+const ZONES = ['Entrance, door & lock','Living room','Kitchen & appliances','Bedroom(s) & bedding','Bathroom(s) & plumbing','AC','Wi-Fi & TV','Balcony & windows','Inventory & consumables','General cleanliness','DET equipment'];
+const KEYS = ['entrance','living','kitchen','bedrooms','bathrooms','ac','wifi_tv','balcony','inventory','cleanliness','det'];
 const ME = { status: 200, match: 'action=cleanerMe', body: { cleaner: { cleaner_id: 3, name: 'Faiza', role: 'cleaner' } } };
 const START = (items: any[] = [], photos: any[] = []) => ({ status: 200, match: 'action=insp.start', body: {
   inspection: { id: 41, listingId: 'A', eligibility: 'checkout', startedAt: '2026-10-06T06:42:00Z' }, items, photos } });
 const OK = { status: 200, match: 'action=insp.saveItem', body: { item: { zone: 'x', status: 'ok' } } };
 
-test('parcours : 9 OK, AC en maintenance avec photo, fin', async ({ page }) => {
+test('parcours : 10 OK, AC en maintenance avec photo, fin', async ({ page }) => {
   await bootInsp(page, [ME, START(),
     { status: 200, match: 'action=insp.uploadPhoto', body: { photo: { id: 1, zone: 'ac', kind: 'issue' } } },
     OK,
@@ -17,7 +17,7 @@ test('parcours : 9 OK, AC en maintenance avec photo, fin', async ({ page }) => {
   ], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
   for (const z of ZONES) {
     if (z === 'AC') continue;
-    await page.getByTestId('zone-' + KEYS[ZONES.indexOf(z)]).getByRole('button', { name: 'OK: ' + z, exact: true }).click();
+    await page.getByTestId('zone-' + KEYS[ZONES.indexOf(z)]).getByRole('button', { name: (z === 'DET equipment' ? 'All present: ' : 'OK: ') + z, exact: true }).click();
   }
   const ac = page.getByTestId('zone-ac');
   await ac.getByRole('button', { name: 'Not OK: AC', exact: true }).click();
@@ -25,7 +25,7 @@ test('parcours : 9 OK, AC en maintenance avec photo, fin', async ({ page }) => {
   await ac.locator('input[type=file]').first().setInputFiles({ name: 'a.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
   await ac.getByRole('button', { name: 'Needs maintenance' }).click();
   await ac.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('10 / 10 zones')).toBeVisible();
+  await expect(page.getByText('11 / 11 zones')).toBeVisible();
   await page.getByRole('button', { name: 'Finish inspection' }).click();
   await expect(page.getByText('Inspection saved')).toBeVisible();
   const log = await fetchLog(page);
@@ -37,7 +37,7 @@ test('parcours : 9 OK, AC en maintenance avec photo, fin', async ({ page }) => {
 test('reprise : zones deja saisies affichees', async ({ page }) => {
   await bootInsp(page, [ME, START([{ zone: 'entrance', status: 'ok' }, { zone: 'ac', status: 'not_ok', note: 'Noisy', outcome: 'fixed', fixNote: 'Filter cleaned' }], [{ id: 1, zone: 'ac', kind: 'issue' }])],
     { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
-  await expect(page.getByText('2 / 10 zones')).toBeVisible();
+  await expect(page.getByText('2 / 11 zones')).toBeVisible();
   await expect(page.getByTestId('zone-ac')).toContainText('Filter cleaned');
 });
 
@@ -147,7 +147,7 @@ test('accessibilite : zones nommees, boutons OK/Not OK explicites, compteur aria
       .observe(document.getElementById('view')!, { subtree: true, childList: true, characterData: true });
   });
   await page.getByTestId('zone-kitchen').getByRole('button', { name: 'OK: Kitchen & appliances', exact: true }).click();
-  await expect(page.getByText('1 / 10 zones')).toBeVisible();
+  await expect(page.getByText('1 / 11 zones')).toBeVisible();
   expect(await page.evaluate(() => (window as any).__mut.includes('characterData') || (window as any).__mut.includes('childList'))).toBe(true);
   expect(await page.evaluate(() => (window as any).__cnt === document.querySelector('.count') && document.querySelectorAll('#view [aria-live]').length)).toBe(1);
 });

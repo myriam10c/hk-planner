@@ -5,7 +5,7 @@
 /* #main porte deja le padding lateral et le bas (112px phone) qui degage la barre d'onglets. */
 .insp .wrap{max-width:720px;margin:0 auto;padding:0 0 var(--s4)}
 .insp .wrap > .btn:first-child{margin-top:calc(var(--s4) + env(safe-area-inset-top))}
-.insp .wrap > h1{margin:var(--s5) 0 var(--s1);font-size:28px;line-height:1.15;font-weight:700;letter-spacing:-.02em}
+.insp .wrap > h1{margin:var(--s5) 0 var(--s1);font-size:34px;line-height:1.1;font-weight:700;letter-spacing:-.02em}
 .insp h3{margin:0;font-size:17px;line-height:1.3;font-weight:600;overflow-wrap:anywhere}
 .insp .reason,.insp .mute,.insp .badge,.insp .state{overflow-wrap:anywhere}
 .insp .mute{color:var(--ink-2);font-size:16px;margin:var(--s1) 0}
