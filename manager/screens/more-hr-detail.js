@@ -7,7 +7,6 @@
 // seulement masquees quand isOwner est faux, et il recalcule toujours le nombre de jours.
 import { get, post } from '/manager/api.js';
 import { closeSheet, esc, I, openSheet, sheetBusy, sheetError, sheetIsOpen, toast } from '/manager/ui/dom.js';
-import { askSignature } from '/manager/ui/signature.js';
 import { HR_DOC_TYPES, HR_LEAVE_TYPES, accruedAnnualDays, daysUntil, gratuityEstimate, hrSplitHistory, leaveDays, sickTiers } from '/manager/hr-rules.js';
 import { accessHandler, docLabel, head, plural, sec, typeLabel } from '/manager/screens/more-hr.js';
 
@@ -368,8 +367,9 @@ export async function renderHrDetail(ctx, rawId) {
     write('rec', () => post('hrSaveEmployee', body), 'Employee record saved', ['rec']);
   }
 
-  // Signature de l'employe avant l'envoi ; sans signature, rien ne part.
-  async function onSubmitLeave() {
+  // Comme hrSubmitLeaveFor de hr.js : pas de signature quand un manager pose le conge
+  // d'un autre (le serveur ne la garderait pas) ; le serveur recalcule les jours.
+  function onSubmitLeave() {
     if (st.busy.has('leave')) return;
     const start = val('hrNewStart');
     const end = val('hrNewEnd');
@@ -379,9 +379,7 @@ export async function renderHrDetail(ctx, rawId) {
     if (bad) { st.errs.set('leave', bad); paint(); return; }
     st.errs.delete('leave');
     const body = { cleaner_id: cid, leave_type: val('hrNewType') || 'annual', start_date: start, end_date: end, reason: val('hrNewReason') || null };
-    const sig = await askSignature('Employee signature');
-    if (!sig || !ctx.isCurrent()) return;
-    write('leave', () => post('hrSubmitLeave', { ...body, employee_signature: sig }), 'Request submitted', ['leave']);
+    write('leave', () => post('hrSubmitLeave', body), 'Request submitted', ['leave']);
   }
 
   // Lien signe suivi dans le meme onglet, comme hrDownloadForm de hr.js.

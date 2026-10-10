@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { bootMgr, fetchLog, MANAGER, me, noHorizontalScroll, type FakeRoute } from './helpers';
-import { OVERVIEW, TEAM_READ, emp, req, posts, sign } from './hr-fixtures';
+import { OVERVIEW, TEAM_READ, emp, req, posts } from './hr-fixtures';
 
 // More > HR : fiche employe (#/more/hr/<cleanerId>), memes sections que renderHRDetail de hr.js.
 const AMIR = emp({ cleaner_id: 3, hire_date: '2024-10-01', job_title: 'Senior cleaner', nationality: 'Philippines', notes: 'Keys holder', updated_at: '2026-10-01T08:00:00Z' });
@@ -102,7 +102,7 @@ test('enregistrer le dossier : poste les champs puis recharge ; erreur du serveu
   expect('basic_salary' in calls[1]).toBe(false);
 });
 
-test('poser un conge : apercu des jours et feries, rien sans signature, puis poste avec signature', async ({ page }) => {
+test('poser un conge : controles des dates et apercu des jours et feries, rien n est poste', async ({ page }) => {
   await boot(page, [OK('hrSubmitLeave')]);
   const bk = sec(page, 'book');
   await bk.getByRole('button', { name: 'Submit request' }).click();
@@ -114,25 +114,24 @@ test('poser un conge : apercu des jours et feries, rien sans signature, puis pos
   await bk.getByLabel('From').fill('2026-12-01');
   await bk.getByLabel('To').fill('2026-12-03');
   await expect(bk.locator('[data-leave-preview]')).toHaveText('3 days, weekends included. Public holiday in range: National Day (2026-12-02).');
+  expect(await posts(page, 'hrSubmitLeave')).toHaveLength(0);
+});
+
+test('poser un conge valide : poste aussitot, sans signature ni nombre de jours', async ({ page }) => {
+  await boot(page, [OK('hrSubmitLeave')]);
+  const bk = sec(page, 'book');
   await bk.getByLabel('Type').selectOption('sick');
+  await bk.getByLabel('From').fill('2026-12-01');
+  await bk.getByLabel('To').fill('2026-12-03');
   await bk.getByLabel('Reason (optional)').fill('Flu');
   await bk.getByRole('button', { name: 'Submit request' }).click();
-  const sheet = page.locator('#sheet');
-  await expect(sheet.getByRole('heading', { name: 'Employee signature' })).toBeVisible();
-  await sheet.getByRole('button', { name: 'Cancel' }).click();
-  await expect(page.locator('#sheet.on')).toHaveCount(0);
-  expect(await posts(page, 'hrSubmitLeave')).toHaveLength(0);
-  await bk.getByRole('button', { name: 'Submit request' }).click();
-  await sign(page);
-  await sheet.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.locator('#toast')).toContainText('Request submitted');
+  // Aucun pad de signature : le manager pose le conge d'un autre, comme hrSubmitLeaveFor.
+  await expect(page.locator('#sheet canvas')).toHaveCount(0);
   const calls = await posts(page, 'hrSubmitLeave');
-  expect(calls).toHaveLength(1);
-  const { employee_signature, ...rest } = calls[0];
-  expect(rest).toEqual({ cleaner_id: 3, leave_type: 'sick', start_date: '2026-12-01', end_date: '2026-12-03', reason: 'Flu' });
-  expect(employee_signature.startsWith('data:image/png;base64,')).toBe(true);
-  // Le nombre de jours est recalcule par le serveur : jamais envoye.
-  expect('days' in calls[0]).toBe(false);
+  // Corps identique a hr.js ; le serveur recalcule les jours.
+  expect(calls).toEqual([{ cleaner_id: 3, leave_type: 'sick', start_date: '2026-12-01', end_date: '2026-12-03', reason: 'Flu' }]);
+  expect('employee_signature' in calls[0]).toBe(false);
   await expect(bk.getByLabel('From')).toHaveValue('');
 });
 
