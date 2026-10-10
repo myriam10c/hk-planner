@@ -3248,6 +3248,14 @@ function setTab(t){if(t==='inspections'){location.href='/inspections/';return;}i
 let moreOpen=false;
 function openMoreMenu(){ moreOpen=true; renderMoreMenu(); }
 function closeMoreMenu(){ moreOpen=false; renderMoreMenu(); }
+// Lien vers la nouvelle app manager /manager/ (spec 2026-10-09, phase 2) : vue
+// manager seulement (pas de cleanerMode). Simple lien, l'ancienne app reste.
+function mgrAppLink(){
+  if(cleanerMode) return '';
+  return '<a class="more-item" href="/manager/" data-mgr-app style="text-decoration:none;color:inherit">'+
+    '<span class="more-icon" style="background:#0a6fd620;color:#0a6fd6">'+icon('sparkles',22)+'</span>'+
+    '<span class="more-label">New manager app</span></a>';
+}
 function renderMoreMenu(){
   let el=document.getElementById('moreMenu');
   if(!el){ el=document.createElement('div'); el.id='moreMenu'; document.body.appendChild(el); }
@@ -3274,6 +3282,7 @@ function renderMoreMenu(){
           <span class="more-icon" style="background:${i.color}20;color:${i.color}">${i.icon}</span>
           <span class="more-label">${i.label}</span>
         </button>`).join('')}
+        ${mgrAppLink()}
       </div>
     </div>
   </div>`;
