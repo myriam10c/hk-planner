@@ -42,6 +42,7 @@ import { mgrPlanning } from "./mgr_planning.ts";
 import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
 import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
 import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
+import { buildDisputeUpdate, disputeAccess } from "./disputes.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -4234,6 +4235,9 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", reviews: data || [] });
     }
     if (action === "getDisputes") {
+      // Reserve aux managers (seul appelant : l'onglet Reviews).
+      const dRefusal = disputeAccess(await currentUser(sb, req));
+      if (dRefusal) return jsonResp({ error: dRefusal.error }, dRefusal.status);
       // Base = review_disputes (every analyzed dispute, ~180 days). reviews_cache only
       // mirrors ~30 days, so it can't drive the list. We merge the cache when the review
       // is still mirrored there: it gives the freshest text and the is_hidden/is_cancelled
@@ -4271,17 +4275,15 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "updateDisputeStatus" && req.method === "POST") {
-      const body = await req.json();
-      const { review_id, dispute_status, reply_posted, updated_by } = body;
-      if (!review_id) return jsonResp({ error: "review_id required" }, 400);
-      const allowed = new Set(["todo", "submitted", "removed", "rejected", "not_disputable"]);
-      const upd: Record<string, any> = { review_id: Number(review_id), updated_at: new Date().toISOString() };
-      if (dispute_status !== undefined) {
-        if (!allowed.has(dispute_status)) return jsonResp({ error: "invalid dispute_status" }, 400);
-        upd.dispute_status = dispute_status;
-      }
-      if (reply_posted !== undefined) upd.reply_posted = !!reply_posted;
-      if (updated_by !== undefined) upd.updated_by = String(updated_by).slice(0, 40);
+      const body = await req.json().catch(() => ({}));
+      // Session manager exigee ; auteur = membre de la session, updated_by du corps ignore.
+      const me = await currentUser(sb, req);
+      const dRefusal = disputeAccess(me);
+      if (dRefusal) return jsonResp({ error: dRefusal.error }, dRefusal.status);
+      const built = buildDisputeUpdate(body, sessionActor(me, null), new Date().toISOString());
+      if (!built.ok) return jsonResp({ error: built.error }, 400);
+      const { review_id } = body;
+      const upd = built.patch;
       // UPDATE (not upsert): the analysis row already exists (created by the daily
       // syncDisputeAnalysis job). An upsert would fire the BEFORE INSERT trigger on its
       // insert attempt, and since this payload omits `removable` the trigger would read

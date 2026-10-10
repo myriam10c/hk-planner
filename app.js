@@ -6437,7 +6437,7 @@ const GROUND_PROC={ // procedure hint per ground (the playbook template to use)
 async function loadDisputes(){
   reviewsLoading=true;reviewsError=false;
   try{
-    const res=await api('getDisputes');
+    const res=await apiWrite('getDisputes');
     reviewsData=(res&&res.reviews)?res.reviews:[];
   }catch(err){
     reviewsError=true;
@@ -6454,21 +6454,21 @@ function setReviewFilter(f){ reviewsFilter=f; render(); }
 
 async function setDisputeStatus(reviewId,status){
   try{
-    await api('updateDisputeStatus',{body:{review_id:reviewId,dispute_status:status,updated_by:'walter'}});
+    await apiWrite('updateDisputeStatus',{body:{review_id:reviewId,dispute_status:status}});
     const row=(reviewsData||[]).find(r=>String(r.id)===String(reviewId));
     if(row){ row.dispute=row.dispute||{}; row.dispute.dispute_status=status; }
     toast('Status updated','success'); render();
-  }catch(err){ toast('Update failed','error'); }
+  }catch(err){ toast((err&&err.message)||'Update failed','error'); }
 }
 
 async function toggleReplyPosted(reviewId){
   const row=(reviewsData||[]).find(r=>String(r.id)===String(reviewId));
   const next=!(row&&row.dispute&&row.dispute.reply_posted);
   try{
-    await api('updateDisputeStatus',{body:{review_id:reviewId,reply_posted:next,updated_by:'walter'}});
+    await apiWrite('updateDisputeStatus',{body:{review_id:reviewId,reply_posted:next}});
     if(row){ row.dispute=row.dispute||{}; row.dispute.reply_posted=next; }
     toast(next?'Reply marked posted':'Reply unmarked','success'); render();
-  }catch(err){ toast('Update failed','error'); }
+  }catch(err){ toast((err&&err.message)||'Update failed','error'); }
 }
 
 function copyDisputeText(text){

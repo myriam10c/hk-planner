@@ -63,3 +63,38 @@ button.tm-row:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 /* WebKit garde parfois hidden (herite du panneau ferme) sur un select cree pendant l'ouverture. */
 .sheet.on .tm-fl,.sheet.on .tm-fl select{visibility:visible}
 .tm-fl select{height:44px;-webkit-appearance:none;appearance:none;padding-right:36px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7282' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:18px}
+
+/* Reviews : puces de statut, cartes de litige, interrupteur « Reply posted ». */
+.rv{display:flex;flex-direction:column;gap:var(--s3);max-width:720px}
+.rv-chips{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.rv-chip{min-height:44px;padding:0 14px;border-radius:999px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);font:inherit;font-size:16px;font-weight:600;cursor:pointer}
+.rv-chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.rv-n{font-weight:500;opacity:.8}
+.rv-card{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s4);min-width:0}
+.rv-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s2)}
+.rv-stars{color:var(--warn);font-size:20px;letter-spacing:2px}
+.rv-off{color:var(--line-2)}
+.rv-listing{margin:0;font-size:18px;overflow-wrap:anywhere}
+.rv-sub{color:var(--ink-2);font-size:16px}
+.rv-review{margin:0;font-size:16px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.rv-orig>summary{display:flex;align-items:center;min-height:44px;font-size:16px;font-weight:600;cursor:pointer}
+.rv-block{display:flex;flex-direction:column;gap:var(--s1);padding:var(--s3);background:var(--surface-2);border-radius:var(--r-lg,12px)}
+.rv-lbl{font-size:16px;font-weight:600}
+.rv-angle,.rv-proc{margin:0;font-size:16px;overflow-wrap:anywhere}
+.rv-proc{color:var(--ink-2)}
+.rv-ev{margin:0;padding-left:20px;font-size:16px;overflow-wrap:anywhere}
+.rv-copyrow{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s1)}
+.rv-text{font-size:16px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;width:100%}
+.rv-copy,.rv-sbtn{min-height:44px;font-size:16px}
+.rv-note{margin:0;color:var(--ink-2);font-size:16px}
+.rv-actions{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.rv-sbtn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.rv-sbtn:disabled,.rv-switch:disabled{opacity:.55;cursor:default}
+.rv-switch{display:flex;align-items:center;gap:var(--s3);min-height:44px;background:transparent;border:0;padding:0;color:var(--ink);font:inherit;font-size:16px;font-weight:600;cursor:pointer;text-align:left}
+.rv-knob{position:relative;flex:none;width:44px;height:26px;border-radius:999px;background:var(--line-2);transition:background .15s}
+.rv-knob::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--surface);transition:transform .15s}
+.rv-switch[aria-checked="true"] .rv-knob{background:var(--accent)}
+.rv-switch[aria-checked="true"] .rv-knob::after{transform:translateX(18px)}
+.rv-switch:focus-visible,.rv-chip:focus-visible,.rv-orig>summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.rv-err{margin:0;padding:var(--s2) var(--s3);border-radius:10px;background:var(--bad-tint);color:var(--bad-ink);font-size:16px}
+@media (prefers-reduced-motion:reduce){.rv-knob,.rv-knob::after{transition:none}}
