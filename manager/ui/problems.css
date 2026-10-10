@@ -1,0 +1,19 @@
+/* Problems : fiche d'un probleme (spec 2026-10-09, sections 3 et 4). Tokens de tokens.css seulement. */
+.pfacts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px var(--s4);margin:0}
+.pfacts dt{color:var(--ink-3)}
+.pfacts dd{margin:0;font-weight:500;overflow-wrap:anywhere}
+.pdesc{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.pphotos{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:var(--s2)}
+.pphotos a{display:flex;flex-direction:column;gap:2px;text-decoration:none;color:var(--ink-3);font-size:13px}
+.pphotos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--r-sm);background:var(--sunk)}
+.pcomments,.phist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s2)}
+.pcomments p{margin:2px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.pcomments img{max-width:160px;border-radius:var(--r-sm);margin-top:4px}
+.phist li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--s3);font-size:15px}
+.t3{color:var(--ink-3)}
+.plabel{display:block;font-size:14px;color:var(--ink-2);margin-top:var(--s3)}
+.ptext{width:100%;border:1px solid var(--line-2);border-radius:var(--r-md);background:var(--surface);color:var(--ink);font:inherit;font-size:16px;padding:var(--s2) var(--s3);margin:4px 0 var(--s2);resize:vertical}
+.pdates{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.pinline{display:flex;gap:var(--s2);flex-wrap:wrap}
+.pinline input{min-height:40px;border:1px solid var(--line-2);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit;font-size:16px;padding:0 var(--s2)}
+.psub{font-size:15px;margin:var(--s3) 0 var(--s2);color:var(--ink-2)}

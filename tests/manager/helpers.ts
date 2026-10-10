@@ -7,6 +7,8 @@ export type FakeRoute = { match: string; status: number; body: any; delay?: numb
 
 export const MANAGER = { id: 8, name: 'Walter', color: '#e94560', role: 'manager', email: 'walter@example.com' };
 export const me = (member: any) => ({ match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: member } });
+// Image d'un pixel servie a la place des URL signees du stockage (aucun appel reseau).
+const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 // Session au format ecrit par supabase-js dans hkAuthSession, valide tres loin.
 export function emailSession() {
@@ -22,6 +24,7 @@ export async function bootMgr(
   opts: { email?: boolean; pin?: string; hash?: string; timeoutMs?: number; cache?: { savedAt: number; data: any }; clock?: Date } = {},
 ) {
   await page.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  await page.route('https://signed.test/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG_1PX, 'base64') }));
   await page.route(/\/v3\/(\?.*)?$/, (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>V3 STUB</title><h1>V3 STUB</h1>' }));
   await page.route(/:\d+\/(\?.*)?$/, (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>ROOT STUB</title><h1>ROOT STUB</h1>' }));
   if (opts.clock) await page.clock.setFixedTime(opts.clock);

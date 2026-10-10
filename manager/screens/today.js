@@ -3,7 +3,8 @@
 import { get, post } from '/manager/api.js';
 import { clearToday, loadToday, saveToday } from '/manager/today-cache.js';
 import { closeSheet, dubaiTime, esc, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
-import { arrivalSheet, boardHtml, jobSheet, pickerSheet, problemSheet } from '/manager/screens/today-view.js';
+import { arrivalSheet, boardHtml, jobSheet, pickerSheet } from '/manager/screens/today-view.js';
+import { createProblemPanel } from '/manager/problem-panel.js';
 
 function dubaiParts(ms) {
   const p = {};
@@ -194,7 +195,7 @@ export async function renderToday(ctx) {
       if (a) { st.sheetKey = a.prevKey || null; openSheet(arrivalSheet(st.data, a, now, readOnly())); }
     } else if (op === 'prob') {
       const p = st.data.problems.top.find((x) => x.ref === el.getAttribute('data-ref'));
-      if (p) { st.sheetKey = null; openSheet(problemSheet(p)); }
+      if (p) { st.sheetKey = null; panel.open(p.ref, p); }
     }
   }
 
@@ -208,11 +209,14 @@ export async function renderToday(ctx) {
     if (next) { e.preventDefault(); next.focus(); }
   }
 
+  // Fiche et gestes des problemes : meme panneau que l'ecran Problems.
+  const panel = createProblemPanel({ readOnly, onChange: () => refresh(), handleAccess });
   document.addEventListener('click', onClick);
   document.addEventListener('keydown', onKey);
   ctx.onLeave(() => {
     document.removeEventListener('click', onClick);
     document.removeEventListener('keydown', onKey);
+    panel.dispose();
   });
   await refresh();
 }

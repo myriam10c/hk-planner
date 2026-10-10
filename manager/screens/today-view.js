@@ -137,8 +137,8 @@ function problemsHtml(data) {
     + '<span class="bar ' + p.tone + '"></span><span class="body"><span class="src"><span class="pill ' + p.tone + '">' + esc(p.label) + '</span><span>'
     + esc(p.source) + ' <span class="mono">' + esc(p.ref) + '</span></span></span><span class="ttl">' + esc(p.title) + '</span>'
     + (p.apt || p.bld ? '<span class="where">' + esc(placeLabel(p)) + '</span>' : '') + '<span class="why">' + esc(p.why) + '</span></span></button>').join('');
-  h += '<div class="sec-foot"><span class="t3">' + c.inspectionFindingsOpen + ' inspection findings not turned into tickets. Cleaner reports open: '
-    + c.cleanerReportsOpen + '.</span><a class="link" href="#/problems">All problems</a></div>';
+  h += '<div class="sec-foot"><span class="t3">Including ' + c.inspectionTicketsOpen + ' from inspections and '
+    + c.cleanerReportsOpen + ' cleaner reports.</span><a class="link" href="#/problems">All problems</a></div>';
   return h + '</section>';
 }
 
@@ -244,13 +244,6 @@ export function arrivalSheet(data, a, nowMs, ro) {
     + '<div class="blk"><h3>Cleaner</h3><div>' + (a.cleaners.length ? esc(a.cleaners.join(' and ')) : '<span class="st bad">Nobody</span>') + '</div></div>'
     + ticketsBlk(data.ticketsByListing[a.listingId]) + '</div>'
     + (a.prevKey ? actionsFoot(a.prevKey, a.assigned, a.done, ro) : '<div class="sheet-f"><button class="btn" type="button" data-close>Close</button></div>');
-}
-
-export function problemSheet(p) {
-  return sheetHead(p.title, p.source + ' ' + p.ref + (p.apt || p.bld ? ' · ' + placeLabel(p) : ''))
-    + '<div class="sheet-b">' + statusBox(p.tone, p.label, p.why)
-    + '<div class="blk"><h3>Next step</h3><div class="empty">Assign, Schedule and Close come with the Problems screen. Until then, handle it in the current app.</div></div></div>'
-    + '<div class="sheet-f"><a class="btn primary" href="/?legacy=1">Open in the current app</a><button class="btn" type="button" data-close>Close</button></div>';
 }
 
 export function pickerSheet(data, t, ro) {

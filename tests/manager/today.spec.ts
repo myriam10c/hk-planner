@@ -17,7 +17,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(page.getByText('Data as of 11:00')).toBeVisible();
       await expect(page.locator('.alert')).toContainText('1 arrival blocked');
       await expect(page.locator('.strip')).toContainText('without a cleaner');
-      await expect(page.getByText('No cleaner assigned, and urgent ticket open: Gas not working (#429).')).toBeVisible();
+      await expect(page.getByText('No cleaner assigned, and urgent ticket open: Gas not working (MNT-429).')).toBeVisible();
       await expect(page.getByText('Not started yet, Faiza. Guest in 4 h, checkout time not set.')).toBeVisible();
       await expect(page.locator('.arr', { hasText: 'Owner stay' })).toContainText('Usually Elite · not logged yet');
       await expect(page.locator('.person.unassigned')).toContainText('Usually Elite · not logged yet');
@@ -66,16 +66,6 @@ test('fiche arrivee au clavier : fleches, Entree, Echap rend le focus', async ({
   await page.keyboard.press('Escape');
   await expect(sheet).toHaveAttribute('aria-hidden', 'true');
   await expect(rows.nth(1)).toBeFocused();
-});
-
-test('probleme : fiche en lecture seule avec lien vers l app actuelle', async ({ page }) => {
-  await bootMgr(page, [me(MANAGER), TODAY()], { email: true, clock: NOW });
-  await page.locator('.prob', { hasText: 'Gas not working' }).click();
-  const sheet = page.locator('#sheet');
-  await expect(sheet.getByRole('heading', { name: 'Gas not working' })).toBeVisible();
-  await expect(sheet.getByRole('link', { name: 'Open in the current app' })).toHaveAttribute('href', '/?legacy=1');
-  await sheet.getByRole('button', { name: 'Close' }).last().click();
-  await expect(sheet).toHaveAttribute('aria-hidden', 'true');
 });
 
 test('erreur du proxy sans donnees : message et Retry, jamais d ecran blanc', async ({ page }) => {

@@ -85,3 +85,39 @@ export function toggleTheme() {
   root.setAttribute('data-theme', next);
   try { localStorage.setItem('mgrTheme', next); } catch (e) { /* theme non garde */ }
 }
+
+// Jour calendaire de Dubai (AAAA-MM-JJ) d'un instant.
+export function dubaiToday(ms) {
+  const p = {};
+  new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit', year: 'numeric' })
+    .formatToParts(new Date(ms)).forEach((x) => { p[x.type] = x.value; });
+  return p.year + '-' + p.month + '-' + p.day;
+}
+export function addDays(day, n) {
+  const d = new Date(day + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+export function ddmm(day) { return day ? day.slice(8, 10) + '/' + day.slice(5, 7) : ''; }
+
+// Boutons du panneau desactives pendant une ecriture, erreur du serveur en tete du panneau.
+export function sheetBusy(on) {
+  document.querySelectorAll('#sheet button:not([data-close])').forEach((b) => { b.disabled = on; });
+}
+export function sheetError(msg) {
+  const body = document.querySelector('#sheet .sheet-b');
+  if (!body) return;
+  let el = body.querySelector('.sheet-err');
+  if (!el) {
+    el = document.createElement('p');
+    el.className = 'sheet-err';
+    el.setAttribute('role', 'alert');
+    body.prepend(el);
+  }
+  el.textContent = msg;
+}
+
+// Nombre de problemes urgents ouverts, pour la pastille de la navigation (app.js).
+export function announceBadge(n) {
+  document.dispatchEvent(new CustomEvent('mgr:badge', { detail: { problems: Number(n) || 0 } }));
+}

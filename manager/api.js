@@ -63,3 +63,11 @@ export async function post(action, body) {
     method: 'POST', headers: { ...(await headers()), 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
 }
+
+// Cle d'idempotence d'un geste (meme format que v3 et inspections, validIdem
+// cote proxy : [A-Za-z0-9_-]{8,80}). Une cle neuve par geste de l'utilisateur.
+export function newIdem() {
+  const c = typeof crypto !== 'undefined' ? crypto : null;
+  if (c && typeof c.randomUUID === 'function') return 'mgr-' + c.randomUUID().replace(/-/g, '');
+  return 'mgr-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+}

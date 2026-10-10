@@ -1,3 +1,4 @@
+import { ROW, ROW_TSK } from './problem-fixtures';
 // Reponse mgr.today au format de supabase/functions/hostaway-proxy/mgr_api.ts.
 export const DAY = '2026-10-09';
 export const NOW = new Date('2026-10-09T07:00:00Z'); // 11:00 Dubai
@@ -30,13 +31,8 @@ export function todayBody(over: any = {}) {
       technicians: [{ id: 7, name: 'Semax', open: 1, oldest: { id: 106, title: 'Balcony drain blocked', since: '27/04' } }],
     },
     problems: {
-      counts: { ticketsOpen: 70, ticketsUrgent: 19, ticketsNoTech: 69, teamTasksOpen: 239, teamTasksOverdue: 113, inspectionFindingsOpen: 2, cleanerReportsOpen: 0 },
-      top: [
-        { ref: 'MNT-429', source: 'Maintenance', priority: 'urgent', label: 'Urgent', title: 'Gas not working', listingId: 'L1',
-          apt: '308', bld: 'Binghatti Lavender', why: 'A guest arrives today at 15:00. Open since 09/07, no technician assigned.', tone: 'bad' },
-        { ref: 'TSK-13', source: 'Team task', priority: 'urgent', label: 'Urgent', title: 'AC not cooling', listingId: null,
-          apt: '', bld: '', why: 'Assigned to Semax, overdue since 15/05.', tone: 'bad' },
-      ],
+      counts: { urgent: 21, ticketsOpen: 70, ticketsUrgent: 19, ticketsNoTech: 69, teamTasksOpen: 135, teamTasksOverdue: 19, inspectionTicketsOpen: 11, cleanerReportsOpen: 0 },
+      top: [ROW(), ROW_TSK],
     },
     control: {
       inspections: { proposed: 4, claimed: 1, done: 0, unfinished: [{ apt: '414', bld: 'Azizi Riviera 11', inspector: 'Hillal', date: '05/10' }] },
@@ -52,7 +48,7 @@ export function todayBody(over: any = {}) {
       counts: { ok: 1, warn: 2, bad: 1, idle: 0 },
       rows: [
         { id: '2', listingId: 'L1', apt: '308', bld: 'Binghatti Lavender', time: '15:00', timeSet: true, kind: 'Guest', tone: 'bad', word: 'Blocked',
-          cause: 'No cleaner assigned, and urgent ticket open: Gas not working (#429).', prevKey: '2026-10-09_Ann Lee',
+          cause: 'No cleaner assigned, and urgent ticket open: Gas not working (MNT-429).', prevKey: '2026-10-09_Ann Lee',
           prevCheckout: { date: DAY, time: '12:00' }, cleaners: [], assigned: [], serviceType: null, done: false },
         { id: '4', listingId: 'L2', apt: '103', bld: 'Damac Reva', time: '15:00', timeSet: true, kind: 'Guest', tone: 'warn', word: 'At risk',
           cause: 'Not started yet, Faiza. Guest in 4 h, checkout time not set.', prevKey: '2026-10-09_Cy Doe',
