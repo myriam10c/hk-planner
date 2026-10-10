@@ -35,6 +35,7 @@ import { mgrToday } from "./mgr_api.ts";
 import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
 import { mgrProblemGet } from "./mgr_problem_get.ts";
+import { mgrProblemAct } from "./mgr_problem_act.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -1440,6 +1441,21 @@ Deno.serve(async (req: Request) => {
       const acc = mgrAccess(bearerToken(req) !== null, me);
       if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
       const r = await mgrProblemGet(sb, { ref: url.searchParams.get("ref") ?? "", nowMs: Date.now() });
+      return jsonResp(r.body, r.status);
+    }
+
+    // Gestes Assign / Schedule / Close / Reopen / Comment. Auteur pris dans la
+    // session, cle d'idempotence obligatoire, nouvel assigne d'une tache notifie
+    // comme updateTeamTask.
+    if (action === "mgr.problem.act") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await mgrProblemAct(sb, me!, body, {
+        notifyTask: (t) => keepAlive(notifyAssignee(sb, t).catch((e) => console.warn("[notifyAssignee mgr]", e))),
+      });
       return jsonResp(r.body, r.status);
     }
 
