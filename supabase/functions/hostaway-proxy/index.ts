@@ -34,6 +34,7 @@ import { mgrAccess, MGR_LOOKBACK_DAYS, normalizeMgrReservations, type MgrReserva
 import { mgrToday } from "./mgr_api.ts";
 import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
+import { mgrProblemGet } from "./mgr_problem_get.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -1431,6 +1432,14 @@ Deno.serve(async (req: Request) => {
         day: todayDubai(), nowMs: Date.now(), me: me!, query: pq.q,
         loadReservations: (d) => loadMgrReservations(sb, d),
       });
+      return jsonResp(r.body, r.status);
+    }
+
+    if (action === "mgr.problem.get") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const r = await mgrProblemGet(sb, { ref: url.searchParams.get("ref") ?? "", nowMs: Date.now() });
       return jsonResp(r.body, r.status);
     }
 
