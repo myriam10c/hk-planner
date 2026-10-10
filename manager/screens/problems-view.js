@@ -55,7 +55,8 @@ export function listHtml(st, filtered) {
     return '<div class="ph"><p>' + (filtered ? 'Nothing matches these filters.' : 'Nothing open.') + '</p>'
       + (filtered ? '<button class="btn" type="button" data-clear>Clear filters</button>' : '') + '</div>';
   }
-  const more = st.rows.length < st.data.total;
+  // Load more seulement sur une liste fraiche et stable (sinon page d'un autre filtre).
+  const more = st.fresh && !st.loading && st.rows.length < st.data.total;
   return '<section class="card plist" aria-label="Problems">' + st.rows.map(rowHtml).join('') + '</section>'
     + '<div class="pfoot"><span class="t3 tnum">' + st.rows.length + ' of ' + st.data.total + '</span>'
     + (more ? '<button class="btn" type="button" data-more' + (st.more ? ' disabled' : '') + '>' + (st.more ? 'Loading…' : 'Load more') + '</button>' : '')

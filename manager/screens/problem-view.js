@@ -8,6 +8,8 @@ const STATUS = {
   open: 'Open', assigned: 'Assigned', in_progress: 'In progress', waiting_parts: 'Waiting for parts', to_confirm: 'To confirm',
   resolved: 'Closed', closed: 'Closed', cancelled: 'Cancelled', done: 'Closed',
 };
+// Statuts ouverts d'une tache d'equipe (MGR_OPEN_TASK_STATUSES cote proxy).
+const OPEN_TASK = ['open', 'in_progress'];
 const ROLE = { manager: 'Manager', maintenance: 'Maintenance', cleaner: 'Cleaner' };
 
 function initials(n) {
@@ -58,7 +60,8 @@ export function detailSheet(d, ro) {
   }
   if (d.mirror) {
     b += '<div class="note">Also tracked as team task <span class="mono">' + esc(d.mirror.ref) + '</span>'
-      + (d.mirror.assignee ? ' (' + esc(d.mirror.assignee) + ')' : '') + '. It closes with this ticket.</div>';
+      + (d.mirror.assignee ? ' (' + esc(d.mirror.assignee) + ')' : '')
+      + (OPEN_TASK.includes(d.mirror.status) ? '. It closes with this ticket.' : ', already closed.') + '</div>';
   }
   b += '<div class="blk"><h3>Comments</h3>' + (d.comments.length ? '<ul class="pcomments">' + d.comments.map((c) =>
     '<li><b>' + esc(c.author) + '</b> <span class="mono t3">' + esc(when(c.at)) + '</span><p>' + esc(c.text) + '</p>'

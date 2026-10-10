@@ -110,3 +110,13 @@ Deno.test("fiche : reference inconnue 400, absente 404, photos non signees signa
   const d: any = (await mgrProblemGet(db, { ref: "MNT-429", nowMs: NOW })).body;
   assertEquals([d.photos, d.photosError, d.comments[1].photo], [[], "Photos could not be loaded.", null]);
 });
+
+Deno.test("copie Hermes : une copie ouverte passe avant une copie terminee ; toutes terminees, la premiere avec son statut", async () => {
+  const db = sb();
+  db.tables.team_tasks.unshift({ id: 15, title: "Gas not working", status: "done", assigned_cleaner_id: 8, source_ref: "maint:429" });
+  assertEquals(((await mgrProblemGet(db, { ref: "MNT-429", nowMs: NOW })).body as any).mirror,
+    { ref: "TSK-17", status: "open", assignee: "Semax" });
+  db.tables.team_tasks.find((x: any) => x.id === 17).status = "done";
+  assertEquals(((await mgrProblemGet(db, { ref: "MNT-429", nowMs: NOW })).body as any).mirror,
+    { ref: "TSK-15", status: "done", assignee: "Walter" });
+});

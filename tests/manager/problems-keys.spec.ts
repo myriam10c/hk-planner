@@ -57,6 +57,17 @@ test('clavier dans la fiche ouverte : C ferme ce probleme-la', async ({ page }, 
   await page.locator('.prow').nth(1).click();
   await expect(page.locator('#sheet').getByRole('heading', { name: 'AC not cooling' })).toBeVisible();
   await page.locator('#sheet .sheet-h').click();
+  // Choix Assign ouvert depuis la fiche : C, A et S ne font rien.
+  await page.locator('#sheet [data-pact="assign"]').click();
+  await expect(page.locator('#sheet').getByRole('heading', { name: 'Assign TSK-13' })).toBeVisible();
+  await page.locator('#sheet .sheet-h').click();
+  for (const k of ['c', 's', 'a']) await page.keyboard.press(k);
+  await page.waitForTimeout(300);
+  await expect(page.locator('#sheet').getByRole('heading', { name: 'Assign TSK-13' })).toBeVisible();
+  expect((await acts(page)).length).toBe(0);
+  await page.locator('#sheet [data-pact="back"]').click();
+  await expect(page.locator('#sheet').getByRole('heading', { name: 'AC not cooling' })).toBeVisible();
+  await page.locator('#sheet .sheet-h').click();
   await page.keyboard.press('c');
   await expect(page.locator('#toast')).toContainText('TSK-13 closed');
   expect((await acts(page)).map((a) => [a.ref, a.verb])).toEqual([['TSK-13', 'close']]);

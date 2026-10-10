@@ -27,7 +27,8 @@ export function hasFilter(f) { return !!(f.urgent || f.mine || f.unassigned || f
 
 export async function renderProblems(ctx) {
   const main = ctx.main;
-  const st = { data: null, rows: [], fresh: false, loading: true, error: null, savedAt: 0, f: { ...NO_FILTER }, seq: 0, more: false, typing: null, focusRef: null };
+  // df : filtre qui a produit st.data (le cache n'est ecrit que sans filtre).
+  const st = { data: null, rows: [], fresh: false, loading: true, error: null, savedAt: 0, f: { ...NO_FILTER }, df: { ...NO_FILTER }, seq: 0, more: false, typing: null, focusRef: null };
   const cached = loadCache(PROBLEMS_CACHE, (d) => Array.isArray(d.rows) && !!d.counts);
   if (cached && (!ctx.me || (cached.data.me && cached.data.me.id === ctx.me.id))) {
     st.data = cached.data;
@@ -105,6 +106,7 @@ export async function renderProblems(ctx) {
       if (mine !== st.seq) return;
       st.data = d;
       st.rows = d.rows;
+      st.df = f;
       st.fresh = true;
       st.savedAt = Date.now();
       if (!hasFilter(f)) saveCache(PROBLEMS_CACHE, d, st.savedAt);
@@ -114,18 +116,21 @@ export async function renderProblems(ctx) {
       if (handleAccess(e)) return;
       st.error = e;
       st.fresh = false;
+      // Les puces et la recherche reviennent au filtre de la liste affichee.
+      st.f = { ...st.df };
+      if (document.activeElement !== search) search.value = st.f.q;
     }
     st.loading = false;
     paint();
   }
 
   async function loadMore() {
-    if (st.more || !st.data) return;
+    if (st.more || st.loading || !st.fresh || !st.data) return;
     const mine = st.seq;
     st.more = true;
     paint();
     try {
-      const d = await get('mgr.problems', queryOf(st.f, st.rows.length));
+      const d = await get('mgr.problems', queryOf(st.df, st.rows.length));
       if (mine === st.seq) {
         st.rows = st.rows.concat(d.rows);
         st.data = { ...d, rows: st.rows };
@@ -197,6 +202,8 @@ export async function renderProblems(ctx) {
     if (sheetIsOpen() && !open) return;
     const l = k.length === 1 ? k.toLowerCase() : k;
     if (l === 'a' || l === 's' || l === 'c') {
+      // Choix Assign ou Schedule ouvert : les raccourcis ne valent que sur la fiche.
+      if (open && panel.view() !== 'detail') return;
       const fr = focusedRow();
       const ref = open || (fr && fr.getAttribute('data-ref'));
       if (!ref) return;

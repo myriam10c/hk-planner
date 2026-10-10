@@ -218,14 +218,28 @@ async function doClose(c: Ctx, a: { note: string }): Promise<Done> {
   return { result: { closed: true }, after };
 }
 
+// Ordre de deux lignes du journal : par created_at (Date.parse, decalage Postgres
+// compris), a defaut par id (meme table, ids croissants). > 0 si x est plus recent.
+function newer(x: any, y: any): number {
+  const a = Date.parse(String(x?.created_at ?? "")), b = Date.parse(String(y?.created_at ?? ""));
+  if (Number.isFinite(a) && Number.isFinite(b)) return a - b;
+  return Number(x?.id) - Number(y?.id);
+}
+function latest(rows: any[]): any | null {
+  return rows.reduce((m: any, r: any) => (m === null || newer(r, m) > 0 || (newer(r, m) === 0 && Number(r.id) > Number(m.id)) ? r : m), null);
+}
+
 // Undo de Close : l'etat d'avant vient du dernier journal problem_closed. Sans
-// journal (probleme clos ailleurs), retour a assigned ou open.
+// journal (probleme clos ailleurs), retour a assigned ou open. Un problem_closed
+// pas plus recent que le dernier problem_reopened est perime (clos ensuite dans
+// l'ancienne app) : on l'ignore, notes et copies Hermes ne sont pas touchees.
 async function doReopen(c: Ctx): Promise<Done> {
   const { sb, t } = c;
-  const logs = await readAllRows((x: number, y: number) => sb.from("cleaning_log").select("id, details, created_at")
-    .eq("reservation_key", t.logKey).eq("action", "problem_closed").order("id").range(x, y), "cleaning_log");
-  const last = logs.slice().sort((x: any, y: any) =>
-    (Date.parse(y.created_at) - Date.parse(x.created_at)) || (Number(y.id) - Number(x.id)))[0] ?? null;
+  const logs = await readAllRows((x: number, y: number) => sb.from("cleaning_log").select("id, action, details, created_at")
+    .eq("reservation_key", t.logKey).in("action", ["problem_closed", "problem_reopened"]).order("id").range(x, y), "cleaning_log");
+  const closedLog = latest(logs.filter((l: any) => l.action === "problem_closed"));
+  const reopenedLog = latest(logs.filter((l: any) => l.action === "problem_reopened"));
+  const last = closedLog && (!reopenedLog || newer(closedLog, reopenedLog) > 0) ? closedLog : null;
   const d = last && last.details && typeof last.details === "object" ? last.details : null;
   const after: Done["after"] = [];
   let state: string;

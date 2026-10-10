@@ -1,14 +1,23 @@
 // Fiche d'un probleme (MNT ou TSK) et ses gestes, partagee par Today et Problems.
 // Lecture : mgr.problem.get. Gestes : mgr.problem.act, une cle d'idempotence par
-// geste, jamais d'auteur envoye (le proxy le prend dans la session).
+// geste (reprise au reessai d'un geste a l'issue inconnue), jamais d'auteur envoye
+// (le proxy le prend dans la session).
 import { get, newIdem, post } from '/manager/api.js';
 import { closeSheet, ddmm, dubaiToday, openSheet, sheetBusy, sheetError, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { assignSheet, detailSheet, errorSheet, loadingSheet, scheduleSheet } from '/manager/screens/problem-view.js';
 
 const RO_LINE = 'Reconnect to make changes.';
+const STILL = 'Still processing. Retry.';
+
+// Echec dont l'issue cote serveur est inconnue : delai depasse, reseau coupe, ou
+// cle encore en cours. Le meme geste rejoue alors la meme cle (pas de doublon).
+function uncertain(e) {
+  return !!e && (e.kind === 'timeout' || e.kind === 'offline' || (e.status === 409 && e.message === STILL));
+}
 
 export function createProblemPanel(opts) {
-  const st = { busy: false, row: null, detail: null, view: 'detail', origin: 'detail', seq: 0 };
+  // pending : derniere cle d'un geste a l'issue inconnue, reprise si le meme geste est rejoue.
+  const st = { busy: false, row: null, detail: null, view: 'detail', origin: 'detail', seq: 0, pending: null };
   const ro = () => !!opts.readOnly();
 
   // Probleme affiche dans le panneau (marqueur data-panel), null si le panneau montre autre chose.
@@ -47,15 +56,19 @@ export function createProblemPanel(opts) {
     if (ro()) { toast(RO_LINE); return; }
     st.busy = true;
     if (held(ref)) sheetBusy(true);
+    const sig = ref + '|' + verb + '|' + JSON.stringify(extra);
+    const idem = st.pending && st.pending.sig === sig ? st.pending.idem : newIdem();
     try {
-      await post('mgr.problem.act', { ref, verb, idem: newIdem(), ...extra });
+      await post('mgr.problem.act', { ref, verb, idem, ...extra });
     } catch (e) {
+      st.pending = uncertain(e) ? { sig, idem } : null;
       st.busy = false;
       if (held(ref)) sheetBusy(false);
       if (opts.handleAccess(e)) return;
       if (held(ref)) sheetError(e.message); else toast(e.message);
       return;
     }
+    st.pending = null;
     st.busy = false;
     if (held(ref)) sheetBusy(false);
     done();
@@ -143,6 +156,7 @@ export function createProblemPanel(opts) {
     schedule(ref, row) { quick(ref, row, 'schedule'); },
     close(ref, row) { return close(ref, row); },
     current: shownRef,
+    view() { return st.view; },
     dispose() { document.removeEventListener('click', onClick); },
   };
 }

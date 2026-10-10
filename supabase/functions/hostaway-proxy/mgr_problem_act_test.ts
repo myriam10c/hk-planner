@@ -208,3 +208,36 @@ Deno.test("close : copie TSK en echec, le ticket reste clos et la reponse est un
   assertEquals((await act(sb, { ref: "MNT-429", verb: "close" })).status, 200);
   assertEquals(ticket(sb, 429).status, "resolved");
 });
+
+Deno.test("reopen apres un close ailleurs : le journal problem_closed plus ancien qu'un problem_reopened est ignore", async () => {
+  const sb = seed();
+  await act(sb, { ref: "MNT-429", verb: "close", note: "First fix" });
+  await act(sb, { ref: "MNT-429", verb: "reopen" });
+  // Clos dans l'ancienne app : statut et note ecrits directement, sans journal ; la copie Hermes est faite a part.
+  const t = ticket(sb, 429);
+  Object.assign(t, { status: "resolved", resolution_notes: "Fixed in the old app", resolved_at: "2026-10-09T08:00:00Z" });
+  Object.assign(task(sb, 17), { status: "done", completed_at: "2026-10-09T08:00:00Z", completed_by_cleaner_id: 4 });
+  assertEquals((await act(sb, { ref: "MNT-429", verb: "reopen" })).body,
+    { status: "success", ref: "MNT-429", verb: "reopen", state: "open" });
+  assertEquals([t.status, t.resolution_notes, t.resolved_at], ["open", "Fixed in the old app", null]);
+  const m = task(sb, 17);
+  assertEquals([m.status, m.completed_by_cleaner_id], ["done", 4]);
+});
+
+Deno.test("reopen : horodatages Postgres avec decalage, un close plus recent que le reopen reste pris", async () => {
+  const sb = seed();
+  sb.tables.maintenance_tickets.push({ id: 303, title: "x", status: "resolved", assigned_technician_id: 7, resolution_notes: "new" });
+  sb.tables.cleaning_log.push(
+    { id: 1, reservation_key: "ticket_303", action: "problem_closed", created_at: "2026-10-09T10:00:00+04:00",
+      details: { from: "waiting_parts", notes: "before", mirrors: [] } },
+    { id: 2, reservation_key: "ticket_303", action: "problem_reopened", created_at: "2026-10-09T06:30:00+00:00", details: { to: "waiting_parts" } },
+    { id: 3, reservation_key: "ticket_303", action: "problem_closed", created_at: "2026-10-09T10:45:00+04:00",
+      details: { from: "in_progress", notes: "later", mirrors: [] } },
+  );
+  await act(sb, { ref: "MNT-303", verb: "reopen" });
+  assertEquals([ticket(sb, 303).status, ticket(sb, 303).resolution_notes], ["in_progress", "later"]);
+  sb.tables.cleaning_log.push({ id: 4, reservation_key: "ticket_303", action: "problem_reopened", created_at: "2026-10-09T06:50:00Z", details: {} });
+  Object.assign(ticket(sb, 303), { status: "resolved", resolution_notes: "elsewhere" });
+  await act(sb, { ref: "MNT-303", verb: "reopen" });
+  assertEquals([ticket(sb, 303).status, ticket(sb, 303).resolution_notes], ["assigned", "elsewhere"]);
+});

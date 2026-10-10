@@ -89,3 +89,66 @@ test('Today en cache (reseau coupe) : fiche en lecture seule, aucun geste', asyn
   await expect(sheet.getByRole('button', { name: 'Assign', exact: true })).toHaveCount(0);
   await expect(sheet.locator('#pComment')).toHaveCount(0);
 });
+
+test('reessai apres un delai depasse : meme cle pour le meme geste, nouvelle cle ensuite', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), DETAIL(), { ...ACT(200, ACT_OK(), 1500), once: true }, ACT()],
+    { email: true, clock: NOW, timeoutMs: 400 });
+  await openGas(page);
+  const sheet = page.locator('#sheet');
+  await sheet.locator('#pComment').fill('Replaced the valve');
+  await sheet.getByRole('button', { name: 'Close problem' }).click();
+  await expect(sheet.locator('.sheet-err')).toHaveText('HK Planner is taking too long to answer. Try again.');
+  await sheet.getByRole('button', { name: 'Close problem' }).click();
+  await expect(page.locator('#toast')).toContainText('MNT-429 closed');
+  await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
+  await expect(page.locator('#toast')).toContainText('MNT-429 reopened');
+  const a = await acts(page);
+  expect(a.map((x) => x.verb)).toEqual(['close', 'close', 'reopen']);
+  expect(a[1].idem).toBe(a[0].idem);
+  expect(a[2].idem).not.toBe(a[0].idem);
+});
+
+test('reessai apres coupure reseau ou 409 Still processing : meme cle ; autre texte ou autre erreur : cle neuve', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), DETAIL(),
+    { ...ACT(), fail: true, once: true }, { ...ACT(409, { error: 'Still processing. Retry.' }), once: true },
+    { ...ACT(500, { error: 'Internal error' }), once: true }, ACT()], { email: true, clock: NOW });
+  await openGas(page);
+  const sheet = page.locator('#sheet');
+  const comment = sheet.getByRole('button', { name: 'Comment', exact: true });
+  await sheet.locator('#pComment').fill('Called again');
+  await comment.click();
+  await expect(sheet.locator('.sheet-err')).toHaveText('No connection. Try again.');
+  await comment.click();
+  await expect(sheet.locator('.sheet-err')).toHaveText('Still processing. Retry.');
+  await comment.click();
+  await expect(sheet.locator('.sheet-err')).toHaveText('Internal error');
+  await comment.click();
+  await expect(page.locator('#toast')).toContainText('Comment added');
+  const a = await acts(page);
+  expect(a.map((x) => x.text)).toEqual(['Called again', 'Called again', 'Called again', 'Called again']);
+  expect([a[1].idem, a[2].idem]).toEqual([a[0].idem, a[0].idem]);
+  expect(a[3].idem).not.toBe(a[0].idem);
+});
+
+test('reessai avec un autre texte apres une coupure : cle neuve', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), DETAIL(), { ...ACT(), fail: true, once: true }, ACT()], { email: true, clock: NOW });
+  await openGas(page);
+  const sheet = page.locator('#sheet');
+  await sheet.locator('#pComment').fill('Called again');
+  await sheet.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(sheet.locator('.sheet-err')).toHaveText('No connection. Try again.');
+  await sheet.locator('#pComment').fill('Called the gas company again');
+  await sheet.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(page.locator('#toast')).toContainText('Comment added');
+  const a = await acts(page);
+  expect(a.length).toBe(2);
+  expect(a[1].idem).not.toBe(a[0].idem);
+});
+
+test('copie Hermes deja terminee : pas de phrase « It closes with this ticket. »', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), DETAIL(detailBody({ mirror: { ref: 'TSK-17', status: 'done', assignee: 'Semax' } }))],
+    { email: true, clock: NOW });
+  await openGas(page);
+  const sheet = page.locator('#sheet');
+  await expect(sheet.locator('.note')).toHaveText('Also tracked as team task TSK-17 (Semax), already closed.');
+});

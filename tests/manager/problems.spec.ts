@@ -99,3 +99,17 @@ for (const scheme of ['light', 'dark'] as const) {
     });
   });
 }
+
+test('relecture ratee apres un changement de puce : puces de la liste affichee, pas de Load more', async ({ page }) => {
+  const first = listBody({ rows: manyRows(50, 1000), total: 60 });
+  await bootMgr(page, [me(MANAGER), { match: 'urgent=1', status: 0, body: null, fail: true }, LIST(first)],
+    { email: true, clock: NOW, hash: '#/problems' });
+  await expect(page.locator('.prow')).toHaveCount(50);
+  await expect(page.getByRole('button', { name: 'Load more' })).toBeVisible();
+  await page.locator('#pChips [data-chip="urgent"]').click();
+  await expect(page.locator('.banner.warn')).toContainText('No connection. Try again.');
+  await expect(page.locator('#pChips [data-chip="urgent"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.prow')).toHaveCount(50);
+  await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0);
+  expect((await lists(page)).filter((u) => u.includes('offset=50')).length).toBe(0);
+});
