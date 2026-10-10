@@ -68,9 +68,10 @@ export async function renderInspections(ctx) {
   const render = (html) => { host.innerHTML = String(html).replace(/<(\/?)main\b/g, '<$1section'); };
   // La visionneuse photo de history.js est un <dialog> pose sur <body> : on la ferme en quittant l'ecran.
   if (r.sub === 'history') ctx.onLeave(() => { document.querySelectorAll('body > dialog.photo').forEach((d) => { try { d.close(); } catch (e) { d.remove(); } }); });
+  // go garde par isCurrent : une navigation tardive (fin d inspection lente apres changement d onglet) est ignoree.
   await mod[fn]({
     me: { cleaner_id: ctx.me.id, name: ctx.me.name, role: 'manager' },
-    go, toast: (m) => toast(m), render, esc,
+    go: (h) => { if (ctx.isCurrent()) go(h); }, toast: (m) => toast(m), render, esc,
     isCurrent: ctx.isCurrent, onLeave: ctx.onLeave, embedded: true,
     listingId: r.id, entry: r.entry || 'adhoc',
   });

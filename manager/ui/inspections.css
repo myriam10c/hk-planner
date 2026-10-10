@@ -60,7 +60,7 @@
 @media (min-width:640px){ .insp .actions{flex-direction:row;flex-wrap:wrap} }
 
 /* Ecran d'inspection */
-.insp .count{font-weight:700;margin:var(--s1) 0 var(--s2)}
+.insp .count{display:block;padding:0;background:none;border:0;font-weight:700;margin:var(--s1) 0 var(--s2)}
 .insp .zone.ok{border-color:var(--ok);background:var(--sunk)}
 .insp .zone.bad{border-color:var(--bad)}
 .insp .choices{display:flex;gap:var(--s2);margin-top:10px}

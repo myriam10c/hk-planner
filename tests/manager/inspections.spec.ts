@@ -69,6 +69,18 @@ test('Finish : toast, retour sur Today inspections', async ({ page }) => {
   await expect(page.getByText("Today's inspections")).toBeVisible();
 });
 
+test('Finish lent puis changement d onglet : pas de retour force sur Inspections', async ({ page }, info) => {
+  const items = KEYS.map((k) => ({ zone: k, status: 'ok' }));
+  await boot(page, [START(items), { status: 200, match: 'action=insp.finish', delay: 1500, body: { inspection: { id: 41, finishedAt: '2026-10-06T07:10:00Z' } } }, { match: 'action=mgr.today', status: 200, body: todayBody() }],
+    '#/inspections/inspect/A?e=checkout', { clock: NOW });
+  await page.getByRole('button', { name: 'Finish inspection' }).click();
+  await navOf(page, info).locator('a[href="#/today"]').click();
+  await expect(page).toHaveURL(/#\/today$/);
+  await page.waitForTimeout(2200);
+  await expect(page).toHaveURL(/#\/today$/);
+  await expect(page.getByRole('heading', { name: 'Team control', exact: true })).toBeVisible();
+});
+
 test('module introuvable : message, Retry et lien vers /inspections/', async ({ page }) => {
   await page.route('**/inspections/fleet.js', (r) => r.abort());
   await boot(page, [], '#/inspections/fleet');
