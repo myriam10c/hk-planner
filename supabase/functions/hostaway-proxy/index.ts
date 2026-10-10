@@ -41,6 +41,7 @@ import { LAUNDRY_FIELDS, parsePlanningStart } from "./mgr_planning_rules.ts";
 import { mgrPlanning } from "./mgr_planning.ts";
 import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
 import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
+import { mgrTeam } from "./mgr_team.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -908,6 +909,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["mgr.today", "GET"], ["mgr.problems", "GET"], ["mgr.problem.get", "GET"], ["mgr.problem.act", "POST"],
   ["mgr.planning", "GET"],
   ["mgr.settings", "GET"], ["mgr.settings.set", "POST"], ["mgr.autopilot.run", "POST"],
+  ["mgr.team", "GET"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1517,6 +1519,13 @@ Deno.serve(async (req: Request) => {
       const body = await req.json().catch(() => null);
       const r = await mgrSettingsSet(sb, body, me!, vapid);
       return jsonResp(r.body, r.status);
+    }
+
+    if (action === "mgr.team") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      return jsonResp(await mgrTeam(sb));
     }
 
     // ==================== INSPECTIONS ====================

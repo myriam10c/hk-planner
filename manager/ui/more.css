@@ -33,3 +33,33 @@
 .set-row{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);flex-wrap:wrap;min-height:44px;padding:var(--s1) 0;border-top:1px solid var(--line);font-size:16px;overflow-wrap:anywhere}
 .set-row:first-child{border-top:0}
 .set-name{min-width:0}
+/* Team : groupes par role, lignes de membres, badges, formulaire du panneau. */
+.tm{display:flex;flex-direction:column;gap:var(--s3);max-width:720px}
+.tm-add{min-height:44px;font-size:16px}
+.tm-list{display:flex;flex-direction:column;padding:0 var(--s2) var(--s2)}
+.tm-row{display:flex;align-items:center;gap:var(--s3);width:100%;min-height:64px;padding:var(--s2) var(--s3);background:transparent;border:0;border-top:1px solid var(--line);border-radius:0;color:var(--ink);font:inherit;font-size:16px;text-align:left;cursor:pointer;min-width:0}
+.tm-list>.tm-row:first-child{border-top:0}
+button.tm-row:hover{background:var(--surface-2)}
+button.tm-row:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.tm-row.ro{cursor:default;color:var(--ink-2)}
+.tm-dot{flex:none;width:14px;height:14px;border-radius:50%;border:1px solid var(--line-2)}
+.tm-txt{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.tm-name{font-weight:600;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;overflow-wrap:anywhere}
+.tm-sub{color:var(--ink-2);overflow-wrap:anywhere}
+.tm-badges{display:flex;flex-wrap:wrap;gap:var(--s1);justify-content:flex-end;flex:none;max-width:40%}
+.tm-badge{padding:2px 8px;border-radius:999px;background:var(--accent-tint);color:var(--accent);font-size:13px;font-weight:600}
+.tm-inactive>summary{display:flex;align-items:center;min-height:56px;padding:0 var(--s4);font-size:17px;font-weight:600;cursor:pointer;list-style:none}
+.tm-inactive>summary::-webkit-details-marker{display:none}
+.tm-inactive>summary:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.tm-inactive[open]>summary{border-bottom:1px solid var(--line)}
+.tm-fl{display:flex;flex-direction:column;gap:var(--s1);font-size:16px}
+.tm-fl label,.tm-lab{font-weight:600}
+.tm-fl input,.tm-fl select{min-height:44px;font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:10px;padding:8px 10px;width:100%;min-width:0}
+.tm-fl input[type=color]{padding:4px;width:80px}
+.tm-ro{min-height:44px;display:flex;align-items:center;color:var(--ink-2);overflow-wrap:anywhere}
+.tm-confirm{margin:0;font-size:17px}
+.sheet-f .btn{min-height:44px;font-size:16px}
+.btn.danger{color:var(--bad-ink);border-color:var(--bad)}
+/* WebKit garde parfois hidden (herite du panneau ferme) sur un select cree pendant l'ouverture. */
+.sheet.on .tm-fl,.sheet.on .tm-fl select{visibility:visible}
+.tm-fl select{height:44px;-webkit-appearance:none;appearance:none;padding-right:36px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7282' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:18px}
