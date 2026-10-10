@@ -1,0 +1,140 @@
+/* Ecrans Inspections dans la coquille manager : port de inspections/insp.css, tout sous .insp,
+ * avec les jetons manager (tokens.css, clair et sombre). Aucun jeton v3, aucune couleur en dur
+ * sauf le blanc sur l'accent. #toast-host et body/html abandonnes (toast manager). */
+.insp{min-width:0}
+/* #main porte deja le padding lateral et le bas (112px phone) qui degage la barre d'onglets. */
+.insp .wrap{max-width:720px;margin:0 auto;padding:0 0 var(--s4)}
+.insp .wrap > .btn:first-child{margin-top:calc(var(--s4) + env(safe-area-inset-top))}
+.insp .wrap > h1{margin:var(--s5) 0 var(--s1);font-size:28px;line-height:1.15;font-weight:700;letter-spacing:-.02em}
+.insp h3{margin:0;font-size:17px;line-height:1.3;font-weight:600;overflow-wrap:anywhere}
+.insp .reason,.insp .mute,.insp .badge,.insp .state{overflow-wrap:anywhere}
+.insp .mute{color:var(--ink-2);font-size:16px;margin:var(--s1) 0}
+.insp .pad{padding:var(--s3)}
+.insp .top{flex-wrap:wrap;padding-bottom:var(--s3)}
+.insp .top-actions{display:flex;gap:var(--s2);flex-wrap:wrap;justify-content:flex-end}
+
+/* Boutons : on garde le look manager (rayon, police) et on monte a 44 px de haut. */
+.insp .btn{min-height:44px;padding:0 var(--s4);white-space:normal;text-align:center;line-height:1.25}
+.insp .btn.ghost{background:transparent}
+.insp .btn.ghost:hover{background:var(--surface-2)}
+.insp .btn.primary{color:#fff}
+:root[data-theme="dark"] .insp .btn.primary{color:var(--accent-ink)}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .insp .btn.primary{color:var(--accent-ink)} }
+.insp .btn.block{width:100%;margin-top:var(--s4)}
+.insp .btn.small{min-height:44px;padding:0 var(--s3);font-size:14px}
+
+/* Cartes */
+.insp .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s4);margin:var(--s3) 0;min-width:0}
+.insp .card-top{display:flex;align-items:center;gap:var(--s2)}
+.insp .reason{margin:6px 0 2px;font-weight:600}
+.insp .reason.dim{color:var(--ink-2);font-weight:500}
+.insp .dot{width:12px;height:12px;border-radius:50%;flex:none}
+.insp .dot-green{background:var(--ok)}
+.insp .dot-orange{background:var(--warn)}
+.insp .dot-red{background:var(--bad)}
+.insp .dot-off{background:var(--ink-3)}
+
+/* Pastilles : meme famille que .pill du manager. */
+.insp .badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.insp .badge{font-size:13px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--sunk);color:var(--ink-2)}
+.insp .badge.ok{background:var(--ok-tint);color:var(--ok-ink)}
+.insp .badge.warn{background:var(--warn-tint);color:var(--warn-ink)}
+.insp .badge.bad{background:var(--bad-tint);color:var(--bad-ink)}
+.insp .badge.fix{background:var(--accent-tint);color:var(--ink)}
+.insp .badge.overdue{background:var(--bad);color:var(--surface)}
+.insp .badge.who{display:inline-block;font-size:12px;padding:1px 7px;margin-left:2px;vertical-align:1px;white-space:nowrap}
+
+.insp .actions{display:flex;flex-direction:column;gap:var(--s2);margin-top:var(--s3)}
+.insp .state{min-height:44px;display:flex;align-items:center;color:var(--ink-2);font-weight:600}
+.insp .notice{background:var(--sunk);border-radius:var(--r-md);padding:10px var(--s3);margin:var(--s2) 0}
+.insp .notice.bad{background:var(--bad-tint);color:var(--bad-ink)}
+.insp .also summary{min-height:44px;display:flex;align-items:center;font-weight:600;cursor:pointer}
+
+/* Recherche et listes */
+.insp .search,.insp .inp,.insp .ta{border:1px solid var(--line-2);border-radius:var(--r-md);background:var(--surface);color:var(--ink);font:inherit;font-size:16px}
+.insp .search{width:100%;min-height:44px;padding:0 var(--s3);margin:var(--s3) 0}
+.insp .list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;background:var(--surface)}
+.insp .list li:last-child .row{border-bottom:0}
+.insp .row{width:100%;min-height:48px;text-align:left;padding:0 var(--s4);background:var(--surface);border:0;border-bottom:1px solid var(--line);color:var(--ink);font-size:16px;cursor:pointer}
+.insp .row:hover{background:var(--surface-2)}
+@media (min-width:640px){ .insp .actions{flex-direction:row;flex-wrap:wrap} }
+
+/* Ecran d'inspection */
+.insp .count{font-weight:700;margin:var(--s1) 0 var(--s2)}
+.insp .zone.ok{border-color:var(--ok);background:var(--sunk)}
+.insp .zone.bad{border-color:var(--bad)}
+.insp .choices{display:flex;gap:var(--s2);margin-top:10px}
+.insp .choices .btn{flex:1;min-height:56px;font-size:17px}
+.insp .okbtn{border-color:var(--ok);color:var(--ok-ink)}
+.insp .notok{border-color:var(--bad);color:var(--bad-ink)}
+.insp .choice[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.insp .lbl{display:block;font-weight:600;margin:var(--s3) 0 var(--s1)}
+.insp .ta{width:100%;padding:10px var(--s3)}
+.insp .addphoto{position:relative;margin-top:var(--s2);overflow:hidden}
+.insp .filein{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.insp .thumbs{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.insp .thumb{display:flex;flex-direction:column;align-items:center;gap:var(--s1)}
+.insp .thumb img{width:72px;height:72px;object-fit:cover;border-radius:var(--r-sm)}
+.insp .nourl{width:72px;height:72px;display:flex;align-items:center;justify-content:center;border-radius:var(--r-sm);background:var(--sunk);font-size:13px}
+.insp .tstate{font-size:13px;color:var(--ink-2)}
+.insp .sum{margin:var(--s2) 0 2px;overflow-wrap:anywhere}
+
+/* Parc et historique */
+.insp .frow{position:relative}
+.insp .frow.off{opacity:.6}
+.insp .frow .link{background:none;border:0;padding:0;font:inherit;font-weight:700;color:var(--ink);text-align:left;cursor:pointer;min-height:44px;overflow-wrap:anywhere}
+.insp .hist .when{font-weight:700;margin:0 0 6px}
+.insp .hist .note{margin:6px 0;overflow-wrap:anywhere;color:var(--ink);font-size:16px}
+.insp .hist .zone-item{border-top:1px solid var(--line);padding:var(--s2) 0}
+.insp .hist .thumbs button{background:none;border:0;padding:0;cursor:pointer;min-height:72px}
+/* Visionneuse photo : <dialog> pose sur <body> par history.js, donc hors de .insp. */
+dialog.photo{max-width:96vw;max-height:92vh;padding:var(--s2);border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);color:var(--ink)}
+dialog.photo img{display:block;max-width:100%;max-height:80vh;margin:0 auto var(--s2)}
+
+/* Rapports */
+.insp .chips{display:flex;flex-wrap:wrap;gap:var(--s2);margin:var(--s2) 0}
+.insp .chip{min-height:44px;padding:0 14px;border-radius:999px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
+.insp .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.insp .tiles{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);margin:var(--s3) 0 var(--s1)}
+@media (min-width:640px){ .insp .tiles{grid-template-columns:repeat(4,minmax(0,1fr))} }
+.insp .tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s3);display:flex;flex-direction:column;gap:2px;min-width:0}
+.insp .tile strong{font-size:26px;line-height:1.1;font-variant-numeric:tabular-nums}
+.insp .tile span{font-size:14px;color:var(--ink-2);overflow-wrap:anywhere}
+.insp .tile.good strong{color:var(--ok-ink)}
+.insp .tile.warn strong{color:var(--warn-ink)}
+.insp .rrow{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;min-height:44px;text-align:left;font:inherit;color:var(--ink);cursor:pointer}
+.insp .rrow .rname{font-weight:700;overflow-wrap:anywhere}
+.insp .rrow .mute{margin:0}
+
+/* Zone det : liste des equipements */
+.insp .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.insp .detlist{border:0;margin:0;padding:0;min-width:0}
+.insp .detlist legend{padding:0}
+.insp .detgrp{font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-2);margin:14px 0 2px}
+.insp .detrows{border-top:1px solid var(--line)}
+.insp .detrow{display:flex;align-items:center;gap:10px;min-height:44px;border-bottom:1px solid var(--line)}
+.insp .detrow input{flex:none;width:22px;height:22px;margin:0;accent-color:var(--accent)}
+.insp .detrow label{flex:1;min-width:0;padding:var(--s2) 0;overflow-wrap:anywhere;cursor:pointer}
+.insp .detsum{margin:var(--s1) 0 6px;padding-left:18px}
+.insp .detsum li{margin:3px 0;overflow-wrap:anywhere}
+
+/* Points a verifier en priorite */
+.insp .focus{border-left:3px solid var(--warn);background:var(--warn-tint);border-radius:var(--r-md);padding:var(--s2) var(--s3);margin:6px 0 10px}
+.insp .focus-h{font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--warn-ink);margin:0 0 var(--s1)}
+.insp .focus-item + .focus-item{border-top:1px solid var(--line-2);margin-top:6px;padding-top:6px}
+.insp .focus-item p{margin:2px 0;overflow-wrap:anywhere}
+.insp .focus-rep{font-size:15px;font-style:italic}
+.insp .focus-chk{font-size:15px}
+.insp .focus-sum{border-left:3px solid var(--warn)}
+.insp .focus-sum h2{font-size:17px;margin:0 0 var(--s1)}
+.insp .focus-sum ul{margin:6px 0 0;padding-left:18px}
+.insp .focus-sum li{margin:2px 0}
+
+/* Date de rectification programmee */
+.insp .fixsched{margin-top:var(--s1)}
+.insp .fixrow{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.insp .inp{min-height:44px;padding:0 var(--s3);min-width:0}
+.insp .fixrow input[type="date"]{flex:1 1 160px}
+.insp .fixrow input[type="text"]{flex:2 1 180px}
+.insp .fixedit{margin-top:6px}
+.insp .hist .zone-item .btn.small{margin-top:6px}
