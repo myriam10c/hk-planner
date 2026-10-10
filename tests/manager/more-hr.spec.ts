@@ -234,31 +234,32 @@ test('suppression d un ferie (proprietaire) : confirmation puis hrDeleteHoliday'
   expect(await posts(page, 'hrDeleteHoliday')).toEqual([{ id: 71 }]);
 });
 
-test('Download form : hrLeaveForm puis ouverture du lien signe dans un nouvel onglet', async ({ page, context }) => {
-  // Le lien signe sert un PDF en piece jointe : on verifie que le nouvel onglet le demande.
+test('Download form : hrLeaveForm puis le lien signe dans le meme onglet', async ({ page }) => {
+  // Le lien signe sert un PDF en piece jointe : la page le demande et reste sur l'ecran.
+  await boot(page, [{ match: 'action=hrLeaveForm', status: 200, body: { status: 'success', url: 'https://signed.test/form-41.pdf' } }]);
+  // Apres bootMgr : sa route signed.test (image) passerait sinon avant celle-ci.
   const asked: string[] = [];
-  await context.route('https://signed.test/**', (r) => {
+  await page.route('https://signed.test/**', (r) => {
     asked.push(r.request().url());
     return r.fulfill({ status: 200, contentType: 'application/pdf', headers: { 'Content-Disposition': 'attachment; filename="leave-form-41.pdf"' }, body: '%PDF-1.4' });
   });
-  await boot(page, [{ match: 'action=hrLeaveForm', status: 200, body: { status: 'success', url: 'https://signed.test/form-41.pdf' } }]);
-  const popup = context.waitForEvent('page');
   await page.locator('main [data-hr-sec="pending"]').getByRole('button', { name: 'Download form' }).click();
-  await popup;
   await expect.poll(() => asked).toContain('https://signed.test/form-41.pdf');
+  expect(page.context().pages()).toHaveLength(1);
+  expect(page.url()).toContain('#/more/hr');
+  await expect(page.locator('main [data-hr-sec="team"]')).toBeVisible();
   const calls = (await fetchLog(page)).filter((l) => l.url.includes('action=hrLeaveForm'));
   expect(calls).toHaveLength(1);
   expect(calls[0].url).toContain('id=41');
   await expect(page.locator('main [data-hr-sec="pending"]').getByRole('button', { name: 'Download form' })).toBeEnabled();
 });
 
-test('Download form en echec : onglet referme, message du serveur sur la carte', async ({ page, context }) => {
+test('Download form en echec : message du serveur sur la carte, aucune navigation', async ({ page }) => {
   await boot(page, [{ match: 'action=hrLeaveForm', status: 500, body: { error: 'failed to build the form, try again' } }]);
-  const popup = context.waitForEvent('page');
   await page.locator('main [data-hr-sec="pending"]').getByRole('button', { name: 'Download form' }).click();
-  const p = await popup;
   await expect(page.locator('main [data-hr-sec="pending"]').getByText('failed to build the form, try again')).toBeVisible();
-  await expect.poll(() => p.isClosed()).toBe(true);
+  expect(page.url()).toContain('#/more/hr');
+  expect(page.context().pages()).toHaveLength(1);
 });
 
 test('route avec identifiant : la vue d ensemble s affiche en attendant la fiche', async ({ page }) => {

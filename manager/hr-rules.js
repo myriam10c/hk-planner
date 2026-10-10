@@ -31,7 +31,7 @@ export function leaveDays(start, end){
   return Math.round((b - a) / 86400000) + 1;
 }
 
-// Mois révolus entre deux dates. Le 15/01 -> 14/02 ne fait pas un mois.
+// Mois revolus entre deux dates. Le 15/01 -> 14/02 ne fait pas un mois.
 export function completeMonths(from, to){
   const f = new Date(String(from) + 'T00:00:00Z');
   const t = new Date(String(to) + 'T00:00:00Z');
@@ -41,13 +41,13 @@ export function completeMonths(from, to){
   return Math.max(0, m);
 }
 
-// Droit annuel acquis, décret-loi fédéral 33/2021 :
-//   - moins de 6 mois d'ancienneté : 0
-//   - de 6 à 12 mois : 2 jours par mois révolu
-//   - au-dela de 12 mois : 2,5 jours par mois révolu (30 jours par an)
+// Droit annuel acquis, decret-loi federal 33/2021 :
+//   - moins de 6 mois d'anciennete : 0
+//   - de 6 a 12 mois : 2 jours par mois revolu
+//   - au-dela de 12 mois : 2,5 jours par mois revolu (30 jours par an)
 // openingDays/openingDate permettent de reprendre un solde existant : on ne
-// calcule alors l'acquis qu'a partir d'openingDate, mais le PALIER dépend de
-// l'ancienneté réelle depuis hireDate.
+// calcule alors l'acquis qu'a partir d'openingDate, mais le PALIER depend de
+// l'anciennete reelle depuis hireDate.
 export function accruedAnnualDays(hireDate, asOf, openingDays, openingDate){
   const opening = Number(openingDays) || 0;
   const from = openingDate || hireDate;
@@ -58,8 +58,8 @@ export function accruedAnnualDays(hireDate, asOf, openingDays, openingDate){
   return Math.round((opening + earnedMonths * rate) * 100) / 100;
 }
 
-// Congé maladie par année de service : 15 jours plein salaire, 30 jours a
-// demi-salaire, 45 jours non payés. 90 jours au total.
+// Conge maladie par annee de service : 15 jours plein salaire, 30 jours a
+// demi-salaire, 45 jours non payes. 90 jours au total.
 export function sickTiers(daysUsed){
   const d = Math.max(0, Number(daysUsed) || 0);
   return {
@@ -75,9 +75,9 @@ export function rangesOverlap(aStart, aEnd, bStart, bEnd){
   return String(aStart) <= String(bEnd) && String(bStart) <= String(aEnd);
 }
 
-// Indemnité de fin de service : 21 jours de basic par an sur les 5 premières
-// années, 30 jours par an ensuite, plafonnée a 24 mois de basic. Les jours de
-// congé non payé ne comptent pas dans l'ancienneté.
+// Indemnite de fin de service : 21 jours de basic par an sur les 5 premieres
+// annees, 30 jours par an ensuite, plafonnee a 24 mois de basic. Les jours de
+// conge non paye ne comptent pas dans l'anciennete.
 export function gratuityEstimate(hireDate, endDate, basicSalary, unpaidDays){
   const basic = Number(basicSalary) || 0;
   const a = Date.parse(String(hireDate) + 'T00:00:00Z');
@@ -98,7 +98,7 @@ export function gratuityEstimate(hireDate, endDate, basicSalary, unpaidDays){
   };
 }
 
-// Jours restants avant une date. Négatif si déja passée, null si vide.
+// Jours restants avant une date. Negatif si deja passee, null si vide.
 export function daysUntil(dateStr, todayStr){
   if (!dateStr) return null;
   const a = Date.parse(String(dateStr) + 'T00:00:00Z');
@@ -107,9 +107,9 @@ export function daysUntil(dateStr, todayStr){
   return Math.round((a - b) / 86400000);
 }
 
-// Découpe l'historique d'un employé : demandes vivantes (pending/approved non
-// terminées, tri chronologique) puis le reste (passé, rejeté, annulé, tri
-// antichronologique). Piloté par la vue "Leave history" du dossier manager.
+// Decoupe l'historique d'un employe : demandes vivantes (pending/approved non
+// terminees, tri chronologique) puis le reste (passe, rejete, annule, tri
+// antichronologique). Pilote par la vue "Leave history" du dossier manager.
 export function hrSplitHistory(rows, cleanerId, today){
   const cid = Number(cleanerId);
   const mine = (Array.isArray(rows) ? rows : []).filter(r => Number(r.cleaner_id) === cid);
@@ -119,7 +119,7 @@ export function hrSplitHistory(rows, cleanerId, today){
   return { active: active, past: past };
 }
 
-// Fériés à venir (>= today), tri croissant, plafonnés à limit.
+// Feries a venir (>= today), tri croissant, plafonnes a limit.
 export function hrUpcomingHolidays(rows, today, limit){
   return (Array.isArray(rows) ? rows : [])
     .filter(h => h && h.holiday_date >= today)
@@ -127,7 +127,7 @@ export function hrUpcomingHolidays(rows, today, limit){
     .slice(0, limit || 10);
 }
 
-// Nom du férié tombant ce jour-là, null sinon.
+// Nom du ferie tombant ce jour-la, null sinon.
 export function hrHolidayNameOn(rows, day){
   const h = (Array.isArray(rows) ? rows : []).find(x => x && x.holiday_date === day);
   return h ? h.name : null;

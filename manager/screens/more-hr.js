@@ -289,20 +289,18 @@ export async function renderHr(ctx) {
     await load(true, true);
   }
 
-  // Le lien signe vit 60 s : onglet ouvert pendant le geste (sinon bloque), rempli ensuite.
+  // Lien signe (60 s, piece jointe) suivi dans le meme onglet, comme hrDownloadForm de hr.js :
+  // le navigateur telecharge le PDF sans quitter l'ecran.
   async function onForm(id) {
     if (st.busy.has(id)) return;
-    const w = window.open('', '_blank');
     st.busy.add(id);
     st.errs.delete(id);
     paint();
     try {
       const r = await get('hrLeaveForm', { id: Number(id) });
       if (!r || !r.url) throw new Error('No download link returned.');
-      if (w) { try { w.opener = null; } catch (e) { /* onglet sans opener */ } w.location.href = r.url; }
-      else window.location.href = r.url;
+      if (ctx.isCurrent()) location.href = r.url;
     } catch (e) {
-      if (w) try { w.close(); } catch (err) { /* deja ferme */ }
       if (!ctx.isCurrent() || handleAccess(e)) { st.busy.delete(id); return; }
       st.errs.set(id, (e && e.message) || 'Could not download the form.');
     }
