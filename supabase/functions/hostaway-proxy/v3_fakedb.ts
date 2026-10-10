@@ -18,6 +18,7 @@ const UNIQUE: Record<string, string[]> = {
   inspection_proposals: ["proposal_date", "listing_id"],
   proxy_cache: ["key"],
   security_contacts_doc: ["id"],
+  extra_cleanings: ["reservation_key"],
 };
 
 // Tables dont created_at est rempli par la base a l'insertion.

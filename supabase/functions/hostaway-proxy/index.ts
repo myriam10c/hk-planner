@@ -36,6 +36,7 @@ import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
 import { mgrProblemGet } from "./mgr_problem_get.ts";
 import { mgrProblemAct } from "./mgr_problem_act.ts";
+import { extraReservationKey, insertExtraOnce } from "./mgr_extra.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -1665,8 +1666,11 @@ Deno.serve(async (req: Request) => {
     // même règle que addNote : c'est un fait du ménage, pas un privilège.
     if (action === "saveLaundryCount" && req.method === "POST") {
       const body = await req.json();
-      const { reservation_key, author } = body;
+      const { reservation_key } = body;
       if (!reservation_key) return jsonResp({ error: "reservation_key required" }, 400);
+      // Auteur pris dans la session (spec manager, section 6) : l'ancienne app
+      // envoyait « Manager » pour tous les managers. body.author ignore.
+      const author = sessionActor(await currentUser(sb, req), body.author);
       const q = readLaundryQty(body, false);
       if (q.error) return jsonResp({ error: q.error }, 400);
       // counted_on vient du préfixe date de la clé, pas de l'heure de saisie :
@@ -3770,8 +3774,11 @@ Deno.serve(async (req: Request) => {
     // ========== EXTRA CLEANINGS (hors Hostaway) ==========
     if (action === "addExtraCleaning" && req.method === "POST") {
       const body = await req.json();
-      const { listing_id, cleaning_date, label, guest_name, price_billed, cleaner_price, notes, assigned_cleaner_id, created_by } = body;
+      const { listing_id, cleaning_date, label, guest_name, price_billed, cleaner_price, notes, assigned_cleaner_id } = body;
       if (!listing_id || !cleaning_date) return jsonResp({ error: "listing_id and cleaning_date required" }, 400);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(cleaning_date))) return jsonResp({ error: "cleaning_date must be YYYY-MM-DD" }, 400);
+      // Auteur pris dans la session (spec manager, section 6), body.created_by ignore.
+      const created_by = sessionActor(await currentUser(sb, req), body.created_by);
 
       // Blocage strict AVANT tout write : verifier que le cleaner n'est pas en conge approuve
       // a la date du menage. Le check utilise uniquement des donnees du body, aucune ecriture
@@ -3789,21 +3796,22 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Generate unique reservation_key
+      // reservation_key derivee de la cle d'idempotence quand le navigateur en
+      // envoie une (app manager) : le meme geste rejoue retrouve la prestation
+      // deja creee (contrainte unique), jamais un doublon.
       const rand = Math.random().toString(36).substring(2, 10);
-      const reservation_key = `extra_${cleaning_date}_${rand}`;
-
-      const { data, error } = await sb.from("extra_cleanings").insert({
+      const reservation_key = extraReservationKey(String(cleaning_date), body.idem, rand);
+      const created = await insertExtraOnce(sb, {
         reservation_key, listing_id, cleaning_date,
         label: label || null,
         guest_name: guest_name || null,
         price_billed: price_billed ?? null,
         cleaner_price: cleaner_price ?? null,
         notes: notes || null,
-        created_by: created_by || null,
+        created_by,
         status: 'pending',
-      }).select().single();
-      if (error) throw error;
+      });
+      const data = created.row;
 
       if (assigned_cleaner_id) {
         // Unique constraint = (reservation_key, cleaner_id) depuis la migration
@@ -3814,8 +3822,8 @@ Deno.serve(async (req: Request) => {
         }, { onConflict: "reservation_key,cleaner_id" });
         if (assignErr) throw assignErr;
       }
-      await addLog(sb, reservation_key, "extra_created", created_by, { listing_id, label, price_billed, assigned_cleaner_id });
-      return jsonResp({ status: "success", extra: data });
+      if (!created.replay) await addLog(sb, reservation_key, "extra_created", created_by, { listing_id, label, price_billed, assigned_cleaner_id });
+      return jsonResp({ status: "success", extra: data, replay: created.replay });
     }
 
     if (action === "updateExtraCleaning" && req.method === "POST") {
@@ -3877,6 +3885,11 @@ Deno.serve(async (req: Request) => {
       if (listing_id !== undefined) upd.listing_id = listing_id;
       const { error } = await sb.from("extra_cleanings").update(upd).eq("id", id);
       if (error) throw error;
+      // Trace avec l'auteur de la session (spec manager, section 6).
+      const { data: ecDone } = await sb.from("extra_cleanings").select("reservation_key").eq("id", id).maybeSingle();
+      if (ecDone?.reservation_key) {
+        await addLog(sb, ecDone.reservation_key, "extra_updated", sessionActor(await currentUser(sb, req), body.actor), upd);
+      }
       return jsonResp({ status: "success" });
     }
 
@@ -3896,6 +3909,7 @@ Deno.serve(async (req: Request) => {
         await sb.from("cleaning_timer").delete().eq("reservation_key", key);
         await sb.from("cleaning_cancelled").delete().eq("reservation_key", key);
         await sb.from("checklist_progress").delete().eq("reservation_key", key);
+        await addLog(sb, key, "extra_deleted", sessionActor(await currentUser(sb, req), body.actor));
       }
       return jsonResp({ status: "success" });
     }
