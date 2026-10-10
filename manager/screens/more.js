@@ -15,7 +15,6 @@ const SECTIONS = {
 // Sections dont la sous-route porte un identifiant (logement, employe, onglet).
 const WITH_ID = new Set(['apartment', 'hr', 'setup']);
 
-const LEGACY = 'In the current app for now';
 const ROWS = [
   { title: 'Team', desc: 'Accounts, roles and invitations', href: '#/more/team' },
   { title: 'Apartment', desc: 'One sheet per apartment: cleanings, linen, tickets, inspections, security contacts', href: '#/more/apartment' },
@@ -24,7 +23,7 @@ const ROWS = [
   { title: 'HR and leave', desc: 'Leave requests, balances, documents, public holidays', href: '#/more/hr' },
   { title: 'Ratings and stats', desc: 'Cleanliness ratings, cleanings and times per person', href: '#/more/people' },
   { title: 'Maintenance setup', desc: 'Vendors, equipment, preventive maintenance and costs', href: '#/more/setup' },
-  { title: 'Reports', desc: LEGACY, href: '/?legacy=1', legacy: true },
+  { title: 'Reports', desc: 'Elite accounting, operations, property health and exports', href: '#/more/reports' },
 ];
 
 // '#/more/apartment/123' -> { section: 'apartment', id: '123' }. Section inconnue : hub ('').

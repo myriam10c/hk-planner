@@ -25,7 +25,8 @@ async function headers() {
   return h;
 }
 
-async function send(url, init) {
+// Appel avec delai client : rend la reponse brute, leve ApiError sur delai ou reseau.
+async function fetchTimed(url, init) {
   const ctrl = new AbortController();
   let timer = null;
   // Course plutot que la seule annulation : un fetch qui ignore le signal ne
@@ -45,6 +46,11 @@ async function send(url, init) {
   } finally {
     clearTimeout(timer);
   }
+  return res;
+}
+
+async function send(url, init) {
+  const res = await fetchTimed(url, init);
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) throw new ApiError('Please sign in again.', 'auth', 401);
   if (res.status === 403) throw new ApiError(data.error || 'Not allowed.', 'forbidden', 403);
@@ -52,10 +58,36 @@ async function send(url, init) {
   return data;
 }
 
-export async function get(action, params) {
+function actionUrl(action, params) {
   let url = API + '?action=' + encodeURIComponent(action);
   for (const k of Object.keys(params || {})) url += '&' + k + '=' + encodeURIComponent(params[k]);
-  return send(url, { headers: await headers() });
+  return url;
+}
+
+export async function get(action, params) {
+  return send(actionUrl(action, params), { headers: await headers() });
+}
+
+// Telechargement d'un fichier rendu par le proxy (exports CSV) : memes en-tetes et meme
+// delai que get(), enregistre par un lien Blob. Une erreur serveur (JSON { error })
+// remonte en ApiError avec son message, rien n'est telecharge.
+export async function download(action, params, filename) {
+  const res = await fetchTimed(actionUrl(action, params), { headers: await headers() });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new ApiError('Please sign in again.', 'auth', 401);
+    if (res.status === 403) throw new ApiError(data.error || 'Not allowed.', 'forbidden', 403);
+    throw new ApiError(data.error || ('Error ' + res.status), 'server', res.status);
+  }
+  const blob = await res.blob();
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
 export async function post(action, body) {

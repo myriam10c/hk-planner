@@ -7615,8 +7615,15 @@ async function exportCsv(type){
   const action = actionMap[type];
   if(!action) return;
   const url = API + '?action=' + action + '&month=' + month;
-  const resp = await fetch(url, { headers: { 'X-App-Secret': APP_SHARED_SECRET } });
-  if(!resp.ok){ toast('Export failed','error'); return; }
+  // Session exigee cote proxy (manager, PIN ou email) : memes en-tetes que api().
+  const headers = { 'X-App-Secret': APP_SHARED_SECRET };
+  if(authAccessToken) headers['Authorization'] = 'Bearer ' + authAccessToken;
+  else if(cleanerToken) headers['X-Cleaner-Token'] = cleanerToken;
+  const resp = await fetch(url, { headers });
+  if(!resp.ok){
+    const err = await resp.json().catch(() => ({}));
+    toast((err && err.error) || 'Export failed','error'); return;
+  }
   const blob = await resp.blob();
   const a = document.createElement('a');
   const dlUrl = URL.createObjectURL(blob);

@@ -12,7 +12,7 @@ const ROWS: Array<[string, string, string]> = [
   ['HR and leave', 'Leave requests, balances, documents, public holidays', '#/more/hr'],
   ['Ratings and stats', 'Cleanliness ratings, cleanings and times per person', '#/more/people'],
   ['Maintenance setup', 'Vendors, equipment, preventive maintenance and costs', '#/more/setup'],
-  ['Reports', 'In the current app for now', '/?legacy=1'],
+  ['Reports', 'Elite accounting, operations, property health and exports', '#/more/reports'],
 ];
 
 test('hub : 8 lignes dans l ordre avec leurs liens, More marque courant', async ({ page }, info) => {
@@ -28,7 +28,7 @@ test('hub : 8 lignes dans l ordre avec leurs liens, More marque courant', async 
     const box = await rows.nth(i).boundingBox();
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
-  await expect(page.locator('main .more-row .pill', { hasText: 'Current app' })).toHaveCount(1);
+  await expect(page.locator('main .more-row .pill', { hasText: 'Current app' })).toHaveCount(0);
   await expect(navOf(page, info).locator('a[href="#/more"]')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('main').getByText('Signed in as Walter')).toBeVisible();
   await expect(page.locator('main [data-theme-toggle]')).toBeVisible();

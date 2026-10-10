@@ -3,7 +3,8 @@ import type { Page } from '@playwright/test';
 // Meme principe que tests/inspections/helpers.ts : window.fetch bouchonne avant
 // les modules, journal dans localStorage. « / » et « /v3/ » sont remplaces par
 // des pages temoins : on ne verifie ici que les decisions de /manager/.
-export type FakeRoute = { match: string; status: number; body: any; delay?: number; once?: boolean; fail?: boolean };
+// raw : corps texte rendu tel quel (ex. un CSV), avec contentType (defaut text/csv).
+export type FakeRoute = { match: string; status: number; body: any; delay?: number; once?: boolean; fail?: boolean; raw?: string; contentType?: string };
 
 export const MANAGER = { id: 8, name: 'Walter', color: '#e94560', role: 'manager', email: 'walter@example.com' };
 export const me = (member: any) => ({ match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: member } });
@@ -62,7 +63,9 @@ export async function bootMgr(
         if (url.indexOf(r.match) === -1 || servies.has(r)) continue;
         if (r.once) servies.add(r);
         if (r.fail) return new Promise((_res, rej) => setTimeout(() => rej(new TypeError('Failed to fetch')), r.delay || 0));
-        const make = () => new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } });
+        const make = () => (typeof r.raw === 'string'
+          ? new Response(r.raw, { status: r.status, headers: { 'Content-Type': r.contentType || 'text/csv' } })
+          : new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } }));
         if (r.delay) return new Promise((res) => setTimeout(() => res(make()), r.delay));
         return Promise.resolve(make());
       }

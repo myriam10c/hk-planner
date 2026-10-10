@@ -221,3 +221,46 @@ a.hr-row:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .su-fl textarea{resize:vertical}
 .sheet.on .su-fl,.sheet.on .su-fl select{visibility:visible}
 .su-fl select{height:44px;-webkit-appearance:none;appearance:none;padding-right:36px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7282' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:18px}
+
+/* Reports : compta Elite, operations, sante des logements, exports. */
+.rp{display:flex;flex-direction:column;gap:var(--s3);max-width:720px}
+.rp-top{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;font-size:16px}
+.rp-top label{font-weight:600}
+.rp-top select{min-height:44px;height:44px;font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:10px;padding:0 36px 0 10px;min-width:0;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7282' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:18px}
+.rp-top select:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.rp-muted{color:var(--ink-2)}
+.rp-pad{margin:0;padding:var(--s2) var(--s4)}
+.rp-fresh{margin:0;padding:0 var(--s4) var(--s2);font-size:16px;color:var(--ink-2);display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
+.rp-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--s2);padding:0 var(--s4) var(--s4)}
+.rp-stat{display:flex;flex-direction:column;gap:2px;min-width:0;padding:var(--s2) var(--s3);background:var(--surface-2);border-radius:10px}
+.rp-stat span{font-size:16px;color:var(--ink-2);overflow-wrap:anywhere}
+.rp-stat b{font-size:18px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.rp-stat b .rp-muted{font-size:16px;font-weight:500}
+.rp-break{border-top:1px solid var(--line);padding:var(--s2) var(--s4) var(--s3)}
+.rp-break h3,.rp-week h3{margin:var(--s2) 0;font-size:17px;font-weight:600}
+.rp-brow{display:flex;flex-direction:column;gap:4px;padding:var(--s2) 0;font-size:16px;min-width:0}
+.rp-brow+.rp-brow{border-top:1px solid var(--line)}
+.rp-bhead{display:flex;justify-content:space-between;gap:var(--s2);flex-wrap:wrap}
+.rp-bvals{display:flex;flex-wrap:wrap;column-gap:var(--s4);row-gap:2px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.rp-unms{border-top:1px solid var(--line)}
+.rp-unm summary{display:flex;align-items:center;min-height:44px;padding:0 var(--s4);font-size:16px;font-weight:600;cursor:pointer}
+.rp-unm+.rp-unm{border-top:1px solid var(--line)}
+.rp-unm ul{margin:0;padding:0 var(--s4) var(--s3) calc(var(--s4) + 18px);font-size:16px;overflow-wrap:anywhere}
+.rp-acts{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;padding:0 var(--s4) var(--s4);font-size:16px}
+.rp-acts .btn{min-height:44px;font-size:16px;display:inline-flex;align-items:center}
+.rp-err{margin:0;padding:0 var(--s4) var(--s4);color:var(--bad-ink);font-size:16px}
+.rp-week{border-top:1px solid var(--line);padding:var(--s2) var(--s4) var(--s4)}
+.rp-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:var(--s2);align-items:end}
+.rp-day{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:16px;min-width:0}
+.rp-n{font-variant-numeric:tabular-nums;font-weight:600}
+.rp-bar{display:flex;align-items:flex-end;width:100%;max-width:36px;height:72px;background:var(--surface-2);border-radius:6px;overflow:hidden}
+.rp-bar i{display:block;width:100%;background:var(--accent);border-radius:6px 6px 0 0}
+.rp-d{color:var(--ink-2)}
+.rp-props{display:flex;flex-direction:column;padding:0 var(--s2) var(--s2)}
+.rp-prop{display:flex;align-items:center;gap:var(--s3);min-height:56px;padding:var(--s2) var(--s3);color:var(--ink);text-decoration:none;font-size:16px;min-width:0}
+.rp-prop+.rp-prop{border-top:1px solid var(--line)}
+.rp-prop:hover{background:var(--surface-2)}
+.rp-prop:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.rp-ptxt{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;overflow-wrap:anywhere}
+.rp-chev{display:inline-flex;width:20px;height:20px;color:var(--ink-2);flex:none}
+.rp-chev svg{width:100%;height:100%}

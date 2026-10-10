@@ -42,6 +42,7 @@ import { mgrPlanning } from "./mgr_planning.ts";
 import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
 import { dashboardKpis } from "./kpis.ts";
 import { mgrPeople, parsePeopleMonth } from "./mgr_people.ts";
+import { mgrReports, parseReportsMonth, reportsAccess } from "./mgr_reports.ts";
 import { completePreventiveRun, mgrSetup, nextDueAfterEdit, setupAccess } from "./mgr_setup.ts";
 import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
 import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
@@ -916,7 +917,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["mgr.settings", "GET"], ["mgr.settings.set", "POST"], ["mgr.autopilot.run", "POST"],
   ["mgr.team", "GET"], ["mgr.people", "GET"],
   ["mgr.apartments", "GET"], ["mgr.apartment", "GET"],
-  ["mgr.setup", "GET"],
+  ["mgr.setup", "GET"], ["mgr.reports", "GET"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1561,6 +1562,23 @@ Deno.serve(async (req: Request) => {
       } catch (e) {
         console.error("[mgr.setup]", e);
         return jsonResp({ error: "Maintenance setup is unavailable right now. Try again." }, 503);
+      }
+    }
+
+    // Rapports (More > Reports) : compta Elite du snapshot telle quelle, operations du mois,
+    // sante des logements. Lecture seule.
+    if (action === "mgr.reports") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const today = todayDubai();
+      const mo = parseReportsMonth(url.searchParams.get("month"), today);
+      if (!mo.ok) return jsonResp({ error: mo.error }, 400);
+      try {
+        return jsonResp(await mgrReports(sb, mo.month, { today }));
+      } catch (e) {
+        console.error("[mgr.reports]", e);
+        return jsonResp({ error: "Reports are unavailable right now. Try again." }, 503);
       }
     }
 
@@ -3597,6 +3615,9 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "exportCleaningsCsv") {
+      // Session manager exigee AVANT toute lecture (mgr_reports.ts, PIN ou email).
+      const rRefusal = reportsAccess(await currentUser(sb, req));
+      if (rRefusal) return jsonResp({ error: rRefusal.error }, rRefusal.status);
       const month = url.searchParams.get("month"); // YYYY-MM optionnel
       const timerQuery = (from: number, to: number) => {
         let q = sb.from("cleaning_timer").select("reservation_key, cleaner_id, started_at, finished_at, duration_minutes")
@@ -3672,6 +3693,9 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "exportMaintenanceCsv") {
+      // Session manager exigee AVANT toute lecture (mgr_reports.ts, PIN ou email).
+      const rRefusal = reportsAccess(await currentUser(sb, req));
+      if (rRefusal) return jsonResp({ error: rRefusal.error }, rRefusal.status);
       const month = url.searchParams.get("month");
       const [ticketRes, costRes, vendorRes] = await Promise.all([
         sb.from("maintenance_tickets").select("*").order("created_at", { ascending: false }),
@@ -4344,6 +4368,9 @@ Deno.serve(async (req: Request) => {
     // ========== CLEANING ACCOUNTING (Elite subcontractor) ==========
     // Read : current data for a month. Returns the cached snapshot computed by VPS handler.
     if (action === "getCleaningAccounting") {
+      // Session manager exigee AVANT toute lecture (mgr_reports.ts, PIN ou email).
+      const rRefusal = reportsAccess(await currentUser(sb, req));
+      if (rRefusal) return jsonResp({ error: rRefusal.error }, rRefusal.status);
       const month = url.searchParams.get("month");  // YYYY-MM
       if (!month || !/^\d{4}-\d{2}$/.test(month)) {
         return jsonResp({ error: "month param required (YYYY-MM)" }, 400);
@@ -4355,6 +4382,9 @@ Deno.serve(async (req: Request) => {
     }
     // List all months that have cached data (for the month picker)
     if (action === "listCleaningAccountingMonths") {
+      // Session manager exigee AVANT toute lecture (mgr_reports.ts, PIN ou email).
+      const rRefusal = reportsAccess(await currentUser(sb, req));
+      if (rRefusal) return jsonResp({ error: rRefusal.error }, rRefusal.status);
       const { data, error } = await sb.from("cleaning_accounting_cache")
         .select("month, rows_count, unmatched_count, computed_at, totals_json")
         .order("month", { ascending: false });
