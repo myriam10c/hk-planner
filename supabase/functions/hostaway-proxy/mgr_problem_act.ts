@@ -25,7 +25,9 @@ export type ActDeps = { nowMs?: number; notifyTask?: (task: any) => void };
 export type Act =
   | { verb: "assign"; memberId: number | null; vendorId: number | null }
   | { verb: "schedule"; date: string | null }
-  | { verb: "comment"; text: string };
+  | { verb: "comment"; text: string }
+  | { verb: "close"; note: string }
+  | { verb: "reopen" };
 type Target = { kind: InboxKind; id: number; ref: string; row: any; logKey: string };
 type Done = { result: Record<string, unknown>; after: Array<[string, () => Promise<unknown>]> };
 type Ctx = { sb: any; me: SessionUser; t: Target; nowMs: number; nowIso: string; deps: ActDeps };
@@ -72,6 +74,8 @@ export function parseAct(body: any, today: string): Act | { error: string } {
     const text = cleanText(body?.text);
     return text ? { verb, text } : { error: "Write a comment first." };
   }
+  if (verb === "close") return { verb, note: cleanText(body?.note) };
+  if (verb === "reopen") return { verb };
   return { error: "Unknown action." };
 }
 
@@ -79,6 +83,8 @@ export function parseAct(body: any, today: string): Act | { error: string } {
 // resultat memorise meme si le probleme a change entre-temps.
 export function stateRefusal(verb: string, closed: boolean, ref: string): string | null {
   if (closed && (verb === "assign" || verb === "schedule")) return ref + " is closed. Reopen it first.";
+  if (closed && verb === "close") return ref + " is already closed.";
+  if (!closed && verb === "reopen") return ref + " is not closed.";
   return null;
 }
 
@@ -168,8 +174,90 @@ async function doComment(c: Ctx, a: { text: string }): Promise<Done> {
   return { result: { comment: { author: c.me.name, text: a.text, at: data?.created_at ? String(data.created_at) : c.nowIso } }, after: [] };
 }
 
+async function doClose(c: Ctx, a: { note: string }): Promise<Done> {
+  const { sb, t } = c;
+  const from = String(t.row.status ?? "open");
+  const after: Done["after"] = [];
+  if (t.kind === "MNT") {
+    // Copies Hermes encore ouvertes : lues avant l'ecriture, fermees apres (effet secondaire).
+    const mirrors = (await readAllRows((x: number, y: number) => sb.from("team_tasks").select("id, status")
+      .eq("source_ref", MGR_MIRROR_PREFIX + t.id).order("id").range(x, y), "team_tasks"))
+      .filter((m: any) => MGR_OPEN_TASK_STATUSES.includes(String(m.status ?? ""))).map((m: any) => Number(m.id));
+    const { error } = await sb.from("maintenance_tickets").update({
+      status: "resolved", resolved_at: c.nowIso, last_update: c.nowIso, ...(a.note ? { resolution_notes: a.note } : {}),
+    }).eq("id", t.id);
+    if (error) throw error;
+    after.push(["journal de " + t.ref, () => v3Log(sb, t.logKey, "problem_closed", c.me.name, {
+      from, notes: t.row.resolution_notes ?? null, mirrors, note: a.note || null,
+    })]);
+    if (mirrors.length) {
+      after.push(["copies Hermes de " + t.ref, async () => {
+        const { error: e } = await sb.from("team_tasks")
+          .update({ status: "done", completed_at: c.nowIso, completed_by_cleaner_id: c.me.cleaner_id }).in("id", mirrors);
+        if (e) throw e;
+      }]);
+    }
+    if (a.note) {
+      after.push(["note de " + t.ref, async () => {
+        const { error: e } = await sb.from("ticket_comments").insert({ ticket_id: t.id, author: c.me.name, comment: a.note });
+        if (e) throw e;
+      }]);
+    }
+  } else {
+    const { error } = await sb.from("team_tasks")
+      .update({ status: "done", completed_at: c.nowIso, completed_by_cleaner_id: c.me.cleaner_id }).eq("id", t.id);
+    if (error) throw error;
+    after.push(["journal de " + t.ref, () => v3Log(sb, t.logKey, "problem_closed", c.me.name, { from, note: a.note || null })]);
+    if (a.note) {
+      after.push(["note de " + t.ref, async () => {
+        const { error: e } = await sb.from("team_task_comments").insert({ task_id: t.id, cleaner_id: c.me.cleaner_id, body: a.note });
+        if (e) throw e;
+      }]);
+    }
+  }
+  return { result: { closed: true }, after };
+}
+
+// Undo de Close : l'etat d'avant vient du dernier journal problem_closed. Sans
+// journal (probleme clos ailleurs), retour a assigned ou open.
+async function doReopen(c: Ctx): Promise<Done> {
+  const { sb, t } = c;
+  const logs = await readAllRows((x: number, y: number) => sb.from("cleaning_log").select("id, details, created_at")
+    .eq("reservation_key", t.logKey).eq("action", "problem_closed").order("id").range(x, y), "cleaning_log");
+  const last = logs.slice().sort((x: any, y: any) =>
+    (Date.parse(y.created_at) - Date.parse(x.created_at)) || (Number(y.id) - Number(x.id)))[0] ?? null;
+  const d = last && last.details && typeof last.details === "object" ? last.details : null;
+  const after: Done["after"] = [];
+  let state: string;
+  if (t.kind === "MNT") {
+    const fallback = t.row.assigned_technician_id != null || t.row.assigned_vendor_id != null ? "assigned" : "open";
+    state = d && MGR_OPEN_TICKET_STATUSES.includes(String(d.from)) ? String(d.from) : fallback;
+    const { error } = await sb.from("maintenance_tickets").update({
+      status: state, resolved_at: null, closed_at: null, last_update: c.nowIso,
+      ...(d ? { resolution_notes: d.notes ?? null } : {}),
+    }).eq("id", t.id);
+    if (error) throw error;
+    const mirrors = d && Array.isArray(d.mirrors)
+      ? d.mirrors.map(Number).filter((n: number) => Number.isInteger(n) && n > 0) : [];
+    if (mirrors.length) {
+      after.push(["copies Hermes de " + t.ref, async () => {
+        const { error: e } = await sb.from("team_tasks")
+          .update({ status: "open", completed_at: null, completed_by_cleaner_id: null }).in("id", mirrors).eq("status", "done");
+        if (e) throw e;
+      }]);
+    }
+  } else {
+    state = d && MGR_OPEN_TASK_STATUSES.includes(String(d.from)) ? String(d.from) : "open";
+    const { error } = await sb.from("team_tasks")
+      .update({ status: state, completed_at: null, completed_by_cleaner_id: null }).eq("id", t.id);
+    if (error) throw error;
+  }
+  after.unshift(["journal de " + t.ref, () => v3Log(sb, t.logKey, "problem_reopened", c.me.name, { to: state })]);
+  return { result: { state }, after };
+}
+
 const WRITERS: Record<string, (c: Ctx, a: any, who: string | null) => Promise<Done>> = {
-  assign: doAssign, schedule: doSchedule, comment: doComment,
+  assign: doAssign, schedule: doSchedule, comment: doComment, close: doClose, reopen: doReopen,
 };
 
 export async function mgrProblemAct(sb: any, me: SessionUser, body: any, deps: ActDeps = {}): Promise<ActionResult> {

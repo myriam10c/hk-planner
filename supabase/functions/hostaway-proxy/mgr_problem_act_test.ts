@@ -154,3 +154,57 @@ Deno.test("comment : auteur de la session, texte borne, vide refuse", async () =
   assertEquals(sb.tables.team_task_comments.map((c: any) => [c.task_id, c.cleaner_id, c.body.length]), [[13, 8, 2000]]);
   assertEquals((await act(sb, { ref: "MNT-429", verb: "comment", text: "   " })).body.error, "Write a comment first.");
 });
+
+Deno.test("close MNT : resolved, note, copie TSK fermee, journal avec l'etat d'avant ; deux fois = 409", async () => {
+  const sb = seed();
+  const r = await act(sb, { ref: "MNT-429", verb: "close", note: "Replaced the valve" });
+  assertEquals(r.body, { status: "success", ref: "MNT-429", verb: "close", closed: true });
+  const t = ticket(sb, 429);
+  assertEquals([t.status, t.resolved_at, t.resolution_notes], ["resolved", "2026-10-09T07:00:00.000Z", "Replaced the valve"]);
+  assertEquals([task(sb, 17).status, task(sb, 17).completed_by_cleaner_id], ["done", 8]);
+  assertEquals(sb.tables.ticket_comments.map((c: any) => [c.author, c.comment]), [["Walter", "Replaced the valve"]]);
+  assertEquals(sb.tables.cleaning_log.map((l: any) => [l.action, l.actor, l.details]),
+    [["problem_closed", "Walter", { from: "open", notes: null, mirrors: [17], note: "Replaced the valve" }]]);
+  assertEquals(await act(sb, { ref: "MNT-429", verb: "close" }), { status: 409, body: { error: "MNT-429 is already closed." } });
+});
+
+Deno.test("reopen (Undo) : statut, note et copie TSK d'avant le close ; deux fois = 409", async () => {
+  const sb = seed();
+  await act(sb, { ref: "MNT-430", verb: "close" });
+  assertEquals((await act(sb, { ref: "MNT-430", verb: "reopen" })).body,
+    { status: "success", ref: "MNT-430", verb: "reopen", state: "in_progress" });
+  assertEquals([ticket(sb, 430).status, ticket(sb, 430).resolved_at, ticket(sb, 430).closed_at], ["in_progress", null, null]);
+  await act(sb, { ref: "MNT-429", verb: "close", note: "x" });
+  await act(sb, { ref: "MNT-429", verb: "reopen" });
+  const m = task(sb, 17);
+  assertEquals([ticket(sb, 429).status, ticket(sb, 429).resolution_notes, m.status, m.completed_at, m.completed_by_cleaner_id],
+    ["open", null, "open", null, null]);
+  assertEquals((await act(sb, { ref: "MNT-429", verb: "reopen" })).body.error, "MNT-429 is not closed.");
+});
+
+Deno.test("reopen d'un ticket clos ailleurs (sans journal) : assigned s'il a un technicien, sinon open", async () => {
+  const sb = seed();
+  sb.tables.maintenance_tickets.push({ id: 302, title: "x", status: "resolved", assigned_technician_id: 7, resolution_notes: "old" });
+  await act(sb, { ref: "MNT-300", verb: "reopen" });
+  await act(sb, { ref: "MNT-302", verb: "reopen" });
+  assertEquals(ticket(sb, 300).status, "open");
+  assertEquals([ticket(sb, 302).status, ticket(sb, 302).resolution_notes], ["assigned", "old"]);
+});
+
+Deno.test("close et reopen TSK : done par la session, note en commentaire, retour a in_progress", async () => {
+  const sb = seed();
+  task(sb, 13).status = "in_progress";
+  await act(sb, { ref: "TSK-13", verb: "close", note: "Done by phone" });
+  const t = task(sb, 13);
+  assertEquals([t.status, t.completed_at, t.completed_by_cleaner_id], ["done", "2026-10-09T07:00:00.000Z", 8]);
+  assertEquals(sb.tables.team_task_comments.map((c: any) => [c.task_id, c.cleaner_id, c.body]), [[13, 8, "Done by phone"]]);
+  await act(sb, { ref: "TSK-13", verb: "reopen" });
+  assertEquals([t.status, t.completed_at, t.completed_by_cleaner_id], ["in_progress", null, null]);
+});
+
+Deno.test("close : copie TSK en echec, le ticket reste clos et la reponse est un succes", async () => {
+  const sb = seed();
+  sb.fail["team_tasks.update"] = { message: "boom" };
+  assertEquals((await act(sb, { ref: "MNT-429", verb: "close" })).status, 200);
+  assertEquals(ticket(sb, 429).status, "resolved");
+});
