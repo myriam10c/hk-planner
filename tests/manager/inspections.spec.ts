@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { bootMgr, MANAGER, me } from './helpers';
+import { bootMgr, fetchLog, MANAGER, me } from './helpers';
 import { NOW, todayBody } from './fixtures';
 
 // Formes reprises de tests/inspections/*.spec.ts (reponses du proxy insp.*).
@@ -46,8 +46,9 @@ test('historique d un logement depuis Fleet, retour vers Fleet', async ({ page }
   await boot(page, [], '#/inspections/fleet');
   await page.getByText('Apt 202 · Tower B').click();
   await expect(page).toHaveURL(/#\/inspections\/history\/B$/);
+  await expect(page.getByRole('heading', { name: 'Apt 202 · Tower B' })).toBeVisible();
   await expect(page.getByText('Good overall')).toBeVisible();
-  await page.getByRole('button', { name: /Back/ }).first().click();
+  await page.getByRole('button', { name: 'Back to fleet', exact: true }).click();
   await expect(page).toHaveURL(/#\/inspections\/fleet$/);
 });
 
@@ -58,7 +59,7 @@ test('manager : bouton Reports ouvre les rapports', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible();
 });
 
-test('Start inspection puis retour sur Today manager sans erreur de page', async ({ page }) => {
+test('Start inspection puis retour sur Today manager sans erreur de page', async ({ page }, info) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   await bootMgr(page, [me(MANAGER), INSP_TODAY(8), START(), { match: 'action=mgr.today', status: 200, body: todayBody() }],
@@ -66,7 +67,7 @@ test('Start inspection puis retour sur Today manager sans erreur de page', async
   await page.getByRole('button', { name: 'Start inspection' }).click();
   await expect(page).toHaveURL(/#\/inspections\/inspect\/A\?e=checkout$/);
   await expect(page.getByText('0 / 11 zones')).toBeVisible();
-  await page.locator('#tabbar a[href="#/today"], #sideNav a[href="#/today"]').locator('visible=true').click();
+  await navOf(page, info).locator('a[href="#/today"]').click();
   await expect(page.getByRole('heading', { name: 'Team control', exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -95,6 +96,8 @@ test('me null (hors ligne) : message de connexion, pas d erreur de page', async 
   await bootMgr(page, [{ match: 'action=cleanerMe', status: 200, body: {}, fail: true }], { email: true, hash: '#/inspections' });
   await expect(page.getByText('Inspections need a connection.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect.poll(async () => (await fetchLog(page)).filter((l) => l.url.includes('action=cleanerMe')).length).toBeGreaterThanOrEqual(2);
   expect(errors).toEqual([]);
 });
 

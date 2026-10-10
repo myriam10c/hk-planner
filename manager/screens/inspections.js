@@ -44,7 +44,8 @@ function go(h) {
   else location.hash = t;
 }
 
-function retry() { window.dispatchEvent(new HashChangeEvent('hashchange')); }
+// Rechargement complet : refait aussi cleanerMe (me) et evite un import de module en echec garde en cache.
+function retry() { location.reload(); }
 
 function message(ctx, text, withLink) {
   ctx.main.innerHTML = '<header class="top"><div><h1>Inspections</h1></div></header>'
