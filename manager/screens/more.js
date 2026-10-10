@@ -22,7 +22,7 @@ const ROWS = [
   { title: 'Reviews', desc: 'Review disputes', href: '#/more/reviews' },
   { title: 'Settings', desc: 'Autopilot, notifications, inspection target, checklists', href: '#/more/settings' },
   { title: 'HR and leave', desc: 'Leave requests, balances, documents, public holidays', href: '#/more/hr' },
-  { title: 'Ratings and stats', desc: LEGACY, href: '/?legacy=1', legacy: true },
+  { title: 'Ratings and stats', desc: 'Cleanliness ratings, cleanings and times per person', href: '#/more/people' },
   { title: 'Maintenance setup', desc: LEGACY, href: '/?legacy=1', legacy: true },
   { title: 'Reports', desc: LEGACY, href: '/?legacy=1', legacy: true },
 ];
