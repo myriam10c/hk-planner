@@ -9,7 +9,7 @@ const ROWS: Array<[string, string, string]> = [
   ['Apartment', 'One sheet per apartment: cleanings, linen, tickets, inspections, security contacts', '#/more/apartment'],
   ['Reviews', 'Review disputes', '#/more/reviews'],
   ['Settings', 'Autopilot, notifications, inspection target, checklists', '#/more/settings'],
-  ['HR and leave', 'In the current app for now', '/?legacy=1'],
+  ['HR and leave', 'Leave requests, balances, documents, public holidays', '#/more/hr'],
   ['Ratings and stats', 'In the current app for now', '/?legacy=1'],
   ['Maintenance setup', 'In the current app for now', '/?legacy=1'],
   ['Reports', 'In the current app for now', '/?legacy=1'],
@@ -28,7 +28,7 @@ test('hub : 8 lignes dans l ordre avec leurs liens, More marque courant', async 
     const box = await rows.nth(i).boundingBox();
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
-  await expect(page.locator('main .more-row .pill', { hasText: 'Current app' })).toHaveCount(4);
+  await expect(page.locator('main .more-row .pill', { hasText: 'Current app' })).toHaveCount(3);
   await expect(navOf(page, info).locator('a[href="#/more"]')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('main').getByText('Signed in as Walter')).toBeVisible();
   await expect(page.locator('main [data-theme-toggle]')).toBeVisible();
@@ -52,11 +52,14 @@ test('parseMoreHash', async ({ page }) => {
   await boot(page);
   const r = await page.evaluate(async () => {
     const m = await import('/manager/screens/more.js');
-    return ['#/more', '#/more/apartment/123', '#/more/team/9', '#/more/apartment/%E0', '#/more/zzz', '#/more/apartment/a%20b'].map((h) => m.parseMoreHash(h));
+    return ['#/more', '#/more/apartment/123', '#/more/team/9', '#/more/apartment/%E0', '#/more/zzz', '#/more/apartment/a%20b',
+      '#/more/hr', '#/more/hr/12', '#/more/hr/%E0', '#/more/setup/vendors', '#/more/people/3', '#/more/reports'].map((h) => m.parseMoreHash(h));
   });
   expect(r).toEqual([
     { section: '', id: null }, { section: 'apartment', id: '123' }, { section: 'team', id: null },
     { section: 'apartment', id: null }, { section: '', id: null }, { section: 'apartment', id: 'a b' },
+    { section: 'hr', id: null }, { section: 'hr', id: '12' }, { section: 'hr', id: null },
+    { section: 'setup', id: 'vendors' }, { section: 'people', id: null }, { section: 'reports', id: null },
   ]);
 });
 

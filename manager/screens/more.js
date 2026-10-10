@@ -7,7 +7,13 @@ const SECTIONS = {
   team: ['/manager/screens/more-team.js', 'renderTeam'],
   reviews: ['/manager/screens/more-reviews.js', 'renderReviews'],
   apartment: ['/manager/screens/more-apartment.js', 'renderApartment'],
+  hr: ['/manager/screens/more-hr.js', 'renderHr'],
+  people: ['/manager/screens/more-people.js', 'renderPeople'],
+  setup: ['/manager/screens/more-setup.js', 'renderSetup'],
+  reports: ['/manager/screens/more-reports.js', 'renderReports'],
 };
+// Sections dont la sous-route porte un identifiant (logement, employe, onglet).
+const WITH_ID = new Set(['apartment', 'hr', 'setup']);
 
 const LEGACY = 'In the current app for now';
 const ROWS = [
@@ -15,14 +21,14 @@ const ROWS = [
   { title: 'Apartment', desc: 'One sheet per apartment: cleanings, linen, tickets, inspections, security contacts', href: '#/more/apartment' },
   { title: 'Reviews', desc: 'Review disputes', href: '#/more/reviews' },
   { title: 'Settings', desc: 'Autopilot, notifications, inspection target, checklists', href: '#/more/settings' },
-  { title: 'HR and leave', desc: LEGACY, href: '/?legacy=1', legacy: true },
+  { title: 'HR and leave', desc: 'Leave requests, balances, documents, public holidays', href: '#/more/hr' },
   { title: 'Ratings and stats', desc: LEGACY, href: '/?legacy=1', legacy: true },
   { title: 'Maintenance setup', desc: LEGACY, href: '/?legacy=1', legacy: true },
   { title: 'Reports', desc: LEGACY, href: '/?legacy=1', legacy: true },
 ];
 
 // '#/more/apartment/123' -> { section: 'apartment', id: '123' }. Section inconnue : hub ('').
-// L'identifiant n'existe que pour apartment, decode ; encodage invalide -> null.
+// L'identifiant n'existe que pour apartment, hr et setup, decode ; encodage invalide -> null.
 export function parseMoreHash(hash) {
   const rest = String(hash || '').replace(/^#\/?more\/?/, '');
   const cut = rest.search(/[?]/);
@@ -31,7 +37,7 @@ export function parseMoreHash(hash) {
   let section = parts[0] || '';
   if (!Object.prototype.hasOwnProperty.call(SECTIONS, section)) section = '';
   let id = null;
-  if (section === 'apartment' && parts[1]) {
+  if (WITH_ID.has(section) && parts[1]) {
     try { id = decodeURIComponent(parts[1]); } catch (e) { id = null; }
   }
   return { section, id };
