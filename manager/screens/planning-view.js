@@ -1,0 +1,158 @@
+// Ecran Planning : HTML pur construit a partir de la reponse mgr.planning. Aucun
+// appel reseau, aucun calcul de statut : le proxy les rend faits. Chaque panneau
+// a la signature (d, j, ro, s) et s'appelle <vue>Sheet (planning.js les trouve
+// par leur nom).
+import { addDays, ddmm, dubaiTime, esc, I, placeLabel } from '/manager/ui/dom.js';
+import {
+  dayLong, dayShort, filterJobs, initials, jobsOn, LAUNDRY_ITEMS, laundryLine, namesOf, nextLine, slotOf, weekLabel,
+} from '/manager/screens/planning-rules.js';
+
+export const RO_LINE = 'Reconnect to make changes.';
+export const CLOSE = '<button class="btn" type="button" data-close>Close</button>';
+export function B(pa, label, cls) {
+  return '<button class="btn' + (cls ? ' ' + cls : '') + '" type="button" data-pa="' + esc(pa) + '">' + esc(label) + '</button>';
+}
+export function head(title, sub) {
+  return '<div class="sheet-h"><div><h2 id="sheetTitle">' + esc(title) + '</h2><div class="sub">' + esc(sub) + '</div></div>'
+    + '<button class="iconbtn x" type="button" data-close aria-label="Close">' + I.close + '</button></div>';
+}
+export function roFoot() {
+  return '<div class="sheet-f"><p class="ro-note" role="status">' + RO_LINE + '</p>' + CLOSE + '</div>';
+}
+
+function header(s) {
+  const asof = s.data ? '<div class="asof' + (s.stale ? ' stale' : '') + '">Data as of ' + esc(dubaiTime(s.data.generatedAt)) + '</div>' : '';
+  const add = s.data && !s.ro ? '<button class="btn sm primary" type="button" data-add-extra>Add extra</button>' : '';
+  return '<header class="top pl-top"><div><h1>Planning</h1><div class="date">' + esc(weekLabel(s.start)) + '</div>' + asof + '</div>'
+    + '<div class="pl-tools"><div class="pl-nav" role="group" aria-label="Week">'
+    + '<button class="iconbtn" type="button" data-week="-1" aria-label="Previous week" title="Previous week">' + I.prev + '</button>'
+    + '<button class="btn sm" type="button" data-week="0">This week</button>'
+    + '<button class="iconbtn" type="button" data-week="1" aria-label="Next week" title="Next week">' + I.next + '</button></div>'
+    + add
+    + '<button class="iconbtn" type="button" data-theme-toggle aria-label="Switch light or dark theme" title="Theme">' + I.theme + '</button></div></header>';
+}
+
+function legend(s) {
+  const d = s.data;
+  const count = {};
+  let none = 0;
+  for (const j of d.jobs) {
+    if (j.cancelled) continue;
+    if (!j.assigned.length) none++;
+    for (const id of j.assigned) count[id] = (count[id] || 0) + 1;
+  }
+  const cur = s.filter == null ? 'all' : String(s.filter);
+  const chip = (val, label, n, slot) => '<button type="button" class="chip pchip" data-filter="' + esc(val) + '" aria-pressed="' + (cur === String(val) ? 'true' : 'false') + '">'
+    + (slot ? '<i class="dot pc-' + esc(slot) + '" aria-hidden="true"></i>' : '') + esc(label) + ' <span class="n">' + n + '</span></button>';
+  const people = d.people.filter((p) => p.assignable || count[p.id]);
+  return '<div class="chiprow pl-legend" role="group" aria-label="Filter by person">'
+    + chip('all', 'Everyone', d.counts.total, '')
+    + people.map((p) => chip(p.id, p.name, count[p.id] || 0, p.slot)).join('')
+    + chip('none', 'Unassigned', none, 'none') + '</div>';
+}
+
+function timeText(j) {
+  if (j.kind === 'extra') return 'Extra';
+  if (j.postponedFrom) return 'From ' + ddmm(j.postponedFrom);
+  return j.checkout || 'Time not set';
+}
+
+function card(d, j) {
+  const who = j.assigned.length ? namesOf(d, j.assigned) : 'Unassigned';
+  const pill = j.tone === 'idle' && j.word === 'Scheduled' ? '' : '<span class="pill sm ' + esc(j.tone) + '">' + esc(j.word) + '</span>';
+  const tags = [];
+  if (j.next && j.next.sameDay && !j.cancelled) tags.push('Check-in ' + (j.next.time || 'today'));
+  if (j.laundry) tags.push('Linen ' + j.laundry.total);
+  return '<button type="button" class="pj pc-' + esc(slotOf(d, j)) + (j.kind === 'extra' ? ' extra' : '') + (j.cancelled ? ' cancelled' : '') + '" data-job="' + esc(j.key) + '">'
+    + '<span class="pj-top"><span class="mono">' + esc(timeText(j)) + '</span>' + pill + '</span>'
+    + '<span class="pj-place">' + esc(placeLabel(j) || 'Apartment') + '</span>'
+    + '<span class="pj-who">' + esc(who) + '</span>'
+    + (tags.length ? '<span class="pj-tags">' + tags.map((t) => '<span>' + esc(t) + '</span>').join('') + '</span>' : '')
+    + '</button>';
+}
+
+function dayHead(d, day, today) {
+  const jobs = jobsOn(d, day.date).filter((j) => !j.cancelled);
+  const un = jobs.filter((j) => !j.assigned.length && j.state !== 'done').length;
+  return '<div class="pl-dh' + (day.date === today ? ' today' : '') + '"><h2>' + esc(dayShort(day.date)) + '</h2>'
+    + '<div class="meta">' + jobs.length + ' cleaning' + (jobs.length === 1 ? '' : 's')
+    + (un ? ' · <span class="st bad">' + un + ' unassigned</span>' : '') + '</div>'
+    + (day.holiday ? '<div class="pl-hol">' + esc(day.holiday) + '</div>' : '')
+    + (day.off.length ? '<div class="pl-off">' + esc(namesOf(d, day.off)) + ' off</div>' : '') + '</div>';
+}
+
+function cards(d, list) {
+  return '<div class="pl-cards">' + (list.length ? list.map((j) => card(d, j)).join('') : '<p class="empty">No cleaning</p>') + '</div>';
+}
+
+function grid(s) {
+  const d = s.data;
+  return '<div class="pl-grid">' + d.days.map((day) =>
+    '<section class="pl-col" aria-label="' + esc(dayLong(day.date)) + '">' + dayHead(d, day, s.today)
+    + cards(d, filterJobs(jobsOn(d, day.date), s.filter)) + '</section>').join('') + '</div>';
+}
+
+function dayView(s) {
+  const d = s.data;
+  const strip = '<div class="pl-strip" role="group" aria-label="Day">' + d.days.map((day) => {
+    const n = jobsOn(d, day.date).filter((j) => !j.cancelled).length;
+    return '<button type="button" data-day="' + esc(day.date) + '" aria-pressed="' + (day.date === s.day ? 'true' : 'false') + '"'
+      + (day.date === s.today ? ' class="today"' : '') + ' aria-label="' + esc(dayLong(day.date)) + ', ' + n + ' cleanings">'
+      + '<span>' + esc(dayShort(day.date).split(' ')[0]) + '</span><b>' + Number(day.date.slice(8)) + '</b><small>' + n + '</small></button>';
+  }).join('') + '</div>';
+  const day = d.days.find((x) => x.date === s.day) || d.days[0];
+  return strip + '<section class="pl-day" aria-label="' + esc(dayLong(day.date)) + '">' + dayHead(d, day, s.today)
+    + cards(d, filterJobs(jobsOn(d, day.date), s.filter)) + '</section>';
+}
+
+// s : { data, start, today, day, wide, filter, loading, error, banner, stale, ro }
+export function screenHtml(s) {
+  if (!s.data) {
+    if (s.loading) return header(s) + '<p class="boot" role="status">Loading the week…</p>';
+    return header(s) + '<div class="err-card" role="alert"><p>' + esc(s.error ? s.error.message : 'Could not load.')
+      + '</p><button class="btn primary" type="button" data-retry>Retry</button></div>';
+  }
+  return header(s) + (s.banner || '') + legend(s) + (s.wide ? grid(s) : dayView(s));
+}
+
+// Fiche d'un menage : statut, faits, gestes (branches par planning.js, taches 6 a 9).
+export function jobSheet(d, j, ro) {
+  const rows = [];
+  const kv = (k, v) => rows.push('<div><dt>' + esc(k) + '</dt><dd>' + v + '</dd></div>');
+  const time = j.kind === 'checkout' && !j.postponedFrom ? (j.checkout ? ', checkout ' + j.checkout : ', checkout time not set') : '';
+  kv('When', esc(dayLong(j.date) + time));
+  if (j.postponedFrom) kv('Postponed', 'from ' + esc(dayLong(j.postponedFrom)));
+  kv('Assigned', j.assigned.length ? esc(namesOf(d, j.assigned)) : '<span class="st bad">Nobody</span>');
+  const day = d.days.find((x) => x.date === j.date);
+  const away = day ? j.assigned.filter((id) => day.off.includes(id)) : [];
+  if (away.length) kv('Leave', '<span class="st warn">' + esc(namesOf(d, away)) + ' on leave this day</span>');
+  if (j.next) kv('Next guest', esc(nextLine(j.next)));
+  if (j.guest) kv('Guest leaving', esc(j.guest));
+  if (j.cancelled) kv('Cancelled', esc((j.cancelled.reason || 'No reason given') + (j.cancelled.by ? ' · by ' + j.cancelled.by : '')));
+  if (j.extra) {
+    kv('Extra', esc(j.extra.label || 'Extra cleaning'));
+    if (j.extra.guestName) kv('Guest or client', esc(j.extra.guestName));
+    if (j.extra.priceBilled != null) kv('Price billed', esc(j.extra.priceBilled + ' AED'));
+    if (j.extra.cleanerPrice != null) kv('Cleaner rate', esc(j.extra.cleanerPrice + ' AED'));
+    if (j.extra.notes) kv('Notes', esc(j.extra.notes));
+  }
+  kv('Linen', j.laundry ? esc(laundryLine(j.laundry)) : 'Not counted');
+  const status = '<div class="statusbox ' + esc(j.tone) + '"><span class="bar ' + esc(j.tone) + '"></span><div><span class="st ' + esc(j.tone) + '">' + esc(j.word) + '</span></div></div>';
+  let foot;
+  if (ro) foot = roFoot();
+  else if (j.cancelled) foot = '<div class="sheet-f">' + B('restore', 'Restore cleaning', 'primary') + CLOSE + '</div>';
+  else {
+    const done = j.state === 'done';
+    foot = '<div class="sheet-f">'
+      + (done ? '' : B('assign', j.assigned.length ? 'Reassign' : 'Assign', 'primary'))
+      + B(done ? 'undone' : 'done', done ? 'Undo done' : 'Mark done')
+      + B('laundry', j.laundry ? 'Edit linen count' : 'Count linen')
+      + (done ? '' : B('postpone', 'Postpone'))
+      + (j.postponedFrom && !done ? B('restore-date', 'Restore date') : '')
+      + (j.extra ? B('edit-extra', 'Edit extra') : '')
+      + (done ? '' : B('cancel', 'Cancel cleaning'))
+      + CLOSE + '</div>';
+  }
+  return head(placeLabel(j) || 'Cleaning', (j.kind === 'extra' ? 'Extra cleaning' : 'Checkout cleaning') + ' · ' + dayShort(j.date))
+    + '<div class="sheet-b">' + status + '<dl class="kvs">' + rows.join('') + '</dl></div>' + foot;
+}

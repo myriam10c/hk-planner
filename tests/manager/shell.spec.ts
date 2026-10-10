@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { bootMgr, MANAGER, me, noHorizontalScroll } from './helpers';
 
+// Planning est livre (phase 3) : il n'est plus un ecran provisoire.
 const LINKS: Array<[string, string, string]> = [
-  ['planning', 'Planning', '/?legacy=1'],
   ['inspections', 'Inspections', '/inspections/'],
   ['more', 'More', '/?legacy=1'],
 ];

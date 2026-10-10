@@ -15,6 +15,8 @@
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px;
   --ease-out:cubic-bezier(.16,1,.3,1); --ease-in:cubic-bezier(.7,0,.84,0);
   --sidebar:232px;
+  /* Une couleur par personne au Planning (cleaners p1 a p4, sous-traitant). */
+  --pc-1:#7a5af8; --pc-2:#dd2590; --pc-3:#0e9384; --pc-4:#6172f3; --pc-sub:#0086c9;
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){
@@ -27,6 +29,7 @@
     --bad:#f97066; --bad-ink:#fda29b; --bad-tint:#33130f;
     --scrim:rgba(0,0,0,.6); --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
     --focus:#4ea8ff; color-scheme:dark;
+    --pc-1:#9b8afb; --pc-2:#f670c7; --pc-3:#2ed3b7; --pc-4:#8098f9; --pc-sub:#36bffa;
   }
 }
 :root[data-theme="dark"]{
@@ -38,6 +41,7 @@
   --bad:#f97066; --bad-ink:#fda29b; --bad-tint:#33130f;
   --scrim:rgba(0,0,0,.6); --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
   --focus:#4ea8ff; color-scheme:dark;
+  --pc-1:#9b8afb; --pc-2:#f670c7; --pc-3:#2ed3b7; --pc-4:#8098f9; --pc-sub:#36bffa;
 }
 *{box-sizing:border-box}
 html,body{margin:0;overflow-x:clip}

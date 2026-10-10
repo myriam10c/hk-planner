@@ -13,6 +13,7 @@ const VIEWS = [
 // Ecrans livres : module et fonction de rendu. Les autres restent provisoires.
 const SCREENS = {
   today: ['/manager/screens/today.js', 'renderToday'],
+  planning: ['/manager/screens/planning.js', 'renderPlanning'],
   problems: ['/manager/screens/problems.js', 'renderProblems'],
 };
 const main = document.getElementById('main');
