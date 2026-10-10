@@ -279,12 +279,12 @@ Deno.test("les tables de correspondance exposees aux taches 5 a 7 sont figees", 
   }
 });
 
-Deno.test("V3_LINEN_FIELDS est mot pour mot LAUNDRY_FIELDS d'index.ts", async () => {
+Deno.test("V3_LINEN_FIELDS est mot pour mot LAUNDRY_FIELDS (mgr_planning_rules.ts, source unique d'index.ts)", async () => {
   // Les deux listes sont des jumelles volontaires : v3.ts ne peut pas importer
   // index.ts, qui appelle Deno.serve au chargement. On lit donc le fichier comme
   // du texte. Verifie dans la suite et non par une commande a la main, pour qu'une
   // divergence casse les tests au lieu de passer inapercue.
-  const src = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  const src = await Deno.readTextFile(new URL("./mgr_planning_rules.ts", import.meta.url));
   const bloc = src.match(/const\s+LAUNDRY_FIELDS\s*=\s*\[([\s\S]*?)\]/);
   assertEquals(bloc !== null, true);
   const champs = [...bloc![1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);

@@ -37,6 +37,8 @@ import { mgrProblems } from "./mgr_problems.ts";
 import { mgrProblemGet } from "./mgr_problem_get.ts";
 import { mgrProblemAct } from "./mgr_problem_act.ts";
 import { extraReservationKey, insertExtraOnce } from "./mgr_extra.ts";
+import { LAUNDRY_FIELDS, parsePlanningStart } from "./mgr_planning_rules.ts";
+import { mgrPlanning } from "./mgr_planning.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -280,6 +282,42 @@ async function buildCheckoutsPayload(sb: any, startDate: string, endDate: string
   return { status: "success", count: reservations.length, reservations };
 }
 
+// Departs d'une plage avec le cache serveur au chaud (proxy_cache
+// « checkouts:<start>_<end> »). Stale-while-revalidate : la pagination Hostaway
+// est le chemin lent (~5-10 s sur un mois) ; un instantane recent est servi tout
+// de suite et rafraichi en arriere-plan, Hostaway n'est appele en direct que si
+// l'instantane a plus de 10 min. Partage par l'action checkouts (ancienne app) et
+// mgr.planning (app manager) : une seule logique. setPostponed purge ces cles.
+async function loadCheckoutsCached(sb: any, startDate: string, endDate: string, fresh: boolean): Promise<any> {
+  const cacheKey = "checkouts:" + startDate + "_" + endDate;
+  if (!fresh) {
+    try {
+      const { data: row } = await sb.from("proxy_cache").select("payload, updated_at").eq("key", cacheKey).maybeSingle();
+      if (row && row.payload) {
+        const age = Date.now() - new Date(row.updated_at).getTime();
+        if (age < CHECKOUTS_STALE_MS) {
+          if (age > CHECKOUTS_FRESH_MS) {
+            const revalidate = buildCheckoutsPayload(sb, startDate, endDate)
+              .then((payload) => sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() }))
+              .catch((e) => console.error("[hostaway-proxy] checkouts revalidate failed:", e));
+            try { (globalThis as any).EdgeRuntime?.waitUntil?.(revalidate); } catch (_e) { /* best effort */ }
+          }
+          return { ...row.payload, cachedAt: row.updated_at };
+        }
+      }
+    } catch (e) {
+      console.error("[hostaway-proxy] proxy_cache read failed:", e);
+    }
+  }
+  const payload = await buildCheckoutsPayload(sb, startDate, endDate);
+  try {
+    await sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() });
+  } catch (e) {
+    console.error("[hostaway-proxy] proxy_cache write failed:", e);
+  }
+  return payload;
+}
+
 async function loadInspReservations(sb: any, day: string): Promise<{ reservations: InspReservation[]; cachedAt: string | null }> {
   return loadReservationsCached(sb, day, {
     fetchHostaway: async (d) => {
@@ -398,10 +436,7 @@ async function loadPostponedDates(sb: any, keys: string[]): Promise<Record<strin
 }
 
 // ========== Linge : champs quantités ==========
-const LAUNDRY_FIELDS = [
-  "pillowcases", "bed_sheets", "duvet_covers",
-  "small_towels", "face_towels", "large_towels", "bath_mats",
-] as const;
+// LAUNDRY_FIELDS vit dans mgr_planning_rules.ts (source unique, lue aussi par mgr.planning).
 
 // Retourne {values} ou {error}. allowNegative est vrai uniquement pour les
 // ajustements d'inventaire, où une correction peut ramener un solde vers le bas.
@@ -883,6 +918,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["insp.setFixSchedule", "POST"],
   // ===== App manager /manager/ (spec 2026-10-09) =====
   ["mgr.today", "GET"], ["mgr.problems", "GET"], ["mgr.problem.get", "GET"], ["mgr.problem.act", "POST"],
+  ["mgr.planning", "GET"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1460,6 +1496,26 @@ Deno.serve(async (req: Request) => {
       return jsonResp(r.body, r.status);
     }
 
+    // Planning : la semaine de menages en un appel, lecture seule. Les gestes
+    // passent par les actions existantes (assignCleaner, setDone, setCancelled,
+    // setPostponed, saveLaundryCount, add/update/deleteExtraCleaning).
+    if (action === "mgr.planning") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const today = todayDubai();
+      const ps = parsePlanningStart(url.searchParams.get("start"), today);
+      if (!ps.ok) return jsonResp({ error: ps.error }, 400);
+      const r = await mgrPlanning(sb, {
+        start: ps.start, today, nowMs: Date.now(), me: me!,
+        loadCheckouts: async (s, e) => {
+          const p = await loadCheckoutsCached(sb, s, e, false);
+          return { reservations: Array.isArray(p?.reservations) ? p.reservations : [], cachedAt: p?.cachedAt ?? null };
+        },
+      });
+      return jsonResp(r.body, r.status);
+    }
+
     // ==================== INSPECTIONS ====================
     // Recap du job Telegram : serveur seul (X-Server-Secret verifie plus haut), sans session.
     if (action === "insp.recap") return jsonResp(await inspRecap(sb, todayDubai()));
@@ -1518,36 +1574,7 @@ Deno.serve(async (req: Request) => {
       if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
         return jsonResp({ error: "startDate and endDate must be YYYY-MM-DD" }, 400);
       }
-      // Server-side stale-while-revalidate: the Hostaway pagination is the slow
-      // path (~5-10s on month ranges). Serve a recent snapshot instantly and
-      // revalidate in background; only fetch synchronously when too old.
-      const cacheKey = "checkouts:" + startDate + "_" + endDate;
-      if (url.searchParams.get("fresh") !== "1") {
-        try {
-          const { data: row } = await sb.from("proxy_cache").select("payload, updated_at").eq("key", cacheKey).maybeSingle();
-          if (row && row.payload) {
-            const age = Date.now() - new Date(row.updated_at).getTime();
-            if (age < CHECKOUTS_STALE_MS) {
-              if (age > CHECKOUTS_FRESH_MS) {
-                const revalidate = buildCheckoutsPayload(sb, startDate, endDate)
-                  .then((payload) => sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() }))
-                  .catch((e) => console.error("[hostaway-proxy] checkouts revalidate failed:", e));
-                try { (globalThis as any).EdgeRuntime?.waitUntil?.(revalidate); } catch (_e) { /* best effort */ }
-              }
-              return jsonResp({ ...row.payload, cachedAt: row.updated_at });
-            }
-          }
-        } catch (e) {
-          console.error("[hostaway-proxy] proxy_cache read failed:", e);
-        }
-      }
-      const payload = await buildCheckoutsPayload(sb, startDate, endDate);
-      try {
-        await sb.from("proxy_cache").upsert({ key: cacheKey, payload, updated_at: new Date().toISOString() });
-      } catch (e) {
-        console.error("[hostaway-proxy] proxy_cache write failed:", e);
-      }
-      return jsonResp(payload);
+      return jsonResp(await loadCheckoutsCached(sb, startDate, endDate, url.searchParams.get("fresh") === "1"));
     }
 
     // ==================== SYNC LISTINGS ====================
