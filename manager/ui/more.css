@@ -158,3 +158,14 @@ a.hr-row:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .hr-form{display:flex;flex-direction:column;gap:var(--s3);padding:var(--s3) var(--s4) var(--s4);border-top:1px solid var(--line)}
 .hr-note{min-height:88px;font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:10px;padding:8px 10px;width:100%;min-width:0;resize:vertical}
 .sig-pad{display:block;width:100%;max-width:640px;aspect-ratio:640/280;height:auto;background:#fff;border:1px dashed var(--line-2);border-radius:var(--r-md);touch-action:none;cursor:crosshair}
+/* HR : fiche employe (soldes, historique, remuneration, panneau document). */
+.hr-stats{display:flex;flex-direction:column;padding:0 var(--s4) var(--s3)}
+.hr-stat{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);padding:var(--s2) 0;border-top:1px solid var(--line);font-size:16px;min-width:0}
+.hr-stat:first-child{border-top:0}
+.hr-stat span{color:var(--ink-2);overflow-wrap:anywhere}
+.hr-stat b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.hr-past{margin:0;padding:var(--s3) var(--s3) var(--s1);font-size:16px;font-weight:600;color:var(--ink-2);border-top:1px solid var(--line)}
+.hr-msg{margin:0;padding:var(--s3) var(--s4) var(--s4);font-size:16px;color:var(--ink-2)}
+.hr-err.pad{padding:var(--s3) var(--s4) 0}
+.hr-sheet-form{display:flex;flex-direction:column;gap:var(--s3)}
+.hr-form .tm-fl .hr-note{min-height:88px}

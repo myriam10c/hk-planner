@@ -5,16 +5,16 @@
 // Ecritures : hrDecideLeave (proprietaire ; Approve exige la signature du manager),
 // hrSaveHoliday, hrDeleteHoliday (proprietaire), hrLeaveForm pour le formulaire PDF.
 // Le serveur reste juge : les boutons proprietaire sont seulement masques si isOwner est faux.
-// La fiche employe (#/more/hr/<id>) arrive en Task 2 ; d'ici la, l'identifiant affiche la vue d'ensemble.
+// La fiche employe (#/more/hr/<id>) vit dans more-hr-detail.js, chargee a la demande.
 import { get, post } from '/manager/api.js';
 import { closeSheet, esc, I, openSheet, sheetBusy, sheetError, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { askSignature } from '/manager/ui/signature.js';
 import { HR_DOC_TYPES, HR_LEAVE_TYPES, accruedAnnualDays, daysUntil, hrUpcomingHolidays, rangesOverlap } from '/manager/hr-rules.js';
 
 const ROLE_LABEL = { manager: 'Manager', cleaner: 'Cleaner', maintenance: 'Maintenance', subcontractor: 'Subcontractor' };
-const typeLabel = (k) => { const t = HR_LEAVE_TYPES.find((x) => x.key === k); return t ? t.label : String(k || ''); };
-const docLabel = (k) => { const t = HR_DOC_TYPES.find((x) => x.key === k); return t ? t.label : String(k || ''); };
-const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+export const typeLabel = (k) => { const t = HR_LEAVE_TYPES.find((x) => x.key === k); return t ? t.label : String(k || ''); };
+export const docLabel = (k) => { const t = HR_DOC_TYPES.find((x) => x.key === k); return t ? t.label : String(k || ''); };
+export const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
 const nextDay = (d) => new Date(Date.parse(d + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
 
 function header() {
@@ -22,19 +22,31 @@ function header() {
     + '<h1>HR and leave</h1></div></header>';
 }
 
-const sec = (key, title, meta, body) => '<section class="card hr-sec" data-hr-sec="' + key + '">'
+export const sec = (key, title, meta, body) => '<section class="card hr-sec" data-hr-sec="' + key + '">'
   + '<div class="sec-head"><h2>' + esc(title) + '</h2>' + (meta !== '' ? '<span class="meta">' + esc(meta) + '</span>' : '') + '</div>'
   + body + '</section>';
 
-export async function renderHr(ctx) {
-  const main = ctx.main;
-  const st = { data: null, team: [], busy: new Set(), errs: new Map(), formBusy: false, formErr: '', sheet: null, sheetBusy: false };
+export const head = (title, sub) => '<div class="sheet-h"><div><h2 id="sheetTitle">' + esc(title) + '</h2>'
+  + (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') + '</div>'
+  + '<button class="iconbtn x" type="button" data-close aria-label="Close">' + I.close + '</button></div>';
 
-  function handleAccess(e) {
+// Session expiree : retour a l'accueil ; session PIN seule : ecran de connexion par email.
+export function accessHandler(ctx) {
+  return (e) => {
     if (e && e.kind === 'auth') { location.replace('/'); return true; }
     if (e && e.kind === 'forbidden' && e.message === 'email sign-in required') { ctx.emailRequired(); return true; }
     return false;
+  };
+}
+
+export async function renderHr(ctx, id) {
+  if (id) {
+    const { renderHrDetail } = await import('/manager/screens/more-hr-detail.js');
+    return renderHrDetail(ctx, id);
   }
+  const main = ctx.main;
+  const st = { data: null, team: [], busy: new Set(), errs: new Map(), formBusy: false, formErr: '', sheet: null, sheetBusy: false };
+  const handleAccess = accessHandler(ctx);
 
   const nameOf = (id) => {
     const c = st.team.find((x) => String(x.id) === String(id));
@@ -194,10 +206,6 @@ export async function renderHr(ctx) {
     if (!sig || !ctx.isCurrent()) return;
     decide(id, { id: Number(id), decision: 'approved', note: '', manager_signature: sig }, 'Leave approved');
   }
-
-  const head = (title, sub) => '<div class="sheet-h"><div><h2 id="sheetTitle">' + esc(title) + '</h2>'
-    + (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') + '</div>'
-    + '<button class="iconbtn x" type="button" data-close aria-label="Close">' + I.close + '</button></div>';
 
   function onReject(id) {
     const r = (st.data.pending || []).find((x) => String(x.id) === id);
