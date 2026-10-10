@@ -3053,10 +3053,15 @@ async function saveVendor(){
   const specialty=document.getElementById('vSpecialty').value;
   const rate=document.getElementById('vRate').value;
   if(!name){toast('Enter name','error');return;}
-  await api('saveVendor',{body:{name,phone,email,specialty,hourly_rate:rate?Number(rate):null}});
+  try{ await apiWrite('saveVendor',{body:{name,phone,email,specialty,hourly_rate:rate?Number(rate):null}}); }
+  catch(err){ toast((err&&err.message)||'Could not save','error'); return; }
   toast(t('saved'),'success');await refreshMaintenance();
 }
-async function deleteVendor(id){await api('deleteVendor',{body:{id}});toast(t('removed'),'success');await refreshMaintenance();}
+async function deleteVendor(id){
+  try{ await apiWrite('deleteVendor',{body:{id}}); }
+  catch(err){ toast((err&&err.message)||'Could not remove','error'); return; }
+  toast(t('removed'),'success');await refreshMaintenance();
+}
 // Equipment functions
 async function saveEquipmentItem(){
   const name=document.getElementById('eqName').value.trim();
@@ -3068,7 +3073,8 @@ async function saveEquipmentItem(){
   const interval=document.getElementById('eqInterval').value;
   const condition=document.getElementById('eqCondition').value;
   if(!name||!listingId){toast('Name and property required','error');return;}
-  await api('saveEquipment',{body:{listing_id:listingId,name,category,brand,model,serial_number:serial,service_interval_days:Number(interval)||180,condition}});
+  try{ await apiWrite('saveEquipment',{body:{listing_id:listingId,name,category,brand,model,serial_number:serial,service_interval_days:Number(interval)||180,condition}}); }
+  catch(err){ toast((err&&err.message)||'Could not save','error'); return; }
   toast(t('saved'),'success');await refreshMaintenance();
 }
 // Preventive maintenance
@@ -3079,11 +3085,13 @@ async function savePreventive(){
   const freq=document.getElementById('pmFreq').value;
   const vendorId=document.getElementById('pmVendor').value;
   if(!name){toast('Enter task name','error');return;}
-  await api('savePreventiveMaintenance',{body:{task_name:name,listing_id:listingId||null,category,frequency_days:Number(freq)||90,assigned_vendor_id:vendorId?Number(vendorId):null}});
+  try{ await apiWrite('savePreventiveMaintenance',{body:{task_name:name,listing_id:listingId||null,category,frequency_days:Number(freq)||90,assigned_vendor_id:vendorId?Number(vendorId):null}}); }
+  catch(err){ toast((err&&err.message)||'Could not save','error'); return; }
   toast(t('saved'),'success');await refreshMaintenance();
 }
 async function completePreventive(id){
-  await api('completePreventive',{body:{id,actor:cleanerMode?cleanerMode.name:'Manager'}});
+  try{ await apiWrite('completePreventive',{body:{id,actor:cleanerMode?cleanerMode.name:'Manager'}}); }
+  catch(err){ toast((err&&err.message)||'Could not complete','error'); return; }
   toast('Completed ✓','success');confetti();await refreshMaintenance();
 }
 // SLA helper

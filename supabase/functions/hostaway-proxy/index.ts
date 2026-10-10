@@ -42,6 +42,7 @@ import { mgrPlanning } from "./mgr_planning.ts";
 import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
 import { dashboardKpis } from "./kpis.ts";
 import { mgrPeople, parsePeopleMonth } from "./mgr_people.ts";
+import { mgrSetup, setupAccess } from "./mgr_setup.ts";
 import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
 import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
 import { buildDisputeUpdate, disputeAccess } from "./disputes.ts";
@@ -915,6 +916,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["mgr.settings", "GET"], ["mgr.settings.set", "POST"], ["mgr.autopilot.run", "POST"],
   ["mgr.team", "GET"], ["mgr.people", "GET"],
   ["mgr.apartments", "GET"], ["mgr.apartment", "GET"],
+  ["mgr.setup", "GET"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1544,6 +1546,21 @@ Deno.serve(async (req: Request) => {
       } catch (e) {
         console.error("[mgr.people]", e);
         return jsonResp({ error: "Stats are unavailable right now. Try again." }, 503);
+      }
+    }
+
+    // Configuration maintenance (More > Maintenance setup) : lecture seule, couts du mois.
+    if (action === "mgr.setup") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const mo = parsePeopleMonth(url.searchParams.get("month"), todayDubai());
+      if (!mo.ok) return jsonResp({ error: mo.error }, 400);
+      try {
+        return jsonResp(await mgrSetup(sb, mo.month));
+      } catch (e) {
+        console.error("[mgr.setup]", e);
+        return jsonResp({ error: "Maintenance setup is unavailable right now. Try again." }, 503);
       }
     }
 
@@ -2757,6 +2774,9 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { id, name, phone, email, specialty, hourly_rate, notes } = body;
       if (!name || !specialty) return jsonResp({ error: "name and specialty required" }, 400);
+      // Session manager exigee AVANT toute ecriture (mgr_setup.ts).
+      const setupRefusal = setupAccess(await currentUser(sb, req));
+      if (setupRefusal) return jsonResp({ error: setupRefusal.error }, setupRefusal.status);
       if (id) {
         const { error } = await sb.from("vendors").update({ name, phone, email, specialty, hourly_rate, notes }).eq("id", id);
         if (error) throw error;
@@ -2769,6 +2789,9 @@ Deno.serve(async (req: Request) => {
     if (action === "deleteVendor" && req.method === "POST") {
       const body = await req.json();
       if (!body.id) return jsonResp({ error: "id required" }, 400);
+      // Session manager exigee AVANT toute ecriture (mgr_setup.ts).
+      const setupRefusal = setupAccess(await currentUser(sb, req));
+      if (setupRefusal) return jsonResp({ error: setupRefusal.error }, setupRefusal.status);
       const { error } = await sb.from("vendors").update({ is_active: false }).eq("id", body.id);
       if (error) throw error;
       return jsonResp({ status: "success" });
@@ -2787,6 +2810,9 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { id, listing_id, name, category, brand, model, serial_number, install_date, warranty_until, service_interval_days, condition, notes } = body;
       if (!name || !listing_id) return jsonResp({ error: "name and listing_id required" }, 400);
+      // Session manager exigee AVANT toute ecriture (mgr_setup.ts).
+      const setupRefusal = setupAccess(await currentUser(sb, req));
+      if (setupRefusal) return jsonResp({ error: setupRefusal.error }, setupRefusal.status);
       const nextService = install_date ? new Date(new Date(install_date).getTime() + (service_interval_days || 180) * 86400000).toISOString().split('T')[0] : null;
       if (id) {
         const { error } = await sb.from("equipment").update({ listing_id, name, category, brand, model, serial_number, install_date, warranty_until, service_interval_days, condition, notes, next_service: nextService }).eq("id", id);
@@ -2816,9 +2842,13 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { ticket_id, listing_id, category, description, amount, vendor_id, receipt_photo, date } = body;
       if (!amount) return jsonResp({ error: "amount required" }, 400);
+      // Session manager exigee AVANT toute ecriture (mgr_setup.ts).
+      const setupRefusal = setupAccess(await currentUser(sb, req));
+      if (setupRefusal) return jsonResp({ error: setupRefusal.error }, setupRefusal.status);
       const { data: costRow, error } = await sb.from("maintenance_costs").insert({
         ticket_id, listing_id, category, description, amount, vendor_id,
-        date: date || new Date().toISOString().split('T')[0],
+        // Jour de Dubai par defaut (pas de colonne auteur dans maintenance_costs).
+        date: date || todayDubai(),
       }).select().single();
       if (error) throw error;
       if (receipt_photo && costRow) {
@@ -2841,6 +2871,9 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { id, listing_id, equipment_id, task_name, description, category, frequency_days, assigned_vendor_id, estimated_cost } = body;
       if (!task_name) return jsonResp({ error: "task_name required" }, 400);
+      // Session manager exigee AVANT toute ecriture (mgr_setup.ts).
+      const setupRefusal = setupAccess(await currentUser(sb, req));
+      if (setupRefusal) return jsonResp({ error: setupRefusal.error }, setupRefusal.status);
       const nextDue = new Date(); nextDue.setDate(nextDue.getDate() + (frequency_days || 90));
       if (id) {
         const { error } = await sb.from("preventive_maintenance").update({ listing_id, equipment_id, task_name, description, category, frequency_days, assigned_vendor_id, estimated_cost }).eq("id", id);
@@ -2855,7 +2888,11 @@ Deno.serve(async (req: Request) => {
       const body = await req.json();
       const { id, actual_cost, notes } = body;
       if (!id) return jsonResp({ error: "id required" }, 400);
-      const actor = sessionActor(await currentUser(sb, req), body.actor);
+      // Session manager exigee AVANT toute ecriture (mgr_setup.ts).
+      const pmMe = await currentUser(sb, req);
+      const setupRefusal = setupAccess(pmMe);
+      if (setupRefusal) return jsonResp({ error: setupRefusal.error }, setupRefusal.status);
+      const actor = sessionActor(pmMe, body.actor);
       const { data: pm } = await sb.from("preventive_maintenance").select("*").eq("id", id).single();
       if (!pm) return jsonResp({ error: "Not found" }, 404);
       const nextDue = new Date(); nextDue.setDate(nextDue.getDate() + (pm.frequency_days || 90));
