@@ -49,7 +49,8 @@ export function detailSheet(d, ro) {
     + (p.assignee ? esc(who(p.assignee)) : '<span class="st bad">Nobody</span>') + '</dd>'
     + '<dt>Due</dt><dd' + (p.overdue ? ' class="st bad"' : '') + '>' + esc(p.due ? (p.overdue ? 'Overdue since ' : '') + p.due : 'No date') + '</dd>'
     + (d.reportedBy ? '<dt>Reported by</dt><dd>' + esc(d.reportedBy) + '</dd>' : '')
-    + (d.category ? '<dt>Category</dt><dd>' + esc(d.category) + '</dd>' : '') + '</dl>';
+    + (d.category ? '<dt>Category</dt><dd>' + esc(d.category) + '</dd>' : '')
+    + (p.listingId ? '<dt>Apartment</dt><dd><a class="aplink" href="#/more/apartment/' + encodeURIComponent(p.listingId) + '">Apartment sheet</a></dd>' : '') + '</dl>';
   if (d.description) b += '<div class="blk"><h3>Description</h3><p class="pdesc">' + esc(d.description) + '</p></div>';
   if (d.photos.length) {
     b += '<div class="blk"><h3>Photos</h3><div class="pphotos">' + d.photos.map((ph) => '<a href="' + esc(ph.url)

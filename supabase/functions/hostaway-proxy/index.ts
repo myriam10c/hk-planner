@@ -43,6 +43,7 @@ import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
 import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
 import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
 import { buildDisputeUpdate, disputeAccess } from "./disputes.ts";
+import { healthScore, mgrApartment, mgrApartments, readHealthInputs } from "./mgr_apartment.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -911,6 +912,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["mgr.planning", "GET"],
   ["mgr.settings", "GET"], ["mgr.settings.set", "POST"], ["mgr.autopilot.run", "POST"],
   ["mgr.team", "GET"],
+  ["mgr.apartments", "GET"], ["mgr.apartment", "GET"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1527,6 +1529,25 @@ Deno.serve(async (req: Request) => {
       const acc = mgrAccess(bearerToken(req) !== null, me);
       if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
       return jsonResp(await mgrTeam(sb));
+    }
+
+    // Fiche logement (More > Apartment) : liste et fiche, lecture seule.
+    if (action === "mgr.apartments" || action === "mgr.apartment") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      if (action === "mgr.apartments") {
+        const r = await mgrApartments(sb);
+        return jsonResp(r.body, r.status);
+      }
+      const r = await mgrApartment(sb, {
+        listingId: url.searchParams.get("listingId") ?? "", today: todayDubai(), nowMs: Date.now(), me: me!, req,
+        loadCheckouts: async (s, e) => {
+          const p = await loadCheckoutsCached(sb, s, e, false);
+          return { reservations: Array.isArray(p?.reservations) ? p.reservations : [], cachedAt: p?.cachedAt ?? null };
+        },
+      });
+      return jsonResp(r.body, r.status);
     }
 
     // ==================== INSPECTIONS ====================
@@ -2840,29 +2861,10 @@ Deno.serve(async (req: Request) => {
     if (action === "getPropertyHealth") {
       const listingId = url.searchParams.get("listingId");
       if (!listingId) return jsonResp({ error: "listingId required" }, 400);
-      const [ticketsRes, equipRes, costsRes, feedbackRes] = await Promise.all([
-        sb.from("maintenance_tickets").select("id, priority, status, created_at").eq("listing_id", listingId),
-        sb.from("equipment").select("id, condition, next_service").eq("listing_id", listingId),
-        sb.from("maintenance_costs").select("amount").eq("listing_id", listingId),
-        sb.from("guest_feedback").select("rating").eq("listing_id", listingId),
-      ]);
-      const tickets = ticketsRes.data || [];
-      const equip = equipRes.data || [];
-      const costs = costsRes.data || [];
-      const feedback = feedbackRes.data || [];
-      const openTickets = tickets.filter((t: any) => ['open','assigned','in_progress','waiting_parts'].includes(t.status));
-      const urgentOpen = openTickets.filter((t: any) => t.priority === 'urgent' || t.priority === 'high');
-      const totalCost = costs.reduce((s: number, c: any) => s + Number(c.amount), 0);
-      const avgRating = feedback.length > 0 ? feedback.reduce((s: number, f: any) => s + f.rating, 0) / feedback.length : 0;
-      const overdueEquip = equip.filter((e: any) => e.next_service && e.next_service < new Date().toISOString().split('T')[0]);
-      // Score: 100 base, deduct for issues
-      let score = 100;
-      score -= openTickets.length * 5;
-      score -= urgentOpen.length * 10;
-      score -= overdueEquip.length * 8;
-      if (avgRating > 0 && avgRating < 4) score -= (4 - avgRating) * 10;
-      score = Math.max(0, Math.min(100, score));
-      return jsonResp({ status: "success", health: { score, openTickets: openTickets.length, urgentOpen: urgentOpen.length, totalEquipment: equip.length, overdueService: overdueEquip.length, totalCost, avgRating: Math.round(avgRating * 10) / 10, totalFeedback: feedback.length } });
+      // Formule unique (mgr_apartment.ts), aussi lue par la fiche logement de /manager/.
+      const hin = await readHealthInputs(sb, listingId);
+      const h = healthScore({ tickets: hin.tickets, equipment: hin.equipment, costs: hin.costs, feedback: hin.feedback, today: todayDubai() });
+      return jsonResp({ status: "success", health: { score: h.score, openTickets: h.openTickets, urgentOpen: h.urgentOpen, totalEquipment: h.totalEquipment, overdueService: h.overdueService, totalCost: h.totalCost, avgRating: h.avgRating, totalFeedback: h.totalFeedback } });
     }
 
     // ==================== TICKET COMMENTS ====================

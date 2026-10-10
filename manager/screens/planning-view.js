@@ -137,6 +137,7 @@ export function jobSheet(d, j, ro) {
     if (j.extra.notes) kv('Notes', esc(j.extra.notes));
   }
   kv('Linen', j.laundry ? esc(laundryLine(j.laundry)) : 'Not counted');
+  if (j.listingId) kv('Apartment', '<a class="aplink" href="#/more/apartment/' + encodeURIComponent(j.listingId) + '">Apartment sheet</a>');
   const status = '<div class="statusbox ' + esc(j.tone) + '"><span class="bar ' + esc(j.tone) + '"></span><div><span class="st ' + esc(j.tone) + '">' + esc(j.word) + '</span></div></div>';
   let foot;
   if (ro) foot = roFoot();
