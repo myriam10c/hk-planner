@@ -108,10 +108,11 @@ test('reessai apres un delai depasse : meme cle pour le meme geste, nouvelle cle
   expect(a[2].idem).not.toBe(a[0].idem);
 });
 
-test('reessai apres coupure reseau ou 409 Still processing : meme cle ; autre texte ou autre erreur : cle neuve', async ({ page }) => {
+test('reessai apres coupure reseau, 409 Still processing ou 5xx : meme cle ; autre texte ou autre erreur : cle neuve', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), TODAY(), DETAIL(),
     { ...ACT(), fail: true, once: true }, { ...ACT(409, { error: 'Still processing. Retry.' }), once: true },
-    { ...ACT(500, { error: 'Internal error' }), once: true }, ACT()], { email: true, clock: NOW });
+    { ...ACT(500, { error: 'Internal error' }), once: true }, { ...ACT(409, { error: 'Problem already closed.' }), once: true },
+    ACT()], { email: true, clock: NOW });
   await openGas(page);
   const sheet = page.locator('#sheet');
   const comment = sheet.getByRole('button', { name: 'Comment', exact: true });
@@ -123,11 +124,13 @@ test('reessai apres coupure reseau ou 409 Still processing : meme cle ; autre te
   await comment.click();
   await expect(sheet.locator('.sheet-err')).toHaveText('Internal error');
   await comment.click();
+  await expect(sheet.locator('.sheet-err')).toHaveText('Problem already closed.');
+  await comment.click();
   await expect(page.locator('#toast')).toContainText('Comment added');
   const a = await acts(page);
-  expect(a.map((x) => x.text)).toEqual(['Called again', 'Called again', 'Called again', 'Called again']);
-  expect([a[1].idem, a[2].idem]).toEqual([a[0].idem, a[0].idem]);
-  expect(a[3].idem).not.toBe(a[0].idem);
+  expect(a.map((x) => x.text)).toEqual(['Called again', 'Called again', 'Called again', 'Called again', 'Called again']);
+  expect([a[1].idem, a[2].idem, a[3].idem]).toEqual([a[0].idem, a[0].idem, a[0].idem]);
+  expect(a[4].idem).not.toBe(a[0].idem);
 });
 
 test('reessai avec un autre texte apres une coupure : cle neuve', async ({ page }) => {

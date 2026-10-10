@@ -9,10 +9,11 @@ import { assignSheet, detailSheet, errorSheet, loadingSheet, scheduleSheet } fro
 const RO_LINE = 'Reconnect to make changes.';
 const STILL = 'Still processing. Retry.';
 
-// Echec dont l'issue cote serveur est inconnue : delai depasse, reseau coupe, ou
+// Echec dont l'issue cote serveur est inconnue : delai depasse, reseau coupe, 5xx, ou
 // cle encore en cours. Le meme geste rejoue alors la meme cle (pas de doublon).
 function uncertain(e) {
-  return !!e && (e.kind === 'timeout' || e.kind === 'offline' || (e.status === 409 && e.message === STILL));
+  return !!e && (e.kind === 'timeout' || e.kind === 'offline' || (e.status === 409 && e.message === STILL)
+    || (e.kind === 'server' && e.status >= 500));
 }
 
 export function createProblemPanel(opts) {

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { bootMgr, MANAGER, me } from './helpers';
-import { IDEM, isMobile, noIdem, OK, openJob, PLAN, PNOW, writes } from './planning-fixtures';
+import { bootMgr, fetchLog, MANAGER, me } from './helpers';
+import { IDEM, isMobile, noIdem, OK, openJob, PLAN, planningBody, PNOW, writes } from './planning-fixtures';
 
 const HASH = '#/planning';
 
@@ -55,4 +55,50 @@ test('Edit extra puis Delete', async ({ page }, info) => {
   await sh.getByRole('button', { name: 'Delete extra' }).click();
   await expect(page.locator('#toast')).toContainText('Extra cleaning deleted');
   expect(noIdem(await writes(page, 'deleteExtraCleaning'))).toEqual([{ id: 31 }]);
+});
+
+test('Edit extra : l extra disparu au rechargement, Save n en cree pas un nouveau', async ({ page }, info) => {
+  const gone = planningBody();
+  gone.jobs = gone.jobs.filter((j: any) => j.key !== 'extra_2026-10-09_mabc');
+  await bootMgr(page, [me(MANAGER), { ...PLAN(), once: true }, { ...PLAN(), once: true }, PLAN(gone),
+    { match: 'action=setDone', status: 200, body: OK },
+    { match: 'action=addExtraCleaning', status: 200, body: OK },
+    { match: 'action=updateExtraCleaning', status: 200, body: OK }], { email: true, hash: HASH, clock: PNOW });
+  const mobile = isMobile(info);
+  // Un geste sur un autre menage laisse un toast Undo.
+  await openJob(page, mobile, '2026-10-09_Di Fox', '2026-10-09');
+  const sh = page.locator('#sheet');
+  await sh.getByRole('button', { name: 'Mark done' }).click();
+  await expect(page.locator('#toast')).toContainText('marked done');
+  // Edition de l extra ouverte, puis l Undo recharge une semaine sans cet extra.
+  await openJob(page, mobile, 'extra_2026-10-09_mabc', '2026-10-09');
+  await sh.getByRole('button', { name: 'Edit extra' }).click();
+  await expect(sh.locator('h2')).toHaveText('Edit extra cleaning');
+  await page.locator('#toast [data-undo]').dispatchEvent('click');
+  await expect.poll(async () => (await fetchLog(page)).filter((l: any) => l.url.includes('action=mgr.planning')).length).toBe(3);
+  await expect(page.locator('.pj[data-job="extra_2026-10-09_mabc"]')).toHaveCount(0);
+  await sh.locator('#xPrice').fill('300');
+  await sh.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(sh.locator('.sheet-err')).toHaveText('This cleaning is no longer on the planning.');
+  expect(await writes(page, 'addExtraCleaning')).toEqual([]);
+  expect(await writes(page, 'updateExtraCleaning')).toEqual([]);
+});
+
+test('Add extra : reponse 500 puis reessai, meme cle (ecriture peut-etre faite)', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), PLAN(),
+    { match: 'action=addExtraCleaning', status: 500, body: { error: 'Internal error' }, once: true },
+    { match: 'action=addExtraCleaning', status: 200, body: OK }], { email: true, hash: HASH, clock: PNOW });
+  await page.getByRole('button', { name: 'Add extra' }).click();
+  const sh = page.locator('#sheet');
+  await sh.locator('#xListing').selectOption('L8');
+  await sh.locator('#xDate').fill('2026-10-10');
+  await sh.locator('#xPrice').fill('200');
+  await sh.getByRole('button', { name: 'Create extra' }).click();
+  await expect(sh.locator('.sheet-err')).toHaveText('Internal error');
+  await sh.getByRole('button', { name: 'Create extra' }).click();
+  await expect(page.locator('#toast')).toContainText('Extra cleaning added for Apt 808 · Tower H on Sat 10');
+  const w = await writes(page, 'addExtraCleaning');
+  expect(w.length).toBe(2);
+  expect(w[0].idem).toMatch(IDEM);
+  expect(w[1].idem).toBe(w[0].idem);
 });

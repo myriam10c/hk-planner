@@ -263,7 +263,9 @@ export async function renderPlanning(ctx) {
   ACT['x-save'] = (j) => {
     const r = extraBody();
     if (r.error) { sheetError(r.error); return; }
-    if (!j) {
+    // Creation decidee par le panneau lui-meme : un extra edite qui a disparu au
+    // rechargement ne doit jamais devenir un nouvel extra facture.
+    if (st.sheet && st.sheet.key === '__new') {
       const whoEl = document.getElementById('xWho');
       const who = whoEl ? whoEl.value : '';
       const l = st.data.listings.find((x) => x.id === r.body.listing_id) || {};
@@ -271,7 +273,7 @@ export async function renderPlanning(ctx) {
         'Extra cleaning added for ' + (placeLabel(l) || 'the apartment') + ' on ' + dayShort(r.body.cleaning_date));
       return;
     }
-    if (!j.extra) return;
+    if (!j || !j.extra) { sheetError('This cleaning is no longer on the planning.'); return; }
     write(j.key, 'updateExtraCleaning', { id: j.extra.id, ...r.body }, 'Extra cleaning saved for ' + placeLabel(j));
   };
   ACT['x-delete'] = (j) => { if (j && j.extra) show(j.key, 'delete'); };
