@@ -62,11 +62,3 @@ Deno.test("kpis: 7 jours calcules depuis le jour Dubai injecte (01:00 Dubai = ve
   const by = Object.fromEntries(k.last7DaysCompletions.map((d: any) => [d.date, d.completions]));
   assertEquals([by["2026-10-09"], by["2026-10-10"], by["2026-10-11"]], [1, 1, 0]);
 });
-
-Deno.test("kpis: scopeMonth ne garde que les chronos et menages du mois Dubai", async () => {
-  // r3 (30/09 21:00Z = 01/10 01:00 Dubai) compte en octobre, pas en septembre.
-  const oct = await dashboardKpis(seed(), "2026-10", "2026-10-11", "2026-10");
-  assertEquals(oct.cleanerPerformance.map((p: any) => p.totalCleanings), [2, 2]);
-  const sep = await dashboardKpis(seed(), "2026-09", "2026-10-11", "2026-09");
-  assertEquals(sep.cleanerPerformance.map((p: any) => [p.totalCleanings, p.timerCount]), [[0, 0], [0, 0]]);
-});

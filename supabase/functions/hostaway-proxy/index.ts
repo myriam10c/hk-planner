@@ -1539,7 +1539,12 @@ Deno.serve(async (req: Request) => {
       const today = todayDubai();
       const mo = parsePeopleMonth(url.searchParams.get("month"), today);
       if (!mo.ok) return jsonResp({ error: mo.error }, 400);
-      return jsonResp(await mgrPeople(sb, mo.month, today));
+      try {
+        return jsonResp(await mgrPeople(sb, mo.month));
+      } catch (e) {
+        console.error("[mgr.people]", e);
+        return jsonResp({ error: "Stats are unavailable right now. Try again." }, 503);
+      }
     }
 
     // Fiche logement (More > Apartment) : liste et fiche, lecture seule.

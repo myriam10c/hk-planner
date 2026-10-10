@@ -81,7 +81,8 @@ test('mois : precedent recharge avec month=, suivant desactive au mois courant',
   await page.getByRole('button', { name: 'Previous month' }).click();
   await expect(page.locator('.pp-month-l')).toHaveText('September 2026');
   await expect(page.locator('[data-person="1"]')).toContainText('20');
-  await expect(page.locator('[data-person="2"]')).toContainText('No timer'); // sans ligne de perf ce mois : pas de chiffre
+  await expect(page.locator('[data-person="2"]').getByText('Not available')).toHaveCount(4); // sans ligne de perf ce mois
+  await expect(page.locator('[data-person="2"]').getByText('No timer')).toHaveCount(0);
   const urls = (await fetchLog(page)).map((l) => l.url).filter((u) => u.includes('mgr.people'));
   expect(urls[0]).not.toContain('month=');
   expect(urls[1]).toContain('month=2026-09');
@@ -137,3 +138,11 @@ for (const scheme of ['light', 'dark'] as const) {
     });
   });
 }
+
+test('stats indisponibles (503) : message du serveur et Retry, pas de zeros', async ({ page }) => {
+  await boot(page, [{ match: 'action=mgr.people', status: 503, body: { error: 'Stats are unavailable right now. Try again.' }, once: true }, ...READS]);
+  await expect(page.locator('main').getByText('Stats are unavailable right now. Try again.')).toBeVisible();
+  await expect(page.locator('[data-person]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.locator('[data-person="1"]')).toBeVisible();
+});

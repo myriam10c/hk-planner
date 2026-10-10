@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import { mgrAccess } from "./mgr_rules.ts";
-import { mgrPeople, parsePeopleMonth } from "./mgr_people.ts";
+import { dubaiMonthBounds, mgrPeople, parsePeopleMonth } from "./mgr_people.ts";
 
 const details = (n: number) => Array.from({ length: n }, (_, i) => ({
   cleaning_date: `2026-09-${String(i + 1).padStart(2, "0")}`, listing_id: i % 2 ? 22 : 11, guest: `G${i}`, cleanliness: 9,
@@ -37,7 +37,7 @@ const seed = () => fakeDb({
 });
 
 Deno.test("mgr.people: forme, tri, managers exclus, inactifs nommes", async () => {
-  const r = await mgrPeople(seed(), "2026-10", "2026-10-11");
+  const r = await mgrPeople(seed(), "2026-10");
   assertEquals(r.month, "2026-10");
   assertEquals([r.ratings.computedAt, r.ratings.syncedAt, r.ratings.unmatched],
     ["2026-10-10T20:00:00Z", "2026-10-10T20:05:00Z", 3]);
@@ -52,7 +52,7 @@ Deno.test("mgr.people: forme, tri, managers exclus, inactifs nommes", async () =
 });
 
 Deno.test("mgr.people: pas assez de donnees = moyennes null, recent 10 trie desc avec nom de logement", async () => {
-  const r = await mgrPeople(seed(), "2026-10", "2026-10-11");
+  const r = await mgrPeople(seed(), "2026-10");
   const amir = r.ratings.people.find((p) => p.id === 2)!;
   assertEquals([amir.enoughData, amir.avgAll, amir.avg90, amir.count], [false, null, null, 2]);
   const z = r.ratings.people.find((p) => p.id === 1)!;
@@ -62,24 +62,24 @@ Deno.test("mgr.people: pas assez de donnees = moyennes null, recent 10 trie desc
 });
 
 Deno.test("mgr.people: performance du mois (minutes, null sans chrono)", async () => {
-  const r = await mgrPeople(seed(), "2026-10", "2026-10-11");
+  const r = await mgrPeople(seed(), "2026-10");
   assertEquals(r.performance.map((p) => p.id), [1, 2]);
   assertEquals(r.performance[0], { id: 1, name: "Zara", role: "cleaner", cleanings: 2, avgMinutes: 50, fastest: 40, slowest: 60, timed: 2 });
   assertEquals(r.performance[1], { id: 2, name: "Amir", role: "cleaner", cleanings: 1, avgMinutes: null, fastest: null, slowest: null, timed: 0 });
-  const sep = await mgrPeople(seed(), "2026-09", "2026-10-11");
+  const sep = await mgrPeople(seed(), "2026-09");
   assertEquals(sep.performance.map((p) => p.cleanings), [0, 0]);
 });
 
 Deno.test("mgr.people: sans snapshot de notes", async () => {
   const db = fakeDb({ cleaners: [{ id: 1, name: "Zara", color: "", role: "cleaner", is_active: true }] });
-  const r = await mgrPeople(db, "2026-10", "2026-10-11");
+  const r = await mgrPeople(db, "2026-10");
   assertEquals(r.ratings, { computedAt: null, syncedAt: null, unmatched: 0, people: [] });
 });
 
 Deno.test("mgr.people: erreur de lecture remontee", async () => {
   const db = seed();
   db.fail["cleaner_ratings_cache.select"] = { message: "boom" };
-  await assertRejects(() => mgrPeople(db, "2026-10", "2026-10-11"));
+  await assertRejects(() => mgrPeople(db, "2026-10"));
 });
 
 Deno.test("mgr.people: validation du mois", () => {
@@ -93,4 +93,53 @@ Deno.test("mgr.people: validation du mois", () => {
 Deno.test("mgr.people: acces manager seulement", () => {
   assert(!mgrAccess(false, null).ok);
   assert(!mgrAccess(true, { role: "cleaner" } as any).ok);
+});
+
+Deno.test("mgr.people: bornes UTC d'un mois de Dubai", () => {
+  assertEquals(dubaiMonthBounds("2026-10"), { from: "2026-09-30T20:00:00.000Z", to: "2026-10-31T20:00:00.000Z" });
+  assertEquals(dubaiMonthBounds("2026-12").to, "2026-12-31T20:00:00.000Z");
+});
+
+Deno.test("mgr.people: un mois de plus d'une page est lu en entier", async () => {
+  const timers: any[] = [];
+  const assignments: any[] = [];
+  const dones: any[] = [];
+  for (let i = 0; i < 2300; i++) {
+    const k = "k" + String(i).padStart(5, "0");
+    timers.push({ reservation_key: k, cleaner_id: 1, started_at: "2026-08-10T06:00:00Z", duration_minutes: 30 });
+    dones.push({ reservation_key: k, done: true, updated_at: "2026-08-10T07:00:00Z" });
+    assignments.push({ reservation_key: k, cleaner_id: 1 });
+  }
+  // Hors mois : ne doit pas compter.
+  timers.push({ reservation_key: "out", cleaner_id: 1, started_at: "2026-09-02T06:00:00Z", duration_minutes: 99 });
+  assignments.push({ reservation_key: "out", cleaner_id: 1 });
+  const db = fakeDb({
+    cleaners: [{ id: 1, name: "Zara", role: "cleaner", is_active: true }],
+    cleaning_timer: timers, menage_done: dones, cleaning_assignments: assignments,
+  }, { maxRows: 1000, honorOrder: true });
+  const r = await mgrPeople(db, "2026-08");
+  assertEquals(r.performance[0].cleanings, 2300);
+  assertEquals([r.performance[0].timed, r.performance[0].avgMinutes], [2300, 30]);
+});
+
+Deno.test("mgr.people: erreur de lecture des stats = exception, jamais des zeros", async () => {
+  for (const t of ["cleaning_timer.select", "menage_done.select", "cleaning_assignments.select"]) {
+    const db = seed();
+    db.fail[t] = { message: "boom" };
+    await assertRejects(() => mgrPeople(db, "2026-10"));
+  }
+});
+
+Deno.test("mgr.people: un cleaner inactif aujourd'hui garde ses chiffres du mois", async () => {
+  const db = seed();
+  // Bob (7, inactif) a travaille en octobre.
+  db.writes.length = 0;
+  await db.from("cleaning_assignments").insert({ reservation_key: "rb", cleaner_id: 7 });
+  await db.from("cleaning_timer").insert({ reservation_key: "rb", cleaner_id: 7, started_at: "2026-10-08T06:00:00Z", duration_minutes: 20 });
+  const r = await mgrPeople(db, "2026-10");
+  const bob = r.performance.find((p) => p.id === 7)!;
+  assertEquals([bob.name, bob.timed, bob.avgMinutes], ["Old Bob", 1, 20]);
+  // Sans activite ce mois-la, un inactif n'apparait pas.
+  const sep = await mgrPeople(seed(), "2026-09");
+  assert(!sep.performance.some((p) => p.id === 7));
 });

@@ -3,42 +3,9 @@
 // jour Dubai) : plus de date UTC de la machine pour les 7 derniers jours.
 import { plusDays } from "./v3.ts";
 
-const DUBAI_UTC_OFFSET_MS = 4 * 3600_000;
-// Mois (YYYY-MM) d'un horodatage ISO, lu en heure de Dubai.
-function dubaiMonthOf(iso: string): string {
-  const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? new Date(ms + DUBAI_UTC_OFFSET_MS).toISOString().slice(0, 7) : "";
-}
-
-export async function dashboardKpis(sb: any, month: string | null, today: string, scopeMonth?: string): Promise<any> {
-  // Tri par récence + limit : PostgREST clampe de toute façon à max-rows (1000 par
-  // défaut), donc sans ORDER BY la troncature jetterait des lignes arbitraires et
-  // fausserait les KPIs fenêtrés (7 jours / mois courant). Trié desc, le cap ne
-  // coupe que du vieux.
-  const [timerRes, assignRes, doneRes, cleanerRes, ticketRes] = await Promise.all([
-    sb.from("cleaning_timer").select("reservation_key, cleaner_id, started_at, finished_at, duration_minutes").not("duration_minutes", "is", null).order("started_at", { ascending: false }).limit(5000),
-    sb.from("cleaning_assignments").select("reservation_key, cleaner_id").order("assigned_at", { ascending: false }).limit(5000),
-    sb.from("menage_done").select("reservation_key, done, updated_at").order("updated_at", { ascending: false }).limit(5000),
-    sb.from("cleaners").select("id, name, color, role").eq("is_active", true).limit(200),
-    sb.from("maintenance_tickets").select("id, status, priority, category, created_at, resolved_at").order("created_at", { ascending: false }).limit(5000),
-  ]);
-  let timers = timerRes.data || [];
-  const assigns = assignRes.data || [];
-  let dones = doneRes.data || [];
-  const clnrs = cleanerRes.data || [];
-  const tickets = ticketRes.data || [];
-  // Option reservee a mgr.people : ne garder que les chronos et menages du mois (jour Dubai).
-  // Sans scopeMonth (handler legacy) rien n'est filtre, la reponse reste identique.
-  if (scopeMonth) {
-    timers = timers.filter((t: any) => t.started_at && dubaiMonthOf(t.started_at) === scopeMonth);
-    dones = dones.filter((d: any) => d.updated_at && dubaiMonthOf(d.updated_at) === scopeMonth);
-  }
-
-  // Global avg cleaning time
-  const durations = timers.map((t: any) => t.duration_minutes).filter((d: number) => d > 0 && d < 480);
-  const avgCleaningTime = durations.length > 0 ? Math.round(durations.reduce((a: number, b: number) => a + b, 0) / durations.length) : 0;
-
-  // Per-cleaner performance , multi-assign aware: count any cleaning where the cleaner is in the list.
+// Performance par cleaner a partir de lignes deja lues (partage avec mgr.people).
+export function cleanerPerformance(clnrs: any[], timers: any[], assigns: any[], dones: any[]): any[] {
+  // Per-cleaner performance, multi-assign aware: count any cleaning where the cleaner is in the list.
   const assignMap: Record<string, number[]> = {};
   assigns.forEach((a: any) => {
     if (!assignMap[a.reservation_key]) assignMap[a.reservation_key] = [];
@@ -54,6 +21,32 @@ export async function dashboardKpis(sb: any, month: string | null, today: string
     const slowest = cDurations.length > 0 ? Math.max(...cDurations) : 0;
     return { id: c.id, name: c.name, color: c.color, totalCleanings: cDone.length, avgTime, fastest, slowest, timerCount: cDurations.length };
   });
+  return cleanerPerf;
+}
+
+export async function dashboardKpis(sb: any, month: string | null, today: string): Promise<any> {
+  // Tri par récence + limit : PostgREST clampe de toute façon à max-rows (1000 par
+  // défaut), donc sans ORDER BY la troncature jetterait des lignes arbitraires et
+  // fausserait les KPIs fenêtrés (7 jours / mois courant). Trié desc, le cap ne
+  // coupe que du vieux.
+  const [timerRes, assignRes, doneRes, cleanerRes, ticketRes] = await Promise.all([
+    sb.from("cleaning_timer").select("reservation_key, cleaner_id, started_at, finished_at, duration_minutes").not("duration_minutes", "is", null).order("started_at", { ascending: false }).limit(5000),
+    sb.from("cleaning_assignments").select("reservation_key, cleaner_id").order("assigned_at", { ascending: false }).limit(5000),
+    sb.from("menage_done").select("reservation_key, done, updated_at").order("updated_at", { ascending: false }).limit(5000),
+    sb.from("cleaners").select("id, name, color, role").eq("is_active", true).limit(200),
+    sb.from("maintenance_tickets").select("id, status, priority, category, created_at, resolved_at").order("created_at", { ascending: false }).limit(5000),
+  ]);
+  const timers = timerRes.data || [];
+  const assigns = assignRes.data || [];
+  const dones = doneRes.data || [];
+  const clnrs = cleanerRes.data || [];
+  const tickets = ticketRes.data || [];
+
+  // Global avg cleaning time
+  const durations = timers.map((t: any) => t.duration_minutes).filter((d: number) => d > 0 && d < 480);
+  const avgCleaningTime = durations.length > 0 ? Math.round(durations.reduce((a: number, b: number) => a + b, 0) / durations.length) : 0;
+
+  const cleanerPerf = cleanerPerformance(clnrs, timers, assigns, dones);
 
   // Maintenance summary
   const openTickets = tickets.filter((t: any) => ['open','assigned','in_progress','waiting_parts'].includes(t.status));

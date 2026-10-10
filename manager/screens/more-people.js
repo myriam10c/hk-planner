@@ -50,6 +50,8 @@ export async function renderPeople(ctx) {
       ? stat(label, '<span class="pill ' + tone(v) + '">' + fmtAvg(v) + ' / 10</span>')
       : stat(label, '<span class="pp-muted">Not enough data</span>'));
     const timed = perf && perf.timed > 0;
+    const na = '<span class="pp-muted">Not available</span>';
+    const none = perf ? '<span class="pp-muted">No timer</span>' : na;
     const reviews = r && r.recent.length
       ? '<details class="pp-recent"><summary>Recent reviews (' + r.recent.length + ')</summary><div class="pp-revs">'
         + r.recent.map((x) => '<div class="pp-rev"><span class="pp-rev-t"><b>' + esc(x.listingName) + '</b>'
@@ -65,10 +67,10 @@ export async function renderPeople(ctx) {
       + stat('Reviews', r ? String(r.count) : '0')
       + '</div>'
       + '<div class="pp-stats pp-month">'
-      + stat('Cleanings in ' + monthLabel(st.data.month), perf ? String(perf.cleanings) : '<span class="pp-muted">Not available</span>')
-      + stat('Average time', timed ? mins(perf.avgMinutes) : '<span class="pp-muted">No timer</span>')
-      + stat('Fastest', timed ? mins(perf.fastest) : '<span class="pp-muted">No timer</span>')
-      + stat('Slowest', timed ? mins(perf.slowest) : '<span class="pp-muted">No timer</span>')
+      + stat('Cleanings in ' + monthLabel(st.data.month), perf ? String(perf.cleanings) : na)
+      + stat('Average time', timed ? mins(perf.avgMinutes) : none)
+      + stat('Fastest', timed ? mins(perf.fastest) : none)
+      + stat('Slowest', timed ? mins(perf.slowest) : none)
       + '</div>' + reviews + '</section>';
   }
 
