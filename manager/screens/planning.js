@@ -149,6 +149,39 @@ export async function renderPlanning(ctx) {
 
   // Gestes (taches 6 a 9) : ajoutes juste sous cette ligne.
 
+  // Tache 6 : Assign (une ou plusieurs personnes, mode set, type de service garde), Mark done / Undo.
+  function assignTo(j, ids) {
+    const prev = j.assigned.slice();
+    const service = j.serviceType || 'CHC';
+    const where = placeLabel(j);
+    const label = (list) => (list.length ? namesOf(st.data, list) : 'nobody');
+    return write(j.key, 'assignCleaner', { reservation_key: j.key, cleaner_ids: ids, mode: 'set', service_type: service },
+      ids.length ? where + ' assigned to ' + label(ids) : where + ' unassigned',
+      () => write(j.key, 'assignCleaner', { reservation_key: j.key, cleaner_ids: prev, mode: 'set', service_type: service },
+        where + ' back to ' + label(prev)));
+  }
+  function markDone(j, val) {
+    const where = placeLabel(j);
+    return write(j.key, 'setDone', { key: j.key, done: val }, where + (val ? ' marked done' : ' back to not done'),
+      () => write(j.key, 'setDone', { key: j.key, done: !val }, where + (val ? ' back to not done' : ' marked done')));
+  }
+  ACT.assign = (j) => {
+    if (!j) return;
+    if (readOnly()) { toast(RO_LINE); return; }
+    st.pick = new Set(j.assigned);
+    show(j.key, 'assign');
+  };
+  ACT.toggle = (j, el) => {
+    if (!j || el.disabled) return;
+    const id = Number(el.getAttribute('data-id'));
+    if (st.pick.has(id)) st.pick.delete(id); else st.pick.add(id);
+    el.setAttribute('aria-pressed', st.pick.has(id) ? 'true' : 'false');
+  };
+  ACT['save-assign'] = (j) => { if (j) assignTo(j, [...st.pick].sort((a, b) => a - b)); };
+  ACT['clear-assign'] = (j) => { if (j) assignTo(j, []); };
+  ACT.done = (j) => { if (j) markDone(j, true); };
+  ACT.undone = (j) => { if (j) markDone(j, false); };
+
   function onClick(e) {
     const t = e.target && e.target.closest ? e.target : null;
     const el = t ? t.closest('[data-retry],[data-week],[data-day],[data-filter],[data-job],[data-add-extra],#sheet [data-pa]') : null;

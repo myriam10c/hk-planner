@@ -156,3 +156,26 @@ export function jobSheet(d, j, ro) {
   return head(placeLabel(j) || 'Cleaning', (j.kind === 'extra' ? 'Extra cleaning' : 'Checkout cleaning') + ' · ' + dayShort(j.date))
     + '<div class="sheet-b">' + status + '<dl class="kvs">' + rows.join('') + '</dl></div>' + foot;
 }
+
+// Choix des personnes (plusieurs possibles) : Save remplace la liste.
+// Une personne en conge ce jour-la est grisee, sauf si deja assignee (on peut la retirer).
+export function assignSheet(d, j, ro, s) {
+  if (ro) return head('Assign', placeLabel(j)) + '<div class="sheet-b"></div>' + roFoot();
+  const day = d.days.find((x) => x.date === j.date);
+  const off = new Set(day ? day.off : []);
+  const n = {};
+  for (const x of jobsOn(d, j.date)) if (!x.cancelled) for (const id of x.assigned) n[id] = (n[id] || 0) + 1;
+  const opts = d.people.filter((p) => p.assignable).map((p) => {
+    const on = s.pick.has(p.id);
+    const locked = off.has(p.id) && !on;
+    const k = n[p.id] || 0;
+    const sub = off.has(p.id) ? 'On leave' : k + ' job' + (k === 1 ? '' : 's') + ' that day';
+    return '<button type="button" data-pa="toggle" data-id="' + p.id + '" aria-pressed="' + (on ? 'true' : 'false') + '"'
+      + (locked ? ' disabled data-off' : '') + '>'
+      + '<span class="av pc-' + esc(p.slot) + '" aria-hidden="true">' + esc(initials(p.name)) + '</span>'
+      + '<span><b>' + esc(p.name) + '</b><small>' + esc(sub) + '</small></span></button>';
+  }).join('');
+  return head('Assign', placeLabel(j) + ' · ' + dayShort(j.date))
+    + '<div class="sheet-b"><p class="note">Pick one or more people, then Save.</p><div class="pick">' + opts + '</div></div>'
+    + '<div class="sheet-f">' + B('save-assign', 'Save', 'primary') + (j.assigned.length ? B('clear-assign', 'Clear all') : '') + B('back', 'Back') + '</div>';
+}
