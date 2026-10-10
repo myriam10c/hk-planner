@@ -92,7 +92,7 @@ Deno.test("Who does what : personnes, non assignes (arrivee du jour d'abord), te
 Deno.test("arrivees a 11:00 : bloque, a risque (00:00), pret, sejour proprietaire Elite pas encore saisi", async () => {
   const a = buildArrivals(await core(AT_11));
   assertEquals(a.rows.map((r) => [r.apt, r.time, r.kind, r.tone, r.cause]), [
-    ["101", "15:00", "Guest", "bad", "No cleaner assigned, and urgent ticket open: Gas not working (#429)."],
+    ["101", "15:00", "Guest", "bad", "No cleaner assigned, and urgent ticket open: Gas not working (MNT-429)."],
     ["202", "15:00", "Guest", "warn", "Not started yet, Faiza. Guest in 4 h, checkout time not set."],
     ["404", "15:00", "Guest", "ok", "Cleaned by Elite Cleaning after the 05/10 checkout."],
     ["303", "16:00", "Owner stay", "warn", "Usually Elite · not logged yet. Elite logs its jobs the next day around 14:00."],

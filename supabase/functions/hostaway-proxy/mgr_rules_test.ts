@@ -88,11 +88,11 @@ Deno.test("Ready : menage fait, aucun ticket urgent", () => {
 
 Deno.test("Blocked : ticket urgent, meme menage fait", () => {
   assertEquals(st(P({ done: true, assignedNames: ["Faiza"] }), at("11:00"), { urgent: [GAS] }),
-    { tone: "bad", word: "Blocked", cause: "Clean, but urgent ticket open: Gas not working (#429)." });
+    { tone: "bad", word: "Blocked", cause: "Clean, but urgent ticket open: Gas not working (MNT-429)." });
   assertEquals(st(P(), at("11:00"), { urgent: [GAS] }).cause,
-    "No cleaner assigned, and urgent ticket open: Gas not working (#429).");
+    "No cleaner assigned, and urgent ticket open: Gas not working (MNT-429).");
   assertEquals(st(P({ assignedNames: ["Faiza"] }), at("11:00"), { urgent: [GAS] }).cause,
-    "Urgent ticket open: Gas not working (#429).");
+    "Urgent ticket open: Gas not working (MNT-429).");
 });
 
 Deno.test("Blocked : non assigne, avec rotation ; heure de depart absente", () => {
@@ -137,7 +137,7 @@ Deno.test("annule, reporte, aucun depart connu", () => {
   assertEquals(st(null, at("11:00")),
     { tone: "ok", word: "Ready", cause: "No checkout in the last 14 days, apartment empty." });
   assertEquals(st(null, at("11:00"), { urgent: [GAS] }),
-    { tone: "bad", word: "Blocked", cause: "Urgent ticket open: Gas not working (#429)." });
+    { tone: "bad", word: "Blocked", cause: "Urgent ticket open: Gas not working (MNT-429)." });
 });
 
 import { mgrAccess, parseRiskHours } from "./mgr_rules.ts";

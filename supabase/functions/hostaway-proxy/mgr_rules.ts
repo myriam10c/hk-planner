@@ -137,7 +137,8 @@ export function arrivalStatus(i: {
   prev: PrevCleaning | null; urgent: Array<{ id: number; title: string }>;
 }): Status {
   const u = i.urgent[0];
-  const tk = u ? u.title + " (#" + u.id + ")" : "";
+  // Meme format que problemRef (mgr_inbox.ts) : une seule reference partout.
+  const tk = u ? u.title + " (MNT-" + u.id + ")" : "";
   const p = i.prev;
   if (!p) {
     if (u) return { tone: "bad", word: "Blocked", cause: "Urgent ticket open: " + tk + "." };
