@@ -21,7 +21,7 @@ export function emailSession() {
 export async function bootMgr(
   page: Page,
   routes: FakeRoute[],
-  opts: { email?: boolean; pin?: string; hash?: string; timeoutMs?: number; cache?: { savedAt: number; data: any }; clock?: Date } = {},
+  opts: { email?: boolean; pin?: string; hash?: string; timeoutMs?: number; cache?: { savedAt: number; data: any }; clock?: Date; storage?: Record<string, string> } = {},
 ) {
   await page.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   await page.route('https://signed.test/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG_1PX, 'base64') }));
@@ -35,6 +35,7 @@ export async function bootMgr(
         if (cfg.email) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.email));
         if (cfg.pin) localStorage.setItem('cleanerToken', cfg.pin);
         if (cfg.cache) localStorage.setItem('mgrTodayCache', JSON.stringify(cfg.cache));
+        if (cfg.storage) for (const k of Object.keys(cfg.storage)) localStorage.setItem(k, cfg.storage[k]);
       }
     } catch (e) { /* stockage indisponible */ }
     if (cfg.timeoutMs) (window as any).__MGR_TIMEOUT_MS = cfg.timeoutMs;
@@ -69,7 +70,7 @@ export async function bootMgr(
     }) as any;
   }, {
     routes, email: opts.email ? emailSession() : null, pin: opts.pin || null,
-    cache: opts.cache || null, timeoutMs: opts.timeoutMs || 0,
+    cache: opts.cache || null, timeoutMs: opts.timeoutMs || 0, storage: opts.storage || null,
   });
   await page.goto('/manager/' + (opts.hash || ''), { waitUntil: 'domcontentloaded' });
 }

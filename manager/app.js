@@ -10,8 +10,15 @@ const VIEWS = [
   { id: 'today', label: 'Today' }, { id: 'planning', label: 'Planning' }, { id: 'problems', label: 'Problems' },
   { id: 'inspections', label: 'Inspections' }, { id: 'more', label: 'More' },
 ];
+// Ecrans livres : module et fonction de rendu. Les autres restent provisoires.
+const SCREENS = {
+  today: ['/manager/screens/today.js', 'renderToday'],
+  problems: ['/manager/screens/problems.js', 'renderProblems'],
+};
 const main = document.getElementById('main');
 let me = null;
+// Problemes urgents ouverts, annonces par Today et Problems (evenement mgr:badge).
+let urgent = 0;
 let seq = 0;
 let leaving = [];
 let listening = false;
@@ -21,10 +28,15 @@ function currentView() {
   return VIEWS.some((x) => x.id === v) ? v : 'today';
 }
 
+function badge(id) {
+  if (id !== 'problems' || urgent <= 0) return '';
+  return '<span class="nbadge" aria-label="' + urgent + ' urgent">' + (urgent > 99 ? '99+' : urgent) + '</span>';
+}
+
 function renderNav(view) {
   const link = (cls, v, inner) => '<a class="' + cls + '" href="#/' + v.id + '"' + (view === v.id ? ' aria-current="page"' : '') + '>' + inner + '</a>';
-  document.getElementById('sideNav').innerHTML = VIEWS.map((v) => link('navlink', v, I[v.id] + '<span>' + v.label + '</span>')).join('');
-  document.getElementById('tabbar').innerHTML = VIEWS.map((v) => link('tab', v, '<span class="tab-wrap">' + I[v.id] + '</span>' + v.label)).join('');
+  document.getElementById('sideNav').innerHTML = VIEWS.map((v) => link('navlink', v, I[v.id] + '<span>' + v.label + '</span>' + badge(v.id))).join('');
+  document.getElementById('tabbar').innerHTML = VIEWS.map((v) => link('tab', v, '<span class="tab-wrap">' + I[v.id] + badge(v.id) + '</span>' + v.label)).join('');
   document.getElementById('sideFoot').textContent = me ? 'Signed in as ' + me.name : 'Offline';
 }
 
@@ -47,17 +59,27 @@ async function route() {
   const view = currentView();
   renderNav(view);
   const ctx = { me, main, isCurrent: () => mine === seq, onLeave: (fn) => { leaving.push(fn); }, emailRequired };
-  if (view === 'today') {
+  const screen = SCREENS[view];
+  if (screen) {
     let mod = null;
-    try { mod = await import('/manager/screens/today.js'); } catch (e) { mod = null; }
+    try { mod = await import(screen[0]); } catch (e) { mod = null; }
     if (mine !== seq) return;
-    if (mod && typeof mod.renderToday === 'function') { await mod.renderToday(ctx); return; }
+    if (mod && typeof mod[screen[1]] === 'function') { await mod[screen[1]](ctx); return; }
   }
   renderPlaceholder(ctx, view);
 }
 
 function startShell() {
-  if (!listening) { listening = true; window.addEventListener('hashchange', route); }
+  if (!listening) {
+    listening = true;
+    window.addEventListener('hashchange', route);
+    document.addEventListener('mgr:badge', (e) => {
+      const n = Math.max(0, Number(e.detail && e.detail.problems) || 0);
+      if (n === urgent) return;
+      urgent = n;
+      renderNav(currentView());
+    });
+  }
   return route();
 }
 

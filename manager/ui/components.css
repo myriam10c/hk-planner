@@ -95,3 +95,7 @@ section.card{background:var(--surface);border:1px solid var(--line);border-radiu
 :root[data-theme="dark"] .toast button{color:#0a6fd6}
 @media (min-width:960px){ .toast{bottom:28px} }
 .ro-note{margin:0;color:var(--muted,inherit);font-weight:500;flex:1}
+
+/* Pastille des problemes urgents dans la navigation. */
+.nbadge{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--bad);color:var(--surface);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;margin-left:auto}
+.tab .nbadge{position:absolute;top:-6px;right:-14px;margin:0}

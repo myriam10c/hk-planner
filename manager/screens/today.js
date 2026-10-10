@@ -2,7 +2,7 @@
 // cache local du dernier Today (spec section 7).
 import { get, post } from '/manager/api.js';
 import { clearToday, loadToday, saveToday } from '/manager/today-cache.js';
-import { closeSheet, dubaiTime, esc, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
+import { announceBadge, closeSheet, dubaiTime, esc, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { arrivalSheet, boardHtml, jobSheet, pickerSheet } from '/manager/screens/today-view.js';
 import { createProblemPanel } from '/manager/problem-panel.js';
 
@@ -81,6 +81,7 @@ export async function renderToday(ctx) {
       st.savedAt = Date.now();
       st.fresh = true;
       saveToday(d, st.savedAt);
+      announceBadge(d.problems.counts.urgent);
     } catch (e) {
       if (handleAccess(e)) return;
       st.error = e;

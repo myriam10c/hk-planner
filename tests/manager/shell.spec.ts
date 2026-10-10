@@ -3,7 +3,6 @@ import { bootMgr, MANAGER, me, noHorizontalScroll } from './helpers';
 
 const LINKS: Array<[string, string, string]> = [
   ['planning', 'Planning', '/?legacy=1'],
-  ['problems', 'Problems', '/?legacy=1'],
   ['inspections', 'Inspections', '/inspections/'],
   ['more', 'More', '/?legacy=1'],
 ];
