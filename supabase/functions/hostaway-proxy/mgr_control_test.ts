@@ -86,3 +86,13 @@ Deno.test("hier, a 14:30 : Elite sans job saisi", async () => {
   const c = await loadControl(db(), core("2026-10-09T10:30:00Z"));
   assertEquals(c.yesterday.rows[2], { name: "Elite Cleaning", text: "No cleaning marked done." });
 });
+
+Deno.test("taches en retard : copies maint:<id> exclues, in_progress comprises, horodatage +04:00 compare en temps", async () => {
+  const sb = db();
+  sb.tables.team_tasks.push(
+    { id: 30, status: "open", assigned_cleaner_id: 7, due_at: "2026-05-01T08:00:00Z", source_ref: "maint:429" },
+    { id: 31, status: "in_progress", assigned_cleaner_id: 6, due_at: "2026-10-09T10:59:59+04:00" },
+  );
+  const c = await loadControl(sb, core("2026-10-09T07:00:00Z"));
+  assertEquals(c.overdue, { total: 4, rows: [{ name: "Semax", n: 2 }, { name: "Hillal", n: 1 }, { name: "Unassigned", n: 1 }] });
+});

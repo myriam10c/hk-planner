@@ -5,7 +5,8 @@ import { dubaiDay } from "./insp_rules.ts";
 import {
   byRoleThenName, ddmm, dubaiMs, eliteLogDeadlineMs, hhmm, joinNames, keyDate, MGR_ELITE_LOG_HOUR, plural,
 } from "./mgr_rules.ts";
-import { byKeys, readOrThrow, type MgrCore } from "./mgr_today.ts";
+import { isOverdue, MGR_OPEN_TASK_STATUSES, mirrorTicketId } from "./mgr_inbox.ts";
+import { byKeys, readAllRows, readOrThrow, type MgrCore } from "./mgr_today.ts";
 
 export const MGR_LINEN_WINDOW_DAYS = 7;
 
@@ -24,7 +25,8 @@ export async function loadControl(sb: any, c: MgrCore): Promise<MgrControl> {
     q(sb.from("inspection_proposals").select("listing_id, claimed_by").eq("proposal_date", day), "inspection_proposals"),
     q(sb.from("inspections").select("id, listing_id, inspector_id, inspection_date, finished_at").gte("inspection_date", from), "inspections"),
     q(sb.from("menage_done").select("reservation_key, done, updated_at").eq("done", true).gte("updated_at", iso(dubaiMs(from, 0))), "menage_done"),
-    q(sb.from("team_tasks").select("id, assigned_cleaner_id, due_at").eq("status", "open"), "team_tasks"),
+    readAllRows((a: number, b: number) => sb.from("team_tasks").select("id, assigned_cleaner_id, due_at, source_ref")
+      .in("status", MGR_OPEN_TASK_STATUSES).order("id").range(a, b), "team_tasks"),
     q(sb.from("team_tasks").select("id, completed_by_cleaner_id, completed_at").eq("status", "done").gte("completed_at", iso(dubaiMs(y, 0))), "team_tasks"),
     q(sb.from("maintenance_tickets").select("id, resolved_at").gte("resolved_at", iso(dubaiMs(y, 0))), "maintenance_tickets"),
   ]);
@@ -58,10 +60,10 @@ export async function loadControl(sb: any, c: MgrCore): Promise<MgrControl> {
       .map((i: any) => ({ ...where(i.listing_id), inspector: nm(i.inspector_id), date: ddmm(i.inspection_date) })),
   };
 
-  const nowIso = iso(c.nowMs);
+  // Copies Hermes des tickets (maint:<id>) exclues : meme regle que la boite Problems.
   const od = new Map<string, number>();
   for (const t of openTasks) {
-    if (!t.due_at || String(t.due_at) >= nowIso) continue;
+    if (mirrorTicketId(t.source_ref) !== null || !isOverdue(t.due_at, c.nowMs)) continue;
     const k = t.assigned_cleaner_id == null ? "Unassigned" : nm(t.assigned_cleaner_id);
     od.set(k, (od.get(k) ?? 0) + 1);
   }

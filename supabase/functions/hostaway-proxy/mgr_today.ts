@@ -8,8 +8,10 @@ import {
   MGR_LOOKBACK_DAYS, MGR_USUALLY_ELITE_WINDOW_DAYS, reservationKey, splitListing, usuallyEliteListings,
   type MgrReservation, type PrevCleaning, type Tone,
 } from "./mgr_rules.ts";
+import { MGR_OPEN_TICKET_STATUSES } from "./mgr_inbox.ts";
 
-export const MGR_OPEN_TICKET_STATUSES = ["open", "assigned", "in_progress"];
+// Liste unique (mgr_inbox.ts) : Today, Problems et l'ecran Maintenance actuel disent la meme chose.
+export { MGR_OPEN_TICKET_STATUSES };
 
 export type MgrPerson = { id: number; name: string; role: string; active: boolean };
 export type MgrTicket = {
@@ -34,6 +36,32 @@ export type MgrCore = {
 export function readOrThrow(res: any, what: string): any[] {
   if (res?.error) throw new Error("[mgr] " + what + ": " + (res.error.message ?? "read failed"));
   return res?.data ?? [];
+}
+
+export const MGR_READ_PAGE = 1000;
+export const MGR_READ_MAX = 20000;
+// PostgREST plafonne une lecture a 1000 lignes sans le dire : on pagine
+// explicitement (ordre stable obligatoire dans build), et au-dela de MGR_READ_MAX
+// on leve plutot que de calculer sur une table tronquee.
+export async function readAllRows(
+  build: (from: number, to: number) => any, what: string, page = MGR_READ_PAGE,
+): Promise<any[]> {
+  const out: any[] = [];
+  for (let from = 0; ; from += page) {
+    const rows = readOrThrow(await build(from, from + page - 1), what);
+    out.push(...rows);
+    if (rows.length < page) return out;
+    if (out.length >= MGR_READ_MAX) throw new Error("[mgr] " + what + ": more than " + MGR_READ_MAX + " rows");
+  }
+}
+
+export function listingMap(rows: any[]): Record<string, { apt: string; bld: string }> {
+  return Object.fromEntries(rows.map((l: any) => [String(l.listing_id), splitListing(l)]));
+}
+export function peopleMap(rows: any[]): Record<string, MgrPerson> {
+  return Object.fromEntries(rows.map((p: any) => [String(p.id), {
+    id: Number(p.id), name: String(p.name ?? ""), role: String(p.role ?? ""), active: p.is_active !== false,
+  }]));
 }
 
 export async function byKeys(sb: any, table: string, cols: string, keys: string[]): Promise<any[]> {
@@ -72,20 +100,19 @@ export async function loadCore(
     byKeys(sb, "menage_done", "reservation_key, done", keys),
     byKeys(sb, "cleaning_timer", "reservation_key, started_at, finished_at", keys),
     byKeys(sb, "cleaning_cancelled", "reservation_key", keys),
-    all(sb.from("listing_config").select("listing_id, internal_name, listing_name, apt_number"), "listing_config"),
-    all(sb.from("cleaners").select("id, name, role, is_active"), "cleaners"),
-    all(sb.from("maintenance_tickets")
+    readAllRows((a: number, b: number) => sb.from("listing_config")
+      .select("listing_id, internal_name, listing_name, apt_number").order("listing_id").range(a, b), "listing_config"),
+    readAllRows((a: number, b: number) => sb.from("cleaners").select("id, name, role, is_active").order("id").range(a, b), "cleaners"),
+    readAllRows((a: number, b: number) => sb.from("maintenance_tickets")
       .select("id, listing_id, title, priority, status, assigned_technician_id, assigned_vendor_id, created_at, source")
-      .in("status", MGR_OPEN_TICKET_STATUSES), "maintenance_tickets"),
+      .in("status", MGR_OPEN_TICKET_STATUSES).order("id").range(a, b), "maintenance_tickets"),
     all(sb.from("cleaning_accounting_cache").select("month, payload_json")
       .in("month", monthsBack(day, MGR_USUALLY_ELITE_WINDOW_DAYS)), "cleaning_accounting_cache"),
   ]);
   const core: MgrCore = {
     day, nowMs: a.nowMs, riskHours: a.riskHours, reservations,
-    listings: Object.fromEntries(listings.map((l: any) => [String(l.listing_id), splitListing(l)])),
-    people: Object.fromEntries(people.map((p: any) => [String(p.id), {
-      id: Number(p.id), name: String(p.name ?? ""), role: String(p.role ?? ""), active: p.is_active !== false,
-    }])),
+    listings: listingMap(listings),
+    people: peopleMap(people),
     tickets: tickets.map((t: any) => ({
       id: Number(t.id), listingId: t.listing_id == null ? "" : String(t.listing_id), title: String(t.title ?? "Ticket"),
       priority: String(t.priority ?? "medium"), status: String(t.status ?? "open"),

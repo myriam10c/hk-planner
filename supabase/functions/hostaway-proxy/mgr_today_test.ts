@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { buildArrivals, buildJobs, buildTicketsByListing, buildWho, loadCore } from "./mgr_today.ts";
+import { buildArrivals, buildJobs, buildTicketsByListing, buildWho, loadCore, readAllRows } from "./mgr_today.ts";
 
 const DAY = "2026-10-09";
 const AT_11 = Date.parse("2026-10-09T07:00:00Z");   // 11:00 Dubai
@@ -115,4 +115,22 @@ Deno.test("tickets ouverts par logement, urgents d'abord", async () => {
     L1: [{ id: 429, title: "Gas not working", priority: "urgent", since: "09/07", tech: null }],
     L4: [{ id: 106, title: "Balcony drain blocked", priority: "low", since: "27/04", tech: "Semax" }],
   });
+});
+
+Deno.test("lectures paginees : au-dela de 1000 lignes rien n'est perdu", async () => {
+  const many = Array.from({ length: 1205 }, (_, i) => ({ listing_id: "X" + i, internal_name: (i + 1) + " - Tower" }));
+  const sb = fakeDb({ listing_config: many }, { maxRows: 1000 });
+  const c = await loadCore(sb, { day: DAY, nowMs: AT_11, riskHours: 6, reservations: [] });
+  assertEquals(Object.keys(c.listings).length, 1205);
+  assertEquals(c.listings["X1204"], { apt: "1205", bld: "Tower" });
+});
+
+Deno.test("readAllRows : pages explicites, erreur levee avec le nom de la table", async () => {
+  const sb = fakeDb({ t: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }] }, { maxRows: 2 });
+  const rows = await readAllRows((a, b) => sb.from("t").select("id").order("id").range(a, b), "t", 2);
+  assertEquals(rows.map((r) => r.id), [1, 2, 3, 4, 5]);
+  sb.fail["t.select"] = { message: "boom" };
+  let msg = "";
+  try { await readAllRows((a, b) => sb.from("t").select("id").range(a, b), "t", 2); } catch (e) { msg = (e as Error).message; }
+  assertEquals(msg, "[mgr] t: boom");
 });
