@@ -235,3 +235,77 @@ Deno.test("headerInjectionError refuse un CR ou un LF dans le destinataire ou le
   assertEquals(headerInjectionError("a@b.c\nBcc: x@y.z", "Sujet"), "invalid recipient");
   assertEquals(headerInjectionError("a@b.c", "Sujet\r\nBcc: x@y.z"), "invalid subject");
 });
+
+// ---------------------------------------------------------------------------
+// Projet Supabase partage avec Interiors Studio (2026-10-10).
+// ---------------------------------------------------------------------------
+
+const INTERIORS_URL = "https://interiors-studio.netlify.app";
+
+// Verrou : les emails HK Planner restent identiques octet pour octet. Les
+// instantanes ont ete generes avec le code d'avant l'ajout d'Interiors Studio.
+Deno.test("buildAuthEmail HK Planner identique aux instantanes d'avant Interiors", async () => {
+  const snap = JSON.parse(await Deno.readTextFile(new URL("./hk_email_snapshots.json", import.meta.url)));
+  let count = 0;
+  for (const t of snap.types as string[]) {
+    for (const [k, r] of Object.entries(snap.redirects as Record<string, unknown>)) {
+      const got = buildAuthEmail("https://proj.supabase.co", { email: "walter@example.com" },
+        { token_hash: "hash-abc", email_action_type: t, redirect_to: r, site_url: snap.app });
+      assertEquals(got, snap.emails[t + "|" + k], t + "|" + k);
+      count++;
+    }
+  }
+  assertEquals(count, 48);
+});
+
+Deno.test("safeRedirectTo accepte l'origine Interiors Studio avec la meme garde de frontiere", () => {
+  assertEquals(safeRedirectTo(INTERIORS_URL), INTERIORS_URL);
+  assertEquals(safeRedirectTo(INTERIORS_URL + "/"), INTERIORS_URL + "/");
+  assertEquals(safeRedirectTo(INTERIORS_URL + "/#/catalogue?x=1"), INTERIORS_URL + "/#/catalogue?x=1");
+  assertEquals(safeRedirectTo(INTERIORS_URL + "?a=1"), INTERIORS_URL + "?a=1");
+  assertEquals(safeRedirectTo(INTERIORS_URL + ".evil.example/x"), APP_URL);
+  assertEquals(safeRedirectTo(INTERIORS_URL + "-evil.netlify.app"), APP_URL);
+  assertEquals(safeRedirectTo("http://interiors-studio.netlify.app"), APP_URL);
+});
+
+function interiorsEmail(type: string) {
+  return buildAuthEmail(SUPABASE_URL, { email: "hillal@medini-homes.com" }, {
+    token_hash: "hash-abc", email_action_type: type, redirect_to: INTERIORS_URL, site_url: APP_URL,
+  });
+}
+
+for (const type of ["magiclink", "recovery"]) {
+  Deno.test("Interiors Studio : " + type + " devient un lien de connexion a la marque Interiors", () => {
+    const e = interiorsEmail(type);
+    assertEquals(e.subject, "Sign in to Interiors Studio");
+    assertStringIncludes(e.text, "Sign in: ");
+    assertStringIncludes(e.html, ">Sign in</a>");
+    assertStringIncludes(e.html, "MEDINI INTERIORS STUDIO");
+    assertStringIncludes(e.html, "#8C7A5E");
+    assertStringIncludes(e.text, "This link works once and expires in 1 hour.");
+    assertEquals(e.html.includes("#7c3aed"), false);
+    assertEquals(/HK Planner|password/i.test(e.subject + e.text + e.html), false);
+    const link = e.text.split("Sign in: ")[1].split("\n")[0];
+    assertEquals(new URL(link).searchParams.get("redirect_to"), INTERIORS_URL);
+    assertEquals(new URL(link).searchParams.get("type"), type);
+  });
+}
+
+Deno.test("Interiors Studio : tous les types portent la marque Interiors, jamais HK Planner", () => {
+  for (const type of ["invite", "signup", "recovery", "magiclink", "email_change", "email_change_new", "other"]) {
+    const e = interiorsEmail(type);
+    const all = e.subject + e.text + e.html;
+    assertStringIncludes(all, "Interiors Studio");
+    assertEquals(all.includes("HK Planner"), false, type);
+    assertEquals(all.includes("—"), false, type);
+  }
+});
+
+Deno.test("Une origine inconnue retombe sur HK Planner (lien et marque)", () => {
+  const e = buildAuthEmail(SUPABASE_URL, { email: "a@b.c" }, {
+    token_hash: "h", email_action_type: "magiclink", redirect_to: INTERIORS_URL + ".evil.example", site_url: APP_URL,
+  });
+  assertEquals(e.subject, "Sign in to HK Planner");
+  const link = e.text.split("Sign in: ")[1].split("\n")[0];
+  assertEquals(new URL(link).searchParams.get("redirect_to"), APP_URL);
+});

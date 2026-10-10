@@ -171,7 +171,7 @@ rm -P "$HOOK_ENV"; rmdir "$HOOK_DIR"
 **Run the function tests**:
 
 ```bash
-npx -y deno@2.9.6 test --no-lock --allow-env --allow-net supabase/functions/auth-mailer/mailer_test.ts
+npx -y deno@2.9.6 test --no-lock --allow-env --allow-net --allow-read supabase/functions/auth-mailer/mailer_test.ts
 npx -y deno@2.9.6 test --no-lock --allow-env --allow-net supabase/functions/hostaway-proxy/auth_test.ts
 ```
 

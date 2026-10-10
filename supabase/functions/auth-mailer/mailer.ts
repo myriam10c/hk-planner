@@ -19,6 +19,22 @@ export interface AuthEmail {
 }
 
 const APP_URL = "https://stunning-kleicha-f61101.netlify.app";
+// Le projet Supabase est partage : Interiors Studio utilise la meme Auth. Chaque
+// app a sa marque ; HK Planner reste la cible par defaut et le repli.
+const INTERIORS_URL = "https://interiors-studio.netlify.app";
+
+interface Brand {
+  origin: string;
+  name: string;
+  label: string;
+  accent: string;
+}
+
+const HK_BRAND: Brand = { origin: APP_URL, name: "HK Planner", label: "HK Planner", accent: "#7c3aed" };
+const INTERIORS_BRAND: Brand = {
+  origin: INTERIORS_URL, name: "Interiors Studio", label: "MEDINI INTERIORS STUDIO", accent: "#8C7A5E",
+};
+const BRANDS: Brand[] = [HK_BRAND, INTERIORS_BRAND];
 // Ruling Q2 du controleur : l'expediteur est l'adresse Workspace portee par le
 // jeton OAuth (GMAIL_FROM_ADDRESS), mais une reponse doit arriver sur l'adresse
 // publique de Medini. Valeur fixe et deja publique, donc une constante, pas un
@@ -103,12 +119,27 @@ function esc(s: unknown): string {
 // T4, remarque 1). Le caractere qui suit l'origine doit ouvrir un chemin, une
 // requete ou un fragment : sans ce controle, "APP_URL.evil.example" passerait le
 // simple startsWith.
+function originMatches(v: string, origin: string): boolean {
+  if (!v.startsWith(origin)) return false;
+  const rest = v.slice(origin.length);
+  return rest === "" || "/?#".includes(rest[0]);
+}
+
+// Liste fermee d'origines (BRANDS) ; tout le reste retombe sur HK Planner.
 export function safeRedirectTo(raw: unknown): string {
   const v = typeof raw === "string" ? raw.trim() : "";
-  if (!v.startsWith(APP_URL)) return APP_URL;
-  const rest = v.slice(APP_URL.length);
-  if (rest !== "" && !"/?#".includes(rest[0])) return APP_URL;
-  return v;
+  for (const b of BRANDS) if (originMatches(v, b.origin)) return v;
+  return APP_URL;
+}
+
+// Marque de l'email : celle de l'app vers laquelle le lien renvoie.
+function brandFor(redirect: string): Brand {
+  for (const b of BRANDS) if (originMatches(redirect, b.origin)) return b;
+  return HK_BRAND;
+}
+
+function redirectOf(emailData: any): string {
+  return safeRedirectTo(emailData?.redirect_to || emailData?.site_url || APP_URL);
 }
 
 // Injection d'en-tete RFC 822 : un CR ou un LF dans le destinataire ou dans le
@@ -126,18 +157,20 @@ export function buildActionUrl(supabaseUrl: string, emailData: any): string {
   const u = new URL(base + "/auth/v1/verify");
   u.searchParams.set("token", String(emailData?.token_hash ?? ""));
   u.searchParams.set("type", String(emailData?.email_action_type ?? ""));
-  u.searchParams.set("redirect_to", safeRedirectTo(emailData?.redirect_to || emailData?.site_url || APP_URL));
+  u.searchParams.set("redirect_to", redirectOf(emailData));
   return u.toString();
 }
 
-function shell(title: string, intro: string, cta: string, link: string, outro: string): string {
+function shell(
+  brand: Brand, title: string, intro: string, cta: string, link: string, outro: string,
+): string {
   return [
     '<div style="margin:0;padding:24px 12px;background:#f0f0f3;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1c1c1e">',
     '<div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:16px;padding:28px 24px">',
-    '<div style="font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#7c3aed">HK Planner</div>',
+    '<div style="font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:' + brand.accent + '">' + esc(brand.label) + "</div>",
     '<h1 style="margin:12px 0 8px;font-size:21px;line-height:1.3">' + esc(title) + "</h1>",
     '<p style="margin:0 0 20px;font-size:15px;line-height:1.55;color:#3a3a3c">' + esc(intro) + "</p>",
-    '<a href="' + esc(link) + '" style="display:block;text-align:center;background:#7c3aed;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:14px 18px;border-radius:12px">' + esc(cta) + "</a>",
+    '<a href="' + esc(link) + '" style="display:block;text-align:center;background:' + brand.accent + ';color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:14px 18px;border-radius:12px">' + esc(cta) + "</a>",
     '<p style="margin:20px 0 0;font-size:13px;line-height:1.5;color:#6b6b70">' + esc(outro) + "</p>",
     '<p style="margin:12px 0 0;font-size:12px;line-height:1.5;color:#8e8e93;word-break:break-all">' + esc(link) + "</p>",
     "</div></div>",
@@ -146,36 +179,59 @@ function shell(title: string, intro: string, cta: string, link: string, outro: s
 
 const LINK_LIFETIME = "This link works once and expires in 1 hour.";
 
+// HK Planner : contenu fige (verrouille par hk_email_snapshots.json). Les textes
+// sont parametres par le nom de l'app ; pour HK Planner ils restent identiques.
 export function buildAuthEmail(supabaseUrl: string, user: any, emailData: any): AuthEmail {
   const link = buildActionUrl(supabaseUrl, emailData);
   const type = String(emailData?.email_action_type ?? "");
   const who = String(user?.email ?? "");
+  const brand = brandFor(redirectOf(emailData));
+  const n = brand.name;
+  // En-tete du texte brut : le nom de l'app, prefixe Medini pour Interiors.
+  const head = brand === HK_BRAND ? n : "Medini " + n;
+
+  // Interiors Studio n'a pas de mot de passe : un lien de recuperation connecte
+  // simplement l'utilisateur, comme un lien magique.
+  if (brand === INTERIORS_BRAND && (type === "magiclink" || type === "recovery")) {
+    const intro = "Here is your one-time sign-in link for " + n + ".";
+    return {
+      subject: "Sign in to " + n,
+      text: [
+        head, "", intro, "", "Sign in: " + link, "", LINK_LIFETIME,
+        "If you did not ask for this, ignore this email.",
+      ].join("\n"),
+      html: shell(
+        brand, "Sign in", intro, "Sign in", link,
+        LINK_LIFETIME + " If you did not ask for this, ignore this email.",
+      ),
+    };
+  }
 
   if (type === "invite" || type === "signup") {
-    const intro = "A manager created your HK Planner account for " + who +
+    const intro = "A manager created your " + n + " account for " + who +
       ". Choose a password and you are in. From now on you sign in with this email address.";
     return {
-      subject: "Your HK Planner account is ready",
+      subject: "Your " + n + " account is ready",
       text: [
-        "HK Planner",
+        head,
         "",
         intro,
         "",
         "Set your password: " + link,
         "",
         LINK_LIFETIME,
-        "If the link has expired, open HK Planner and tap Forgot password.",
+        "If the link has expired, open " + n + " and tap Forgot password.",
       ].join("\n"),
-      html: shell("Your account is ready", intro, "Set your password", link, LINK_LIFETIME),
+      html: shell(brand, "Your account is ready", intro, "Set your password", link, LINK_LIFETIME),
     };
   }
 
   if (type === "recovery") {
-    const intro = "We got a request to reset the HK Planner password for " + who + ".";
+    const intro = "We got a request to reset the " + n + " password for " + who + ".";
     return {
-      subject: "Reset your HK Planner password",
+      subject: "Reset your " + n + " password",
       text: [
-        "HK Planner",
+        head,
         "",
         intro,
         "",
@@ -185,37 +241,37 @@ export function buildAuthEmail(supabaseUrl: string, user: any, emailData: any): 
         "If you did not ask for this, ignore this email. Your password stays as it is.",
       ].join("\n"),
       html: shell(
-        "Reset your password", intro, "Choose a new password", link,
+        brand, "Reset your password", intro, "Choose a new password", link,
         LINK_LIFETIME + " If you did not ask for this, ignore this email.",
       ),
     };
   }
 
   if (type === "magiclink") {
-    const intro = "Here is your one-time sign-in link for HK Planner.";
+    const intro = "Here is your one-time sign-in link for " + n + ".";
     return {
-      subject: "Sign in to HK Planner",
-      text: ["HK Planner", "", intro, "", "Sign in: " + link, "", LINK_LIFETIME].join("\n"),
-      html: shell("Sign in", intro, "Sign in", link, LINK_LIFETIME),
+      subject: "Sign in to " + n,
+      text: [head, "", intro, "", "Sign in: " + link, "", LINK_LIFETIME].join("\n"),
+      html: shell(brand, "Sign in", intro, "Sign in", link, LINK_LIFETIME),
     };
   }
 
   if (type === "email_change" || type === "email_change_current" || type === "email_change_new") {
-    const intro = "Confirm this email address so it can be used to sign in to HK Planner.";
+    const intro = "Confirm this email address so it can be used to sign in to " + n + ".";
     return {
-      subject: "Confirm your new HK Planner email",
-      text: ["HK Planner", "", intro, "", "Confirm: " + link, "", LINK_LIFETIME].join("\n"),
-      html: shell("Confirm your email", intro, "Confirm this address", link, LINK_LIFETIME),
+      subject: "Confirm your new " + n + " email",
+      text: [head, "", intro, "", "Confirm: " + link, "", LINK_LIFETIME].join("\n"),
+      html: shell(brand, "Confirm your email", intro, "Confirm this address", link, LINK_LIFETIME),
     };
   }
 
   // Repli : un nouveau type d'email cote Supabase ne doit jamais faire echouer
   // le hook, sinon l'action utilisateur echoue elle aussi.
-  const intro = "Open this link to finish the action you started in HK Planner.";
+  const intro = "Open this link to finish the action you started in " + n + ".";
   return {
-    subject: "HK Planner",
-    text: ["HK Planner", "", intro, "", link, "", LINK_LIFETIME].join("\n"),
-    html: shell("HK Planner", intro, "Open HK Planner", link, LINK_LIFETIME),
+    subject: n,
+    text: [head, "", intro, "", link, "", LINK_LIFETIME].join("\n"),
+    html: shell(brand, n, intro, "Open " + n, link, LINK_LIFETIME),
   };
 }
 
