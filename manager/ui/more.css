@@ -10,3 +10,26 @@
 .more-foot{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);max-width:720px;margin-top:var(--s5);color:var(--ink-2);font-size:16px}
 .more-back{display:inline-flex;align-items:center;gap:var(--s1);min-height:44px;color:var(--ink-2);text-decoration:none;font-size:16px;font-weight:600}
 .more-back svg{width:20px;height:20px}
+/* Settings : cartes, interrupteur, champ d'objectif, resultat de l'autopilote. */
+.set{display:flex;flex-direction:column;gap:var(--s3);max-width:720px}
+.set-body{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s3);padding:0 var(--s4) var(--s4);min-width:0}
+.set-body .btn{min-height:44px;font-size:16px}
+.set-line{margin:0;font-size:16px;color:var(--ink);overflow-wrap:anywhere}
+.set-sub{margin:0;font-size:16px;color:var(--ink-2)}
+.set-err{margin:0;font-size:16px;color:var(--bad-ink);overflow-wrap:anywhere}
+.set-actions{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.set-switch{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);width:100%;min-height:44px;font-size:16px;cursor:pointer}
+.set-switch input{appearance:none;-webkit-appearance:none;flex:none;position:relative;width:52px;height:32px;margin:0;border-radius:16px;background:var(--line-2);cursor:pointer;transition:background-color .15s var(--ease-out)}
+.set-switch input::before{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s var(--ease-out)}
+.set-switch input:checked{background:var(--ok)}
+.set-switch input:checked::before{transform:translateX(20px)}
+.set-switch input:disabled{opacity:.55;cursor:default}
+.set-switch input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.set-field{display:flex;flex-direction:column;gap:var(--s1);font-size:16px}
+.set-inline{display:flex;gap:var(--s2);align-items:center}
+.set-inline input{width:96px;min-height:44px;padding:0 var(--s3);font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:10px}
+.set-result{display:flex;flex-direction:column;gap:var(--s2);width:100%}
+.set-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;width:100%}
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);flex-wrap:wrap;min-height:44px;padding:var(--s1) 0;border-top:1px solid var(--line);font-size:16px;overflow-wrap:anywhere}
+.set-row:first-child{border-top:0}
+.set-name{min-width:0}

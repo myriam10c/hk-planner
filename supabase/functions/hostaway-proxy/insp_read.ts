@@ -84,7 +84,7 @@ async function missedCounts(sb: any, day: string, lastDone: Record<string, { fin
   return out;
 }
 
-async function readTarget(sb: any): Promise<number> {
+export async function readTarget(sb: any): Promise<number> {
   const { data } = await sb.from("app_config").select("value").eq("key", "inspections_daily_target").maybeSingle();
   const n = Number(data?.value);
   return Number.isInteger(n) && n >= 0 && n <= 50 ? n : INSP_DEFAULT_TARGET;

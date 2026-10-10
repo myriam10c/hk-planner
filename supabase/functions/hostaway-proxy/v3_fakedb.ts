@@ -19,6 +19,7 @@ const UNIQUE: Record<string, string[]> = {
   proxy_cache: ["key"],
   security_contacts_doc: ["id"],
   extra_cleanings: ["reservation_key"],
+  app_config: ["key"],
 };
 
 // Tables dont created_at est rempli par la base a l'insertion.
