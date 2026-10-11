@@ -245,8 +245,16 @@ export async function renderSetup(ctx, id) {
       st.busy = false;
       sheetBusy(false);
       if (handleAccess(e)) return;
+      // Mark done peut echouer apres l'echeance ecrite (cout ou equipement) : la tache est deja
+      // faite, on ferme le panneau pour qu'un second appui ne repousse pas next_due_at, on
+      // affiche le message en toast et on relit la liste.
+      if (action === 'completePreventive' && e && e.kind === 'server' && /^Task marked done/.test(e.message || '')) {
+        if (st.sheet) { st.sheet = null; closeSheet(); }
+        toast(e.message);
+        load(st.month === st.current ? '' : st.month, true);
+        return;
+      }
       sheetError((e && e.message) || 'Something went wrong. Try again.');
-      // Mark done peut echouer apres l'echeance ecrite (cout ou equipement) : on relit la liste.
       if (action === 'completePreventive' && e && e.kind === 'server') load(st.month === st.current ? '' : st.month, true);
       return;
     }

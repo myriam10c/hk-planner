@@ -44,8 +44,7 @@ export function parseMoreHash(hash) {
 
 function hub(ctx) {
   const rows = ROWS.map((r) => '<a class="more-row" href="' + esc(r.href) + '">'
-    + '<span class="more-txt"><span class="more-title">' + esc(r.title)
-    + (r.legacy ? ' <span class="pill idle">Current app</span>' : '') + '</span>'
+    + '<span class="more-txt"><span class="more-title">' + esc(r.title) + '</span>'
     + '<span class="more-desc">' + esc(r.desc) + '</span></span>'
     + '<span class="more-chev">' + I.next + '</span></a>').join('');
   const name = ctx.me && ctx.me.name ? ctx.me.name : '';

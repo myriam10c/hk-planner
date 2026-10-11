@@ -2,6 +2,7 @@
 // etre partage avec mgr.people et teste sans Hostaway. Le jour metier est injecte (today,
 // jour Dubai) : plus de date UTC de la machine pour les 7 derniers jours.
 import { plusDays } from "./v3.ts";
+import { dubaiDay } from "./insp_rules.ts";
 
 // Performance par cleaner a partir de lignes deja lues (partage avec mgr.people).
 export function cleanerPerformance(clnrs: any[], timers: any[], assigns: any[], dones: any[]): any[] {
@@ -65,7 +66,8 @@ export async function dashboardKpis(sb: any, month: string | null, today: string
   for (let i = 6; i >= 0; i--) {
     // Jour metier Dubai (argument today), plus la date UTC de la machine.
     const ds = plusDays(today, -i);
-    const dayDones = dones.filter((r: any) => r.done && r.updated_at && r.updated_at.startsWith(ds));
+    // updated_at est en UTC : on le convertit en jour Dubai (01:00 Dubai = la veille en UTC).
+    const dayDones = dones.filter((r: any) => r.done && r.updated_at && !isNaN(Date.parse(r.updated_at)) && dubaiDay(r.updated_at) === ds);
     last7.push({ date: ds, completions: dayDones.length });
   }
 

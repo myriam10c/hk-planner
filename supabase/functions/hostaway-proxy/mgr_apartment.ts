@@ -64,7 +64,9 @@ export function healthScore(i: HealthInput): Health {
   };
 }
 
-// Les quatre tables de la sante d'un logement. Une table illisible compte pour vide
+// Les trois tables de la sante d'un logement. guest_feedback n'a pas de colonne listing_id en base
+// (verifie le 11/10/2026) : jamais lue ici, la penalite de note vaut donc 0 et feedback reste vide.
+// Une table illisible compte pour vide
 // (comportement de l'ancien handler) et son nom part dans `failed`.
 export async function readHealthInputs(sb: any, listingId: string): Promise<{
   tickets: RawTicket[]; equipment: any[]; costs: any[]; feedback: any[]; failed: string[];
@@ -78,14 +80,13 @@ export async function readHealthInputs(sb: any, listingId: string): Promise<{
     if (r?.error) throw new Error(String(r.error.message ?? "read failed"));
     return r?.data ?? [];
   };
-  const [tickets, equipment, costs, feedback] = await Promise.all([
+  const [tickets, equipment, costs] = await Promise.all([
     safe("maintenance_tickets", () => readAllRows((a: number, b: number) => sb.from("maintenance_tickets").select(MGR_TICKET_COLS)
       .eq("listing_id", listingId).order("id").range(a, b), "maintenance_tickets")),
     safe("equipment", () => one(sb.from("equipment").select("id, condition, next_service").eq("listing_id", listingId))),
     safe("maintenance_costs", () => one(sb.from("maintenance_costs").select("amount").eq("listing_id", listingId))),
-    safe("guest_feedback", () => one(sb.from("guest_feedback").select("rating").eq("listing_id", listingId))),
   ]);
-  return { tickets, equipment, costs, feedback, failed: failed.sort() };
+  return { tickets, equipment, costs, feedback: [], failed: failed.sort() };
 }
 
 // ==================== LISTE ====================

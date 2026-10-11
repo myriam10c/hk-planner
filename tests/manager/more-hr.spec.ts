@@ -245,3 +245,23 @@ for (const scheme of ['light', 'dark'] as const) {
     });
   });
 }
+
+test('identifiant invalide : l apercu RH, jamais une fiche NaN', async ({ page }) => {
+  for (const bad of ['abc', '0', '-2', '1.5']) {
+    await boot(page, [], [READ], '#/more/hr/' + bad);
+    await expect(page.locator('main [data-hr-sec="team"]')).toBeVisible();
+    await expect(page.locator('main [data-hr-sec="balances"]')).toHaveCount(0);
+    await expect(page.locator('main')).not.toContainText('NaN');
+    expect((await fetchLog(page)).some((l) => l.url.includes('hrGetCompensation'))).toBe(false);
+  }
+});
+
+test('quitter pendant le chargement de la fiche : rien n est peint par dessus More', async ({ page }) => {
+  await boot(page, [], [READ]);
+  await expect(page.locator('main [data-hr-sec="team"]')).toBeVisible();
+  await page.evaluate(() => { location.hash = '#/more/hr/3'; location.hash = '#/more'; });
+  await expect(page.locator('main a.more-row').first()).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page.locator('main a.more-row').first()).toBeVisible();
+  await expect(page.locator('main [data-hr-sec="balances"]')).toHaveCount(0);
+});

@@ -87,7 +87,6 @@ const seed = () => fakeDb({
     { id: 2, listing_id: "L1", condition: "good", next_service: "2026-12-01" },
   ],
   maintenance_costs: [{ listing_id: "L1", amount: 120 }],
-  guest_feedback: [{ listing_id: "L1", rating: 3 }, { listing_id: "L1", rating: 4 }],
   inspections: [
     { id: 71, listing_id: "L1", inspector_id: 8, started_at: "2026-10-08T06:00:00Z", finished_at: "2026-10-08T06:40:00Z", eligibility: "ok" },
     { id: 70, listing_id: "L1", inspector_id: 8, started_at: "2026-10-01T06:00:00Z", finished_at: "2026-10-01T06:40:00Z", eligibility: "ok" },
@@ -165,7 +164,7 @@ Deno.test("mgr.apartment : fiche complete (menages, tickets, inspections, contac
   ]);
 
   // 3 ouverts (-15), 1 urgent (-10), 1 entretien en retard (-8), note 3.5 (-5).
-  assertEquals(b.health, { score: 62, openTickets: 3, urgentOpen: 1, overdueService: 1, ratingPenalty: 5 });
+  assertEquals(b.health, { score: 67, openTickets: 3, urgentOpen: 1, overdueService: 1, ratingPenalty: 0 });
 
   assertEquals(b.security, {
     building: "Binghatti Lavender",
@@ -246,7 +245,7 @@ Deno.test("mgr.apartment : ticket sans statut ou priorite High compte pareil dan
   const b = (await run("L1", db)).body as MgrApartment;
   assertEquals(b.tickets.open.map((t) => [t.ref, t.priority]), [["MNT-601", "high"], ["MNT-600", "normal"]]);
   // 2 ouverts (-10), 1 haut (-10), entretien en retard (-8), note 3.5 (-5).
-  assertEquals(b.health, { score: 67, openTickets: 2, urgentOpen: 1, overdueService: 1, ratingPenalty: 5 });
+  assertEquals(b.health, { score: 72, openTickets: 2, urgentOpen: 1, overdueService: 1, ratingPenalty: 0 });
   assertEquals(b.health.openTickets, b.tickets.open.length);
 });
 
@@ -304,12 +303,18 @@ Deno.test("healthScore : memes nombres que l'ancien getPropertyHealth", () => {
   assertEquals([n.openTickets, n.urgentOpen], [3, 2]);
 });
 
-Deno.test("readHealthInputs : lit les quatre tables du logement, une table en panne est signalee", async () => {
+Deno.test("readHealthInputs : lit trois tables, ne lit jamais guest_feedback, une table en panne est signalee", async () => {
   const db = seed();
-  db.fail["guest_feedback.select"] = { message: "boom" };
+  const reads: string[] = [];
+  const orig = db.from.bind(db);
+  db.from = (t: string) => { reads.push(t); return orig(t); };
+  db.fail["equipment.select"] = { message: "boom" };
   const h = await quiet(() => readHealthInputs(db, "L1"));
-  assertEquals([h.tickets.length, h.equipment.length, h.costs.length, h.feedback.length], [6, 2, 1, 0]);
-  assertEquals(h.failed, ["guest_feedback"]);
+  assertEquals([h.tickets.length, h.equipment.length, h.costs.length, h.feedback.length], [6, 0, 1, 0]);
+  assertEquals(h.failed, ["equipment"]);
+  assertEquals(reads.includes("guest_feedback"), false);
+  const ok = await readHealthInputs(seed(), "L1");
+  assertEquals([ok.failed, ok.feedback], [[], []]);
 });
 
 Deno.test("mgr.apartments : liste des logements (meme source que Planning) avec exclusion", async () => {

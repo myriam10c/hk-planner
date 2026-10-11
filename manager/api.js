@@ -17,6 +17,12 @@ function timeoutMs() {
   return t > 0 ? t : TIMEOUT_MS;
 }
 
+// Telechargements : 60 s (le crochet de test raccourcit aussi ce delai).
+function downloadTimeoutMs() {
+  const t = Number(typeof window !== 'undefined' ? window.__MGR_TIMEOUT_MS : 0);
+  return t > 0 ? t : 60000;
+}
+
 async function headers() {
   const s = await getSession();
   const h = { 'X-App-Secret': APP_SECRET };
@@ -72,14 +78,33 @@ export async function get(action, params) {
 // delai que get(), enregistre par un lien Blob. Une erreur serveur (JSON { error })
 // remonte en ApiError avec son message, rien n'est telecharge.
 export async function download(action, params, filename) {
-  const res = await fetchTimed(actionUrl(action, params), { headers: await headers() });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 401) throw new ApiError('Please sign in again.', 'auth', 401);
-    if (res.status === 403) throw new ApiError(data.error || 'Not allowed.', 'forbidden', 403);
-    throw new ApiError(data.error || ('Error ' + res.status), 'server', res.status);
+  // Delai propre aux telechargements : il couvre les en-tetes ET le corps (res.blob()),
+  // sinon un corps qui n'arrive jamais tiendrait l'ecran. 60 s, ou le crochet de test.
+  const ctrl = new AbortController();
+  let timer = null;
+  const late = new Promise((_res, rej) => {
+    timer = setTimeout(() => {
+      try { ctrl.abort(); } catch (e) { /* deja fini */ }
+      rej(new ApiError('HK Planner is taking too long to answer. Try again.', 'timeout', 0));
+    }, downloadTimeoutMs());
+  });
+  late.catch(() => {});
+  let blob;
+  try {
+    const res = await Promise.race([fetch(actionUrl(action, params), { headers: await headers(), signal: ctrl.signal }), late]);
+    if (!res.ok) {
+      const data = await Promise.race([res.json().catch(() => ({})), late]);
+      if (res.status === 401) throw new ApiError('Please sign in again.', 'auth', 401);
+      if (res.status === 403) throw new ApiError(data.error || 'Not allowed.', 'forbidden', 403);
+      throw new ApiError(data.error || ('Error ' + res.status), 'server', res.status);
+    }
+    blob = await Promise.race([res.blob(), late]);
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError('No connection. Try again.', 'offline', 0);
+  } finally {
+    clearTimeout(timer);
   }
-  const blob = await res.blob();
   const href = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = href;

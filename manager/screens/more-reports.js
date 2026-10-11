@@ -45,7 +45,8 @@ export function rowsToCsv(rows) {
     const s = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
     return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  return [cols.map(cell).join(',')].concat(rows.map((r) => cols.map((c) => cell(isObj(r) ? r[c] : '')).join(','))).join('\n');
+  // BOM UTF-8 en tete : Excel lit alors les noms arabes et accentues ; les valeurs restent telles quelles.
+  return '\ufeff' + [cols.map(cell).join(',')].concat(rows.map((r) => cols.map((c) => cell(isObj(r) ? r[c] : '')).join(','))).join('\n');
 }
 
 function saveText(text, filename) {

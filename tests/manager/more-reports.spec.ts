@@ -125,8 +125,11 @@ test('Download CSV : lignes du snapshot telles quelles, colonnes dans l ordre st
     page.locator('[data-rp="accounting"]').getByRole('button', { name: 'Download CSV' }).click(),
   ]);
   expect(dl.suggestedFilename()).toBe('elite_accounting_2026-09.csv');
-  const text = fs.readFileSync((await dl.path())!, 'utf8');
-  expect(text).toBe([
+  const bytes = fs.readFileSync((await dl.path())!);
+  // BOM UTF-8 en tete (Excel), puis les valeurs telles quelles.
+  expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+  const text = bytes.toString('utf8');
+  expect(text).toBe('\ufeff' + [
     'guest,nights,cost_ht,vat_net,revenue_ttc,cleaning_date,revenue_status',
     '"Ahmad, Hasan",13,155,4.15,250,2026-09-01,OK',
     '"Kofi ""K"" Adu",2,236,,0,2026-09-02,MISSING_FEE',
@@ -179,6 +182,22 @@ test('exports : telechargement authentifie du mois, erreur serveur affichee', as
   await ex.getByRole('button', { name: 'Maintenance CSV' }).click();
   await expect(ex.getByRole('alert')).toHaveText('Only managers can do this.');
   await expect(ex.getByRole('button', { name: 'Maintenance CSV' })).toBeEnabled();
+});
+
+test('export : un corps qui n arrive jamais est coupe par le delai, message et bouton libre', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), ...READS], { email: true, hash: '#/more/reports', clock: FRESH, timeoutMs: 600 });
+  const ex = page.locator('[data-rp="exports"]');
+  await expect(ex.getByRole('button', { name: 'Cleanings CSV' })).toBeVisible();
+  // En-tetes tout de suite, corps qui ne vient jamais.
+  await page.evaluate(() => {
+    const orig = window.fetch;
+    window.fetch = ((u: any, i: any) => String(u).includes('exportCleaningsCsv')
+      ? Promise.resolve({ ok: true, status: 200, blob: () => new Promise(() => {}), json: () => Promise.resolve({}) } as any)
+      : orig(u, i)) as any;
+  });
+  await ex.getByRole('button', { name: 'Cleanings CSV' }).click();
+  await expect(ex.getByRole('alert')).toContainText('taking too long');
+  await expect(ex.getByRole('button', { name: 'Cleanings CSV' })).toBeEnabled();
 });
 
 test('rapports d inspection : lien', async ({ page }) => {

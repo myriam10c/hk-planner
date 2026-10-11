@@ -3019,12 +3019,17 @@ async function createPreventiveFromInsight(listingId,category,listingName){
   if(!taskName)return;
   const days=prompt('Frequency (days):','90');
   const freq=Number(days)||90;
-  await api('savePreventiveMaintenance',{body:{
-    task_name:taskName,
-    listing_id:listingId||null,
-    category,
-    frequency_days:freq
-  }});
+  try{
+    await apiWrite('savePreventiveMaintenance',{body:{
+      task_name:taskName,
+      listing_id:listingId||null,
+      category,
+      frequency_days:freq
+    }});
+  }catch(e){
+    toast('Could not create the preventive task: '+((e&&e.message)||'error'),'error');
+    return;
+  }
   toast('Preventive task created ✓','success');
   haptic('medium');
   await refreshMaintenance();
@@ -7619,7 +7624,27 @@ async function exportCsv(type){
   const headers = { 'X-App-Secret': APP_SHARED_SECRET };
   if(authAccessToken) headers['Authorization'] = 'Bearer ' + authAccessToken;
   else if(cleanerToken) headers['X-Cleaner-Token'] = cleanerToken;
-  const resp = await fetch(url, { headers });
+  let resp;
+  try{ resp = await fetch(url, { headers }); }
+  catch(e){ toast('Export failed: network error','error'); return; }
+  if(resp.status===401 && authAccessToken){
+    // Meme sortie que api() : session email expiree.
+    try{ await sbAuth.auth.signOut(); }catch(e){}
+    authAccessToken=null; cleanerMode=null;
+    localStorage.removeItem('cleanerMode');
+    authScreen='login';
+    authError='Your session ended. Sign in again.';
+    render();
+    return;
+  }
+  if(resp.status===401 && cleanerToken){
+    // Meme sortie que api() : session PIN expiree ou revoquee.
+    cleanerMode=null; cleanerToken=null;
+    if(authScreen==='createAccount') authScreen=null;
+    localStorage.removeItem('cleanerMode'); localStorage.removeItem('cleanerToken');
+    window.location.hash='#cleaner'; render();
+    return;
+  }
   if(!resp.ok){
     const err = await resp.json().catch(() => ({}));
     toast((err && err.error) || 'Export failed','error'); return;

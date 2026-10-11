@@ -60,5 +60,6 @@ Deno.test("kpis: 7 jours calcules depuis le jour Dubai injecte (01:00 Dubai = ve
   assertEquals(k.last7DaysCompletions.map((d: any) => d.date),
     ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09", "2026-10-10", "2026-10-11"]);
   const by = Object.fromEntries(k.last7DaysCompletions.map((d: any) => [d.date, d.completions]));
-  assertEquals([by["2026-10-09"], by["2026-10-10"], by["2026-10-11"]], [1, 1, 0]);
+  // r2 (done 2026-10-10T21:30Z) tombe le 11 a Dubai (01:30), pas le 10 comme le prefixe UTC.
+  assertEquals([by["2026-10-09"], by["2026-10-10"], by["2026-10-11"]], [1, 0, 1]);
 });

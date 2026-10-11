@@ -40,8 +40,11 @@ export function accessHandler(ctx) {
 }
 
 export async function renderHr(ctx, id) {
-  if (id) {
+  // Identifiant valide = entier positif ; autre chose (abc, 0, -1, 1.5) : on montre l'apercu, jamais une fiche NaN.
+  if (id && /^[1-9]\d*$/.test(String(id))) {
     const { renderHrDetail } = await import('/manager/screens/more-hr-detail.js');
+    // L'ecran a pu changer pendant l'import : on ne peint plus.
+    if (!ctx.isCurrent()) return;
     return renderHrDetail(ctx, id);
   }
   const main = ctx.main;
