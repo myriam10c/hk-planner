@@ -272,6 +272,6 @@ export async function renderProblems(ctx) {
   const linked = refFromHash();
   if (linked && ctx.isCurrent()) {
     st.focusRef = linked;
-    panel.open(linked, rowOf(linked), { onMissing: () => toast('This problem was not found. It may be closed.') });
+    panel.open(linked, rowOf(linked), { onMissing: () => { if (ctx.isCurrent()) toast('This problem was not found. It may be closed.'); } });
   }
 }

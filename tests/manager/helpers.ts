@@ -22,7 +22,7 @@ export function emailSession() {
 export async function bootMgr(
   page: Page,
   routes: FakeRoute[],
-  opts: { email?: boolean; pin?: string; hash?: string; timeoutMs?: number; cache?: { savedAt: number; data: any }; clock?: Date; storage?: Record<string, string> } = {},
+  opts: { email?: boolean; pin?: string; hash?: string; timeoutMs?: number; cache?: { savedAt: number; data: any }; clock?: Date; storage?: Record<string, string>; authDelayMs?: number } = {},
 ) {
   await page.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   await page.route('https://signed.test/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG_1PX, 'base64') }));
@@ -51,6 +51,9 @@ export async function bootMgr(
     const servies = new Set<any>();
     window.fetch = ((input: any, init: any) => {
       const url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (url.indexOf('/auth/v1/') !== -1 && cfg.authDelayMs) {
+        return new Promise((_res, rej) => setTimeout(() => rej(new TypeError('Failed to fetch')), cfg.authDelayMs));
+      }
       if (url.indexOf('/auth/v1/') !== -1) {
         return Promise.resolve(new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400, headers: { 'Content-Type': 'application/json' } }));
       }
@@ -73,7 +76,7 @@ export async function bootMgr(
     }) as any;
   }, {
     routes, email: opts.email ? emailSession() : null, pin: opts.pin || null,
-    cache: opts.cache || null, timeoutMs: opts.timeoutMs || 0, storage: opts.storage || null,
+    cache: opts.cache || null, timeoutMs: opts.timeoutMs || 0, storage: opts.storage || null, authDelayMs: opts.authDelayMs || 0,
   });
   await page.goto('/manager/' + (opts.hash || ''), { waitUntil: 'domcontentloaded' });
 }

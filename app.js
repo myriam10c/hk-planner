@@ -657,6 +657,9 @@ function mgrCutoverTarget(){
   return MGR_CUTOVER_PATH+(MGR_BOOT_TASK?'#/problems?ref=TSK-'+MGR_BOOT_TASK:'');
 }
 let leavingForMgr=false;
+// Vrai quand la garde anti-boucle a retenu un renvoi : le manager reste dans
+// l'ancienne app, le bandeau lui dit et lui offre « Open the new app ».
+let mgrLoopBlocked=false;
 // Renvoie vers /manager/ si la session courante y a droit. true = navigation lancee.
 function maybeGoManager(){
   if(leavingForMgr) return true;
@@ -669,7 +672,11 @@ function maybeGoManager(){
   // refuse ; un second renvoi dans les 30 s laisse l'ancienne app s'ouvrir.
   let last=0;
   try{ last=Number(sessionStorage.getItem(MGR_REDIRECT_KEY))||0; }catch(e){}
-  if(last&&Date.now()-last>=0&&Date.now()-last<V3_LOOP_MS) return false;
+  if(last&&Date.now()-last>=0&&Date.now()-last<V3_LOOP_MS){
+    mgrLoopBlocked=true;
+    renderMgrBanner();
+    return false;
+  }
   try{ sessionStorage.setItem(MGR_REDIRECT_KEY,String(Date.now())); }catch(e){}
   leavingForMgr=true;
   location.replace(mgrCutoverTarget());
@@ -682,7 +689,7 @@ function mgrBannerKind(){
   if(window.location.hash==='#cleaner') return null; // ecran PIN
   if(String(dubaiDateOf(Date.now()))<MGR_CUTOVER_DATE) return null;
   try{ if(sessionStorage.getItem(MGR_BANNER_HIDDEN_KEY)==='1') return null; }catch(e){}
-  if(authAccessToken) return v3LegacyChosen()?'legacy':null;
+  if(authAccessToken) return (v3ConfirmedRole==='manager'&&(v3LegacyChosen()||mgrLoopBlocked))?'legacy':null;
   if(cleanerToken) return 'pin';
   return null;
 }
@@ -729,7 +736,8 @@ function mgrOpenNewApp(){
   try{ sessionStorage.removeItem(V3_LEGACY_KEY); sessionStorage.removeItem(MGR_REDIRECT_KEY); }catch(e){}
   leavingForMgr=true;
   renderMgrBanner();
-  location.assign(MGR_CUTOVER_PATH);
+  // replace : Back ne ramene pas une page figee (bfcache) avec leavingForMgr=true.
+  location.replace(MGR_CUTOVER_PATH);
 }
 // Session PIN d'un manager deja dote d'une adresse : on ferme la session (PIN
 // compris, emailLogout) et on ouvre le login email avec son adresse.

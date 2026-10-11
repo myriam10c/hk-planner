@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { bootMgr, fetchLog, MANAGER, me } from './helpers';
+import { bootMgr, emailSession, fetchLog, MANAGER, me } from './helpers';
 
 const member = (role: string) => ({ ...MANAGER, id: 30, name: 'Member', role });
 
@@ -34,4 +34,16 @@ test('manager en session email : coquille, en-tete Bearer', async ({ page }) => 
   await expect(page.getByRole('heading', { name: 'Planning' })).toBeVisible();
   const log = await fetchLog(page);
   expect(log.find((l) => l.url.includes('action=cleanerMe'))!.headers['Authorization']).toBe('Bearer jwt-test');
+});
+
+test('session email lente a renouveler + jeton PIN : la coquille s ouvre, pas d ecran email', async ({ page }) => {
+  // Jeton d'acces expire, refresh token present, endpoint de renouvellement trop lent :
+  // v3/session.js rend le PIN (prioritaire sur stale), mais la session email existe.
+  const expiree = { ...emailSession(), access_token: 'jwt-expire', expires_at: 1000 };
+  await bootMgr(page, [me(MANAGER)], {
+    pin: 'pin-tok', authDelayMs: 9000,
+    storage: { hkAuthSession: JSON.stringify(expiree) },
+  });
+  await expect.poll(() => page.locator('#tabbar a, #sideNav a').count(), { timeout: 15_000 }).toBeGreaterThan(0);
+  await expect(page.getByRole('heading', { name: 'Sign in with your email' })).toHaveCount(0);
 });

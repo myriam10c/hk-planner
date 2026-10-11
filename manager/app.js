@@ -86,6 +86,14 @@ function startShell() {
   return route();
 }
 
+function emailSessionStored() {
+  try {
+    const raw = localStorage.getItem('hkAuthSession');
+    const sess = raw ? JSON.parse(raw) : null;
+    return !!(sess && sess.refresh_token);
+  } catch (e) { return false; }
+}
+
 async function boot() {
   initSheet();
   document.addEventListener('click', (e) => {
@@ -96,6 +104,9 @@ async function boot() {
   if (!s) { location.replace('/'); return; }
   // Session email a renouveler sans reseau : la coquille s'ouvre, Today montre son cache.
   if (s.kind === 'stale') { await startShell(); return; }
+  // Renouvellement lent : v3/session.js prefere le PIN a « stale ». Si une session
+  // email avec refresh token est encore stockee, c'est ce cas, pas un manager PIN seul.
+  if (s.kind === 'pin' && emailSessionStored()) { await startShell(); return; }
   let cleaner = null;
   try {
     const r = await get('cleanerMe');

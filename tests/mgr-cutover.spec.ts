@@ -172,9 +172,28 @@ test('?legacy=1 garde l ancienne app avec le bandeau, meme apres rechargement ; 
 test('bandeau legacy : Open the new app ouvre /manager/ et rend la bascule a l onglet', async ({ page }) => {
   await boot(page, { at: APRES, email: true, routes: routesFor(WALTER, 'walter@example.com'), path: '/?legacy=1' });
   await expect(banner(page)).toBeVisible({ timeout: 10_000 });
+  const avant = await page.evaluate(() => history.length);
   await banner(page).getByRole('button', { name: 'Open the new app' }).click();
   await versManager(page);
   expect(await page.evaluate(() => sessionStorage.getItem('hkV3Legacy'))).toBeNull();
+  // replace et non assign : pas d'entree d'historique ajoutee (Back ne ramene pas une page figee).
+  expect(await page.evaluate(() => history.length)).toBe(avant);
+});
+
+test('?legacy=1 : une session email cleaner ou sous-traitant ne voit jamais le bandeau manager', async ({ page }) => {
+  await boot(page, { at: APRES, email: true, routes: routesFor(ELITE, 'x@example.com'), path: '/?legacy=1' });
+  await reste(page, 3000);
+  await expect(banner(page)).toHaveCount(0);
+});
+
+test('garde anti-boucle : le manager qui reste voit le bandeau Open the new app', async ({ page }) => {
+  await boot(page, { at: APRES, email: true, routes: routesFor(WALTER, 'walter@example.com') });
+  await versManager(page);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
+  await reste(page);
+  await expect(banner(page)).toBeVisible();
+  await expect(banner(page).getByRole('button', { name: 'Open the new app' })).toBeVisible();
 });
 
 test('bandeau legacy : Dismiss le cache pour l onglet', async ({ page }) => {

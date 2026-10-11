@@ -44,6 +44,7 @@ export function createProblemPanel(opts) {
       const d = await get('mgr.problem.get', { ref });
       if (mine !== st.seq || !held(ref)) return;
       st.detail = d;
+      st.onMissing = null; // ouverture reussie : plus de 404 a signaler
       show(view);
     } catch (e) {
       if (mine !== st.seq) return;
