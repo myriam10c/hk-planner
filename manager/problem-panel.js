@@ -18,7 +18,7 @@ function uncertain(e) {
 
 export function createProblemPanel(opts) {
   // pending : derniere cle d'un geste a l'issue inconnue, reprise si le meme geste est rejoue.
-  const st = { busy: false, row: null, detail: null, view: 'detail', origin: 'detail', seq: 0, pending: null };
+  const st = { busy: false, row: null, detail: null, view: 'detail', origin: 'detail', seq: 0, pending: null, onMissing: null };
   const ro = () => !!opts.readOnly();
 
   // Probleme affiche dans le panneau (marqueur data-panel), null si le panneau montre autre chose.
@@ -48,6 +48,14 @@ export function createProblemPanel(opts) {
     } catch (e) {
       if (mine !== st.seq) return;
       if (opts.handleAccess(e)) return;
+      // Ouverture par lien : une reference inconnue (404) ferme la feuille et previent l'appelant.
+      if (e.status === 404 && st.onMissing) {
+        const fn = st.onMissing;
+        st.onMissing = null;
+        if (held(ref)) closeSheet();
+        fn(ref);
+        return;
+      }
       if (held(ref)) openSheet(errorSheet(ref, st.row, e.message)); else toast(e.message);
     }
   }
@@ -152,7 +160,11 @@ export function createProblemPanel(opts) {
 
   document.addEventListener('click', onClick);
   return {
-    open(ref, row) { st.row = row || null; st.origin = 'detail'; st.detail = null; load(ref, 'detail'); },
+    open(ref, row, o) {
+      st.row = row || null; st.origin = 'detail'; st.detail = null;
+      st.onMissing = o && o.onMissing ? o.onMissing : null;
+      load(ref, 'detail');
+    },
     assign(ref, row) { quick(ref, row, 'assign'); },
     schedule(ref, row) { quick(ref, row, 'schedule'); },
     close(ref, row) { return close(ref, row); },

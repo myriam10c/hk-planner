@@ -237,10 +237,30 @@ export async function renderProblems(ctx) {
     },
   });
 
+  // Lien profond : #/problems?ref=REF. Le hash suit la fiche ouverte par replaceState
+  // (pas de hashchange, donc pas de nouveau rendu ni d'entree d'historique en plus).
+  function refFromHash() {
+    const q = (location.hash.split('?')[1] || '');
+    return new URLSearchParams(q).get('ref') || null;
+  }
+  function syncHash() {
+    if (!ctx.isCurrent() || location.hash.split('?')[0] !== '#/problems') return;
+    const ref = panel.current();
+    const want = ref ? '#/problems?ref=' + encodeURIComponent(ref) : '#/problems';
+    if (location.hash !== want) history.replaceState(history.state, '', want);
+  }
+  const sheetEl = document.getElementById('sheet');
+  const watcher = sheetEl ? new MutationObserver(syncHash) : null;
+  if (watcher) {
+    watcher.observe(sheetEl, { attributes: true, attributeFilter: ['class'] });
+    watcher.observe(document.getElementById('sheetInner'), { childList: true });
+  }
+
   document.addEventListener('click', onClick);
   document.addEventListener('keydown', onKey);
   search.addEventListener('input', onInput);
   ctx.onLeave(() => {
+    if (watcher) watcher.disconnect();
     document.removeEventListener('click', onClick);
     document.removeEventListener('keydown', onKey);
     search.removeEventListener('input', onInput);
@@ -249,4 +269,9 @@ export async function renderProblems(ctx) {
     panel.dispose();
   });
   await refresh();
+  const linked = refFromHash();
+  if (linked && ctx.isCurrent()) {
+    st.focusRef = linked;
+    panel.open(linked, rowOf(linked), { onMissing: () => toast('This problem was not found. It may be closed.') });
+  }
 }

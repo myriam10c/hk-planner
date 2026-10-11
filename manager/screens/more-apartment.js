@@ -2,7 +2,7 @@
 // Lecture seule. La fiche reprend menages, linge, tickets, inspections, contacts securite
 // et le score de sante calcules par le proxy (mgr_apartment.ts) ; rien n'est recalcule ici.
 // Les mots de passe de portail ne sortent pas du proxy : lien vers l'onglet Security actuel.
-// Problems ne sait pas encore ouvrir un probleme par sa reference : la reference reste en texte.
+// Les references de tickets ouvrent Problems sur la fiche du ticket (#/problems?ref=).
 import { get } from '/manager/api.js';
 import { ddmm, esc, I, placeLabel } from '/manager/ui/dom.js';
 
@@ -133,15 +133,19 @@ function cleaningsHtml(d, state) {
   }));
 }
 
+function refLink(ref) {
+  return '<a class="ap-ref ap-link mono" href="#/problems?ref=' + encodeURIComponent(ref) + '">' + esc(ref) + '</a>';
+}
+
 function ticketsHtml(d) {
   const open = emptyOr(d, 'tickets', d.tickets.open, 'No open ticket.', (t) => {
     const p = PRIO[t.priority] || PRIO.normal;
-    return '<div class="ap-line"><span class="ap-ref mono">' + esc(t.ref) + '</span>' + pill(p[0], p[1]) + '</div>'
+    return '<div class="ap-line">' + refLink(t.ref) + pill(p[0], p[1]) + '</div>'
       + '<div class="ap-main">' + esc(t.title) + '</div>'
       + '<div class="ap-sub">' + esc(['Since ' + ddmm(isoDay(t.createdAt)), t.assignee || 'Unassigned'].join(' · ')) + '</div>';
   });
   const recent = emptyOr(d, 'tickets', d.tickets.recent, 'No ticket closed in the last 90 days.', (t) =>
-    '<div class="ap-line"><span class="ap-ref mono">' + esc(t.ref) + '</span><span class="ap-sub">Closed ' + esc(ddmm(isoDay(t.resolvedAt))) + '</span></div>'
+    '<div class="ap-line">' + refLink(t.ref) + '<span class="ap-sub">Closed ' + esc(ddmm(isoDay(t.resolvedAt))) + '</span></div>'
     + '<div class="ap-main">' + esc(t.title) + '</div>');
   return section('open', 'Open tickets', d.tickets.open.length ? String(d.tickets.open.length) : '', open)
     + section('recent', 'Recent tickets', 'Closed in the last 90 days', recent);

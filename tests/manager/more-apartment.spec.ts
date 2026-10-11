@@ -209,3 +209,10 @@ for (const scheme of ['light', 'dark'] as const) {
     if (scheme === 'dark') expect(lum).toBeLessThan(0.3); else expect(lum).toBeGreaterThan(0.7);
   });
 }
+
+test('fiche logement : les references de tickets sont des liens vers Problems', async ({ page }) => {
+  await boot(page, '#/more/apartment/L1', [LIST, CL(), ONE()]);
+  const link = page.locator('main [data-sec="open"]').getByRole('link', { name: 'MNT-429' });
+  await expect(link).toHaveAttribute('href', '#/problems?ref=MNT-429');
+  await expect(page.locator('main [data-sec="recent"]').getByRole('link', { name: 'MNT-400' })).toHaveAttribute('href', '#/problems?ref=MNT-400');
+});
