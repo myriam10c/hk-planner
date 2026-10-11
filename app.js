@@ -628,6 +628,118 @@ async function v3BootCheck(setupCheck){
   v3ConfirmedRole=me.cleaner.role;
   return maybeGoV3();
 }
+// ===== Bascule des managers vers /manager/ (phase 6a, 11/10/2026) =====
+// A partir de MGR_CUTOVER_DATE (jour Dubai), une session EMAIL role 'manager'
+// confirmee par le serveur pendant cette page est renvoyee vers /manager/, qui
+// n'accepte que les sessions email. Une session PIN manager reste ici et voit un
+// bandeau qui l'invite a se connecter par email. Meme echappatoire que pour les
+// cleaners : `?legacy=1` (V3_LEGACY_KEY) garde l'ancienne app pour l'onglet,
+// `?legacy=0` rend la bascule. Ancienne app retiree le MGR_LEGACY_UNTIL.
+const MGR_CUTOVER_DATE='2026-10-11';
+const MGR_LEGACY_UNTIL='2026-11-10';
+const MGR_CUTOVER_PATH='/manager/';
+const MGR_REDIRECT_KEY='hkMgrRedirectAt';
+const MGR_BANNER_HIDDEN_KEY='hkMgrBannerHidden';
+function mgrCutoverDue(role,isEmailSession,dubaiDate,legacy){
+  return role==='manager'&&!!isEmailSession&&!legacy&&String(dubaiDate)>=MGR_CUTOVER_DATE;
+}
+(function(){
+  try{
+    if(new URLSearchParams(location.search).get('legacy')==='0') sessionStorage.removeItem(MGR_REDIRECT_KEY);
+  }catch(e){}
+}());
+// Lien de push d'une tache d'equipe (/?task=<id>) lu au chargement : render()
+// reecrit l'URL (writeUrlState) avant la decision de bascule et l'effacerait.
+const MGR_BOOT_TASK=(function(){
+  try{ const id=new URLSearchParams(location.search).get('task'); return /^\d+$/.test(id||'')?id:null; }catch(e){ return null; }
+}());
+function mgrCutoverTarget(){
+  return MGR_CUTOVER_PATH+(MGR_BOOT_TASK?'#/problems?ref=TSK-'+MGR_BOOT_TASK:'');
+}
+let leavingForMgr=false;
+// Renvoie vers /manager/ si la session courante y a droit. true = navigation lancee.
+function maybeGoManager(){
+  if(leavingForMgr) return true;
+  if(authScreen) return false;
+  if(v3Offline()) return false;
+  if(!authAccessToken) return false;
+  if(v3ConfirmedRole!=='manager') return false;
+  if(!mgrCutoverDue(v3ConfirmedRole,!!authAccessToken,dubaiDateOf(Date.now()),v3LegacyChosen())) return false;
+  // Garde anti-boucle : /manager/ renvoie vers la racine toute session qu'il
+  // refuse ; un second renvoi dans les 30 s laisse l'ancienne app s'ouvrir.
+  let last=0;
+  try{ last=Number(sessionStorage.getItem(MGR_REDIRECT_KEY))||0; }catch(e){}
+  if(last&&Date.now()-last>=0&&Date.now()-last<V3_LOOP_MS) return false;
+  try{ sessionStorage.setItem(MGR_REDIRECT_KEY,String(Date.now())); }catch(e){}
+  leavingForMgr=true;
+  location.replace(mgrCutoverTarget());
+  return true;
+}
+// Bandeau de la vue manager, hors de #app (render() reecrit #app a chaque tour) :
+// legacy avec session email, ou session PIN qui doit passer a l'email.
+function mgrBannerKind(){
+  if(leavingForMgr||leavingForV3||authScreen||cleanerMode) return null;
+  if(window.location.hash==='#cleaner') return null; // ecran PIN
+  if(String(dubaiDateOf(Date.now()))<MGR_CUTOVER_DATE) return null;
+  try{ if(sessionStorage.getItem(MGR_BANNER_HIDDEN_KEY)==='1') return null; }catch(e){}
+  if(authAccessToken) return v3LegacyChosen()?'legacy':null;
+  if(cleanerToken) return 'pin';
+  return null;
+}
+function mgrLegacyUntilLabel(){
+  return new Date(MGR_LEGACY_UNTIL+'T00:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric',timeZone:'UTC'});
+}
+function renderMgrBanner(){
+  const kind=mgrBannerKind();
+  let el=document.getElementById('mgrBanner');
+  if(!kind){ if(el) el.remove(); return; }
+  let text, btns;
+  const btn='min-height:36px;padding:0 14px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;border:0;background:#0a6fd6;color:#fff;';
+  if(kind==='legacy'){
+    text='You are using the old manager app. It will be removed on '+mgrLegacyUntilLabel()+'.';
+    btns='<button type="button" data-action="mgrOpenNewApp" style="'+btn+'">Open the new app</button>';
+  }else{
+    // Adresse deja posee : linkEmail refuserait un compte deja utilise, le
+    // chemin est la connexion par email. Sinon, Create your account.
+    const row=currentCleanerRow();
+    const hasEmail=!row||!!((row.email||'')+'').trim();
+    text='The new manager app needs your email sign-in.';
+    btns=hasEmail
+      ?'<button type="button" data-action="mgrSignInWithEmail" style="'+btn+'">Sign out and sign in with email</button>'
+      :'<button type="button" data-action="openAccountSetup" style="'+btn+'">Set up email sign-in</button>';
+  }
+  const html='<span style="flex:1 1 220px">'+text+'</span>'+btns+
+    '<button type="button" data-action="dismissMgrBanner" aria-label="Dismiss" title="Dismiss" style="background:none;border:0;color:inherit;font-size:18px;line-height:1;padding:4px 8px;cursor:pointer;opacity:.7">&times;</button>';
+  if(!el){
+    el=document.createElement('div');
+    el.id='mgrBanner';
+    el.setAttribute('role','status');
+    el.style.cssText='position:relative;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:8px 16px 0;padding:10px 12px;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:14px;line-height:1.4;box-sizing:border-box';
+    const app=document.getElementById('app');
+    if(app&&app.parentNode) app.parentNode.insertBefore(el,app); else document.body.prepend(el);
+  }
+  el.dataset.mgrBanner=kind;
+  if(el.innerHTML!==html) el.innerHTML=html;
+}
+function dismissMgrBanner(){
+  try{ sessionStorage.setItem(MGR_BANNER_HIDDEN_KEY,'1'); }catch(e){}
+  renderMgrBanner();
+}
+function mgrOpenNewApp(){
+  try{ sessionStorage.removeItem(V3_LEGACY_KEY); sessionStorage.removeItem(MGR_REDIRECT_KEY); }catch(e){}
+  leavingForMgr=true;
+  renderMgrBanner();
+  location.assign(MGR_CUTOVER_PATH);
+}
+// Session PIN d'un manager deja dote d'une adresse : on ferme la session (PIN
+// compris, emailLogout) et on ouvre le login email avec son adresse.
+async function mgrSignInWithEmail(){
+  const row=currentCleanerRow();
+  const email=((row&&row.email)||'')+'';
+  await emailLogout();
+  authEmailDraft=email.trim();
+  render();
+}
 // Migration : sessions pré-Phase1 (cleanerMode sans token) → forcer re-login
 if(cleanerMode && !cleanerToken){
   cleanerMode=null;
@@ -3334,6 +3446,8 @@ async function cleanerLogin(){
       // le teste en premier, le chargement continue derriere. Pas de Welcome
       // par-dessus l'ecran obligatoire (ferait croire que c'est fini).
       if(!(await maybeOfferAccountSetup())) toast('Welcome '+res.cleaner.name+'!','success');
+      // Session PIN : jamais renvoyee (bandeau), sauf session email deja ouverte.
+      if(maybeGoManager()) return;
       fetchAll();
       return;
     }
@@ -4462,7 +4576,7 @@ async function submitLinkEmail(){
     const ok=await adoptEmailSession();
     accountSetupBusy=false;
     if(ok&&authScreen==='createAccount') authScreen=null;
-    if(ok&&maybeGoV3()) return;
+    if(ok&&(maybeGoV3()||maybeGoManager())) return;
     render();
     if(ok){ toast('Account created. You can sign in with your email now.','success'); fetchAll(); }
   }catch(err2){
@@ -4542,7 +4656,7 @@ async function emailLogin(){
     authAccessToken=r.data&&r.data.session?r.data.session.access_token:null;
     const ok=await adoptEmailSession();
     authBusy=false;
-    if(ok&&maybeGoV3()) return;
+    if(ok&&(maybeGoV3()||maybeGoManager())) return;
     render();
     if(ok) fetchAll();
   }catch(e){ authBusy=false; authError=authErrorMessage(e); render(); }
@@ -4582,7 +4696,7 @@ async function submitNewPassword(){
     authAccessToken=s.data&&s.data.session?s.data.session.access_token:null;
     const ok=await adoptEmailSession();
     authBusy=false;
-    if(ok&&maybeGoV3()) return;
+    if(ok&&(maybeGoV3()||maybeGoManager())) return;
     render();
     if(ok){ toast('Password saved','success'); fetchAll(); }
   }catch(e){ authBusy=false; authError=authErrorMessage(e); render(); }
@@ -4764,6 +4878,8 @@ function maybeShowInspAnnounce(){
 // ============ RENDER ============
 function render(){
   if(leavingForV3) return; // bascule v3 en cours : ne rien repeindre
+  if(leavingForMgr) return; // bascule /manager/ en cours
+  renderMgrBanner();
   if(authScreen==='createAccount'){renderAuthCreateAccount();return;}
   if(authScreen==='setPassword'){renderAuthSetPassword();return;}
   if(authScreen==='login'){renderAuthLogin();return;}
@@ -8024,7 +8140,7 @@ hkAuthBoot().then(async function(ok){
   if(!ok) return;
   // Session email : cleanerMe vient de confirmer le role (adoptEmailSession).
   // Session PIN : on le demande au serveur avant le premier fetchAll.
-  if(authAccessToken){ if(maybeGoV3()) return; }
+  if(authAccessToken){ if(maybeGoV3()||maybeGoManager()) return; }
   else if(cleanerToken&&await v3BootCheck(bootSetupCheck)) return;
   fetchAll();
 });

@@ -91,6 +91,13 @@ async function bootWithFakeNetwork(
   await page.waitForFunction(() => typeof (window as any).parseAuthHash === 'function', null, { timeout: 10_000 });
 }
 
+// Depuis la bascule du 11/10 (tests/mgr-cutover.spec.ts), une session email
+// manager est renvoyee vers /manager/. Les parcours ci-dessous testent l'ancienne
+// app elle-meme : on la garde pour l'onglet, comme ?legacy=1.
+async function keepOldApp(page: any) {
+  await page.addInitScript(() => { try { sessionStorage.setItem('hkV3Legacy', '1'); } catch (e) { /* ignore */ } });
+}
+
 function storedSession() {
   return { ...SESSION, expires_at: Math.floor(Date.now() / 1000) + 3600 };
 }
@@ -163,6 +170,7 @@ test('un mot de passe faux affiche un message en anglais et garde l ecran', asyn
 });
 
 test('une connexion reussie envoie le JWT au proxy en Bearer', async ({ page }) => {
+  await keepOldApp(page);
   await bootWithFakeNetwork(page, [
     { match: '/auth/v1/token', status: 200, body: SESSION },
     { match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: { id: 8, name: 'Walter', color: '#e94560', role: 'manager' } } },
@@ -316,6 +324,7 @@ test('un 401 sur cleanerMe garde le message de session terminee', async ({ page 
 // ---------------------------------------------------------------------------
 
 test('revue finale constat 1 : un manager connecte par email peut se deconnecter', async ({ page }) => {
+  await keepOldApp(page);
   // adoptEmailSession met cleanerMode a null pour un manager, et les trois
   // boutons Logout etaient gates sur cleanerMode : aucun moyen de sortir.
   await bootWithFakeNetwork(page, [
@@ -579,6 +588,7 @@ test('hotfix hash : un lien de reinitialisation laisse la barre d adresse propre
 });
 
 test('hotfix hash : rouvrir la meme page ne redemande plus un mot de passe', async ({ page }) => {
+  await keepOldApp(page);
   await bootWithFakeNetwork(page, recoveryRoutes(), { hash: HASH_RECOVERY });
   await expect(page.locator('#authNewPassword')).toBeVisible();
   expect((await urlEtMenage(page)).hash).toBe('');

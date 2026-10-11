@@ -37,6 +37,8 @@ async function boot(page: any, member: any) {
       localStorage.setItem('hkAuthSession', JSON.stringify(cfg.session));
       localStorage.setItem('onboardingSeen', '1');
       localStorage.setItem('hkInspAnnounceShown', '9');
+      // Bascule du 11/10 : sans ?legacy=1, le manager email part vers /manager/.
+      sessionStorage.setItem('hkV3Legacy', '1');
     } catch (e) { /* ignore */ }
     const real = window.fetch.bind(window);
     window.fetch = ((input: any, init: any) => {
