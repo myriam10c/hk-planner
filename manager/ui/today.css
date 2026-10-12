@@ -115,3 +115,8 @@
 .pick button[aria-current="true"]{border-color:var(--accent);background:var(--accent-tint)}
 .pick button .av{width:32px;height:32px;font-size:14px}
 .pick button small{display:block;color:var(--ink-3);font-size:14px}
+
+/* Jours du bloc « Who does what » : Today, Tomorrow et cinq jours, defilement horizontal du seul rang. */
+.wdays{padding:0 var(--s4) var(--s3)}
+.wpad{padding:0 var(--s4) var(--s3)}
+.wpad .banner{margin-bottom:0}
