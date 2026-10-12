@@ -224,7 +224,8 @@ test('Done avec photo : mnt.photo d abord (cle, fichier, ticketId), puis ticket.
   const f = await forms(page);
   expect(f).toHaveLength(1);
   expect(f[0].ticketId).toBe('14');
-  expect(f[0].file).toBe('file:leak.png:image/png');
+  // F1 : photo reduite en JPEG avant l'envoi (shrink d'inspections/photo.js).
+  expect(f[0].file).toBe('file:leak.jpg:image/jpeg');
   expect(f[0].idem).toMatch(/^mgr-[A-Za-z0-9]{8,}/);
   const a = await acts(page);
   expect(a[0]).toMatchObject({ op: 'ticket.done', ticketId: 14, photoPath: 'v3/2026-10-09/abc.png' });
@@ -419,4 +420,103 @@ test('375 px : fiche, Done et New ticket sans defilement horizontal, cibles de 4
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '+ New ticket' }).click();
   await check();
+});
+
+// ---------- Revue finale (F1, F11, T5 #6) ----------
+
+const PHOTO_OK = { match: 'action=mnt.photo', status: 200, body: { status: 'success', photoId: 77, path: 'v3/2026-10-09/abc.jpg' } };
+
+test('F1 : photo illisible d un type refuse (HEIC) : erreur dans la feuille, rien envoye', async ({ page }) => {
+  await openFromOpen(page, [PHOTO_OK, ACT_OK()], WORKING);
+  const s = sheet(page);
+  await s.locator('[data-mact="tk-done"]').click();
+  await s.locator('#mtPhoto').setInputFiles({ name: 'IMG_0001.HEIC', mimeType: 'image/heic', buffer: Buffer.from('not really a heic file') });
+  await s.locator('[data-mact="tk-done-send"]').click();
+  await expect(s.locator('.sheet-err')).toHaveText('This photo format is not supported. Take a new photo.');
+  await expect(s.locator('[data-mact="tk-done-send"]')).toBeEnabled();
+  const log = await fetchLog(page);
+  expect(log.some((l) => l.url.includes('action=mnt.photo') || l.url.includes('action=mnt.act'))).toBe(false);
+});
+
+test('T5 #6 : ticket.done rate apres l envoi de la photo : le reessai ne renvoie pas la photo, meme cle de geste', async ({ page }) => {
+  await openFromOpen(page, [PHOTO_OK, { ...ACT_OK(), fail: true, once: true }, ACT_OK()], WORKING);
+  await watchForms(page);
+  const s = sheet(page);
+  await s.locator('[data-mact="tk-done"]').click();
+  await s.locator('#mtPhoto').setInputFiles(PNG);
+  await s.locator('[data-mact="tk-done-send"]').click();
+  await expect(s.locator('.sheet-err')).toHaveText('No connection. Try again.');
+  await expect(s.locator('[data-mact="tk-done-send"]')).toBeEnabled();
+  await s.locator('[data-mact="tk-done-send"]').click();
+  await expect(page.locator('#toast')).toContainText('MNT-14 done');
+  expect(await forms(page)).toHaveLength(1);
+  const a = await acts(page);
+  expect(a).toHaveLength(2);
+  expect(a.map((x) => x.photoPath)).toEqual(['v3/2026-10-09/abc.jpg', 'v3/2026-10-09/abc.jpg']);
+  expect(a[1].idem).toBe(a[0].idem);
+});
+
+test('T5 #6 : upload() envoie les en-tetes de session sans Content-Type, delai depasse = message de delai', async ({ page }) => {
+  await bootMgr(page, ALL(GET('MNT-14', DETAIL(WORKING)), { ...PHOTO_OK, delay: 1500 }, ACT_OK()),
+    { email: true, clock: NOW_MNT, hash: '#/maintenance?ref=MNT-14', timeoutMs: 400 });
+  const s = sheet(page);
+  await s.locator('[data-mact="tk-done"]').click();
+  await s.locator('#mtPhoto').setInputFiles(PNG);
+  await s.locator('[data-mact="tk-done-send"]').click();
+  await expect(s.locator('.sheet-err')).toHaveText('HK Planner is taking too long to answer. Try again.');
+  const up = (await fetchLog(page)).find((l) => l.url.includes('action=mnt.photo'))!;
+  expect(up.headers['Authorization']).toBe('Bearer jwt-test');
+  expect(up.headers['X-App-Secret']).toBeTruthy();
+  expect(up.headers['Content-Type']).toBeUndefined();
+  expect(await acts(page)).toHaveLength(0);
+});
+
+test('T5 #6 : Confirm fixed ouvre la feuille Mark done ; Reopen sur un ticket clos envoie ticket.reopen', async ({ page }) => {
+  await bootMgr(page, ALL(
+    GET('MNT-33', DETAIL({ id: 33, ref: 'MNT-33', stage: 'to_confirm', status: 'to_confirm' })),
+    GET('MNT-34', DETAIL({ id: 34, ref: 'MNT-34', stage: 'done', status: 'resolved', resolvedAt: '2026-10-08T08:00:00Z', resolvedBy: 'Semax' })),
+    ACT_OK({ ticketId: 34, status: 'assigned' }),
+  ), { email: true, clock: NOW_MNT, hash: '#/maintenance?ref=MNT-33' });
+  const s = sheet(page);
+  await s.locator('[data-mact="tk-done"]').click();
+  await expect(s.getByRole('heading', { name: 'Mark done' })).toBeVisible();
+  await expect(s.locator('#mtDoneNote')).toBeVisible();
+  expect(await acts(page)).toHaveLength(0);
+  await page.evaluate(() => { location.hash = '#/maintenance?ref=MNT-34'; });
+  await expect(s.locator('[data-mref="MNT-34"]')).toBeVisible();
+  await s.locator('[data-mact="tk-reopen"]').click();
+  await expect(page.locator('#toast')).toContainText('MNT-34 reopened');
+  const a = await acts(page);
+  expect(a.map(({ idem, ...x }) => x)).toEqual([{ op: 'ticket.reopen', ticketId: 34 }]);
+});
+
+test('F11 : photo de cloture montree une seule fois ; lien Hostaway de l historique en 44 px', async ({ page }) => {
+  const url = 'https://signed.test/v3/after.jpg';
+  await openFromOpen(page, [], {
+    stage: 'done', status: 'resolved', resolvedAt: '2026-10-08T08:00:00Z', resolvedBy: 'Semax', resolutionPhotoUrl: url,
+    photos: [{ url, at: '2026-10-08T08:00:00Z' }],
+    history: [
+      { at: '2026-10-09T06:10:00Z', who: 'Guest', kind: 'guest', text: 'Hot', photoUrl: null },
+      { at: '2026-10-08T08:00:00Z', who: 'Semax', kind: 'event', text: 'added a photo', photoUrl: url },
+    ],
+  });
+  const s = sheet(page);
+  await expect(s.locator('a.mt-thumb[href="' + url + '"]')).toHaveCount(1);
+  const h = await s.locator('.mt-hist a.mt-hlink').evaluate((a: any) => a.getBoundingClientRect().height);
+  expect(h).toBeGreaterThanOrEqual(44);
+});
+
+test('F11 : photo de cloture hors historique : montree une fois dans les photos', async ({ page }) => {
+  const url = 'https://signed.test/v3/after.jpg';
+  await openFromOpen(page, [], { resolutionPhotoUrl: url, photos: [{ url, at: '2026-10-08T08:00:00Z' }] });
+  await expect(sheet(page).locator('a.mt-thumb[href="' + url + '"]')).toHaveCount(1);
+});
+
+test('F11 : echeance passee : Due date sans date pre-remplie, minimum aujourd hui', async ({ page }) => {
+  await openFromOpen(page, [ACT_OK()], { dueOn: '2026-10-07' });
+  const s = sheet(page);
+  await s.locator('[data-mact="tk-due"]').click();
+  await expect(s.locator('#mtDue')).toHaveValue('');
+  await expect(s.locator('#mtDue')).toHaveAttribute('min', '2026-10-09');
+  await expect(s.locator('[data-mact="tk-due-clear"]')).toBeVisible();
 });

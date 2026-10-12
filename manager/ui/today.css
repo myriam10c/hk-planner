@@ -54,6 +54,7 @@
 .prob .why{display:block;color:var(--ink-2);font-size:15px;margin-top:2px}
 .sec-foot{border-top:1px solid var(--line);padding:var(--s3) var(--s4);display:flex;justify-content:space-between;align-items:center;gap:var(--s3);flex-wrap:wrap}
 .sec-foot .t3{color:var(--ink-3);font-size:14px}
+.sec-foot.mt-foot{justify-content:flex-end}
 
 .ctl{border-top:1px solid var(--line);padding:var(--s3) var(--s4)}
 .ctl h3{margin:0 0 var(--s2);font-size:16px;font-weight:600}

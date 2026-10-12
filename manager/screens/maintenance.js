@@ -6,6 +6,7 @@
 // par mnt.photo avant ticket.done. Donnees non fraiches : aucun geste, « Reconnect to make changes. ».
 import { get, post, upload } from '/manager/api.js';
 import { createGestures } from '/manager/gesture.js';
+import { shrink } from '/inspections/photo.js';
 import {
   announceMntBadge, closeSheet, dubaiTime, openSheet, sheetBusy, sheetError, sheetIsOpen, toast,
 } from '/manager/ui/dom.js';
@@ -16,6 +17,11 @@ const FILTERS = ['mine', 'urgent', 'unassigned'];
 const SEARCH_DELAY_MS = 250;
 const DUE_MAX_DAYS = 60; // MNT_DUE_MAX_DAYS (mnt_act.ts)
 const COST_RE = /^\d+(\.\d{1,2})?$/; // meme regle que parseCost (mnt_act.ts)
+// Liste lue il y a plus d'une minute : relue avant un geste (comme Planning).
+const STALE_MS = 60000;
+// Types acceptes par le depot (v3_photos.ts) quand la photo n'a pas pu etre reduite.
+const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const BAD_PHOTO = 'This photo format is not supported. Take a new photo.';
 
 export async function renderMaintenance(ctx) {
   const main = ctx.main;
@@ -43,7 +49,7 @@ export async function renderMaintenance(ctx) {
     return false;
   }
 
-  main.innerHTML = V.shellHtml();
+  main.innerHTML = V.shellHtml(ctx.role === 'maintenance');
   const $ = (id) => document.getElementById(id);
   const search = $('mtSearch');
 
@@ -178,6 +184,7 @@ export async function renderMaintenance(ctx) {
   async function write(ref, body, okMsg) {
     if (st.busy) { toast('Saving, wait a second.'); return null; }
     if (readOnly()) { toast(V.RO_LINE); return null; }
+    if (!(await freshEnough())) return null;
     st.busy = true;
     if (owns(ref)) sheetBusy(true);
     let r;
@@ -199,6 +206,21 @@ export async function renderMaintenance(ctx) {
     toast(typeof okMsg === 'function' ? okMsg(r || {}) : okMsg);
     refresh();
     return r;
+  }
+
+  // Liste lue il y a plus d'une minute : relue avant le geste. Relecture ratee :
+  // anciennes donnees gardees, en lecture seule, aucun geste.
+  let reloading = false;
+  async function freshEnough() {
+    const e = cur();
+    if (!e || Date.now() - e.savedAt <= STALE_MS) return true;
+    if (reloading) return false;
+    reloading = true;
+    await refresh();
+    reloading = false;
+    if (!ctx.isCurrent()) return false;
+    if (readOnly()) { toast(V.RO_LINE); return false; }
+    return true;
   }
 
   // Proposition par reference : depuis une carte, la liste fraiche d'abord ; depuis une
@@ -332,14 +354,26 @@ export async function renderMaintenance(ctx) {
     const file = input && input.files && input.files[0] ? input.files[0] : null;
     let photoPath = null;
     if (file) {
+      // Cle tiree du fichier d'origine : un reessai reprend la meme cle et le meme chemin.
       const key = t.id + '|' + file.name + '|' + file.size + '|' + file.lastModified;
       if (st.photo && st.photo.key === key) photoPath = st.photo.path;
       else {
         st.busy = true;
         sheetBusy(true);
+        // Reduite avant l'envoi (1600 px, JPEG), comme Inspections. Illisible (HEIC
+        // non decode) et d'un type refuse par le depot : erreur dans la feuille.
+        let small = null;
+        try { small = await shrink(file); } catch (e) { small = file; }
+        if (!small || (small === file && !PHOTO_TYPES.includes(file.type))) {
+          st.busy = false;
+          if (owns(t.ref)) { sheetBusy(false); sheetError(BAD_PHOTO); }
+          return;
+        }
+        const sent = small === file ? file
+          : new File([small], (file.name.replace(/\.[^.]*$/, '') || 'photo') + '.jpg', { type: 'image/jpeg' });
         let r;
         try {
-          r = await photoGestures.run('mnt.photo|' + key, (idem) => upload('mnt.photo', { idem, file, ticketId: String(t.id) }));
+          r = await photoGestures.run('mnt.photo|' + key, (idem) => upload('mnt.photo', { idem, file: sent, ticketId: String(t.id) }));
         } catch (e) {
           st.busy = false;
           if (owns(t.ref)) sheetBusy(false);
@@ -355,6 +389,8 @@ export async function renderMaintenance(ctx) {
         st.photo = { key, path: r.path };
         photoPath = r.path;
         if (!owns(t.ref)) return;
+        // Boutons rendus avant write() : un refus avant l'envoi (lecture seule) ne laisse pas la feuille bloquee.
+        sheetBusy(false);
       }
     }
     const body = tkBody(t, 'ticket.done', { note });
@@ -500,13 +536,18 @@ export async function renderMaintenance(ctx) {
     if (ctx.isCurrent() && e.target && e.target.id === 'mtPhoto') photoName();
   }
 
+  // Retour sur l'app : l'onglet affiche est relu (un autre telephone a pu agir).
+  const onVis = () => { if (document.visibilityState === 'visible' && !st.busy && st.view && ctx.isCurrent()) refresh(); };
+
   document.addEventListener('click', onClick);
   document.addEventListener('change', onChange);
+  document.addEventListener('visibilitychange', onVis);
   search.addEventListener('input', onInput);
   ctx.onLeave(() => {
     if (watcher) watcher.disconnect();
     document.removeEventListener('click', onClick);
     document.removeEventListener('change', onChange);
+    document.removeEventListener('visibilitychange', onVis);
     search.removeEventListener('input', onInput);
     clearTimeout(st.typing);
   });

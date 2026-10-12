@@ -391,3 +391,61 @@ test('cout : vide ou absent ne montre rien, 0 est un vrai cout', async ({ page }
   });
   expect(out).toEqual(['', '', '', '', '', 'AED 0', 'AED 120', 'AED 12.50']);
 });
+
+// ---------- Revue finale (F2, F6) ----------
+
+test('F2 : Semax a une ligne Links en bas (Inspections, Field app, Old app)', async ({ page }) => {
+  await bootMgr(page, [me(SEMAX), L.rejected(), L.proposals(), L.open(), L.done()], { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  const links = page.locator('#main nav.mt-links a');
+  await expect(links).toHaveText(['Inspections', 'Field app', 'Old app (until 10 Nov)']);
+  expect(await links.evaluateAll((as: any[]) => as.map((a) => a.getAttribute('href')))).toEqual(['/inspections/', '/v3/', '/?legacy=1']);
+  expect(await links.evaluateAll((as: any[]) => as.map((a) => a.getBoundingClientRect().height >= 44))).toEqual([true, true, true]);
+  await expect(page.locator('#main nav.mt-links')).toHaveAttribute('aria-labelledby', 'mtLinksH');
+});
+
+test('F2 : un manager n a pas la ligne Links', async ({ page }) => {
+  await bootMgr(page, ALL(), { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  await expect(page.locator('.mt-card')).toHaveCount(2);
+  await expect(page.locator('#main nav.mt-links')).toHaveCount(0);
+});
+
+const visible = (page: any) => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+
+test('F6 : retour sur l app (visibilitychange) relit l onglet courant ; ecran quitte, plus rien', async ({ page }) => {
+  await bootMgr(page, [...ALL(), { match: 'action=mgr.planning', status: 500, body: { error: 'x' } }],
+    { email: true, clock: NOW_MNT, hash: '#/maintenance?tab=open' });
+  await expect(page.locator('.mt-row').first()).toBeVisible();
+  const before = (await lists(page)).length;
+  await visible(page);
+  await expect.poll(async () => (await lists(page)).length).toBe(before + 1);
+  expect((await lists(page)).at(-1)).toContain('tab=open');
+  await page.evaluate(() => { location.hash = '#/planning'; });
+  await expect(page.getByRole('heading', { name: 'Planning' })).toBeVisible();
+  const n = (await lists(page)).length;
+  await visible(page);
+  await page.waitForTimeout(300);
+  expect((await lists(page)).length).toBe(n);
+});
+
+test('F6 : liste lue il y a plus de 60 s, relue avant le geste', async ({ page }) => {
+  await bootMgr(page, [...ALL(), { match: 'action=mnt.act', status: 200, body: { ok: true, ticketId: 12, ref: 'MNT-12' } }],
+    { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  await expect(page.locator('.mt-card')).toHaveCount(2);
+  const before = (await lists(page)).length;
+  await page.clock.setFixedTime(new Date(NOW_MNT.getTime() + 61_000));
+  await page.locator('.mt-card').nth(1).getByRole('button', { name: 'Add to MNT-12' }).click();
+  await expect(page.locator('#toast')).toContainText('Added to MNT-12');
+  const log = (await fetchLog(page)).filter((l) => l.url.includes('action=mnt.list') || l.url.includes('action=mnt.act'));
+  const kinds = log.slice(before).map((l) => (l.url.includes('mnt.act') ? 'act' : 'list'));
+  expect(kinds.slice(0, 2)).toEqual(['list', 'act']);
+});
+
+test('F6 : relecture ratee avant le geste (liste trop vieille) : lecture seule, aucun geste', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...L.proposals(), once: true }, { match: 'action=mnt.list', status: 0, body: {}, fail: true }],
+    { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  await expect(page.locator('.mt-card')).toHaveCount(2);
+  await page.clock.setFixedTime(new Date(NOW_MNT.getTime() + 61_000));
+  await page.locator('.mt-card').nth(1).getByRole('button', { name: 'Add to MNT-12' }).click();
+  await expect(page.locator('#toast')).toContainText('Reconnect to make changes.');
+  expect(await acts(page)).toHaveLength(0);
+});

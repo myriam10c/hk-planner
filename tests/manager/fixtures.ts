@@ -1,4 +1,3 @@
-import { ROW_TSK } from './problem-fixtures';
 // Reponse mgr.today au format de supabase/functions/hostaway-proxy/mgr_api.ts.
 export const DAY = '2026-10-09';
 export const NOW = new Date('2026-10-09T07:00:00Z'); // 11:00 Dubai
@@ -29,10 +28,6 @@ export function todayBody(over: any = {}) {
       ],
       unassigned: ['2026-10-09_Ann Lee', '2026-10-09_Lu Mo'],
       technicians: [{ id: 7, name: 'Semax', open: 1, oldest: { id: 106, title: 'Balcony drain blocked', since: '27/04' } }],
-    },
-    problems: {
-      counts: { urgent: 21, ticketsOpen: 70, ticketsUrgent: 19, ticketsNoTech: 69, teamTasksOpen: 135, teamTasksOverdue: 19, inspectionTicketsOpen: 11, cleanerReportsOpen: 0 },
-      top: [ROW_TSK],
     },
     maintenance: {
       counts: { proposals: 3, proposalsUrgent: 1, open: 70, urgent: 19, unassigned: 69 },

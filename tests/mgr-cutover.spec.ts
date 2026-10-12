@@ -156,7 +156,14 @@ test('session email maintenance (Semax) le 11/10 : renvoyee vers /manager/, lien
 test('session PIN maintenance le 11/10 : reste, bandeau de connexion par email', async ({ page }) => {
   await boot(page, { at: APRES, pin: SEMAX, mode: true, routes: routesFor(SEMAX, 'semax@example.com') });
   await reste(page, 3000);
-  await expect(banner(page)).toContainText('The new manager app needs your email sign-in.');
+  // Ruling E : Semax n'est pas manager, mot neutre.
+  await expect(banner(page)).toContainText('The new app needs your email sign-in.');
+  await expect(banner(page)).not.toContainText('manager app');
+});
+
+test('F10 : push de tache /?task=13 pour Semax (email) : /manager/ sur #/tasks?ref=TSK-13', async ({ page }) => {
+  await boot(page, { at: APRES, email: true, routes: routesFor(SEMAX, 'semax@example.com'), path: '/?task=13' });
+  await versManager(page, '#/tasks?ref=TSK-13');
 });
 
 test('?legacy=1 : une session email maintenance garde l ancienne app avec le bandeau', async ({ page }) => {

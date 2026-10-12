@@ -1,6 +1,7 @@
 // App manager /manager/ (spec 2026-10-09-hk-manager-app-design.md) : acces,
 // navigation par role, routeur par hash. Manager : Today · Planning · Maintenance ·
-// Inspections · More (Tasks sous More). Maintenance (Semax) : Maintenance · Planning.
+// Inspections · More (Tasks sous More). Maintenance (Semax) : Maintenance · Planning,
+// plus Tasks sans entree de navigation (une push de tache y arrive, ruling C).
 import { getSession } from '/v3/session.js';
 import { get } from '/manager/api.js';
 import { decideAccess } from '/manager/access.js';
@@ -11,7 +12,7 @@ const LABELS = { today: 'Today', planning: 'Planning', maintenance: 'Maintenance
 // Par role : entrees de navigation, vues permises (Tasks vit sous More), vue d'arrivee.
 const ROLES = {
   manager: { nav: ['today', 'planning', 'maintenance', 'inspections', 'more'], extra: ['tasks'], landing: 'today' },
-  maintenance: { nav: ['maintenance', 'planning'], extra: [], landing: 'maintenance' },
+  maintenance: { nav: ['maintenance', 'planning'], extra: ['tasks'], landing: 'maintenance' },
 };
 // Vue cachee de la navigation -> entree marquee courante.
 const PARENT = { tasks: 'more' };
@@ -33,14 +34,25 @@ let seq = 0;
 let leaving = [];
 let listening = false;
 
+// Membre de la session courante, pose par l'app racine (hkSessionCleanerId) et
+// efface a la deconnexion.
+const MEMBER_KEY = 'hkSessionCleanerId';
 // Role confirme par le serveur ; sans reponse (session a renouveler, hors ligne),
-// le dernier role confirme sur cet appareil, sinon manager.
+// le dernier role confirme sur cet appareil, seulement s'il appartient au membre
+// de la session courante (appareil partage), sinon manager.
+function storedRole() {
+  try {
+    const o = JSON.parse(localStorage.getItem(ROLE_KEY) || 'null');
+    const member = localStorage.getItem(MEMBER_KEY);
+    if (!o || typeof o !== 'object' || !member || String(o.id) !== String(member)) return null;
+    return o.role;
+  } catch (e) { return null; }
+}
 function roleOf() {
-  let r = me && me.role;
-  if (!r) { try { r = localStorage.getItem(ROLE_KEY); } catch (e) { r = null; } }
+  const r = (me && me.role) || storedRole();
   return ROLES[r] ? r : 'manager';
 }
-function rememberRole(r) { try { localStorage.setItem(ROLE_KEY, r); } catch (e) { /* stockage indisponible */ } }
+function rememberRole(id, r) { try { localStorage.setItem(ROLE_KEY, JSON.stringify({ id, role: r })); } catch (e) { /* stockage indisponible */ } }
 
 // Anciens liens #/problems : taches -> #/tasks, tickets MNT -> #/maintenance (requete gardee).
 function legacyHash(hash) {
@@ -71,18 +83,22 @@ function badge(id) {
 function renderNav(view) {
   const cur = PARENT[view] || view;
   const views = ROLES[roleOf()].nav;
+  // Une colonne par entree (2 pour Semax), pas une grille fixe de 5.
+  document.getElementById('tabbar').style.setProperty('--tabs', String(views.length));
   const link = (cls, id, inner) => '<a class="' + cls + '" href="#/' + id + '"' + (cur === id ? ' aria-current="page"' : '') + '>' + inner + '</a>';
   document.getElementById('sideNav').innerHTML = views.map((id) => link('navlink', id, I[id] + '<span>' + LABELS[id] + '</span>' + badge(id))).join('');
   document.getElementById('tabbar').innerHTML = views.map((id) => link('tab', id, '<span class="tab-wrap">' + I[id] + badge(id) + '</span>' + LABELS[id])).join('');
   document.getElementById('sideFoot').textContent = me ? 'Signed in as ' + me.name : 'Offline';
 }
 
-function emailRequired() {
+function emailRequired(role) {
   document.body.classList.add('bare');
   document.getElementById('sideNav').innerHTML = '';
   document.getElementById('tabbar').innerHTML = '';
+  const r = role || roleOf();
+  const why = r === 'maintenance' ? 'The new app needs your email sign-in.' : 'The manager app needs your email account.';
   main.innerHTML = '<div class="ph" style="margin-top:32px"><h2>Sign in with your email</h2>'
-    + '<p>The manager app needs your email account. This device is signed in with a PIN.</p>'
+    + '<p>' + why + ' This device is signed in with a PIN.</p>'
     + '<p>Open HK Planner, sign out, then sign in with your email and password.</p>'
     + '<a class="btn primary" href="/?legacy=1">Open HK Planner</a></div>';
 }
@@ -95,7 +111,7 @@ async function route() {
   closeSheet();
   const view = currentView();
   renderNav(view);
-  const ctx = { me, main, isCurrent: () => mine === seq, onLeave: (fn) => { leaving.push(fn); }, emailRequired };
+  const ctx = { me, role: roleOf(), main, isCurrent: () => mine === seq, onLeave: (fn) => { leaving.push(fn); }, emailRequired: () => emailRequired() };
   const screen = SCREENS[view];
   if (screen) {
     let mod = null;
@@ -152,9 +168,9 @@ async function boot() {
   }
   const d = decideAccess(s, cleaner);
   if (d.go) { location.replace(d.go); return; }
-  if (d.screen === 'email') { emailRequired(); return; }
+  if (d.screen === 'email') { emailRequired(cleaner.role); return; }
   me = { id: cleaner.id, name: cleaner.name, role: cleaner.role };
-  rememberRole(cleaner.role);
+  rememberRole(cleaner.id, cleaner.role);
   await startShell();
 }
 

@@ -3,7 +3,7 @@
 .sidebar{display:none}
 main{padding:0 16px 112px;max-width:1240px;margin:0 auto}
 .boot{color:var(--ink-3);padding:var(--s8) 0}
-.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,minmax(0,1fr));padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(var(--tabs,5),minmax(0,1fr));padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
 .tab{background:none;border:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;font-size:12px;font-weight:500;color:var(--ink-3);cursor:pointer;border-radius:10px;white-space:nowrap;text-decoration:none;min-width:0}
 .tab svg{width:24px;height:24px}
 .tab[aria-current="page"]{color:var(--accent)}

@@ -201,15 +201,18 @@ function maintenanceHtml(data) {
   const m = data.maintenance;
   if (!m) return h + '<div class="empty pad">Maintenance is unavailable right now.</div></section>';
   const c = m.counts;
-  h += '<div class="counts"><a class="count" href="#/maintenance"><b class="tnum">' + c.proposals + '</b><span>' + c.proposals + ' proposals to check</span></a>'
-    + '<div class="count"><b class="tnum">' + c.urgent + '</b><span>' + c.urgent + ' urgent tickets</span></div>'
-    + '<div class="count"><b class="tnum">' + c.unassigned + '</b><span>' + c.unassigned + ' with nobody</span></div></div>';
+  // Le nombre une seule fois (en gras), le libelle au singulier pour 1.
+  const n = (v) => Number(v) || 0;
+  const count = (v, one, many) => '<b class="tnum">' + n(v) + '</b> <span>' + (n(v) === 1 ? one : many) + '</span>';
+  h += '<div class="counts"><a class="count" href="#/maintenance">' + count(c.proposals, 'proposal to check', 'proposals to check') + '</a>'
+    + '<div class="count">' + count(c.urgent, 'urgent ticket', 'urgent tickets') + '</div>'
+    + '<div class="count">' + count(c.unassigned, 'with nobody', 'with nobody') + '</div></div>';
   if (!m.top.length) h += '<div class="empty pad">Nothing open.</div>';
   h += m.top.map((t) => '<a class="prob" href="#/maintenance?ref=' + encodeURIComponent(t.ref) + '" data-nav-row>'
     + '<span class="bar ' + (MNT_TONE[t.priority] || 'ok') + '"></span><span class="body"><span class="src"><span>' + esc(MNT_STAGE[t.stage] || '')
     + '</span><span class="mono">' + esc(t.ref) + '</span></span><span class="ttl">' + esc(t.title) + '</span>'
     + (t.apt || t.bld ? '<span class="where">' + esc(placeLabel(t)) + '</span>' : '') + '</span></a>').join('');
-  h += '<div class="sec-foot"><span class="t3"></span><a class="link" href="#/maintenance">Open maintenance</a></div>';
+  h += '<div class="sec-foot mt-foot"><a class="link" href="#/maintenance">Open maintenance</a></div>';
   return h + '</section>';
 }
 

@@ -335,16 +335,20 @@ test('revue finale constat 1 : un manager connecte par email peut se deconnecter
   await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
   const logout = page.locator('.header [data-action="cleanerLogout"]').first();
   await expect(logout).toBeVisible();
+  // Ruling D : le role garde par /manager/ part avec la session.
+  await page.evaluate(() => localStorage.setItem('mgrRole', JSON.stringify({ id: 8, role: 'manager' })));
   await logout.click();
   await expect(page.locator('#authEmail')).toBeVisible({ timeout: 10_000 });
   const left = await page.evaluate(() => ({
     session: localStorage.getItem('hkAuthSession'),
     pin: localStorage.getItem('cleanerToken'),
     mode: localStorage.getItem('cleanerMode'),
+    role: localStorage.getItem('mgrRole'),
   }));
   expect(left.session).toBeNull();
   expect(left.pin).toBeNull();
   expect(left.mode).toBeNull();
+  expect(left.role).toBeNull();
 });
 
 test('revue finale constat 4 : reason invalid_token dit que la session est terminee', async ({ page }) => {
@@ -392,15 +396,18 @@ test('correctif 11/09 : un manager connecte par PIN a aussi un bouton Logout', a
   await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
   const logout = page.locator('.header [data-action="cleanerLogout"]').first();
   await expect(logout).toBeVisible();
+  await page.evaluate(() => localStorage.setItem('mgrRole', JSON.stringify({ id: 8, role: 'manager' })));
   await logout.click();
   // Un logout PIN ramene sur l ecran PIN (Quick unlock), pas sur le login email.
   await expect(page.locator('#pinInput')).toBeVisible({ timeout: 10_000 });
   const left = await page.evaluate(() => ({
     pin: localStorage.getItem('cleanerToken'),
     mode: localStorage.getItem('cleanerMode'),
+    role: localStorage.getItem('mgrRole'),
   }));
   expect(left.pin).toBeNull();
   expect(left.mode).toBeNull();
+  expect(left.role).toBeNull();
 });
 
 // ===== Hotfix du 12/09 : comptes en libre-service =====

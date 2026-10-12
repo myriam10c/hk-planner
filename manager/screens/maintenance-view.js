@@ -68,7 +68,14 @@ const quoteText = (t) => '“' + esc(t) + '”';
 function hostawayUrl(id) { return 'https://dashboard.hostaway.com/v3/messages/inbox/' + encodeURIComponent(id); }
 function placeCat(p) { return [placeLabel(p), p.categoryLabel || CATEGORY[p.category] || ''].filter(Boolean).join(' · '); }
 
-export function shellHtml() {
+// Liens de sortie du role maintenance (Semax), en bas de l'ecran : ses autres apps.
+const LINKS = [['/inspections/', 'Inspections'], ['/v3/', 'Field app'], ['/?legacy=1', 'Old app (until 10 Nov)']];
+export function linksHtml() {
+  return '<nav class="mt-links" aria-labelledby="mtLinksH"><h2 class="mt-label" id="mtLinksH">Links</h2><div class="mt-linkrow">'
+    + LINKS.map(([href, label]) => '<a class="mt-outlink" href="' + esc(href) + '">' + esc(label) + '</a>').join('') + '</div></nav>';
+}
+
+export function shellHtml(withLinks) {
   return '<header class="top mt-top"><div><h1>Maintenance</h1><div class="asof" id="mtAsof" hidden></div></div>'
     + '<div class="mt-topbtns"><button class="btn mt-btn" type="button" data-new>+ New ticket</button>'
     + '<button class="iconbtn" type="button" data-theme-toggle aria-label="Switch light or dark theme" title="Theme">' + I.theme + '</button></div></header>'
@@ -77,7 +84,7 @@ export function shellHtml() {
     + '<div class="mt-tools" id="mtTools" hidden><div class="mt-chips" id="mtChips" role="group" aria-label="Filters"></div>'
     + '<label class="sr" for="mtSearch">Search apartment</label>'
     + '<input id="mtSearch" class="mt-search" type="search" placeholder="Search apartment" autocomplete="off"></div>'
-    + '<div id="mtList"></div>';
+    + '<div id="mtList"></div>' + (withLinks ? linksHtml() : '');
 }
 
 export function tabsHtml(tab, counts) {
@@ -414,7 +421,7 @@ function historyHtml(t, nowMs) {
     let body;
     if (x.kind === 'guest') {
       body = '<b>' + esc(guest) + '</b> <span class="mt-hq">' + quoteText(x.text) + '</span>'
-        + (conv ? ' <a href="' + esc(hostawayUrl(conv)) + '" target="_blank" rel="noopener">Hostaway</a>' : '');
+        + (conv ? ' <a class="mt-hlink" href="' + esc(hostawayUrl(conv)) + '" target="_blank" rel="noopener">Hostaway</a>' : '');
     } else {
       body = '<b>' + esc(x.who || 'Unknown') + '</b> <span class="mt-htext">' + esc(x.text) + '</span>';
     }
@@ -425,8 +432,9 @@ function historyHtml(t, nowMs) {
 // Photos hors historique (photo du signalement) et photo de cloture.
 function extraPhotos(t) {
   const seen = new Set((t.history || []).map((x) => x.photoUrl).filter(Boolean));
-  const urls = (t.photos || []).map((p) => p.url).filter((u) => u && !seen.has(u));
-  if (t.resolutionPhotoUrl) urls.push(t.resolutionPhotoUrl);
+  const urls = (t.photos || []).map((p) => p.url).filter((u) => u && !seen.has(u) && u !== t.resolutionPhotoUrl);
+  // Photo de cloture une seule fois : pas en plus si l'historique la montre deja.
+  if (t.resolutionPhotoUrl && !seen.has(t.resolutionPhotoUrl)) urls.push(t.resolutionPhotoUrl);
   const h = urls.map(thumb).join('');
   return h ? '<div class="mt-photos" aria-label="Photos">' + h + '</div>' : '';
 }
@@ -511,8 +519,10 @@ export function assignSheet(t, meta) {
 }
 export function dueSheet(t, nowMs, maxDays) {
   const today = dubaiToday(nowMs);
+  // Une date passee n'est pas pre-remplie (le champ refuserait de l'enregistrer).
+  const cur = t.dueOn && t.dueOn >= today ? t.dueOn : '';
   const b = '<div class="mt-field"><label class="mt-label" for="mtDue">Due date</label>'
-    + '<input id="mtDue" class="mt-input" type="date" min="' + today + '" max="' + addDays(today, maxDays) + '" value="' + esc(t.dueOn || '') + '"></div>';
+    + '<input id="mtDue" class="mt-input" type="date" min="' + today + '" max="' + addDays(today, maxDays) + '" value="' + esc(cur) + '"></div>';
   return subHead(t, 'Due date') + '<div class="sheet-b">' + b + '</div>'
     + '<div class="sheet-f"><button class="btn primary mt-btn mt-grow" type="button" data-mact="tk-due-send">Save</button>'
     + (t.dueOn ? '<button class="btn mt-btn" type="button" data-mact="tk-due-clear">Clear date</button>' : '')

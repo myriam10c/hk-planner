@@ -147,7 +147,7 @@ export function screenHtml(s) {
 }
 
 // Fiche d'un menage : statut, faits, gestes (branches par planning.js, taches 6 a 9).
-export function jobSheet(d, j, ro) {
+export function jobSheet(d, j, ro, s) {
   const rows = [];
   const kv = (k, v) => rows.push('<div><dt>' + esc(k) + '</dt><dd>' + v + '</dd></div>');
   const time = j.kind === 'checkout' && !j.postponedFrom ? (j.checkout ? ', checkout ' + j.checkout : ', checkout time not set') : '';
@@ -168,7 +168,7 @@ export function jobSheet(d, j, ro) {
     if (j.extra.notes) kv('Notes', esc(j.extra.notes));
   }
   kv('Linen', j.laundry ? esc(laundryLine(j.laundry)) : 'Not counted');
-  if (j.listingId) kv('Apartment', '<a class="aplink" href="#/more/apartment/' + encodeURIComponent(j.listingId) + '">Apartment sheet</a>');
+  if (j.listingId && (!s || s.manager !== false)) kv('Apartment', '<a class="aplink" href="#/more/apartment/' + encodeURIComponent(j.listingId) + '">Apartment sheet</a>');
   const status = '<div class="statusbox ' + esc(j.tone) + '"><span class="bar ' + esc(j.tone) + '"></span><div><span class="st ' + esc(j.tone) + '">' + esc(j.word) + '</span></div></div>';
   let foot;
   if (ro) foot = roFoot();
@@ -289,6 +289,8 @@ const EXTRA_TYPES = ['Mid-stay', 'Owner turnover', 'Deep clean', 'Post-construct
 // existant passe par Assign, comme tout menage.
 export function extraSheet(d, j, ro) {
   const x = j && j.extra ? j.extra : null;
+  // Extra existant sans aucun prix (le serveur les omet pour le role maintenance) : champs de prix caches.
+  const noPrices = !!x && x.priceBilled == null && x.cleanerPrice == null;
   const f = x
     ? { listing: j.listingId, date: x.cleaningDate, label: x.label || '', guest: x.guestName || '',
       price: x.priceBilled == null ? '' : String(x.priceBilled), rate: x.cleanerPrice == null ? '' : String(x.cleanerPrice), notes: x.notes || '' }
@@ -304,8 +306,8 @@ export function extraSheet(d, j, ro) {
     + '<label class="fl">Date<input id="xDate" type="date" value="' + esc(f.date) + '"></label>'
     + '<label class="fl">Type<select id="xLabel">' + types + '</select></label>'
     + '<label class="fl">Guest or client<input id="xGuest" type="text" maxlength="120" autocomplete="off" value="' + esc(f.guest) + '"></label>'
-    + '<label class="fl">Price billed (AED)<input id="xPrice" type="number" inputmode="decimal" min="0" step="1" value="' + esc(f.price) + '"></label>'
-    + '<label class="fl">Cleaner rate (AED, optional)<input id="xRate" type="number" inputmode="decimal" min="0" step="1" value="' + esc(f.rate) + '"></label>'
+    + (noPrices ? '' : '<label class="fl">Price billed (AED)<input id="xPrice" type="number" inputmode="decimal" min="0" step="1" value="' + esc(f.price) + '"></label>'
+      + '<label class="fl">Cleaner rate (AED, optional)<input id="xRate" type="number" inputmode="decimal" min="0" step="1" value="' + esc(f.rate) + '"></label>')
     + who
     + '<label class="fl">Notes<textarea id="xNotes" rows="2" maxlength="500">' + esc(f.notes) + '</textarea></label>'
     + '</div></div>';

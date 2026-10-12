@@ -25,6 +25,8 @@ export async function renderPlanning(ctx) {
     start: weekStartOf(today), today, day: today, data: null, savedAt: 0, fresh: false,
     loading: true, error: null, busy: false, filter: null, seq: 0, sheet: null, pick: new Set(),
     sel: false, picked: new Set(), bulk: false, fetchedAt: 0,
+    // Role maintenance (Semax) : ni fiche appartement ni prix des extras (revue finale #5, #6).
+    manager: ctx.role !== 'maintenance',
   };
   const gestures = createGestures();
   // Assignation groupee : un suivi de geste par menage, garde pour la vie de l'ecran.
@@ -303,14 +305,17 @@ export async function renderPlanning(ctx) {
   function extraBody() {
     const v = (id) => { const el = document.getElementById(id); return el ? String(el.value).trim() : ''; };
     const listing = v('xListing'), date = v('xDate'), price = v('xPrice'), rate = v('xRate');
+    // Prix caches (extra sans prix lisible, role maintenance) : jamais envoyes, le serveur garde les siens.
+    const priced = !!document.getElementById('xPrice');
     if (!listing) return { error: 'Choose an apartment.' };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'Choose a date.' };
-    if (price === '' || !Number.isFinite(Number(price)) || Number(price) < 0) return { error: 'Price billed is required.' };
-    if (rate !== '' && (!Number.isFinite(Number(rate)) || Number(rate) < 0)) return { error: 'Cleaner rate must be a number.' };
-    return { body: {
-      listing_id: listing, cleaning_date: date, label: v('xLabel') || null, guest_name: v('xGuest') || null,
-      price_billed: Number(price), cleaner_price: rate === '' ? null : Number(rate), notes: v('xNotes') || null,
-    } };
+    if (priced && (price === '' || !Number.isFinite(Number(price)) || Number(price) < 0)) return { error: 'Price billed is required.' };
+    if (priced && rate !== '' && (!Number.isFinite(Number(rate)) || Number(rate) < 0)) return { error: 'Cleaner rate must be a number.' };
+    const body = {
+      listing_id: listing, cleaning_date: date, label: v('xLabel') || null, guest_name: v('xGuest') || null, notes: v('xNotes') || null,
+    };
+    if (priced) { body.price_billed = Number(price); body.cleaner_price = rate === '' ? null : Number(rate); }
+    return { body };
   }
   ACT.addExtra = () => {
     if (readOnly()) { toast(RO_LINE); return; }

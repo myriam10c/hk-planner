@@ -111,3 +111,9 @@ select.mt-input{height:44px}
 .mt-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0)}
 .mt-photoname{min-width:0;overflow-wrap:anywhere;font-size:14px}
 input[type="date"].mt-input{height:44px}
+/* Liens du role maintenance (Inspections, Field app, Old app) : cibles de 44 px. */
+.mt-links{margin:var(--s6) 0 var(--s4);padding-top:var(--s4);border-top:1px solid var(--line)}
+.mt-linkrow{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.mt-outlink{display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border:1px solid var(--line-2);border-radius:12px;background:var(--surface);color:var(--accent);font-weight:600;text-decoration:none}
+.mt-hbody a.mt-hlink{display:inline-flex;align-items:center;min-height:44px;padding:0 2px}
+.mt-links .mt-label{margin-bottom:var(--s2)}

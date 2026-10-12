@@ -28,12 +28,16 @@ test('role maintenance en session PIN seulement : ecran email', async ({ page })
   await bootMgr(page, [me(member('maintenance'))], { pin: 'pin-tok' });
   await expect(page.getByRole('heading', { name: 'Sign in with your email' })).toBeVisible();
   await expect(page.locator('#tabbar a')).toHaveCount(0);
+  // Ruling E : mot neutre pour Semax.
+  await expect(page.locator('#main')).toContainText('The new app needs your email sign-in.');
+  await expect(page.locator('#main')).not.toContainText('manager app');
 });
 
 test('manager en session PIN seulement : ecran email, aucun appel mgr.today', async ({ page }) => {
   await bootMgr(page, [me(MANAGER)], { pin: 'pin-tok' });
   await expect(page.getByRole('heading', { name: 'Sign in with your email' })).toBeVisible();
   await expect(page.locator('#tabbar a')).toHaveCount(0);
+  await expect(page.locator('#main')).toContainText('The manager app needs your email account.');
   const log = await fetchLog(page);
   expect(log.some((l) => l.url.includes('action=mgr.today'))).toBe(false);
   expect(log.find((l) => l.url.includes('action=cleanerMe'))!.headers['X-Cleaner-Token']).toBe('pin-tok');

@@ -29,7 +29,7 @@ test('lien vers un probleme hors de la liste : lu par mgr.problem.get puis ouver
 test('lien vers un probleme inconnu (404) : toast, la liste reste, le hash redevient #/tasks', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), LIST, { match: 'action=mgr.problem.get', status: 404, body: { error: 'Problem not found' } }],
     { email: true, clock: NOW, hash: '#/tasks?ref=TSK-999' });
-  await expect(page.locator('#toast')).toContainText('This problem was not found. It may be closed.');
+  await expect(page.locator('#toast')).toHaveText('This task was not found.');
   await expect(page.locator('.prow')).toHaveCount(3);
   await expect(page.locator('#sheet.on')).toHaveCount(0);
   await expect.poll(() => hashOf(page)).toBe('#/tasks');

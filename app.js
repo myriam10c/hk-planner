@@ -711,6 +711,7 @@ function renderMgrBanner(){
   const kind=mgrBannerKind();
   let el=document.getElementById('mgrBanner');
   if(!kind){ if(el) el.remove(); return; }
+  const mnt=!!(cleanerMode&&cleanerMode.role==='maintenance');
   let text, btns;
   const btn='min-height:36px;padding:0 14px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;border:0;background:#0a6fd6;color:#fff;';
   if(kind==='legacy'){
@@ -721,7 +722,8 @@ function renderMgrBanner(){
     // chemin est la connexion par email. Sinon, Create your account.
     const row=currentCleanerRow();
     const hasEmail=!row||!!((row.email||'')+'').trim();
-    text='The new manager app needs your email sign-in.';
+    // Semax (maintenance) n'est pas manager : meme app, mot neutre (ruling E).
+    text=mnt?'The new app needs your email sign-in.':'The new manager app needs your email sign-in.';
     btns=hasEmail
       ?'<button type="button" data-action="mgrSignInWithEmail" style="'+btn+'">Sign out and sign in with email</button>'
       :'<button type="button" data-action="openAccountSetup" style="'+btn+'">Set up email sign-in</button>';
@@ -3502,6 +3504,7 @@ async function cleanerLogout(){
   localStorage.removeItem('cleanerMode');
   localStorage.removeItem('cleanerToken');
   localStorage.removeItem(SESSION_CLEANER_KEY);
+  localStorage.removeItem('mgrRole');
   // Meme raison que dans emailLogout : le cache planner contient des donnees
   // voyageurs, il repart avec la session.
   localStorage.removeItem(PLANNER_CACHE_KEY);
@@ -4740,6 +4743,8 @@ async function emailLogout(){
   cleanerMode=null; sessionCleanerId=null;
   localStorage.removeItem('cleanerMode');
   localStorage.removeItem(SESSION_CLEANER_KEY);
+  // Role de /manager/ garde pour ce membre : jamais pour le compte suivant.
+  localStorage.removeItem('mgrRole');
   // Le cache planner porte les noms et telephones des voyageurs de la derniere
   // semaine consultee : il ne doit pas survivre a un changement de compte.
   localStorage.removeItem(PLANNER_CACHE_KEY);

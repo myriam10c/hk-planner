@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { bootMgr, MANAGER, me, noHorizontalScroll } from './helpers';
 import { PLAN, PNOW } from './planning-fixtures';
-import { listBody } from './problem-fixtures';
+import { detailTsk, listBody } from './problem-fixtures';
 
 const SEMAX = { ...MANAGER, id: 7, name: 'Semax', role: 'maintenance', email: 'semax@example.com' };
 const navOf = (page: any, info: any) => (info.project.name === 'mgr-desktop' ? page.locator('#sideNav') : page.locator('#tabbar'));
@@ -44,7 +44,7 @@ test('Semax (maintenance, email) : atterrit sur Maintenance, ne voit que Mainten
   await expect(nav.locator('a[href="#/maintenance"]')).toHaveAttribute('aria-current', 'page');
   await nav.locator('a[href="#/planning"]').click();
   await expect(page.getByRole('heading', { name: 'Planning' })).toBeVisible();
-  for (const h of ['#/today', '#/more', '#/more/team', '#/tasks', '#/inspections', '#/problems?ref=TSK-13']) {
+  for (const h of ['#/today', '#/more', '#/more/team', '#/inspections']) {
     await page.evaluate((x) => { location.hash = x; }, h);
     await expect.poll(() => hashOf(page)).toBe('#/maintenance');
     await expect(page.getByRole('heading', { name: 'Maintenance', exact: true })).toBeVisible();
@@ -96,3 +96,56 @@ test('pastille Maintenance : nombre de propositions annonce par mgr:mntbadge', a
   await page.evaluate(() => document.dispatchEvent(new CustomEvent('mgr:mntbadge', { detail: { proposals: 0 } })));
   await expect(nav.locator('a[href="#/maintenance"] .nbadge')).toHaveCount(0);
 });
+
+// ---------- Revue finale (F3, F8, F10) ----------
+
+test('F3 : barre d onglets, une colonne par entree (2 pour Semax, 5 pour un manager)', async ({ page }, info) => {
+  test.skip(info.project.name === 'mgr-desktop', 'barre d onglets du telephone');
+  await bootMgr(page, [me(SEMAX)], { email: true });
+  await expect(page.locator('#tabbar a')).toHaveCount(2);
+  const cols = () => page.evaluate(() => getComputedStyle(document.getElementById('tabbar')!).gridTemplateColumns.split(' ').length);
+  expect(await cols()).toBe(2);
+  const w = await page.evaluate(() => {
+    const bar = document.getElementById('tabbar')!.getBoundingClientRect();
+    const last = document.querySelectorAll('#tabbar a')[1].getBoundingClientRect();
+    return { bar: bar.right, last: last.right };
+  });
+  expect(w.bar - w.last).toBeLessThan(20);
+});
+
+test('F3 : manager, 5 colonnes', async ({ page }, info) => {
+  test.skip(info.project.name === 'mgr-desktop', 'barre d onglets du telephone');
+  await bootMgr(page, [me(MANAGER), { match: 'action=mgr.today', status: 200, body: {} }], { email: true, hash: '#/more' });
+  await expect(page.locator('#tabbar a')).toHaveCount(5);
+  expect(await page.evaluate(() => getComputedStyle(document.getElementById('tabbar')!).gridTemplateColumns.split(' ').length)).toBe(5);
+});
+
+test('F10 : Semax ouvre #/tasks (vue cachee, sans entree de navigation) et une push ?task= y arrive', async ({ page }, info) => {
+  await bootMgr(page, [me(SEMAX), TASKS, { match: 'action=mgr.problem.get', status: 200, body: detailTsk() }],
+    { email: true, hash: '#/tasks?ref=TSK-13' });
+  await expect(page.getByRole('heading', { name: 'Tasks', exact: true })).toBeVisible();
+  await expect(page.locator('#sheet [data-panel="TSK-13"]')).toBeVisible();
+  const nav = navOf(page, info);
+  await expect(nav.locator('a')).toHaveText(['Maintenance', 'Planning']);
+  await expect(nav.locator('a[aria-current="page"]')).toHaveCount(0);
+});
+
+test('F8 : role garde par membre ; hors ligne, il ne sert qu au meme membre', async ({ page }, info) => {
+  const nav = () => navOf(page, info).locator('a');
+  // Connexion confirmee : role garde avec l'id du membre.
+  await bootMgr(page, [me(SEMAX)], { email: true });
+  await expect(nav()).toHaveText(['Maintenance', 'Planning']);
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem('mgrRole')))!)).toEqual({ id: 7, role: 'maintenance' });
+});
+
+for (const [label, storage, expected] of [
+  ['meme membre : nav Semax', { mgrRole: JSON.stringify({ id: 7, role: 'maintenance' }), hkSessionCleanerId: '7' }, ['Maintenance', 'Planning']],
+  ['autre membre : nav manager', { mgrRole: JSON.stringify({ id: 7, role: 'maintenance' }), hkSessionCleanerId: '8' }, ['Today', 'Planning', 'Maintenance', 'Inspections', 'More']],
+  ['ancien format (texte) : ignore', { mgrRole: 'maintenance', hkSessionCleanerId: '7' }, ['Today', 'Planning', 'Maintenance', 'Inspections', 'More']],
+  ['sans membre connu : ignore', { mgrRole: JSON.stringify({ id: 7, role: 'maintenance' }) }, ['Today', 'Planning', 'Maintenance', 'Inspections', 'More']],
+] as const) {
+  test('F8 : cleanerMe injoignable, ' + label, async ({ page }, info) => {
+    await bootMgr(page, [{ match: 'action=cleanerMe', status: 0, body: null, fail: true }], { email: true, storage: storage as any });
+    await expect(navOf(page, info).locator('a')).toHaveText(expected as any);
+  });
+}
