@@ -74,11 +74,11 @@ Deno.test("parseMntQuery : defauts, valeurs et refus", () => {
   assertEquals(parseMntQuery(new URLSearchParams("filter=bogus")), { error: "Invalid filter." });
 });
 
-Deno.test("propositions en attente : urgent d'abord puis updated_at decroissant, logement inconnu et nul", async () => {
+Deno.test("propositions en attente : urgent, high, normal puis updated_at decroissant, logement inconnu et nul", async () => {
   const b = await list(Q());
   assertEquals(b.tab, "proposals");
   assertEquals(b.tickets, []);
-  assertEquals(b.proposals.map((p) => p.ref), ["PRP-2", "PRP-3", "PRP-1", "PRP-8"]);
+  assertEquals(b.proposals.map((p) => p.ref), ["PRP-2", "PRP-1", "PRP-3", "PRP-8"]);
   assertEquals(b.proposals[0], {
     id: 2, ref: "PRP-2", listingId: "L2", apt: "2609", bld: "Nobles by Tiger", title: "Proposal 2",
     category: "ac", categoryLabel: "AC", urgency: "urgent", guestName: "Guest 2", stayFrom: "2026-10-10", stayTo: "2026-10-13",
@@ -86,10 +86,22 @@ Deno.test("propositions en attente : urgent d'abord puis updated_at decroissant,
     reservationId: "R2", openTicket: { id: 10, ref: "MNT-10", title: "Ticket 10" }, status: "pending", rejectReason: null,
     decidedBy: null, decidedAt: null, createdAt: "2026-10-11T10:00:00Z", updatedAt: "2026-10-11T09:00:00Z",
   });
-  const p3 = b.proposals[1];
+  const p3 = b.proposals[2];
   assertEquals([p3.apt, p3.bld, p3.guestInNow, p3.openTicket], ["", "Listing L9", false, null]);
   const p8 = b.proposals[3];
   assertEquals([p8.listingId, p8.apt, p8.bld], [null, "", ""]);
+});
+
+Deno.test("propositions en attente : high passe devant un normal plus recent, egalite par id decroissant", async () => {
+  const sb = fakeDb({
+    maintenance_proposals: [
+      PR(1, { urgency: "normal", updated_at: "2026-10-12T12:00:00Z" }),
+      PR(2, { urgency: "high", updated_at: "2026-10-01T08:00:00Z" }),
+      PR(3, { urgency: "normal", updated_at: "2026-10-12T12:00:00Z" }),
+      PR(4, { urgency: "urgent", updated_at: "2026-09-01T08:00:00Z" }),
+    ],
+  });
+  assertEquals((await list(Q(), sb)).proposals.map((p) => p.id), [4, 2, 3, 1]);
 });
 
 Deno.test("guest in now : jour de Dubai, pas le jour UTC", async () => {
@@ -170,10 +182,18 @@ Deno.test("lecture paginee : plus d'une page de tickets et de propositions", asy
 });
 
 Deno.test("erreur de lecture : 503", async () => {
-  for (const t of ["maintenance_tickets", "maintenance_proposals", "cleaners", "vendors", "listing_config", "cleaning_log"]) {
-    const sb = db();
-    sb.fail[t + ".select"] = { message: "boom" };
-    const r = await mntList(sb, ME, Q({ tab: "done" }), { nowMs: NOW });
-    assertEquals([t, r.status, r.body], [t, 503, { error: "Maintenance is unavailable right now. Try again." }]);
+  const errs: unknown[][] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => { errs.push(a); };
+  try {
+    for (const t of ["maintenance_tickets", "maintenance_proposals", "cleaners", "vendors", "listing_config", "cleaning_log"]) {
+      const sb = db();
+      sb.fail[t + ".select"] = { message: "boom" };
+      const r = await mntList(sb, ME, Q({ tab: "done" }), { nowMs: NOW });
+      assertEquals([t, r.status, r.body], [t, 503, { error: "Maintenance is unavailable right now. Try again." }]);
+    }
+  } finally {
+    console.error = orig;
   }
+  assertEquals(errs.length, 6);
 });

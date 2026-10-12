@@ -2,8 +2,7 @@
 // tirees des messages des guests, tickets ouverts et tickets faits. Les compteurs
 // portent toujours sur tout l'ouvert et toutes les propositions en attente, quels
 // que soient l'onglet et le filtre. Toute erreur de lecture rend un 503.
-import { splitListing } from "./mgr_rules.ts";
-import { readAllRows } from "./mgr_today.ts";
+import { listingMap, readAllRows } from "./mgr_today.ts";
 import { MGR_CLOSED_TICKET_STATUSES, MGR_OPEN_TICKET_STATUSES, problemRef } from "./mgr_inbox.ts";
 import { guestInNow, MNT_CATEGORY_LABEL, MNT_ROLES, type MntCategory, proposalRef } from "./mnt_rules.ts";
 import { todayDubai } from "./v3.ts";
@@ -52,6 +51,8 @@ const TICKET_COLS =
 const PROPOSAL_COLS =
   "id, listing_id, reservation_id, conversation_id, guest_name, stay_from, stay_to, title, category, urgency, quotes, status, open_ticket_id, decided_by, decided_at, reject_reason, created_at, updated_at";
 
+const URGENCY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2 };
+const urgRank = (u: unknown) => URGENCY_RANK[String(u ?? "")] ?? 2;
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 const prioRank = (p: unknown) => PRIORITY_RANK[String(p ?? "")] ?? 2;
 const STAGE: Record<string, MntStage> = {
@@ -113,7 +114,7 @@ export async function mntList(
       for (const l of logs) if (str(l.actor)) resolvedBy[String(l.reservation_key)] = String(l.actor);
     }
 
-    const listings: Record<string, Label> = Object.fromEntries(listingRows.map((l: any) => [String(l.listing_id), splitListing(l)]));
+    const listings: Record<string, Label> = listingMap(listingRows);
     const names: Record<string, string> = Object.fromEntries(people.map((p: any) => [String(p.id), String(p.name ?? "").trim() || "Member " + p.id]));
     const vendorNames: Record<string, string> = Object.fromEntries(vendorRows.map((v: any) => [String(v.id), String(v.name ?? "").trim() || "Vendor " + v.id]));
     const openById: Record<string, any> = Object.fromEntries(open.map((t: any) => [String(t.id), t]));
@@ -164,7 +165,7 @@ export async function mntList(
       const src = q.rejected
         ? decided.slice().sort((a: any, b: any) => desc(a.decided_at, b.decided_at) || Number(b.id) - Number(a.id))
         : pending.slice().sort((a: any, b: any) =>
-          Number(b.urgency === "urgent") - Number(a.urgency === "urgent") || desc(a.updated_at, b.updated_at) || Number(b.id) - Number(a.id));
+          urgRank(a.urgency) - urgRank(b.urgency) || desc(a.updated_at, b.updated_at) || Number(b.id) - Number(a.id));
       proposals = src.map(proposalRow).filter((p: MntProposalRow) => matchesQ(p, q.q));
     } else if (q.tab === "open") {
       const keep = (t: any) => q.filter === "mine" ? Number(t.assigned_technician_id) === me.cleaner_id
