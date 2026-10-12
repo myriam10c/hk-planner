@@ -105,3 +105,21 @@ Deno.test("phase 2 : routes mnt.get (GET) et mnt.photo (POST), session et mntAcc
   assert(pushes.includes('url: APP_URL + "/?prp=" + String(p.id)'));
   assertEquals(pushes.includes("MNT_PUSH_URL"), false);
 });
+
+Deno.test("phase 2 : mgr.planning ouvert a maintenance (planningAccess), mgr.today reste mgrAccess", () => {
+  const p = bloc("mgr.planning");
+  assert(p.includes("planningAccess(bearerToken(req) !== null, me)"));
+  assertEquals(p.includes("mgrAccess("), false);
+  const t = bloc("mgr.today");
+  assert(t.includes("mgrAccess(bearerToken(req) !== null, me)"));
+});
+
+Deno.test("phase 2 : setCancelled et setPostponed acceptent manager et maintenance, meme erreur sinon", () => {
+  for (const a of ["setCancelled", "setPostponed"]) {
+    const debut = src.indexOf(`if (action === "${a}" && req.method === "POST")`);
+    assert(debut >= 0, "handler absent pour " + a);
+    const b = src.slice(debut, src.indexOf("req.json()", debut));
+    assert(b.includes('if (me && !MGR_PLANNING_ROLES.includes(me.role)) return jsonResp({ error: "manager role required" }, 403);'), a);
+    assertEquals(b.includes('me.role !== "manager"'), false, a);
+  }
+});

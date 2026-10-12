@@ -85,6 +85,9 @@ const SOURCE_PARAM: Record<string, InboxSource> = {
 export function problemRef(kind: InboxKind, id: number): string {
   return kind + "-" + id;
 }
+// Refus d'une reference MNT par mgr.problem.get et mgr.problem.act : les tickets
+// s'ouvrent dans l'ecran Maintenance (mnt.get, mnt.act).
+export const MGR_MNT_ELSEWHERE = "Open it in Maintenance.";
 export function parseRef(ref: unknown): { kind: InboxKind; id: number } | null {
   if (typeof ref !== "string") return null;
   const m = ref.trim().toUpperCase().match(/^(MNT|TSK)-(\d{1,9})$/);
@@ -240,9 +243,10 @@ export function rankRows(rows: InboxRow[]): InboxRow[] {
     (a.kind === b.kind ? 0 : a.kind === "MNT" ? -1 : 1) || a.id - b.id);
 }
 
-export function buildInbox(tickets: RawTicket[], tasks: RawTask[], c: InboxCtx): InboxRow[] {
+// Boite Problems (ecran Tasks) : taches d'equipe seulement depuis la phase 2
+// maintenance ; les tickets sont servis par mnt.list (ecran Maintenance).
+export function buildInbox(tasks: RawTask[], c: InboxCtx): InboxRow[] {
   const rows: InboxRow[] = [];
-  for (const t of tickets) if (MGR_OPEN_TICKET_STATUSES.includes(String(t.status ?? "open"))) rows.push(ticketRow(t, c));
   for (const t of tasks) {
     if (!MGR_OPEN_TASK_STATUSES.includes(String(t.status ?? "open"))) continue;
     if (mirrorTicketId(t.source_ref) !== null) continue;
@@ -290,6 +294,8 @@ export function apartmentsOf(rows: InboxRow[]): Array<{ listingId: string; apt: 
 export function parseInboxQuery(p: URLSearchParams): { ok: true; q: InboxQuery } | { ok: false; error: string } {
   const src = p.get("source") ?? "";
   if (src && !Object.prototype.hasOwnProperty.call(SOURCE_PARAM, src)) return { ok: false, error: "Unknown source." };
+  // Sources de tickets (maintenance, inspection, cleaner) : ignorees, la boite ne sert plus que des taches.
+  const source = src && SOURCE_PARAM[src] === "Team task" ? SOURCE_PARAM[src] : null;
   const offset = p.has("offset") ? Number(p.get("offset")) : 0;
   if (!Number.isInteger(offset) || offset < 0) return { ok: false, error: "Invalid offset." };
   const limit = p.has("limit") ? Number(p.get("limit")) : MGR_PAGE_DEFAULT;
@@ -298,7 +304,7 @@ export function parseInboxQuery(p: URLSearchParams): { ok: true; q: InboxQuery }
     ok: true,
     q: {
       urgent: p.get("urgent") === "1", mine: p.get("mine") === "1", unassigned: p.get("unassigned") === "1",
-      listingId: p.get("listingId") || null, source: src ? SOURCE_PARAM[src] : null,
+      listingId: p.get("listingId") || null, source,
       q: (p.get("q") ?? "").trim().slice(0, 100), offset, limit,
     },
   };

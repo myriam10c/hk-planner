@@ -49,48 +49,12 @@ const sb = () => fakeDb({
   team_task_comments: [{ id: 1, task_id: 13, cleaner_id: 8, body: "On it", created_at: "2026-05-16T08:00:00Z" }],
 });
 
-Deno.test("fiche MNT : photos signees en un lot sans doublon ni vocal, commentaires dans l'ordre, historique, copie TSK", async () => {
+Deno.test("fiche MNT refusee : 409, a ouvrir dans Maintenance, aucune lecture de la base", async () => {
   const db = sb();
-  const r = await mgrProblemGet(db, { ref: "mnt-429", nowMs: NOW });
-  assertEquals(r.status, 200);
-  const d: any = r.body;
-  assertEquals([d.problem.ref, d.problem.apt, d.description, d.category, d.reportedBy],
-    ["MNT-429", "308", "Stove does not light.", "gas", "Faiza"]);
-  assertEquals(d.photos, [
-    { url: "https://signed.test/v3/p1.jpg?exp=3600", label: "Reported" },
-    { url: "https://signed.test/v3/p2.jpg?exp=3600", label: "Cleaner photo" },
-  ]);
-  assertEquals(db.storage.signBatches.length, 1);
-  assertEquals(db.storage.signBatches[0].bucket, "cleaning-photos");
-  assertEquals(d.comments, [
-    { author: "Unknown", text: "Seen by guest", at: "2026-07-09T09:00:00Z", photo: null },
-    { author: "Walter", text: "Called the gas company.", at: "2026-10-08T06:00:00Z", photo: "https://signed.test/c/2.jpg?exp=3600" },
-  ]);
-  assertEquals(d.history, [
-    { at: "2026-07-09T08:00:00Z", text: "Reported by Faiza" },
-    { at: "2026-10-08T05:00:00Z", text: "Assigned to Semax by Walter" },
-    { at: "2026-10-08T05:30:00Z", text: "Unassigned by Walter" },
-  ]);
-  assertEquals(d.mirror, { ref: "TSK-17", status: "open", assignee: "Semax" });
-  assertEquals(d.assignees.map((a: any) => a.name), ["Semax", "Walter", "Faiza"]);
-  assertEquals(d.vendors, [{ id: 3, name: "CoolFix", specialty: "AC" }]);
-  assertEquals(d.photosError, null);
-});
-
-Deno.test("fiche MNT d'inspection : photos de la zone, sans doublon avec la photo du ticket", async () => {
-  const d: any = (await mgrProblemGet(sb(), { ref: "MNT-501", nowMs: NOW })).body;
-  assertEquals(d.problem.source, "Inspection");
-  assertEquals(d.photos.map((p: any) => p.label + " " + p.url), [
-    "Reported https://signed.test/inspections/6/bedrooms/a.jpg?exp=3600",
-    "Inspection https://signed.test/inspections/6/bedrooms/b.jpg?exp=3600",
-  ]);
-  assertEquals(d.mirror, null);
-});
-
-Deno.test("fiche d'un ticket clos ailleurs : closed, Closed dans l'historique faute de journal", async () => {
-  const d: any = (await mgrProblemGet(sb(), { ref: "MNT-300", nowMs: NOW })).body;
-  assertEquals([d.problem.closed, d.problem.why], [true, "Closed on 08/10."]);
-  assertEquals(d.history, [{ at: "2026-05-01T08:00:00Z", text: "Reported" }, { at: "2026-10-08T09:00:00Z", text: "Closed" }]);
+  for (const t of Object.keys(db.tables)) db.fail[t + ".select"] = { message: "must not read " + t };
+  for (const ref of ["MNT-429", "mnt-501", "MNT-9999"]) {
+    assertEquals(await mgrProblemGet(db, { ref, nowMs: NOW }), { status: 409, body: { error: "Open it in Maintenance." } });
+  }
 });
 
 Deno.test("fiche TSK : commentaires au nom du membre, cree par, pas de prestataires", async () => {
@@ -102,21 +66,7 @@ Deno.test("fiche TSK : commentaires au nom du membre, cree par, pas de prestatai
   assertEquals([d.vendors, d.mirror, d.photos], [[], null, []]);
 });
 
-Deno.test("fiche : reference inconnue 400, absente 404, photos non signees signalees", async () => {
+Deno.test("fiche : reference inconnue 400, absente 404", async () => {
   assertEquals(await mgrProblemGet(sb(), { ref: "INS-4", nowMs: NOW }), { status: 400, body: { error: "Unknown problem reference." } });
-  assertEquals(await mgrProblemGet(sb(), { ref: "MNT-9999", nowMs: NOW }), { status: 404, body: { error: "MNT-9999 not found." } });
-  const db = sb();
-  db.fail["storage.sign"] = { message: "down" };
-  const d: any = (await mgrProblemGet(db, { ref: "MNT-429", nowMs: NOW })).body;
-  assertEquals([d.photos, d.photosError, d.comments[1].photo], [[], "Photos could not be loaded.", null]);
-});
-
-Deno.test("copie Hermes : une copie ouverte passe avant une copie terminee ; toutes terminees, la premiere avec son statut", async () => {
-  const db = sb();
-  db.tables.team_tasks.unshift({ id: 15, title: "Gas not working", status: "done", assigned_cleaner_id: 8, source_ref: "maint:429" });
-  assertEquals(((await mgrProblemGet(db, { ref: "MNT-429", nowMs: NOW })).body as any).mirror,
-    { ref: "TSK-17", status: "open", assignee: "Semax" });
-  db.tables.team_tasks.find((x: any) => x.id === 17).status = "done";
-  assertEquals(((await mgrProblemGet(db, { ref: "MNT-429", nowMs: NOW })).body as any).mirror,
-    { ref: "TSK-15", status: "done", assignee: "Walter" });
+  assertEquals(await mgrProblemGet(sb(), { ref: "TSK-9999", nowMs: NOW }), { status: 404, body: { error: "TSK-9999 not found." } });
 });

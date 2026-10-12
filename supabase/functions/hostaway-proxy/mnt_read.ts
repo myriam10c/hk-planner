@@ -82,7 +82,22 @@ function matchesQ(l: Label, q: string): boolean {
 }
 
 // Pas d'intervenant = ni technicien ni prestataire.
-const unassigned = (t: any) => t.assigned_technician_id == null && t.assigned_vendor_id == null;
+export const mntUnassigned = (t: any) => t.assigned_technician_id == null && t.assigned_vendor_id == null;
+const unassigned = mntUnassigned;
+// Ordre des tickets ouverts : urgent, high, medium, low, puis le plus ancien, puis id.
+export const mntOpenOrder = (a: any, b: any) =>
+  prioRank(a.priority) - prioRank(b.priority) || asc(a.created_at, b.created_at) || Number(a.id) - Number(b.id);
+// Compteurs des tickets ouverts, communs a mnt.list et au bloc Maintenance de Today.
+export function mntOpenCounts(open: any[]): { open: number; urgent: number; unassigned: number } {
+  return { open: open.length, urgent: open.filter((t: any) => t.priority === "urgent").length, unassigned: open.filter(unassigned).length };
+}
+// Lecture paginee d'une table (toutes les pages, erreur levee).
+export function mntPage(sb: any, table: string, cols: string, f: (x: any) => any): Promise<any[]> {
+  return readAllRows((a: number, b: number) => f(sb.from(table).select(cols)).order("id").range(a, b), table);
+}
+// Tickets ouverts et propositions en attente : la base commune des compteurs.
+export const readOpenTickets = (sb: any) => mntPage(sb, "maintenance_tickets", MNT_TICKET_COLS, (x) => x.in("status", MGR_OPEN_TICKET_STATUSES));
+export const readPendingProposals = (sb: any) => mntPage(sb, "maintenance_proposals", MNT_PROPOSAL_COLS, (x) => x.eq("status", "pending"));
 
 // Contexte commun aux lignes (liste et fiche) : libelles, noms, tickets ouverts, auteurs de cloture.
 export type MntCtx = {
@@ -146,11 +161,10 @@ export async function mntList(
   const today = todayDubai(nowMs);
   const cutoff = new Date(nowMs - MNT_WINDOW_DAYS * 86400000).toISOString();
   try {
-    const page = (table: string, cols: string, f: (x: any) => any) =>
-      readAllRows((a: number, b: number) => f(sb.from(table).select(cols)).order("id").range(a, b), table);
+    const page = (table: string, cols: string, f: (x: any) => any) => mntPage(sb, table, cols, f);
     const [open, pending, decided, doneResolved, doneLegacy, listingRows, people, vendorRows] = await Promise.all([
-      page("maintenance_tickets", MNT_TICKET_COLS, (x) => x.in("status", MGR_OPEN_TICKET_STATUSES)),
-      page("maintenance_proposals", MNT_PROPOSAL_COLS, (x) => x.eq("status", "pending")),
+      readOpenTickets(sb),
+      readPendingProposals(sb),
       q.tab === "proposals" && q.rejected
         ? page("maintenance_proposals", MNT_PROPOSAL_COLS, (x) => x.in("status", ["rejected", "merged"]).gte("decided_at", cutoff))
         : Promise.resolve([]),
@@ -185,9 +199,7 @@ export async function mntList(
     const proposalRow = (p: any) => mntProposalRow(p, ctx);
 
     const counts = {
-      proposals: pending.length, open: open.length,
-      urgent: open.filter((t: any) => t.priority === "urgent").length,
-      unassigned: open.filter(unassigned).length,
+      proposals: pending.length, ...mntOpenCounts(open),
       mine: open.filter((t: any) => Number(t.assigned_technician_id) === me.cleaner_id).length,
     };
 
@@ -203,8 +215,7 @@ export async function mntList(
       const keep = (t: any) => q.filter === "mine" ? Number(t.assigned_technician_id) === me.cleaner_id
         : q.filter === "urgent" ? t.priority === "urgent"
         : q.filter === "unassigned" ? unassigned(t) : true;
-      tickets = open.filter(keep)
-        .sort((a: any, b: any) => prioRank(a.priority) - prioRank(b.priority) || asc(a.created_at, b.created_at) || Number(a.id) - Number(b.id))
+      tickets = open.filter(keep).sort(mntOpenOrder)
         .map((t: any) => ticketRow(t, false)).filter((t: MntTicketRow) => matchesQ(t, q.q));
     } else {
       tickets = done.slice().sort((a: any, b: any) => desc(closedAt(a), closedAt(b)) || Number(b.id) - Number(a.id))

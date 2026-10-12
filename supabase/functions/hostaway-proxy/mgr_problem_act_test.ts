@@ -34,63 +34,52 @@ export const seed = () => fakeDb({
 let n = 0;
 export const act = (sb: any, body: any, deps: any = {}) =>
   mgrProblemAct(sb, ME, { idem: "idem-test-" + (++n), ...body }, { nowMs: NOW, ...deps });
-const ticket = (sb: any, id: number) => sb.tables.maintenance_tickets.find((x: any) => x.id === id);
 const task = (sb: any, id: number) => sb.tables.team_tasks.find((x: any) => x.id === id);
 
-Deno.test("assign MNT : membre de l'equipe, statut assigned, journal et cle au nom de la session", async () => {
+Deno.test("MNT refuse : 409, a ouvrir dans Maintenance, avant toute validation, aucune ecriture", async () => {
   const sb = seed();
-  const r = await act(sb, { ref: "MNT-429", verb: "assign", memberId: 7, actor: "Manager" });
-  assertEquals(r, { status: 200, body: { status: "success", ref: "MNT-429", verb: "assign", assignee: { kind: "member", id: 7, name: "Semax" } } });
-  const t = ticket(sb, 429);
-  assertEquals([t.assigned_technician_id, t.assigned_vendor_id, t.status, t.last_update], [7, null, "assigned", "2026-10-09T07:00:00.000Z"]);
-  assertEquals(sb.tables.cleaning_log.map((l: any) => [l.reservation_key, l.action, l.actor, l.details]),
-    [["ticket_429", "problem_assigned", "Walter", { to: "Semax", kind: "member" }]]);
-  assertEquals(sb.tables.job_events.map((e: any) => [e.event_type, e.job_id, e.cleaner_id]), [["mgr_problem_act", "MNT-429", 8]]);
+  const r409 = { status: 409, body: { error: "Open it in Maintenance." } };
+  assertEquals(await act(sb, { ref: "MNT-429", verb: "assign", memberId: 7 }), r409);
+  assertEquals(await act(sb, { ref: "mnt-300", verb: "reopen" }), r409);
+  assertEquals(await act(sb, { ref: "MNT-429", verb: "explode" }), r409);
+  assertEquals(await mgrProblemAct(sb, ME, { ref: "MNT-9999", verb: "close" }, { nowMs: NOW }), r409);
+  assertEquals(sb.writes.length, 0);
+  assertEquals(sb.tables.job_events.length, 0);
 });
 
-Deno.test("assign MNT : prestataire, puis retrait ; un ticket en cours garde son statut", async () => {
-  const sb = seed();
-  assertEquals((await act(sb, { ref: "MNT-429", verb: "assign", vendorId: 3 })).body.assignee, { kind: "vendor", id: 3, name: "CoolFix" });
-  const t = ticket(sb, 429);
-  assertEquals([t.assigned_technician_id, t.assigned_vendor_id, t.status], [null, 3, "assigned"]);
-  assertEquals((await act(sb, { ref: "MNT-429", verb: "assign", unassign: true })).body.assignee, null);
-  assertEquals([t.assigned_vendor_id, t.status], [null, "open"]);
-  await act(sb, { ref: "MNT-430", verb: "assign", memberId: 4 });
-  assertEquals([ticket(sb, 430).assigned_technician_id, ticket(sb, 430).status], [4, "in_progress"]);
-});
-
-Deno.test("refus avant toute ecriture : personne, role, prestataire, tache vers prestataire, saisie", async () => {
+Deno.test("refus avant toute ecriture : personne, role, tache vers prestataire, saisie", async () => {
   const sb = seed();
   const err = async (b: any) => (await act(sb, b)).body.error;
-  assertEquals(await err({ ref: "MNT-429", verb: "assign", memberId: 9 }), "This person cannot take tickets.");
-  assertEquals(await err({ ref: "MNT-429", verb: "assign", memberId: 12 }), "This person cannot take tickets.");
-  assertEquals(await err({ ref: "MNT-429", verb: "assign", vendorId: 2 }), "This vendor is not active.");
   assertEquals(await err({ ref: "TSK-13", verb: "assign", memberId: 4 }), "This person cannot take team tasks.");
+  assertEquals(await err({ ref: "TSK-13", verb: "assign", memberId: 9 }), "This person cannot take team tasks.");
   assertEquals(await err({ ref: "TSK-13", verb: "assign", vendorId: 3 }), "Team tasks go to a team member, not a vendor.");
-  assertEquals(await err({ ref: "MNT-429", verb: "assign" }), "Choose a person or a vendor.");
-  assertEquals(await err({ ref: "MNT-429", verb: "assign", memberId: 7, vendorId: 3 }), "Choose a person or a vendor, not both.");
-  assertEquals(await err({ ref: "MNT-429", verb: "assign", memberId: "abc" }), "Invalid person.");
+  assertEquals(await err({ ref: "TSK-13", verb: "assign" }), "Choose a person or a vendor.");
+  assertEquals(await err({ ref: "TSK-13", verb: "assign", memberId: 7, vendorId: 3 }), "Choose a person or a vendor, not both.");
+  assertEquals(await err({ ref: "TSK-13", verb: "assign", memberId: "abc" }), "Invalid person.");
   assertEquals(await err({ ref: "INS-4", verb: "assign", memberId: 7 }), "Unknown problem reference.");
-  assertEquals(await err({ ref: "MNT-429", verb: "explode" }), "Unknown action.");
-  assertEquals((await mgrProblemAct(sb, ME, { ref: "MNT-429", verb: "assign", memberId: 7, idem: "x" }, { nowMs: NOW })).body.error, "idem required");
-  assertEquals(await act(sb, { ref: "MNT-9999", verb: "assign", memberId: 7 }), { status: 404, body: { error: "MNT-9999 not found." } });
+  assertEquals(await err({ ref: "TSK-13", verb: "explode" }), "Unknown action.");
+  assertEquals((await mgrProblemAct(sb, ME, { ref: "TSK-13", verb: "assign", memberId: 7, idem: "x" }, { nowMs: NOW })).body.error, "idem required");
+  assertEquals(await act(sb, { ref: "TSK-9999", verb: "assign", memberId: 7 }), { status: 404, body: { error: "TSK-9999 not found." } });
   assertEquals(sb.writes.length, 0);
 });
 
-Deno.test("assign TSK : manager, notification au nouvel assigne seulement", async () => {
+Deno.test("assign TSK : manager, journal et cle au nom de la session, notification au nouvel assigne seulement", async () => {
   const sb = seed();
   const sent: number[] = [];
   const deps = { notifyTask: (t: any) => { sent.push(t.id); } };
-  await act(sb, { ref: "TSK-13", verb: "assign", memberId: 8 }, deps);
+  const r = await act(sb, { ref: "TSK-13", verb: "assign", memberId: 8, actor: "Manager" }, deps);
+  assertEquals(r, { status: 200, body: { status: "success", ref: "TSK-13", verb: "assign", assignee: { kind: "member", id: 8, name: "Walter" } } });
   await act(sb, { ref: "TSK-13", verb: "assign", memberId: 8 }, deps);
   await act(sb, { ref: "TSK-13", verb: "assign", unassign: true }, deps);
   assertEquals(sent, [13]);
   assertEquals(task(sb, 13).assigned_cleaner_id, null);
+  assertEquals(sb.tables.cleaning_log[0].reservation_key + " " + sb.tables.cleaning_log[0].actor, "task_13 Walter");
+  assertEquals(sb.tables.job_events[0].job_id, "TSK-13");
 });
 
 Deno.test("idempotence : meme cle, meme reponse, une seule ecriture ; cle posee sans resultat = 409", async () => {
   const sb = seed();
-  const body = { ref: "MNT-429", verb: "assign", memberId: 7, idem: "idem-replay-1" };
+  const body = { ref: "TSK-13", verb: "assign", memberId: 8, idem: "idem-replay-1" };
   const a = await mgrProblemAct(sb, ME, body, { nowMs: NOW });
   const b = await mgrProblemAct(sb, ME, body, { nowMs: NOW });
   assertEquals(b, a);
@@ -102,142 +91,74 @@ Deno.test("idempotence : meme cle, meme reponse, une seule ecriture ; cle posee 
 
 Deno.test("ecriture ratee : la cle est liberee, l'erreur remonte", async () => {
   const sb = seed();
-  sb.fail["maintenance_tickets.update"] = { message: "db down" };
+  sb.fail["team_tasks.update"] = { message: "db down" };
   let msg = "";
-  try { await act(sb, { ref: "MNT-429", verb: "assign", memberId: 7 }); } catch (e) { msg = (e as any).message; }
+  try { await act(sb, { ref: "TSK-13", verb: "assign", memberId: 8 }); } catch (e) { msg = (e as any).message; }
   assertEquals(msg, "db down");
   assertEquals(sb.tables.job_events.length, 0);
 });
 
-Deno.test("schedule : fin de journee Dubai, TSK due_at, retrait, passe et trop loin refuses", async () => {
+Deno.test("schedule TSK : fin de journee Dubai, retrait, passe et trop loin refuses", async () => {
   const sb = seed();
-  assertEquals((await act(sb, { ref: "MNT-429", verb: "schedule", date: "2026-10-12" })).body,
-    { status: "success", ref: "MNT-429", verb: "schedule", dueAt: "2026-10-12T19:59:59.000Z" });
-  assertEquals(ticket(sb, 429).sla_deadline, "2026-10-12T19:59:59.000Z");
-  await act(sb, { ref: "TSK-13", verb: "schedule", date: "2026-10-09" });
-  assertEquals(task(sb, 13).due_at, "2026-10-09T19:59:59.000Z");
+  assertEquals((await act(sb, { ref: "TSK-13", verb: "schedule", date: "2026-10-12" })).body,
+    { status: "success", ref: "TSK-13", verb: "schedule", dueAt: "2026-10-12T19:59:59.000Z" });
+  assertEquals(task(sb, 13).due_at, "2026-10-12T19:59:59.000Z");
   await act(sb, { ref: "TSK-13", verb: "schedule", date: null });
   assertEquals(task(sb, 13).due_at, null);
-  const err = async (date: unknown) => (await act(sb, { ref: "MNT-429", verb: "schedule", date })).body.error;
+  const err = async (date: unknown) => (await act(sb, { ref: "TSK-13", verb: "schedule", date })).body.error;
   assertEquals(await err("2026-10-08"), "The date cannot be in the past.");
   assertEquals(await err("2027-10-10"), "The date is too far ahead.");
   assertEquals(await err("2026-02-30"), "Invalid date.");
   assertEquals(sb.tables.cleaning_log.map((l: any) => [l.reservation_key, l.action, l.details]), [
-    ["ticket_429", "problem_scheduled", { date: "2026-10-12" }],
-    ["task_13", "problem_scheduled", { date: "2026-10-09" }],
+    ["task_13", "problem_scheduled", { date: "2026-10-12" }],
     ["task_13", "problem_scheduled", { date: null }],
   ]);
 });
 
-Deno.test("schedule d'un ticket d'inspection : la date de rectification de la zone suit", async () => {
+Deno.test("assign et schedule refuses sur une tache close, la cle est liberee ; comment accepte", async () => {
   const sb = seed();
-  await act(sb, { ref: "MNT-501", verb: "schedule", date: "2026-10-14" });
-  const it = sb.tables.inspection_items[0];
-  assertEquals([it.fix_scheduled_for, it.fix_scheduled_slot], ["2026-10-14", null]);
-  assertEquals(ticket(sb, 501).description, "Lamp broken\n\nFix date: 14 Oct 2026");
-});
-
-Deno.test("assign et schedule refuses sur un probleme clos, la cle est liberee ; comment accepte", async () => {
-  const sb = seed();
-  assertEquals(await act(sb, { ref: "MNT-300", verb: "assign", memberId: 7 }), { status: 409, body: { error: "MNT-300 is closed. Reopen it first." } });
+  assertEquals(await act(sb, { ref: "TSK-19", verb: "assign", memberId: 7 }), { status: 409, body: { error: "TSK-19 is closed. Reopen it first." } });
   assertEquals((await act(sb, { ref: "TSK-19", verb: "schedule", date: "2026-10-10" })).body.error, "TSK-19 is closed. Reopen it first.");
   assertEquals(sb.tables.job_events.length, 0);
-  assertEquals((await act(sb, { ref: "MNT-300", verb: "comment", text: "Checked again" })).status, 200);
+  assertEquals((await act(sb, { ref: "TSK-19", verb: "comment", text: "Checked again" })).status, 200);
 });
 
 Deno.test("comment : auteur de la session, texte borne, vide refuse", async () => {
   const sb = seed();
-  const r = await act(sb, { ref: "MNT-429", verb: "comment", text: "  Called the gas company.  ", author: "Hillal" });
-  assertEquals(r.body.comment, { author: "Walter", text: "Called the gas company.", at: "2026-10-09T07:00:00.000Z" });
-  assertEquals(sb.tables.ticket_comments.map((c: any) => [c.ticket_id, c.author, c.comment]), [[429, "Walter", "Called the gas company."]]);
+  const r = await act(sb, { ref: "TSK-13", verb: "comment", text: "  Called the gas company.  ", author: "Hillal" });
+  const cm = r.body.comment as { author: string; text: string };
+  assertEquals([cm.author, cm.text], ["Walter", "Called the gas company."]);
   await act(sb, { ref: "TSK-13", verb: "comment", text: "x".repeat(2500) });
-  assertEquals(sb.tables.team_task_comments.map((c: any) => [c.task_id, c.cleaner_id, c.body.length]), [[13, 8, 2000]]);
-  assertEquals((await act(sb, { ref: "MNT-429", verb: "comment", text: "   " })).body.error, "Write a comment first.");
+  assertEquals(sb.tables.team_task_comments.map((c: any) => [c.task_id, c.cleaner_id, c.body.length]), [[13, 8, 23], [13, 8, 2000]]);
+  assertEquals((await act(sb, { ref: "TSK-13", verb: "comment", text: "   " })).body.error, "Write a comment first.");
 });
 
-Deno.test("close MNT : resolved, note, copie TSK fermee, journal avec l'etat d'avant ; deux fois = 409", async () => {
-  const sb = seed();
-  const r = await act(sb, { ref: "MNT-429", verb: "close", note: "Replaced the valve" });
-  assertEquals(r.body, { status: "success", ref: "MNT-429", verb: "close", closed: true });
-  const t = ticket(sb, 429);
-  assertEquals([t.status, t.resolved_at, t.resolution_notes], ["resolved", "2026-10-09T07:00:00.000Z", "Replaced the valve"]);
-  assertEquals([task(sb, 17).status, task(sb, 17).completed_by_cleaner_id], ["done", 8]);
-  assertEquals(sb.tables.ticket_comments.map((c: any) => [c.author, c.comment]), [["Walter", "Replaced the valve"]]);
-  assertEquals(sb.tables.cleaning_log.map((l: any) => [l.action, l.actor, l.details]),
-    [["problem_closed", "Walter", { from: "open", notes: null, mirrors: [17], note: "Replaced the valve" }]]);
-  assertEquals(await act(sb, { ref: "MNT-429", verb: "close" }), { status: 409, body: { error: "MNT-429 is already closed." } });
-});
-
-Deno.test("reopen (Undo) : statut, note et copie TSK d'avant le close ; deux fois = 409", async () => {
-  const sb = seed();
-  await act(sb, { ref: "MNT-430", verb: "close" });
-  assertEquals((await act(sb, { ref: "MNT-430", verb: "reopen" })).body,
-    { status: "success", ref: "MNT-430", verb: "reopen", state: "in_progress" });
-  assertEquals([ticket(sb, 430).status, ticket(sb, 430).resolved_at, ticket(sb, 430).closed_at], ["in_progress", null, null]);
-  await act(sb, { ref: "MNT-429", verb: "close", note: "x" });
-  await act(sb, { ref: "MNT-429", verb: "reopen" });
-  const m = task(sb, 17);
-  assertEquals([ticket(sb, 429).status, ticket(sb, 429).resolution_notes, m.status, m.completed_at, m.completed_by_cleaner_id],
-    ["open", null, "open", null, null]);
-  assertEquals((await act(sb, { ref: "MNT-429", verb: "reopen" })).body.error, "MNT-429 is not closed.");
-});
-
-Deno.test("reopen d'un ticket clos ailleurs (sans journal) : assigned s'il a un technicien, sinon open", async () => {
-  const sb = seed();
-  sb.tables.maintenance_tickets.push({ id: 302, title: "x", status: "resolved", assigned_technician_id: 7, resolution_notes: "old" });
-  await act(sb, { ref: "MNT-300", verb: "reopen" });
-  await act(sb, { ref: "MNT-302", verb: "reopen" });
-  assertEquals(ticket(sb, 300).status, "open");
-  assertEquals([ticket(sb, 302).status, ticket(sb, 302).resolution_notes], ["assigned", "old"]);
-});
-
-Deno.test("close et reopen TSK : done par la session, note en commentaire, retour a in_progress", async () => {
+Deno.test("close et reopen TSK : done par la session, note en commentaire, retour a in_progress ; deux fois = 409", async () => {
   const sb = seed();
   task(sb, 13).status = "in_progress";
-  await act(sb, { ref: "TSK-13", verb: "close", note: "Done by phone" });
+  assertEquals((await act(sb, { ref: "TSK-13", verb: "close", note: "Done by phone" })).body,
+    { status: "success", ref: "TSK-13", verb: "close", closed: true });
   const t = task(sb, 13);
   assertEquals([t.status, t.completed_at, t.completed_by_cleaner_id], ["done", "2026-10-09T07:00:00.000Z", 8]);
   assertEquals(sb.tables.team_task_comments.map((c: any) => [c.task_id, c.cleaner_id, c.body]), [[13, 8, "Done by phone"]]);
-  await act(sb, { ref: "TSK-13", verb: "reopen" });
+  assertEquals(await act(sb, { ref: "TSK-13", verb: "close" }), { status: 409, body: { error: "TSK-13 is already closed." } });
+  assertEquals((await act(sb, { ref: "TSK-13", verb: "reopen" })).body, { status: "success", ref: "TSK-13", verb: "reopen", state: "in_progress" });
   assertEquals([t.status, t.completed_at, t.completed_by_cleaner_id], ["in_progress", null, null]);
+  assertEquals((await act(sb, { ref: "TSK-13", verb: "reopen" })).body.error, "TSK-13 is not closed.");
 });
 
-Deno.test("close : copie TSK en echec, le ticket reste clos et la reponse est un succes", async () => {
+Deno.test("reopen TSK : horodatages Postgres avec decalage, un close plus recent que le reopen reste pris", async () => {
   const sb = seed();
-  sb.fail["team_tasks.update"] = { message: "boom" };
-  assertEquals((await act(sb, { ref: "MNT-429", verb: "close" })).status, 200);
-  assertEquals(ticket(sb, 429).status, "resolved");
-});
-
-Deno.test("reopen apres un close ailleurs : le journal problem_closed plus ancien qu'un problem_reopened est ignore", async () => {
-  const sb = seed();
-  await act(sb, { ref: "MNT-429", verb: "close", note: "First fix" });
-  await act(sb, { ref: "MNT-429", verb: "reopen" });
-  // Clos dans l'ancienne app : statut et note ecrits directement, sans journal ; la copie Hermes est faite a part.
-  const t = ticket(sb, 429);
-  Object.assign(t, { status: "resolved", resolution_notes: "Fixed in the old app", resolved_at: "2026-10-09T08:00:00Z" });
-  Object.assign(task(sb, 17), { status: "done", completed_at: "2026-10-09T08:00:00Z", completed_by_cleaner_id: 4 });
-  assertEquals((await act(sb, { ref: "MNT-429", verb: "reopen" })).body,
-    { status: "success", ref: "MNT-429", verb: "reopen", state: "open" });
-  assertEquals([t.status, t.resolution_notes, t.resolved_at], ["open", "Fixed in the old app", null]);
-  const m = task(sb, 17);
-  assertEquals([m.status, m.completed_by_cleaner_id], ["done", 4]);
-});
-
-Deno.test("reopen : horodatages Postgres avec decalage, un close plus recent que le reopen reste pris", async () => {
-  const sb = seed();
-  sb.tables.maintenance_tickets.push({ id: 303, title: "x", status: "resolved", assigned_technician_id: 7, resolution_notes: "new" });
+  sb.tables.team_tasks.push({ id: 21, title: "x", status: "done", assigned_cleaner_id: 7, source_ref: null });
   sb.tables.cleaning_log.push(
-    { id: 1, reservation_key: "ticket_303", action: "problem_closed", created_at: "2026-10-09T10:00:00+04:00",
-      details: { from: "waiting_parts", notes: "before", mirrors: [] } },
-    { id: 2, reservation_key: "ticket_303", action: "problem_reopened", created_at: "2026-10-09T06:30:00+00:00", details: { to: "waiting_parts" } },
-    { id: 3, reservation_key: "ticket_303", action: "problem_closed", created_at: "2026-10-09T10:45:00+04:00",
-      details: { from: "in_progress", notes: "later", mirrors: [] } },
+    { id: 1, reservation_key: "task_21", action: "problem_closed", created_at: "2026-10-09T10:00:00+04:00", details: { from: "open" } },
+    { id: 2, reservation_key: "task_21", action: "problem_reopened", created_at: "2026-10-09T06:30:00+00:00", details: { to: "open" } },
+    { id: 3, reservation_key: "task_21", action: "problem_closed", created_at: "2026-10-09T10:45:00+04:00", details: { from: "in_progress" } },
   );
-  await act(sb, { ref: "MNT-303", verb: "reopen" });
-  assertEquals([ticket(sb, 303).status, ticket(sb, 303).resolution_notes], ["in_progress", "later"]);
-  sb.tables.cleaning_log.push({ id: 4, reservation_key: "ticket_303", action: "problem_reopened", created_at: "2026-10-09T06:50:00Z", details: {} });
-  Object.assign(ticket(sb, 303), { status: "resolved", resolution_notes: "elsewhere" });
-  await act(sb, { ref: "MNT-303", verb: "reopen" });
-  assertEquals([ticket(sb, 303).status, ticket(sb, 303).resolution_notes], ["assigned", "elsewhere"]);
+  await act(sb, { ref: "TSK-21", verb: "reopen" });
+  assertEquals(task(sb, 21).status, "in_progress");
+  sb.tables.cleaning_log.push({ id: 4, reservation_key: "task_21", action: "problem_reopened", created_at: "2026-10-09T06:50:00Z", details: {} });
+  task(sb, 21).status = "done";
+  await act(sb, { ref: "TSK-21", verb: "reopen" });
+  assertEquals(task(sb, 21).status, "open");
 });

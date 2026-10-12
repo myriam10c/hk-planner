@@ -33,10 +33,11 @@ export const db = () => fakeDb({
   ],
   team_tasks: [
     { id: 13, title: "AC not cooling", priority: "urgent", status: "open", listing_id: null, assigned_cleaner_id: 7, due_at: "2026-05-15T08:00:00+00:00", created_at: "2026-05-14T08:00:00Z", source_ref: null },
-    { id: 14, title: "Buy light bulbs", priority: "normal", status: "open", listing_id: null, assigned_cleaner_id: null, due_at: null, created_at: "2026-10-01T08:00:00Z", source_ref: null },
+    { id: 14, title: "Buy light bulbs", priority: "normal", status: "open", listing_id: "L1", assigned_cleaner_id: null, due_at: null, created_at: "2026-10-01T08:00:00Z", source_ref: null },
     { id: 15, title: "Check smoke detector", priority: "low", status: "open", listing_id: null, assigned_cleaner_id: null, due_at: "2026-12-01T08:00:00Z", created_at: "2026-10-01T08:00:00Z", source_ref: null },
     { id: 16, title: "Closed one", priority: "urgent", status: "done", listing_id: null, assigned_cleaner_id: 7, due_at: "2026-05-01T08:00:00Z", created_at: "2026-05-01T08:00:00Z", source_ref: null },
     { id: 17, title: "🔧 Gas not working", priority: "urgent", status: "open", listing_id: "L1", assigned_cleaner_id: 7, due_at: "2026-07-12T08:00:00Z", created_at: "2026-07-09T09:00:00Z", source_ref: "maint:429" },
+    { id: 20, title: "Fix the door bell", priority: "normal", status: "open", listing_id: "L2", assigned_cleaner_id: null, due_at: null, created_at: "2026-09-01T08:00:00Z", source_ref: null },
     { id: 18, title: "Call owner", priority: "high", status: "in_progress", listing_id: null, assigned_cleaner_id: 8, due_at: null, created_at: "2026-10-05T08:00:00Z", source_ref: null },
   ],
   vendors: [{ id: 3, name: "CoolFix", specialty: "AC", is_active: true }, { id: 2, name: "Old Co", specialty: "", is_active: false }],
@@ -51,27 +52,27 @@ export const db = () => fakeDb({
   ],
 });
 
-Deno.test("Today, top 5 : urgence, ce qui touche aujourd'hui, le plus ancien ; copie maint:429 jamais listee", async () => {
+Deno.test("Today, taches d'equipe seulement : urgence, ce qui touche aujourd'hui, le plus ancien ; aucun ticket, copie maint:429 jamais listee", async () => {
   const p = await loadProblems(db(), core, jobs, arrivals);
-  assertEquals(p.top.map((x) => x.ref), ["MNT-429", "MNT-411", "TSK-13", "MNT-502", "MNT-440"]);
-  assertEquals(p.top[0], {
-    ref: "MNT-429", kind: "MNT", id: 429, source: "Maintenance", priority: "urgent", label: "Urgent", tone: "bad",
-    title: "Gas not working", status: "open", closed: false, listingId: "L1", apt: "103", bld: "Damac Reva",
-    assignee: null, createdAt: "2026-07-09T08:00:00Z", since: "09/07", dueAt: null, due: null, overdue: false, todayBoost: 0,
-    why: "A guest arrives today at 15:00. Open since 09/07, no technician assigned.",
-  });
-  assertEquals(p.top[1].why, "Checkout today at 12:00. Open since 14/06, no technician assigned.");
-  assertEquals([p.top[2].source, p.top[2].why, p.top[2].tone], ["Team task", "Assigned to Semax, overdue since 15/05.", "bad"]);
-  assertEquals(p.top[3].why, "A guest arrives today at 15:00. Open since 01/10, no technician assigned. Checked by a cleaner, to confirm and close.");
-  assertEquals([p.top[4].tone, p.top[4].why], ["warn", "Open since 15/07, sent to vendor CoolFix."]);
+  assertEquals(p.top.map((x) => x.ref), ["TSK-13", "TSK-18", "TSK-14", "TSK-20", "TSK-15"]);
+  assertEquals([p.top[0].source, p.top[0].why, p.top[0].tone], ["Team task", "Assigned to Semax, overdue since 15/05.", "bad"]);
+  assertEquals(p.top[2].why, "A guest arrives today at 15:00. Unassigned, open since 01/10.");
+  assertEquals(p.top[3].why, "Checkout today at 12:00. Unassigned, open since 01/09.");
 });
 
-Deno.test("Today, compteurs : copies exclues, sources inspection et cleaner, retards en temps", async () => {
+Deno.test("Today, compteurs : compteurs de tickets a zero, taches et retards en temps", async () => {
   const p = await loadProblems(db(), core, jobs, arrivals);
   assertEquals(p.counts, {
-    urgent: 3, ticketsOpen: 7, ticketsUrgent: 2, ticketsNoTech: 5, teamTasksOpen: 4, teamTasksOverdue: 1,
-    inspectionTicketsOpen: 1, cleanerReportsOpen: 1,
+    urgent: 1, ticketsOpen: 0, ticketsUrgent: 0, ticketsNoTech: 0, teamTasksOpen: 5, teamTasksOverdue: 1,
+    inspectionTicketsOpen: 0, cleanerReportsOpen: 0,
   });
+});
+
+Deno.test("la boite ne lit plus maintenance_tickets : une erreur sur cette table ne la touche pas", async () => {
+  const sb = db();
+  sb.fail["maintenance_tickets.select"] = { message: "boom" };
+  assertEquals((await loadProblems(sb, core, jobs, arrivals)).top.length, 5);
+  assertEquals(((await list(sb)).body as any).total, 5);
 });
 
 Deno.test("lecture team_tasks en erreur : leve", async () => {
@@ -92,7 +93,7 @@ const Q = (o: Record<string, unknown> = {}) =>
 const list = (sb: any, o: Record<string, unknown> = {}, load: any = async () => ({ reservations: RESV, cachedAt: null })) =>
   mgrProblems(sb, { day: DAY, nowMs: NOW, me: ME, query: Q(o), loadReservations: load });
 
-Deno.test("mgr.problems : meme tri que Today, compteurs globaux, logements, options d'affectation", async () => {
+Deno.test("mgr.problems : taches d'equipe seulement, meme tri que Today, compteurs globaux, logements, options d'affectation", async () => {
   const r = await list(db());
   assertEquals(r.status, 200);
   const b: any = r.body;
@@ -100,18 +101,15 @@ Deno.test("mgr.problems : meme tri que Today, compteurs globaux, logements, opti
     "apartments", "assignees", "bookingsCachedAt", "bookingsUnavailable", "counts", "day", "generatedAt", "limit", "me",
     "offset", "rows", "total", "vendors",
   ]);
-  assertEquals(b.rows.map((x: any) => x.ref), [
-    "MNT-429", "MNT-411", "TSK-13", "MNT-502", "MNT-440", "TSK-18", "MNT-501", "MNT-500", "TSK-14", "MNT-106", "TSK-15",
-  ]);
-  assertEquals([b.total, b.offset, b.limit, b.bookingsUnavailable, b.bookingsCachedAt, b.me], [11, 0, 50, false, null, { id: 8, name: "Walter" }]);
+  assertEquals(b.rows.map((x: any) => x.ref), ["TSK-13", "TSK-18", "TSK-14", "TSK-20", "TSK-15"]);
+  assertEquals([b.total, b.offset, b.limit, b.bookingsUnavailable, b.bookingsCachedAt, b.me], [5, 0, 50, false, null, { id: 8, name: "Walter" }]);
   assertEquals(b.counts, {
-    open: 11, urgent: 3, mine: 1, unassigned: 7, overdue: 1,
-    bySource: { Maintenance: 5, Inspection: 1, "Cleaner report": 1, "Team task": 4 },
+    open: 5, urgent: 1, mine: 1, unassigned: 3, overdue: 1,
+    bySource: { Maintenance: 0, Inspection: 0, "Cleaner report": 0, "Team task": 5 },
   });
   assertEquals(b.apartments, [
-    { listingId: "L1", apt: "103", bld: "Damac Reva", n: 2 },
-    { listingId: "L3", apt: "1607", bld: "Central Park JVC", n: 2 },
-    { listingId: "L2", apt: "2609", bld: "Nobles by Tiger", n: 2 },
+    { listingId: "L1", apt: "103", bld: "Damac Reva", n: 1 },
+    { listingId: "L2", apt: "2609", bld: "Nobles by Tiger", n: 1 },
   ]);
   assertEquals(b.assignees, [
     { id: 7, name: "Semax", role: "manager", takesTasks: true },
@@ -122,16 +120,16 @@ Deno.test("mgr.problems : meme tri que Today, compteurs globaux, logements, opti
 });
 
 Deno.test("mgr.problems : filtres et pages ; total apres filtre, compteurs avant filtre", async () => {
-  const b: any = (await list(db(), { urgent: true, offset: 1, limit: 1 })).body;
-  assertEquals([b.total, b.rows.map((x: any) => x.ref), b.counts.open], [3, ["MNT-411"], 11]);
+  const b: any = (await list(db(), { unassigned: true, offset: 1, limit: 1 })).body;
+  assertEquals([b.total, b.rows.map((x: any) => x.ref), b.counts.open], [3, ["TSK-20"], 5]);
   const m: any = (await list(db(), { mine: true })).body;
   assertEquals(m.rows.map((x: any) => x.ref), ["TSK-18"]);
   const z: any = (await list(db(), { limit: 0 })).body;
-  assertEquals([z.rows, z.total, z.counts.urgent], [[], 11, 3]);
+  assertEquals([z.rows, z.total, z.counts.urgent], [[], 5, 1]);
 });
 
 Deno.test("mgr.problems : Hostaway indisponible, liste servie sans le coup de pouce du jour", async () => {
   const b: any = (await list(db(), {}, async () => { throw new Error("down"); })).body;
   assertEquals(b.bookingsUnavailable, true);
-  assertEquals(b.rows.slice(0, 3).map((x: any) => x.ref), ["TSK-13", "MNT-411", "MNT-429"]);
+  assertEquals(b.rows.map((x: any) => x.ref), ["TSK-13", "TSK-18", "TSK-20", "TSK-14", "TSK-15"]);
 });

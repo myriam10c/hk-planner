@@ -31,7 +31,7 @@ import {
 } from "./insp_write.ts";
 import { getSecurityContacts, setSecurityContacts } from "./security_contacts.ts";
 import { sessionActor } from "./actor.ts";
-import { mgrAccess, MGR_LOOKBACK_DAYS, normalizeMgrReservations, splitListing, type MgrReservation } from "./mgr_rules.ts";
+import { mgrAccess, MGR_LOOKBACK_DAYS, MGR_PLANNING_ROLES, planningAccess, normalizeMgrReservations, splitListing, type MgrReservation } from "./mgr_rules.ts";
 import { mgrToday } from "./mgr_api.ts";
 import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
@@ -1666,12 +1666,13 @@ Deno.serve(async (req: Request) => {
       return jsonResp(r.body, r.status);
     }
 
-    // Planning : la semaine de menages en un appel, lecture seule. Les gestes
+    // Planning : la semaine de menages en un appel, lecture seule, managers et
+    // maintenance (planningAccess). Les gestes
     // passent par les actions existantes (assignCleaner, setDone, setCancelled,
     // setPostponed, saveLaundryCount, add/update/deleteExtraCleaning).
     if (action === "mgr.planning") {
       const me = await currentUser(sb, req);
-      const acc = mgrAccess(bearerToken(req) !== null, me);
+      const acc = planningAccess(bearerToken(req) !== null, me);
       if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
       const today = todayDubai();
       const ps = parsePlanningStart(url.searchParams.get("start"), today);
@@ -1900,11 +1901,11 @@ Deno.serve(async (req: Request) => {
     }
 
     // ==================== CANCEL CLEANING ====================
-    // Manager-only : une session authentifiée non-manager (cleaner/maintenance/subcontractor)
-    // est rejetée. Pas de token = vue manager historique (sans login) → autorisé.
+    // Managers et maintenance (MGR_PLANNING_ROLES) : une session authentifiee cleaner ou
+    // subcontractor est rejetee. Pas de token = vue manager historique (sans login), autorise.
     if (action === "setCancelled" && req.method === "POST") {
       const me = await currentUser(sb, req);
-      if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
+      if (me && !MGR_PLANNING_ROLES.includes(me.role)) return jsonResp({ error: "manager role required" }, 403);
       const body = await req.json();
       const { key, cancelled, reason } = body;
       const actor = sessionActor(me, body.actor);
@@ -1924,9 +1925,9 @@ Deno.serve(async (req: Request) => {
     // Date override : déplace un ménage à un jour ultérieur sans toucher Hostaway.
     // postpone=true → upsert (new_date/original_date) ; postpone=false → retire l'override.
     if (action === "setPostponed" && req.method === "POST") {
-      // Manager-only (même règle que setCancelled).
+      // Managers et maintenance (meme regle que setCancelled).
       const me = await currentUser(sb, req);
-      if (me && me.role !== "manager") return jsonResp({ error: "manager role required" }, 403);
+      if (me && !MGR_PLANNING_ROLES.includes(me.role)) return jsonResp({ error: "manager role required" }, 403);
       const body = await req.json();
       const { key, postpone, new_date, original_date } = body;
       const actor = sessionActor(me, body.actor);

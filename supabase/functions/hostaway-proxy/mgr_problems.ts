@@ -1,13 +1,14 @@
-// Boite Problems : lecture des tables (tickets et taches d'equipe ouverts,
-// prestataires) et bloc « Open problems » de Today. Les regles (references,
-// priorites, tri, filtres) vivent dans mgr_inbox.ts ; la meme boite sert Today
-// (5 premiers) et l'ecran Problems (mgr.problems, ajoute par la tache 4).
+// Boite Problems : lecture des tables (taches d'equipe ouvertes, prestataires) et
+// bloc « problems » de Today. Les regles (references, priorites, tri, filtres)
+// vivent dans mgr_inbox.ts ; la meme boite sert Today (5 premiers) et l'ecran
+// Tasks (mgr.problems). Depuis la phase 2 maintenance, les tickets vivent dans
+// l'ecran Maintenance (mnt.list) : la boite ne les lit plus.
 import type { SessionUser } from "./auth.ts";
 import type { MgrReservation } from "./mgr_rules.ts";
 import {
-  apartmentsOf, buildInbox, filterRows, inboxCounts, MGR_OPEN_TASK_STATUSES, MGR_OPEN_TICKET_STATUSES,
+  apartmentsOf, buildInbox, filterRows, inboxCounts, MGR_OPEN_TASK_STATUSES,
   MGR_TASK_ASSIGNEE_ROLES, MGR_TICKET_ASSIGNEE_ROLES, todayFromBoard, todayFromReservations,
-  type InboxCounts, type InboxQuery, type InboxRow, type RawTask, type RawTicket, type TodayIdx,
+  type InboxCounts, type InboxQuery, type InboxRow, type RawTask, type TodayIdx,
 } from "./mgr_inbox.ts";
 import {
   listingMap, peopleMap, readAllRows, type MgrArrival, type MgrCore, type MgrJob, type MgrPerson,
@@ -19,23 +20,23 @@ export const MGR_TASK_COLS =
   "id, title, priority, status, listing_id, assigned_cleaner_id, due_at, created_at, completed_at, source_ref";
 
 export type RawVendor = { id: number; name: string | null; specialty: string | null; is_active: boolean | null };
-export type InboxRaw = { tickets: RawTicket[]; tasks: RawTask[]; vendors: RawVendor[] };
+export type InboxRaw = { tasks: RawTask[]; vendors: RawVendor[] };
 
 export async function loadInboxRaw(sb: any): Promise<InboxRaw> {
-  const [tickets, tasks, vendors] = await Promise.all([
-    readAllRows((a: number, b: number) => sb.from("maintenance_tickets").select(MGR_TICKET_COLS)
-      .in("status", MGR_OPEN_TICKET_STATUSES).order("id").range(a, b), "maintenance_tickets"),
+  const [tasks, vendors] = await Promise.all([
     readAllRows((a: number, b: number) => sb.from("team_tasks").select(MGR_TASK_COLS)
       .in("status", MGR_OPEN_TASK_STATUSES).order("id").range(a, b), "team_tasks"),
     readAllRows((a: number, b: number) => sb.from("vendors").select("id, name, specialty, is_active").order("id").range(a, b), "vendors"),
   ]);
-  return { tickets, tasks, vendors };
+  return { tasks, vendors };
 }
 
 export function vendorNames(vs: RawVendor[]): Record<string, { name: string }> {
   return Object.fromEntries(vs.map((v) => [String(v.id), { name: String(v.name ?? "").trim() || "Vendor " + v.id }]));
 }
 
+// Les compteurs de tickets restent dans la forme (compatibilite) et valent 0 :
+// la boite ne contient plus que des taches d'equipe.
 export type MgrProblemCounts = {
   urgent: number; ticketsOpen: number; ticketsUrgent: number; ticketsNoTech: number;
   teamTasksOpen: number; teamTasksOverdue: number; inspectionTicketsOpen: number; cleanerReportsOpen: number;
@@ -59,7 +60,7 @@ export function todayCounts(rows: InboxRow[]): MgrProblemCounts {
 
 export async function loadProblems(sb: any, c: MgrCore, jobs: MgrJob[], arrivals: MgrArrival[]): Promise<MgrProblems> {
   const raw = await loadInboxRaw(sb);
-  const rows = buildInbox(raw.tickets, raw.tasks, {
+  const rows = buildInbox(raw.tasks, {
     nowMs: c.nowMs, listings: c.listings, people: c.people, vendors: vendorNames(raw.vendors),
     today: todayFromBoard(jobs, arrivals),
   });
@@ -111,7 +112,7 @@ export async function mgrProblems(sb: any, o: {
     loadRefs(sb),
   ]);
   const today: TodayIdx = booked.ok ? todayFromReservations(booked.r.reservations, o.day) : { arrivals: {}, checkouts: {} };
-  const all = buildInbox(raw.tickets, raw.tasks, {
+  const all = buildInbox(raw.tasks, {
     nowMs: o.nowMs, listings: refs.listings, people: refs.people, vendors: vendorNames(raw.vendors), today,
   });
   const rows = filterRows(all, o.query, o.me.cleaner_id);

@@ -79,15 +79,15 @@ Deno.test("ligne tache : assignee, retard, echeance, ouverte depuis, close", () 
   assertEquals([d.closed, d.why], [true, "Closed on 08/10."]);
 });
 
-Deno.test("boite : ouverts seulement, copies maint:<id> des tickets jamais en double", () => {
+Deno.test("boite : taches d'equipe ouvertes seulement, copies maint:<id> des tickets jamais listees", () => {
   assertEquals([mirrorTicketId("maint:429"), mirrorTicketId("review:3"), mirrorTicketId(null), mirrorTicketId("maint:x")],
     [429, null, null, null]);
   const rows = buildInbox(
-    [TK({ id: 429, priority: "urgent" }), TK({ id: 430, status: "waiting_parts" }), TK({ id: 300, status: "resolved" }), TK({ id: 301, status: "cancelled" })],
-    [TS({ id: 17, source_ref: "maint:429" }), TS({ id: 18, status: "in_progress" }), TS({ id: 19, status: "done" })],
+    [TS({ id: 17, source_ref: "maint:429" }), TS({ id: 18, status: "in_progress" }), TS({ id: 19, status: "done" }), TS({ id: 20, priority: "urgent" })],
     CTX,
   );
-  assertEquals(rows.map((r) => r.ref), ["MNT-429", "MNT-430", "TSK-18"]);
+  assertEquals(rows.map((r) => r.ref), ["TSK-20", "TSK-18"]);
+  assertEquals(rows.some((r) => r.kind === "MNT"), false);
 });
 
 Deno.test("tri stable : urgence, ce qui touche aujourd'hui, le plus ancien, MNT avant TSK, id", () => {
@@ -147,6 +147,12 @@ Deno.test("compteurs sur toute la boite, logements tries par nombre", () => {
     { listingId: "L1", apt: "308", bld: "Binghatti Lavender", n: 2 },
     { listingId: "L2", apt: "103", bld: "Damac Reva", n: 1 },
   ]);
+});
+
+Deno.test("parametres de mgr.problems : sources de tickets ignorees (pas de 400), task garde son filtre", () => {
+  const p = (s: string) => parseInboxQuery(new URLSearchParams(s));
+  for (const src of ["maintenance", "inspection", "cleaner"]) assertEquals(p("source=" + src), { ok: true, q: Q() });
+  assertEquals(p("source=task&urgent=1"), { ok: true, q: Q({ source: "Team task", urgent: true }) });
 });
 
 Deno.test("parametres de mgr.problems : defauts, bornes, source inconnue refusee", () => {

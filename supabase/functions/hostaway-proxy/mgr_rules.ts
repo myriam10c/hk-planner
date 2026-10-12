@@ -190,6 +190,16 @@ export function mgrAccess(hasBearer: boolean, me: { role: string } | null): MgrA
   return { ok: true };
 }
 
+// Acces au Planning (et aux gestes du Planning setCancelled / setPostponed) :
+// memes regles que mgrAccess, ouvert aussi au role maintenance (Semax).
+export const MGR_PLANNING_ROLES = ["manager", "maintenance"];
+export function planningAccess(hasBearer: boolean, me: { role: string } | null): MgrAccess {
+  if (!me) return { ok: false, status: 401, error: "auth required" };
+  if (!hasBearer) return { ok: false, status: 403, error: "email sign-in required" };
+  if (!MGR_PLANNING_ROLES.includes(me.role)) return { ok: false, status: 403, error: "forbidden" };
+  return { ok: true };
+}
+
 export function parseRiskHours(v: unknown): number {
   if (v === null || v === undefined || v === "") return MGR_DEFAULT_RISK_HOURS;
   const n = Number(v);

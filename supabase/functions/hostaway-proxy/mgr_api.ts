@@ -8,12 +8,14 @@ import {
 } from "./mgr_today.ts";
 import { loadProblems, type MgrProblems } from "./mgr_problems.ts";
 import { loadControl, type MgrControl } from "./mgr_control.ts";
+import { loadTodayMaintenance, type MgrTodayMaintenance } from "./mgr_today_mnt.ts";
 
 export type MgrToday = {
   day: string; generatedAt: string; bookingsCachedAt: string | null; riskHours: number;
   me: { id: number; name: string };
   strip: { cleanings: number; unassigned: number; arrivals: number; notReady: number };
-  who: MgrWho; problems: MgrProblems; control: MgrControl; arrivals: MgrArrivals;
+  // problems : taches d'equipe seulement ; maintenance : null si la lecture a echoue.
+  who: MgrWho; problems: MgrProblems; maintenance: MgrTodayMaintenance | null; control: MgrControl; arrivals: MgrArrivals;
   assignable: Array<{ id: number; name: string; role: string }>;
   ticketsByListing: Record<string, MgrTicketLite[]>;
 };
@@ -34,7 +36,10 @@ export async function mgrToday(sb: any, o: {
   const jobs = buildJobs(core);
   const who = buildWho(core, jobs);
   const arrivals = buildArrivals(core);
-  const [problems, control] = await Promise.all([loadProblems(sb, core, jobs, arrivals.rows), loadControl(sb, core)]);
+  const [problems, control, maintenance] = await Promise.all([
+    loadProblems(sb, core, jobs, arrivals.rows), loadControl(sb, core),
+    loadTodayMaintenance(sb, { nowMs: o.nowMs, listings: core.listings, people: core.people }),
+  ]);
   const assignable = Object.values(core.people)
     .filter((p) => p.active && (p.role === "cleaner" || p.role === "subcontractor"))
     .sort(byRoleThenName)
@@ -50,7 +55,7 @@ export async function mgrToday(sb: any, o: {
         arrivals: arrivals.rows.length,
         notReady: arrivals.rows.filter((a) => a.tone !== "ok").length,
       },
-      who, problems, control, arrivals, assignable,
+      who, problems, maintenance, control, arrivals, assignable,
       ticketsByListing: buildTicketsByListing(core),
     },
   };

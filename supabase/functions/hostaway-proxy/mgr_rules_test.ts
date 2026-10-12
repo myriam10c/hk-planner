@@ -140,7 +140,7 @@ Deno.test("annule, reporte, aucun depart connu", () => {
     { tone: "bad", word: "Blocked", cause: "Urgent ticket open: Gas not working (MNT-429)." });
 });
 
-import { mgrAccess, parseRiskHours } from "./mgr_rules.ts";
+import { mgrAccess, parseRiskHours, planningAccess } from "./mgr_rules.ts";
 
 Deno.test("acces manager : session email obligatoire, role manager seulement", () => {
   assertEquals(mgrAccess(false, null), { ok: false, status: 401, error: "auth required" });
@@ -149,6 +149,15 @@ Deno.test("acces manager : session email obligatoire, role manager seulement", (
   assertEquals(mgrAccess(true, { role: "cleaner" }), { ok: false, status: 403, error: "forbidden" });
   assertEquals(mgrAccess(true, { role: "maintenance" }), { ok: false, status: 403, error: "forbidden" });
   assertEquals(mgrAccess(true, { role: "manager" }), { ok: true });
+});
+
+Deno.test("acces planning : session email, roles manager et maintenance", () => {
+  assertEquals(planningAccess(false, null), { ok: false, status: 401, error: "auth required" });
+  assertEquals(planningAccess(false, { role: "maintenance" }), { ok: false, status: 403, error: "email sign-in required" });
+  assertEquals(planningAccess(true, { role: "cleaner" }), { ok: false, status: 403, error: "forbidden" });
+  assertEquals(planningAccess(true, { role: "subcontractor" }), { ok: false, status: 403, error: "forbidden" });
+  assertEquals(planningAccess(true, { role: "maintenance" }), { ok: true });
+  assertEquals(planningAccess(true, { role: "manager" }), { ok: true });
 });
 
 Deno.test("seuil a risque : app_config.mgr_risk_hours, defaut 6", () => {
