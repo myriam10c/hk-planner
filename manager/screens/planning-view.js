@@ -23,12 +23,16 @@ export function roFoot() {
 function header(s) {
   const asof = s.data ? '<div class="asof' + (s.stale ? ' stale' : '') + '">Data as of ' + esc(dubaiTime(s.data.generatedAt)) + '</div>' : '';
   const add = s.data && !s.ro ? '<button class="btn sm primary" type="button" data-add-extra>Add extra</button>' : '';
+  // Mode selection (assignation groupee) : jamais en lecture seule.
+  const sel = s.data && !s.ro
+    ? '<button class="btn sm" type="button" data-select aria-pressed="' + (s.sel ? 'true' : 'false') + '">' + (s.sel ? 'Cancel' : 'Select') + '</button>'
+    : '';
   return '<header class="top pl-top"><div><h1>Planning</h1><div class="date">' + esc(weekLabel(s.start)) + '</div>' + asof + '</div>'
     + '<div class="pl-tools"><div class="pl-nav" role="group" aria-label="Week">'
     + '<button class="iconbtn" type="button" data-week="-1" aria-label="Previous week" title="Previous week">' + I.prev + '</button>'
     + '<button class="btn sm" type="button" data-week="0">This week</button>'
     + '<button class="iconbtn" type="button" data-week="1" aria-label="Next week" title="Next week">' + I.next + '</button></div>'
-    + add
+    + sel + add
     + '<button class="iconbtn" type="button" data-theme-toggle aria-label="Switch light or dark theme" title="Theme">' + I.theme + '</button></div></header>';
 }
 
@@ -57,13 +61,24 @@ function timeText(j) {
   return j.checkout || 'Time not set';
 }
 
-function card(d, j) {
+// Selectionnable pour l'assignation groupee : ni fait ni annule.
+export function selectable(j) { return !!j && !j.cancelled && j.state !== 'done'; }
+
+// Etat de selection d'une carte : rien hors mode selection.
+function selAttr(j, s) {
+  if (!s || !s.sel) return '';
+  if (!selectable(j)) return ' aria-disabled="true"';
+  return ' aria-pressed="' + (s.picked.has(j.key) ? 'true' : 'false') + '"';
+}
+
+function card(d, j, s) {
   const who = j.assigned.length ? namesOf(d, j.assigned) : 'Unassigned';
   const pill = j.tone === 'idle' && j.word === 'Scheduled' ? '' : '<span class="pill sm ' + esc(j.tone) + '">' + esc(j.word) + '</span>';
   const tags = [];
   if (j.next && j.next.sameDay && !j.cancelled) tags.push('Check-in ' + (j.next.time || 'today'));
   if (j.laundry) tags.push('Linen ' + j.laundry.total);
-  return '<button type="button" class="pj pc-' + esc(slotOf(d, j)) + (j.kind === 'extra' ? ' extra' : '') + (j.cancelled ? ' cancelled' : '') + '" data-job="' + esc(j.key) + '">'
+  return '<button type="button" class="pj pc-' + esc(slotOf(d, j)) + (j.kind === 'extra' ? ' extra' : '') + (j.cancelled ? ' cancelled' : '')
+    + (s && s.sel ? (selectable(j) ? ' pj-sel' : ' pj-off') : '') + '" data-job="' + esc(j.key) + '"' + selAttr(j, s) + '>'
     + '<span class="pj-top"><span class="mono">' + esc(timeText(j)) + '</span>' + pill + '</span>'
     + '<span class="pj-place">' + esc(placeLabel(j) || 'Apartment') + '</span>'
     + '<span class="pj-who">' + esc(who) + '</span>'
@@ -81,15 +96,15 @@ function dayHead(d, day, today) {
     + (day.off.length ? '<div class="pl-off">' + esc(namesOf(d, day.off)) + ' off</div>' : '') + '</div>';
 }
 
-function cards(d, list) {
-  return '<div class="pl-cards">' + (list.length ? list.map((j) => card(d, j)).join('') : '<p class="empty">No cleaning</p>') + '</div>';
+function cards(d, list, s) {
+  return '<div class="pl-cards">' + (list.length ? list.map((j) => card(d, j, s)).join('') : '<p class="empty">No cleaning</p>') + '</div>';
 }
 
 function grid(s) {
   const d = s.data;
   return '<div class="pl-grid">' + d.days.map((day) =>
     '<section class="pl-col" aria-label="' + esc(dayLong(day.date)) + '">' + dayHead(d, day, s.today)
-    + cards(d, filterJobs(jobsOn(d, day.date), s.filter)) + '</section>').join('') + '</div>';
+    + cards(d, filterJobs(jobsOn(d, day.date), s.filter), s) + '</section>').join('') + '</div>';
 }
 
 function dayView(s) {
@@ -102,17 +117,31 @@ function dayView(s) {
   }).join('') + '</div>';
   const day = d.days.find((x) => x.date === s.day) || d.days[0];
   return strip + '<section class="pl-day" aria-label="' + esc(dayLong(day.date)) + '">' + dayHead(d, day, s.today)
-    + cards(d, filterJobs(jobsOn(d, day.date), s.filter)) + '</section>';
+    + cards(d, filterJobs(jobsOn(d, day.date), s.filter), s) + '</section>';
 }
 
-// s : { data, start, today, day, wide, filter, loading, error, banner, stale, ro }
+// Mode selection : lien « Select all unassigned » (le jour sur telephone, la semaine
+// sur ordinateur) et barre du bas tant qu'au moins un menage est coche.
+function selectRow(s) {
+  if (!s.sel || s.ro) return '';
+  return '<div class="pl-selrow"><p class="note">Tap cleanings to select them.</p>'
+    + '<button class="btn sm" type="button" data-select-all>Select all unassigned</button></div>';
+}
+function bulkBar(s) {
+  if (!s.sel || s.ro || !s.picked.size) return '';
+  return '<div class="pl-bulk" role="region" aria-label="Selection"><span class="pl-bulk-n" role="status">' + s.picked.size + ' selected</span>'
+    + '<button class="btn primary" type="button" data-bulk="assign">Assign</button>'
+    + '<button class="btn" type="button" data-bulk="clear">Clear</button></div>';
+}
+
+// s : { data, start, today, day, wide, filter, loading, error, banner, stale, ro, sel, picked }
 export function screenHtml(s) {
   if (!s.data) {
     if (s.loading) return header(s) + '<p class="boot" role="status">Loading the week…</p>';
     return header(s) + '<div class="err-card" role="alert"><p>' + esc(s.error ? s.error.message : 'Could not load.')
       + '</p><button class="btn primary" type="button" data-retry>Retry</button></div>';
   }
-  return header(s) + (s.banner || '') + legend(s) + (s.wide ? grid(s) : dayView(s));
+  return header(s) + (s.banner || '') + legend(s) + selectRow(s) + (s.wide ? grid(s) : dayView(s)) + bulkBar(s);
 }
 
 // Fiche d'un menage : statut, faits, gestes (branches par planning.js, taches 6 a 9).
@@ -179,6 +208,29 @@ export function assignSheet(d, j, ro, s) {
   return head('Assign', placeLabel(j) + ' · ' + dayShort(j.date))
     + '<div class="sheet-b"><p class="note">Pick one or more people, then Save.</p><div class="pick">' + opts + '</div></div>'
     + '<div class="sheet-f">' + B('save-assign', 'Save', 'primary') + (j.assigned.length ? B('clear-assign', 'Clear all') : '') + B('back', 'Back') + '</div>';
+}
+
+// Assignation groupee : un toucher sur une personne assigne tous les menages coches.
+// Une personne en conge l'un des jours coches est grisee avec le premier de ces jours.
+export function bulkSheet(d, jobs, ro) {
+  const n = jobs.length;
+  const title = 'Assign ' + n + ' cleaning' + (n === 1 ? '' : 's');
+  if (ro) return head(title, weekLabel(d.start)) + '<div class="sheet-b"></div>' + roFoot();
+  const dates = [...new Set(jobs.map((j) => j.date))].sort();
+  const week = {};
+  for (const x of d.jobs) if (!x.cancelled) for (const id of x.assigned) week[id] = (week[id] || 0) + 1;
+  const opts = d.people.filter((p) => p.assignable).map((p) => {
+    const offDay = dates.find((date) => { const day = d.days.find((x) => x.date === date); return !!day && day.off.includes(p.id); });
+    const k = week[p.id] || 0;
+    const sub = offDay ? 'On leave ' + dayShort(offDay) : k + ' job' + (k === 1 ? '' : 's') + ' this week';
+    return '<button type="button" data-pa="bulk-pick" data-id="' + p.id + '"' + (offDay ? ' disabled data-off' : '') + '>'
+      + '<span class="av pc-' + esc(p.slot) + '" aria-hidden="true">' + esc(initials(p.name)) + '</span>'
+      + '<span><b>' + esc(p.name) + '</b><small>' + esc(sub) + '</small></span></button>';
+  }).join('');
+  const days = dates.map((x) => dayShort(x)).join(', ');
+  return head(title, days)
+    + '<div class="sheet-b"><p class="note">Tap a person to assign all selected cleanings to them.</p><div class="pick">' + opts + '</div></div>'
+    + '<div class="sheet-f"><button class="btn" type="button" data-close>Cancel</button></div>';
 }
 
 export function cancelSheet(d, j, ro) {

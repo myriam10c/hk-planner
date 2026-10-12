@@ -22,8 +22,17 @@ export async function renderPlanning(ctx) {
   const st = {
     start: weekStartOf(today), today, day: today, data: null, savedAt: 0, fresh: false,
     loading: true, error: null, busy: false, filter: null, seq: 0, sheet: null, pick: new Set(),
+    sel: false, picked: new Set(),
   };
   const gestures = createGestures();
+  // Assignation groupee : un suivi de geste par menage, garde pour la vie de l'ecran.
+  // Chaque ecriture a sa cle ; rejouer le meme geste sur un menage apres un echec
+  // incertain reprend sa cle, sans melanger avec les autres menages du lot.
+  const bulkGestures = new Map();
+  const gesturesFor = (key) => {
+    if (!bulkGestures.has(key)) bulkGestures.set(key, createGestures());
+    return bulkGestures.get(key);
+  };
   // ACT[data-pa] = (menage, bouton) => void ; hooks.resync : apres une ecriture rendue.
   const ACT = {};
   const hooks = { resync: () => {} };
@@ -57,6 +66,7 @@ export async function renderPlanning(ctx) {
     main.innerHTML = V.screenHtml({
       data: st.data, start: st.start, today: st.today, day: st.day, wide: mq.matches, filter: st.filter,
       loading: st.loading, error: st.error, banner: banner(), stale: !st.fresh, ro: readOnly(),
+      sel: st.sel && !readOnly(), picked: st.picked,
     });
   }
 
@@ -92,11 +102,22 @@ export async function renderPlanning(ctx) {
       st.fresh = false;
     }
     st.loading = false;
+    prunePicked();
     if (st.data && !st.data.days.some((x) => x.date === st.day)) st.day = defaultDay(st.data.start, st.today);
     paint();
   }
 
+  // Selection : seulement des menages encore presents et selectionnables.
+  function prunePicked() {
+    for (const k of [...st.picked]) if (!V.selectable(job(k))) st.picked.delete(k);
+  }
+  function endSelect() {
+    st.sel = false;
+    st.picked = new Set();
+  }
+
   function goWeek(n) {
+    endSelect();
     st.start = n === 0 ? weekStartOf(st.today) : addDays(st.start, 7 * n);
     st.day = defaultDay(st.start, st.today);
     st.data = null;
@@ -281,9 +302,95 @@ export async function renderPlanning(ctx) {
     if (j && j.extra) write(j.key, 'deleteExtraCleaning', { id: j.extra.id }, 'Extra cleaning deleted');
   };
 
+  // Assignation groupee (Select) : ecritures assignCleaner l'une apres l'autre, chacune
+  // avec sa cle ; on continue apres un refus et on rend compte a la fin.
+  function pickedJobs() {
+    if (!st.data) return [];
+    return st.data.jobs.filter((j) => st.picked.has(j.key) && V.selectable(j))
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }
+  const many = (n) => n + ' cleaning' + (n === 1 ? '' : 's');
+  // items : [{ j, ids, service }] ; rend { ok: [items], failed: [{ item, message }] } ou null (sortie d'ecran).
+  async function runBulk(items) {
+    const ok = [], failed = [];
+    for (const it of items) {
+      const body = { reservation_key: it.j.key, cleaner_ids: it.ids, mode: 'set', service_type: it.service };
+      try {
+        await gesturesFor(it.j.key).run('assignCleaner|' + JSON.stringify(body), (idem) => post('assignCleaner', { ...body, idem }));
+        ok.push(it);
+      } catch (e) {
+        if (handleAccess(e)) return null;
+        failed.push({ item: it, message: e.message });
+      }
+    }
+    return { ok, failed };
+  }
+  function notAssigned(failed) {
+    return failed.map((f) => (placeLabel(f.item.j) || 'Apartment') + ' (' + f.message + ')').join('; ');
+  }
+  async function bulkWrite(items, report) {
+    if (st.busy) { toast('Saving, wait a second.'); return; }
+    if (readOnly()) { toast(RO_LINE); return; }
+    st.busy = true;
+    sheetBusy(true);
+    const r = await runBulk(items);
+    st.busy = false;
+    unbusy();
+    if (!r) return;
+    if (st.sheet && st.sheet.key === '__bulk') closeSheet();
+    report(r);
+    endSelect();
+    refresh();
+  }
+  function bulkAssign(id) {
+    const jobs = pickedJobs();
+    if (!jobs.length) { closeSheet(); return; }
+    const who = namesOf(st.data, [id]);
+    const items = jobs.map((j) => ({ j, ids: [id], service: j.serviceType || 'CHC', prev: j.assigned.slice() }));
+    bulkWrite(items, (r) => {
+      const undo = r.ok.length ? () => bulkUndo(r.ok) : undefined;
+      if (!r.failed.length) { toast(many(r.ok.length) + ' assigned to ' + who, undo); return; }
+      toast(r.ok.length + ' of ' + items.length + ' assigned to ' + who + '. Not assigned: ' + notAssigned(r.failed) + '.', undo);
+    });
+  }
+  // Undo : chaque menage reussi revient a sa propre liste d'avant (meme type de service).
+  function bulkUndo(done) {
+    const items = done.map((it) => ({ j: it.j, ids: it.prev, service: it.service }));
+    bulkWrite(items, (r) => {
+      if (!r.failed.length) { toast(many(r.ok.length) + ' back to their previous assignment'); return; }
+      toast(r.ok.length + ' of ' + items.length + ' back to their previous assignment. Not restored: ' + notAssigned(r.failed) + '.');
+    });
+  }
+  ACT['bulk-pick'] = (j, el) => {
+    if (el.disabled) return;
+    bulkAssign(Number(el.getAttribute('data-id')));
+  };
+  function onSelectClick(el) {
+    if (el.hasAttribute('data-select')) {
+      if (st.sel) endSelect(); else if (!readOnly()) st.sel = true;
+      paint();
+      return;
+    }
+    if (el.hasAttribute('data-select-all')) {
+      const list = mq.matches ? st.data.jobs : st.data.jobs.filter((j) => j.date === st.day);
+      for (const j of list) if (V.selectable(j) && !j.assigned.length) st.picked.add(j.key);
+      paint();
+      return;
+    }
+    const b = el.getAttribute('data-bulk');
+    if (b === 'clear') { st.picked = new Set(); paint(); return; }
+    if (b === 'assign') {
+      if (readOnly()) { toast(RO_LINE); return; }
+      const jobs = pickedJobs();
+      if (!jobs.length) return;
+      st.sheet = { key: '__bulk', view: 'bulk' };
+      openSheet(V.bulkSheet(st.data, jobs, readOnly()));
+    }
+  }
+
   function onClick(e) {
     const t = e.target && e.target.closest ? e.target : null;
-    const el = t ? t.closest('[data-retry],[data-week],[data-day],[data-filter],[data-job],[data-add-extra],#sheet [data-pa]') : null;
+    const el = t ? t.closest('[data-retry],[data-week],[data-day],[data-filter],[data-job],[data-add-extra],[data-select],[data-select-all],[data-bulk],#sheet [data-pa]') : null;
     if (!el) return;
     if (el.hasAttribute('data-retry')) { refresh(); return; }
     if (el.hasAttribute('data-week')) { goWeek(Number(el.getAttribute('data-week'))); return; }
@@ -295,7 +402,19 @@ export async function renderPlanning(ctx) {
       paint();
       return;
     }
-    if (el.hasAttribute('data-job')) { show(el.getAttribute('data-job'), 'detail'); return; }
+    if (el.hasAttribute('data-select') || el.hasAttribute('data-select-all') || el.hasAttribute('data-bulk')) { onSelectClick(el); return; }
+    if (el.hasAttribute('data-job')) {
+      const key = el.getAttribute('data-job');
+      // Mode selection : la carte se coche au lieu d'ouvrir la fiche.
+      if (st.sel && !readOnly()) {
+        if (!V.selectable(job(key))) return;
+        if (st.picked.has(key)) st.picked.delete(key); else st.picked.add(key);
+        paint();
+        return;
+      }
+      show(key, 'detail');
+      return;
+    }
     if (el.hasAttribute('data-add-extra')) { if (ACT.addExtra) ACT.addExtra(); return; }
     const k = el.getAttribute('data-pa');
     if (k === 'back') {

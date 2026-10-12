@@ -61,3 +61,14 @@
 .lq-row label{font-size:15px;overflow-wrap:anywhere}
 .lq-row input{height:44px;text-align:center;font:inherit;font-size:18px;font-variant-numeric:tabular-nums;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:10px;min-width:0;width:100%}
 @media (min-width:960px) and (max-width:1279px){ .pj{font-size:13px;padding:6px 8px} .pl-dh{padding:var(--s2)} }
+
+/* Mode selection (assignation groupee) : carte cochee, cartes non selectionnables estompees, barre du bas. */
+.pl-selrow{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s3)}
+.pl-selrow .note{margin:0;font-size:14px;color:var(--ink-2)}
+.pj.pj-sel[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);background:var(--accent-tint)}
+.pj.pj-sel[aria-pressed="true"] .pj-place::before{content:"\2713  ";color:var(--accent)}
+.pj.pj-off{opacity:.45;cursor:default}
+.pl-bulk{position:sticky;z-index:15;bottom:calc(76px + env(safe-area-inset-bottom));margin-top:var(--s3);display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r-md);box-shadow:var(--shadow);padding:var(--s2) var(--s3)}
+.pl-bulk-n{flex:1 1 auto;font-weight:600;min-width:0}
+@media (min-width:960px){ .pl-bulk{bottom:var(--s4)} }
