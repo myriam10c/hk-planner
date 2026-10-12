@@ -5,7 +5,7 @@ import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
 declare const Deno: any;
 
-const APP_URL = "https://stunning-kleicha-f61101.netlify.app";
+export const APP_URL = "https://stunning-kleicha-f61101.netlify.app";
 const PUSH_DEDUPE_WINDOW_MS = 60_000;
 const PUSH_TTL_SECONDS = 3600;
 // Dubai est en UTC+4 toute l'année, aucun changement d'heure : un décalage fixe

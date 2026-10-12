@@ -223,3 +223,17 @@ Deno.test("F3 : clos par l'ancien chemin (closed_at seul) dans les faits, date =
     [24, "2026-10-12T08:00:00Z"], [21, "2026-10-11T08:00:00Z"], [20, "2026-10-10T08:00:00Z"], [26, "2026-10-09T08:00:00Z"],
   ]);
 });
+
+Deno.test("phase 2 : listings = tout listing_config, tries par immeuble puis appartement", async () => {
+  const sb = db();
+  sb.tables.listing_config.push(
+    { listing_id: "L3", internal_name: "1205 - Damac Reva" }, { listing_id: "L4", internal_name: "905 - Damac Reva" },
+    { listing_id: "L5", internal_name: "Azure Villa" },
+  );
+  const b = await list(Q({ tab: "open" }), sb);
+  assertEquals(b.listings, [
+    { id: "L5", apt: "", bld: "Azure Villa" },
+    { id: "L1", apt: "103", bld: "Damac Reva" }, { id: "L4", apt: "905", bld: "Damac Reva" }, { id: "L3", apt: "1205", bld: "Damac Reva" },
+    { id: "L2", apt: "2609", bld: "Nobles by Tiger" },
+  ]);
+});

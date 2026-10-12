@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
-import { assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
+import { APP_URL, assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
 import {
   applyInvite, applyLinkEmail, bearerToken, CLEANER_PUBLIC_SELECT, currentUser, currentUserDetailed,
   deleteCleanerAuthAccount, findCleanerByEmail, normalizeEmail, parseInviteInput,
@@ -52,6 +52,7 @@ import { healthScore, mgrApartment, mgrApartmentCleanings, mgrApartments, readHe
 import { mntAccess } from "./mnt_rules.ts";
 import { mntList, parseMntQuery } from "./mnt_read.ts";
 import { mntAct } from "./mnt_act.ts";
+import { mntGet, mntPhoto } from "./mnt_get.ts";
 import { mntIngest } from "./mnt_ingest.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
@@ -902,8 +903,8 @@ async function notifyAssignee(sb: any, task: any): Promise<void> {
 
 // ========== Maintenance : pushes ==========
 // Meme expediteur que les tickets v3 (sendPush) : seul l'urgent traverse les
-// heures de silence. Aucun nom de guest dans les textes.
-const MNT_PUSH_URL = "https://stunning-kleicha-f61101.netlify.app/";
+// heures de silence. Aucun nom de guest dans les textes. Le lien ouvre la fiche
+// (?mnt=<ticket> ou ?prp=<proposition>) sur l'URL de l'app de push.ts.
 
 // Nouvel assigne d'un ticket maintenance (mnt.act). Appelee sous keepAlive.
 async function notifyMntAssignee(
@@ -912,7 +913,7 @@ async function notifyMntAssignee(
   const payload = {
     title: (t.urgent ? "Urgent: " : "New ticket: ") + t.title,
     body: "Assigned to you. Open HK Planner to see the details.",
-    url: MNT_PUSH_URL,
+    url: APP_URL + "/?mnt=" + String(t.ticketId),
     tag: "mnt-ticket-" + String(t.ticketId),
   };
   const opts: { dedupeKey: string; priority?: string } = {
@@ -943,7 +944,7 @@ async function notifyMntUrgent(
   const payload = {
     title: "Urgent from a guest: " + p.title,
     body: place + " · Open HK Planner to review it.",
-    url: MNT_PUSH_URL,
+    url: APP_URL + "/?prp=" + String(p.id),
     tag: "mnt-proposal-" + String(p.id),
   };
   const ids: number[] = (members ?? []).map((m: any) => Number(m.id));
@@ -1014,6 +1015,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["mgr.setup", "GET"], ["mgr.reports", "GET"],
   // ===== Maintenance (spec 2026-10-12, phase 1) =====
   ["mnt.list", "GET"], ["mnt.act", "POST"], ["mnt.proposals.ingest", "POST"],
+  ["mnt.get", "GET"], ["mnt.photo", "POST"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1601,6 +1603,40 @@ Deno.serve(async (req: Request) => {
       const q = parseMntQuery(url.searchParams);
       if ("error" in q) return jsonResp({ error: q.error }, 400);
       const r = await mntList(sb, me!, q);
+      return jsonResp(r.body, r.status);
+    }
+
+    // Fiche d'un ticket (MNT-n) ou d'une proposition (PRP-n). Photos signees 1 heure.
+    if (action === "mnt.get") {
+      const me = await currentUser(sb, req);
+      const acc = mntAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const r = await mntGet(sb, url.searchParams.get("ref") ?? "", {
+        signUrl: async (path: string) => {
+          const { data, error } = await sb.storage.from("cleaning-photos").createSignedUrl(path, 3600);
+          return error || !data?.signedUrl ? null : String(data.signedUrl);
+        },
+      });
+      return jsonResp(r.body, r.status);
+    }
+
+    // Photo d'un ticket depuis l'ecran Maintenance : memes limites que v3.uploadPhoto,
+    // garde de taille avant la lecture du corps.
+    if (action === "mnt.photo") {
+      const me = await currentUser(sb, req);
+      const acc = mntAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const corpsAnnonce = Number(req.headers.get("content-length") ?? "");
+      if (Number.isFinite(corpsAnnonce) && corpsAnnonce > V3_MAX_UPLOAD_BODY_BYTES) {
+        return jsonResp({ error: "photo is too large" }, 413);
+      }
+      let form: FormData;
+      try {
+        form = await req.formData();
+      } catch (_e) {
+        return jsonResp({ error: "multipart body required" }, 400);
+      }
+      const r = await mntPhoto(sb, me!, form);
       return jsonResp(r.body, r.status);
     }
 

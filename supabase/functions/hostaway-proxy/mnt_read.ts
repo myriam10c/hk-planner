@@ -11,7 +11,7 @@ export const MNT_TABS = ["proposals", "open", "done"] as const;
 export const MNT_FILTERS = ["all", "mine", "urgent", "unassigned"] as const;
 export const MNT_WINDOW_DAYS = 30;
 const MNT_Q_MAX = 100;
-const UNAVAILABLE = "Maintenance is unavailable right now. Try again.";
+export const MNT_UNAVAILABLE = "Maintenance is unavailable right now. Try again.";
 
 export type MntQuery = { tab: "proposals" | "open" | "done"; filter: "all" | "mine" | "urgent" | "unassigned"; q: string; rejected: boolean };
 
@@ -45,11 +45,12 @@ export type MntTicketRow = {
 export type MntList = {
   tab: MntQuery["tab"]; counts: { proposals: number; open: number; urgent: number; unassigned: number; mine: number };
   proposals: MntProposalRow[]; tickets: MntTicketRow[]; team: Array<{ id: number; name: string; role: string }>; vendors: Array<{ id: number; name: string }>;
+  listings: Array<{ id: string; apt: string; bld: string }>;
 };
 
-const TICKET_COLS =
+export const MNT_TICKET_COLS =
   "id, listing_id, title, category, priority, status, source, assigned_technician_id, assigned_vendor_id, created_at, started_at, resolved_at, closed_at, resolution_notes, actual_cost, proposal_id, due_on";
-const PROPOSAL_COLS =
+export const MNT_PROPOSAL_COLS =
   "id, listing_id, reservation_id, conversation_id, guest_name, stay_from, stay_to, title, category, urgency, quotes, status, open_ticket_id, ticket_id, decided_by, decided_at, reject_reason, reject_note, created_at, updated_at";
 
 const URGENCY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2 };
@@ -69,7 +70,7 @@ const closedAt = (t: any): string | null => str(t.resolved_at) ?? str(t.closed_a
 const desc = (a: unknown, b: unknown) => String(b ?? "").localeCompare(String(a ?? ""));
 const asc = (a: unknown, b: unknown) => String(a ?? "").localeCompare(String(b ?? ""));
 
-type Label = { apt: string; bld: string };
+export type Label = { apt: string; bld: string };
 function labelOf(listings: Record<string, Label>, lid: unknown): Label {
   if (lid === null || lid === undefined || lid === "") return { apt: "", bld: "" };
   return listings[String(lid)] ?? { apt: "", bld: "Listing " + lid };
@@ -83,6 +84,61 @@ function matchesQ(l: Label, q: string): boolean {
 // Pas d'intervenant = ni technicien ni prestataire.
 const unassigned = (t: any) => t.assigned_technician_id == null && t.assigned_vendor_id == null;
 
+// Contexte commun aux lignes (liste et fiche) : libelles, noms, tickets ouverts, auteurs de cloture.
+export type MntCtx = {
+  listings: Record<string, Label>; names: Record<string, string>; vendorNames: Record<string, string>;
+  openById: Record<string, any>; resolvedBy: Record<string, string>; today: string;
+};
+export function mntCtx(
+  listingRows: any[], people: any[], vendorRows: any[],
+  o: { today: string; openById?: Record<string, any>; resolvedBy?: Record<string, string> },
+): MntCtx {
+  return {
+    listings: listingMap(listingRows),
+    names: Object.fromEntries(people.map((p: any) => [String(p.id), String(p.name ?? "").trim() || "Member " + p.id])),
+    vendorNames: Object.fromEntries(vendorRows.map((v: any) => [String(v.id), String(v.name ?? "").trim() || "Vendor " + v.id])),
+    openById: o.openById ?? {}, resolvedBy: o.resolvedBy ?? {}, today: o.today,
+  };
+}
+
+export function mntTicketRow(t: any, ctx: MntCtx, isDone: boolean): MntTicketRow {
+  const l = labelOf(ctx.listings, t.listing_id);
+  const tech = idOrNull(t.assigned_technician_id), vendor = idOrNull(t.assigned_vendor_id);
+  const cost = t.actual_cost === null || t.actual_cost === undefined || t.actual_cost === "" ? null : Number(t.actual_cost);
+  return {
+    id: Number(t.id), ref: problemRef("MNT", Number(t.id)), listingId: str(t.listing_id), apt: l.apt, bld: l.bld,
+    title: String(t.title ?? "Ticket"), category: str(t.category), priority: String(t.priority ?? "medium"),
+    status: String(t.status ?? "open"), stage: isDone ? "done" : STAGE[String(t.status)] ?? "todo",
+    origin: ORIGIN[String(t.source ?? "")] ?? "manual",
+    assignee: tech != null ? { kind: "member", id: tech, name: ctx.names[String(tech)] ?? "Member " + tech }
+      : vendor != null ? { kind: "vendor", id: vendor, name: ctx.vendorNames[String(vendor)] ?? "Vendor " + vendor } : null,
+    dueOn: str(t.due_on), createdAt: String(t.created_at ?? ""), startedAt: str(t.started_at), resolvedAt: closedAt(t),
+    resolvedBy: isDone ? ctx.resolvedBy["ticket_" + t.id] ?? null : null, resolutionNotes: str(t.resolution_notes),
+    actualCost: cost === null || Number.isNaN(cost) ? null : cost, proposalId: idOrNull(t.proposal_id),
+  };
+}
+
+export function mntProposalRow(p: any, ctx: MntCtx): MntProposalRow {
+  const l = labelOf(ctx.listings, p.listing_id);
+  const ot = p.open_ticket_id == null ? null : ctx.openById[String(p.open_ticket_id)];
+  const cat = String(p.category ?? "other");
+  const tid = idOrNull(p.ticket_id);
+  return {
+    id: Number(p.id), ref: proposalRef(Number(p.id)), listingId: str(p.listing_id), apt: l.apt, bld: l.bld,
+    title: String(p.title ?? ""), category: cat, categoryLabel: MNT_CATEGORY_LABEL[cat as MntCategory] ?? "Other",
+    urgency: String(p.urgency ?? "normal"), guestName: str(p.guest_name), stayFrom: str(p.stay_from), stayTo: str(p.stay_to),
+    guestInNow: guestInNow({ stay_from: str(p.stay_from), stay_to: str(p.stay_to) }, ctx.today),
+    quotes: Array.isArray(p.quotes) ? p.quotes : [], conversationId: String(p.conversation_id ?? ""), reservationId: str(p.reservation_id),
+    // Seul un ticket encore ouvert est signale : un ticket clos ne bloque plus rien.
+    openTicket: ot ? { id: Number(ot.id), ref: problemRef("MNT", Number(ot.id)), title: String(ot.title ?? "Ticket") } : null,
+    status: String(p.status ?? "pending"), rejectReason: str(p.reject_reason), rejectNote: str(p.reject_note),
+    // Ticket ne d'une proposition acceptee ou fusionnee dans un ticket.
+    ticket: tid !== null && (p.status === "accepted" || p.status === "merged") ? { id: tid, ref: problemRef("MNT", tid) } : null,
+    decidedBy: str(p.decided_by),
+    decidedAt: str(p.decided_at), createdAt: String(p.created_at ?? ""), updatedAt: String(p.updated_at ?? ""),
+  };
+}
+
 export async function mntList(
   sb: any, me: { cleaner_id: number; name: string }, q: MntQuery, o: { nowMs?: number } = {},
 ): Promise<{ status: number; body: MntList | { error: string } }> {
@@ -93,18 +149,18 @@ export async function mntList(
     const page = (table: string, cols: string, f: (x: any) => any) =>
       readAllRows((a: number, b: number) => f(sb.from(table).select(cols)).order("id").range(a, b), table);
     const [open, pending, decided, doneResolved, doneLegacy, listingRows, people, vendorRows] = await Promise.all([
-      page("maintenance_tickets", TICKET_COLS, (x) => x.in("status", MGR_OPEN_TICKET_STATUSES)),
-      page("maintenance_proposals", PROPOSAL_COLS, (x) => x.eq("status", "pending")),
+      page("maintenance_tickets", MNT_TICKET_COLS, (x) => x.in("status", MGR_OPEN_TICKET_STATUSES)),
+      page("maintenance_proposals", MNT_PROPOSAL_COLS, (x) => x.eq("status", "pending")),
       q.tab === "proposals" && q.rejected
-        ? page("maintenance_proposals", PROPOSAL_COLS, (x) => x.in("status", ["rejected", "merged"]).gte("decided_at", cutoff))
+        ? page("maintenance_proposals", MNT_PROPOSAL_COLS, (x) => x.in("status", ["rejected", "merged"]).gte("decided_at", cutoff))
         : Promise.resolve([]),
       // Date de cloture = resolved_at ?? closed_at (l'ancien chemin « closed » ne pose que closed_at) :
       // deux lectures disjointes couvrent exactement coalesce(resolved_at, closed_at) >= cutoff.
       q.tab === "done"
-        ? page("maintenance_tickets", TICKET_COLS, (x) => x.in("status", DONE_STATUSES).gte("resolved_at", cutoff))
+        ? page("maintenance_tickets", MNT_TICKET_COLS, (x) => x.in("status", DONE_STATUSES).gte("resolved_at", cutoff))
         : Promise.resolve([]),
       q.tab === "done"
-        ? page("maintenance_tickets", TICKET_COLS, (x) => x.in("status", DONE_STATUSES).is("resolved_at", null).gte("closed_at", cutoff))
+        ? page("maintenance_tickets", MNT_TICKET_COLS, (x) => x.in("status", DONE_STATUSES).is("resolved_at", null).gte("closed_at", cutoff))
         : Promise.resolve([]),
       page("listing_config", "listing_id, internal_name, listing_name, apt_number", (x) => x),
       page("cleaners", "id, name, role, is_active", (x) => x),
@@ -124,47 +180,9 @@ export async function mntList(
       for (const l of logs) if (str(l.actor)) resolvedBy[String(l.reservation_key)] = String(l.actor);
     }
 
-    const listings: Record<string, Label> = listingMap(listingRows);
-    const names: Record<string, string> = Object.fromEntries(people.map((p: any) => [String(p.id), String(p.name ?? "").trim() || "Member " + p.id]));
-    const vendorNames: Record<string, string> = Object.fromEntries(vendorRows.map((v: any) => [String(v.id), String(v.name ?? "").trim() || "Vendor " + v.id]));
-    const openById: Record<string, any> = Object.fromEntries(open.map((t: any) => [String(t.id), t]));
-
-    const ticketRow = (t: any, isDone: boolean): MntTicketRow => {
-      const l = labelOf(listings, t.listing_id);
-      const tech = idOrNull(t.assigned_technician_id), vendor = idOrNull(t.assigned_vendor_id);
-      const cost = t.actual_cost === null || t.actual_cost === undefined || t.actual_cost === "" ? null : Number(t.actual_cost);
-      return {
-        id: Number(t.id), ref: problemRef("MNT", Number(t.id)), listingId: str(t.listing_id), apt: l.apt, bld: l.bld,
-        title: String(t.title ?? "Ticket"), category: str(t.category), priority: String(t.priority ?? "medium"),
-        status: String(t.status ?? "open"), stage: isDone ? "done" : STAGE[String(t.status)] ?? "todo",
-        origin: ORIGIN[String(t.source ?? "")] ?? "manual",
-        assignee: tech != null ? { kind: "member", id: tech, name: names[String(tech)] ?? "Member " + tech }
-          : vendor != null ? { kind: "vendor", id: vendor, name: vendorNames[String(vendor)] ?? "Vendor " + vendor } : null,
-        dueOn: str(t.due_on), createdAt: String(t.created_at ?? ""), startedAt: str(t.started_at), resolvedAt: closedAt(t),
-        resolvedBy: isDone ? resolvedBy["ticket_" + t.id] ?? null : null, resolutionNotes: str(t.resolution_notes),
-        actualCost: cost === null || Number.isNaN(cost) ? null : cost, proposalId: idOrNull(t.proposal_id),
-      };
-    };
-    const proposalRow = (p: any): MntProposalRow => {
-      const l = labelOf(listings, p.listing_id);
-      const ot = p.open_ticket_id == null ? null : openById[String(p.open_ticket_id)];
-      const cat = String(p.category ?? "other");
-      const tid = idOrNull(p.ticket_id);
-      return {
-        id: Number(p.id), ref: proposalRef(Number(p.id)), listingId: str(p.listing_id), apt: l.apt, bld: l.bld,
-        title: String(p.title ?? ""), category: cat, categoryLabel: MNT_CATEGORY_LABEL[cat as MntCategory] ?? "Other",
-        urgency: String(p.urgency ?? "normal"), guestName: str(p.guest_name), stayFrom: str(p.stay_from), stayTo: str(p.stay_to),
-        guestInNow: guestInNow({ stay_from: str(p.stay_from), stay_to: str(p.stay_to) }, today),
-        quotes: Array.isArray(p.quotes) ? p.quotes : [], conversationId: String(p.conversation_id ?? ""), reservationId: str(p.reservation_id),
-        // Seul un ticket encore ouvert est signale : un ticket clos ne bloque plus rien.
-        openTicket: ot ? { id: Number(ot.id), ref: problemRef("MNT", Number(ot.id)), title: String(ot.title ?? "Ticket") } : null,
-        status: String(p.status ?? "pending"), rejectReason: str(p.reject_reason), rejectNote: str(p.reject_note),
-        // Ticket ne d'une proposition acceptee ou fusionnee dans un ticket.
-        ticket: tid !== null && (p.status === "accepted" || p.status === "merged") ? { id: tid, ref: problemRef("MNT", tid) } : null,
-        decidedBy: str(p.decided_by),
-        decidedAt: str(p.decided_at), createdAt: String(p.created_at ?? ""), updatedAt: String(p.updated_at ?? ""),
-      };
-    };
+    const ctx = mntCtx(listingRows, people, vendorRows, { today, openById: Object.fromEntries(open.map((t: any) => [String(t.id), t])), resolvedBy });
+    const ticketRow = (t: any, isDone: boolean) => mntTicketRow(t, ctx, isDone);
+    const proposalRow = (p: any) => mntProposalRow(p, ctx);
 
     const counts = {
       proposals: pending.length, open: open.length,
@@ -195,13 +213,16 @@ export async function mntList(
 
     const team = people
       .filter((p: any) => p.is_active !== false && (MNT_ROLES as readonly string[]).includes(String(p.role)))
-      .map((p: any) => ({ id: Number(p.id), name: names[String(p.id)], role: String(p.role) }));
+      .map((p: any) => ({ id: Number(p.id), name: ctx.names[String(p.id)], role: String(p.role) }));
     const vendors = vendorRows.filter((v: any) => v.is_active !== false)
-      .map((v: any) => ({ id: Number(v.id), name: vendorNames[String(v.id)] }));
+      .map((v: any) => ({ id: Number(v.id), name: ctx.vendorNames[String(v.id)] }));
+    // Tous les logements, pour les listes de choix d'appartement de l'ecran.
+    const listings = Object.entries(ctx.listings).map(([id, l]) => ({ id, apt: l.apt, bld: l.bld }))
+      .sort((a, b) => a.bld.localeCompare(b.bld) || a.apt.localeCompare(b.apt, undefined, { numeric: true }) || a.id.localeCompare(b.id));
 
-    return { status: 200, body: { tab: q.tab, counts, proposals, tickets, team, vendors } };
+    return { status: 200, body: { tab: q.tab, counts, proposals, tickets, team, vendors, listings } };
   } catch (e) {
     console.error("[mnt_read] list failed:", (e as Error)?.message ?? String(e));
-    return { status: 503, body: { error: UNAVAILABLE } };
+    return { status: 503, body: { error: MNT_UNAVAILABLE } };
   }
 }

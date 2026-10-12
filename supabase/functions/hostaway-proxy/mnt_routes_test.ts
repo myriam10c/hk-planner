@@ -78,3 +78,30 @@ Deno.test("textes des pushes maintenance, anglais, urgent hors heures de silence
   assert(pushes.length > 0 && routes.length > 0);
   assertEquals((pushes + routes).includes("\u2014"), false);
 });
+
+Deno.test("phase 2 : routes mnt.get (GET) et mnt.photo (POST), session et mntAccess", () => {
+  assert(src.includes('["mnt.get", "GET"]'));
+  assert(src.includes('["mnt.photo", "POST"]'));
+  const debut = src.indexOf("const SERVER_ONLY_ACTIONS = new Set([");
+  const set = src.slice(debut, src.indexOf("]);", debut));
+  assertEquals(set.includes('"mnt.get"'), false);
+  assertEquals(set.includes('"mnt.photo"'), false);
+  const g = bloc("mnt.get");
+  const ga = g.indexOf("mntAccess(bearerToken(req) !== null, me)");
+  assert(ga > g.indexOf("await currentUser(sb, req)") && g.indexOf("await currentUser(sb, req)") >= 0);
+  assert(g.indexOf('mntGet(sb, url.searchParams.get("ref") ?? "", {') > ga);
+  assert(g.includes('createSignedUrl(path, 3600)'));
+  const p = bloc("mnt.photo");
+  const pa = p.indexOf("mntAccess(bearerToken(req) !== null, me)");
+  assert(pa >= 0);
+  // Meme garde de taille que v3.uploadPhoto, avant la lecture du corps.
+  const garde = p.indexOf("V3_MAX_UPLOAD_BODY_BYTES");
+  assert(garde > pa && garde < p.indexOf("req.formData()"));
+  assert(p.includes('jsonResp({ error: "multipart body required" }, 400)'));
+  assert(p.includes("mntPhoto(sb, me!, form)"));
+  const pushes = src.slice(src.indexOf("// ========== Maintenance : pushes"), src.indexOf("// ========== Phase 3 : photos"));
+  assertEquals((g + p).includes("\u2014"), false);
+  assert(pushes.includes('url: APP_URL + "/?mnt=" + String(t.ticketId)'));
+  assert(pushes.includes('url: APP_URL + "/?prp=" + String(p.id)'));
+  assertEquals(pushes.includes("MNT_PUSH_URL"), false);
+});
