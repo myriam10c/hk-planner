@@ -58,9 +58,10 @@ function weekdayDay(iso) {
   } catch (e) { return ddmm(dayOf(iso)); }
 }
 // Cout reel seulement : null reste vide, 0 est un vrai cout.
-function costText(n) {
-  if (n === null || n === undefined || !Number.isFinite(Number(n))) return '';
+export function costText(n) {
+  if (n === null || n === undefined || (typeof n === 'string' && !n.trim()) || typeof n === 'boolean') return '';
   const v = Number(n);
+  if (!Number.isFinite(v)) return '';
   return 'AED ' + (Number.isInteger(v) ? String(v) : v.toFixed(2));
 }
 const quoteText = (t) => '“' + esc(t) + '”';
@@ -125,7 +126,9 @@ function guestLine(p) {
   const stay = stayLine(p.stayFrom, p.stayTo);
   const link = p.conversationId
     ? '<a href="' + esc(hostawayUrl(p.conversationId)) + '" target="_blank" rel="noopener" data-hostaway>Open in Hostaway</a>' : '';
-  return [stay ? 'Guest, ' + esc(stay) : 'Guest', link].filter(Boolean).join(' · ');
+  // Prenom du guest s'il est connu, sinon « Guest ».
+  const first = String(p.guestName || '').trim().split(/\s+/)[0] || 'Guest';
+  return [esc(first) + (stay ? ', ' + esc(stay) : ''), link].filter(Boolean).join(' · ');
 }
 function lastQuote(p) { return p.quotes && p.quotes.length ? p.quotes[p.quotes.length - 1] : null; }
 function quoteAt(p) { const q = lastQuote(p); return (q && q.at) || p.createdAt; }

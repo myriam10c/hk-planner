@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { bootMgr, fetchLog, MANAGER, me, noHorizontalScroll } from './helpers';
-import { DONE, NOW_MNT, OPEN, PROPOSALS, PRP, REJECTED, SEMAX, listBody } from './maintenance-fixtures';
+import { DONE, NOW_MNT, OPEN, PROPOSALS, PRP, PRP_MERGE, REJECTED, SEMAX, listBody } from './maintenance-fixtures';
 
 const L = {
   rejected: () => ({ match: 'rejected=1', status: 200, body: REJECTED() }),
@@ -15,13 +15,6 @@ const lists = async (page: any) => (await fetchLog(page)).filter((l) => l.url.in
 const acts = async (page: any) => (await fetchLog(page)).filter((l) => l.url.includes('action=mnt.act')).map((l) => JSON.parse(l.body));
 const hashOf = (page: any) => page.evaluate(() => location.hash);
 const sheet = (page: any) => page.locator('#sheet');
-// Choix dans un select par script : en emulation telephone, selectOption enchaine
-// apres une saisie laisse Chromium croire le champ suivant invisible.
-const choose = (page: any, sel: string, value: string) => page.locator(sel).evaluate((el: HTMLSelectElement, v: string) => {
-  el.value = v;
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-}, value);
 
 test('onglet par defaut Proposals avec pastille, Open sans proposition, onglet garde dans le hash', async ({ page }) => {
   await bootMgr(page, ALL(), { email: true, clock: NOW_MNT, hash: '#/maintenance' });
@@ -64,7 +57,7 @@ test('carte de proposition : pastilles, heure, lieu, citation en texte, lien Hos
   await expect(c.locator('.mt-where')).toHaveText('Apt 1509 · Westwood · AC');
   await expect(c.locator('.mt-qtext')).toHaveText('“The AC is <b>blowing warm</b> air”');
   expect(await c.locator('b').count()).toBe(0);
-  await expect(c.locator('.mt-qmeta')).toHaveText('Guest, 8 to 12 Oct · Open in Hostaway');
+  await expect(c.locator('.mt-qmeta')).toHaveText('Ann, 8 to 12 Oct · Open in Hostaway');
   const a = c.getByRole('link', { name: 'Open in Hostaway' });
   await expect(a).toHaveAttribute('href', 'https://dashboard.hostaway.com/v3/messages/inbox/987654');
   await expect(a).toHaveAttribute('target', '_blank');
@@ -101,8 +94,8 @@ test('Create ticket : champs pre-remplis, modifies, proposal.accept avec cle, to
   const before = (await lists(page)).length;
 
   await s.locator('#mtTitle').fill('AC blowing warm air');
-  await choose(page, '#mtApt', 'L3');
-  await choose(page, '#mtCat', 'electrical');
+  await sheet(page).getByLabel('Apartment', { exact: true }).selectOption('L3');
+  await sheet(page).getByLabel('Category', { exact: true }).selectOption('electrical');
   await s.locator('[data-urg="high"]').click();
   await s.locator('[data-who="m:8"]').click();
   await s.locator('#mtNote').fill('Guest in until Monday');
@@ -131,7 +124,7 @@ test('Create ticket : prestataire obligatoire avec Vendor, Nobody yet sans inter
   await s.locator('[data-mact="accept-send"]').click();
   await expect(s.locator('.sheet-err')).toHaveText('Choose a vendor.');
   expect(await acts(page)).toHaveLength(0);
-  await choose(page, '#mtVendor', '3');
+  await sheet(page).getByLabel('Vendor', { exact: true }).selectOption('3');
   await s.locator('[data-mact="accept-send"]').click();
   await expect(page.locator('#toast')).toContainText('MNT-20 created');
   const a = await acts(page);
@@ -342,8 +335,59 @@ test('Semax : atterrit sur Maintenance ; 375 px sans defilement horizontal, cibl
   await expect(sheet(page).locator('#mtTitle')).toBeVisible();
   const s = await noHorizontalScroll(page);
   expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
-  const small = await page.evaluate(() => Array.from(document.querySelectorAll('#main button, #sheet.on button'))
+  const small = await page.evaluate(() => Array.from(document.querySelectorAll('#main button, #main a, #sheet.on button, #sheet.on a'))
     .filter((b: any) => b.offsetParent !== null && b.getBoundingClientRect().height < 44)
     .map((b: any) => b.textContent.trim()));
   expect(small).toEqual([]);
+});
+
+test('premier affichage : une seule lecture avec des propositions ; sans proposition, pas de Proposals vide affiche', async ({ page }) => {
+  await bootMgr(page, ALL(), { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  await expect(page.locator('.mt-card')).toHaveCount(2);
+  await page.waitForTimeout(300);
+  expect(await lists(page)).toHaveLength(1);
+
+  const page2 = await page.context().newPage();
+  const none = listBody('proposals', { counts: { proposals: 0, open: 3, urgent: 1, unassigned: 2, mine: 1 } });
+  await bootMgr(page2, [me(MANAGER), L.proposals(none), { match: 'tab=open', status: 200, body: OPEN({ counts: none.counts }), delay: 1500 }],
+    { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  await expect.poll(async () => (await lists(page2)).some((u) => u.includes('tab=open'))).toBe(true);
+  await expect(page2.locator('#mtList')).not.toContainText('No proposal to check.');
+  await expect(page2.locator('[data-tab="proposals"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page2.locator('.mt-row')).toHaveCount(3);
+  await page2.close();
+});
+
+test('carte apres relecture : la liste fraiche sert, pas la proposition ouverte avant', async ({ page }) => {
+  const old = PROPOSALS({ proposals: [PRP(), { ...PRP_MERGE(), openTicket: null }] });
+  await bootMgr(page, [me(MANAGER), { ...L.proposals(old), once: true }, L.proposals(), L.open()], { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  await page.locator('.mt-card').nth(1).getByRole('button', { name: 'Reject' }).click();
+  await expect(sheet(page).getByRole('heading', { name: 'Reject proposal' })).toBeVisible();
+  await sheet(page).locator('[data-mact="back"]').click();
+  await page.locator('[data-tab="open"]').click();
+  await expect(page.locator('.mt-row')).toHaveCount(3);
+  await page.locator('[data-tab="proposals"]').click();
+  await page.locator('.mt-card').nth(1).getByRole('button', { name: 'More' }).click();
+  await expect(sheet(page).locator('[data-mact="merge"]')).toHaveText(/Add to MNT-12/);
+});
+
+test('375 px : Proposals avec une pastille a deux chiffres tient dans son onglet', async ({ page }, info) => {
+  test.skip(info.project.name !== 'mgr-mobile', 'largeur telephone');
+  await page.setViewportSize({ width: 375, height: 760 });
+  const many = PROPOSALS({ counts: { proposals: 12, open: 23, urgent: 1, unassigned: 2, mine: 1 } });
+  await bootMgr(page, [me(MANAGER), L.proposals(many)], { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  await expect(page.locator('[data-tab="proposals"] .mt-count')).toHaveText('12');
+  const over = await page.evaluate(() => Array.from(document.querySelectorAll('.mt-tab'))
+    .filter((b: any) => b.scrollWidth > b.clientWidth).map((b: any) => b.textContent));
+  expect(over).toEqual([]);
+});
+
+test('cout : vide ou absent ne montre rien, 0 est un vrai cout', async ({ page }) => {
+  await bootMgr(page, ALL(), { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  await expect(page.locator('.mt-card')).toHaveCount(2);
+  const out = await page.evaluate(async () => {
+    const m = await import('/manager/screens/maintenance-view.js');
+    return [m.costText(''), m.costText('  '), m.costText(null), m.costText(undefined), m.costText('abc'), m.costText(0), m.costText('120'), m.costText(12.5)];
+  });
+  expect(out).toEqual(['', '', '', '', '', 'AED 0', 'AED 120', 'AED 12.50']);
 });

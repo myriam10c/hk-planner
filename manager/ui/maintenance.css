@@ -4,10 +4,10 @@
 .mt-topbtns{display:flex;gap:var(--s2);align-items:center;flex:none}
 .mt-btn{min-height:44px}
 .mt-grow{flex:1 1 auto}
-.mt-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:4px;background:var(--sunk);border-radius:var(--r-md);margin:0 0 var(--s3)}
-.mt-tab{min-height:44px;border:0;border-radius:9px;background:transparent;color:var(--ink-2);font-size:15px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 6px;min-width:0;white-space:nowrap}
-.mt-tab[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(16,20,30,.08)}
-.mt-count{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--bad);color:var(--surface);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.mt-tabs{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);gap:4px;padding:4px;background:var(--sunk);border-radius:var(--r-md);margin:0 0 var(--s3)}
+.mt-tab{min-height:44px;border:0;border-radius:9px;background:transparent;color:var(--ink-2);font-size:15px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:0 4px;min-width:0;white-space:nowrap}
+.mt-tab[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:var(--shadow-sm)}
+.mt-count{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--bad);color:var(--surface);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
 .mt-tools{display:flex;flex-direction:column;gap:var(--s2);margin-bottom:var(--s3);min-width:0}
 .mt-tools[hidden]{display:none}
 .mt-chips,.mt-whos{display:flex;gap:var(--s2);flex-wrap:wrap;min-width:0}
@@ -29,7 +29,7 @@
 .mt-quote{margin:0;padding:10px 12px;background:var(--surface-2);border-radius:10px;font-size:15px;color:var(--ink-2);display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
 .mt-qtext{white-space:pre-wrap}
 .mt-qmeta{font-size:13px;color:var(--ink-3);margin:0}
-.mt-qmeta a{color:var(--accent);font-weight:600;display:inline-block;padding:4px 0}
+.mt-qmeta a{color:var(--accent);font-weight:600;display:inline-flex;align-items:center;min-height:44px;vertical-align:middle}
 .mt-actions{display:flex;gap:var(--s2)}
 .mt-line{margin:0;font-size:14px;color:var(--ink-2)}
 .mt-note{margin:0;font-size:14px;color:var(--ink-2);font-style:italic;overflow-wrap:anywhere;white-space:pre-wrap}
@@ -63,10 +63,13 @@
 .mt-input{width:100%;min-height:44px;padding:0 12px;border:1px solid var(--line-2);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit;font-size:16px;min-width:0}
 .mt-text{padding:10px 12px;resize:vertical}
 select.mt-input{height:44px}
+/* WebKit et Chromium gardent parfois hidden (herite du panneau ferme) sur un champ cree pendant
+ * l'ouverture : le select restait invisible et inutilisable. Force visible tant que le panneau est ouvert. */
+.sheet.on .mt-field,.sheet.on .mt-input,.sheet.on #mtVendorBox{visibility:visible}
 .mt-two{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
 .mt-seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:3px;background:var(--sunk);border-radius:10px}
 .mt-segbtn{min-height:44px;border:0;border-radius:8px;background:transparent;color:var(--ink-2);font-size:15px;cursor:pointer;min-width:0}
-.mt-segbtn[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(16,20,30,.08)}
+.mt-segbtn[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:var(--shadow-sm)}
 .mt-u-urgent[aria-pressed="true"]{background:var(--bad);color:var(--surface)}
 .mt-u-high[aria-pressed="true"]{background:var(--warn-tint);color:var(--warn-ink)}
 .mt-merges{display:flex;flex-direction:column;gap:var(--s2)}

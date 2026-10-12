@@ -20,7 +20,7 @@ export function PRP(o: any = {}) {
 
 export const PRP_MERGE = () => PRP({
   id: 6, ref: 'PRP-6', listingId: 'L2', apt: '4609', bld: 'Peninsula 3', title: 'Shower drain blocked', category: 'plumbing',
-  categoryLabel: 'Plumbing', urgency: 'normal', guestInNow: false, stayFrom: '2026-09-28', stayTo: '2026-10-03', conversationId: '111',
+  categoryLabel: 'Plumbing', urgency: 'normal', guestInNow: false, guestName: null, stayFrom: '2026-09-28', stayTo: '2026-10-03', conversationId: '111',
   quotes: [{ message_id: 'm3', at: '2026-10-08T05:31:00Z', text: 'Water is still not going down' }],
   openTicket: { id: 12, ref: 'MNT-12', title: 'Shower drain blocked' },
 });

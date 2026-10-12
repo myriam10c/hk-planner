@@ -61,7 +61,8 @@ export async function renderMaintenance(ctx) {
     if (open) $('mtChips').innerHTML = V.chipsHtml(st.filter, st.meta && st.meta.counts);
     const now = Date.now();
     let h;
-    if (st.view === 'proposals') h = V.proposalsHtml(e, st.error, now);
+    if (!st.view) h = '<p class="boot" role="status">Loading…</p>';
+    else if (st.view === 'proposals') h = V.proposalsHtml(e, st.error, now);
     else if (st.view === 'rejected') h = V.rejectedHtml(e, st.error);
     else if (open) h = V.openHtml(e, st.error, st.filter !== 'all' || !!st.q, now);
     else h = V.doneHtml(e, st.error);
@@ -88,9 +89,7 @@ export async function renderMaintenance(ctx) {
     try {
       const d = await get('mnt.list', params(view));
       if (mine !== st.seq || !ctx.isCurrent()) return false;
-      st.lists[view] = { data: d, savedAt: Date.now(), fresh: true, f: asked };
-      st.meta = { counts: d.counts, team: d.team || [], vendors: d.vendors || [], listings: d.listings || [] };
-      announceMntBadge(d.counts && d.counts.proposals);
+      keep(view, d, asked);
     } catch (e) {
       if (mine !== st.seq || !ctx.isCurrent()) return false;
       if (handleAccess(e)) return false;
@@ -105,6 +104,38 @@ export async function renderMaintenance(ctx) {
     st.loading = false;
     paint();
     return true;
+  }
+
+  function keep(view, d, asked) {
+    st.lists[view] = { data: d, savedAt: Date.now(), fresh: true, f: asked };
+    st.meta = { counts: d.counts, team: d.team || [], vendors: d.vendors || [], listings: d.listings || [] };
+    announceMntBadge(d.counts && d.counts.proposals);
+  }
+
+  // Premier affichage sans onglet dans le hash : Proposals lue d'abord, rien n'est peint
+  // avant de connaitre le compte ; aucune proposition en attente -> Open (pas de Proposals vide).
+  async function boot() {
+    if (hashTab) { await refresh(); return; }
+    st.view = null;
+    st.loading = true;
+    paint();
+    const mine = ++st.seq;
+    try {
+      const d = await get('mnt.list', params('proposals'));
+      if (mine !== st.seq || !ctx.isCurrent()) return;
+      keep('proposals', d, { filter: st.filter, q: st.q });
+    } catch (e) {
+      if (mine !== st.seq || !ctx.isCurrent() || handleAccess(e)) return;
+      st.view = 'proposals';
+      st.error = e;
+      st.loading = false;
+      paint();
+      return;
+    }
+    st.view = Number(st.meta.counts && st.meta.counts.proposals) > 0 ? 'proposals' : 'open';
+    if (st.view === 'open') { await refresh(); return; }
+    st.loading = false;
+    paint();
   }
 
   // --- Hash : onglet garde (?tab=), feuille suivie (?ref=) par replaceState -------
@@ -154,6 +185,7 @@ export async function renderMaintenance(ctx) {
       r = await gestures.run('mnt.act|' + JSON.stringify(body), (idem) => post('mnt.act', { ...body, idem }));
     } catch (e) {
       st.busy = false;
+      if (!ctx.isCurrent()) return null;
       if (owns(ref)) sheetBusy(false);
       if (handleAccess(e)) return null;
       if (owns(ref)) sheetError(e.message); else toast(e.message);
@@ -161,20 +193,25 @@ export async function renderMaintenance(ctx) {
       return null;
     }
     st.busy = false;
+    // Ecran quitte pendant l'envoi : ni toast ni relecture ici.
+    if (!ctx.isCurrent()) return r;
     if (owns(ref)) { sheetBusy(false); closeSheet(); }
     toast(typeof okMsg === 'function' ? okMsg(r || {}) : okMsg);
     refresh();
     return r;
   }
 
-  function prpOf(ref) {
-    if (st.prp && st.prp.ref === ref) return st.prp;
+  // Proposition par reference : depuis une carte, la liste fraiche d'abord ; depuis une
+  // feuille, la proposition affichee (lien PRP hors liste, detail de mnt.get).
+  function prpOf(ref, fromSheet) {
+    const held = st.prp && st.prp.ref === ref ? st.prp : null;
+    if (fromSheet && held) return held;
     for (const k of ['proposals', 'rejected']) {
       const e = st.lists[k];
       const p = e && e.data.proposals.find((x) => x.ref === ref);
       if (p) return p;
     }
-    return null;
+    return held;
   }
   function showProposal(p, others) {
     st.prp = p;
@@ -398,7 +435,7 @@ export async function renderMaintenance(ctx) {
       else if (k === 'tk-retry' && ref) openTicket(ref);
       return;
     }
-    const p = ref ? prpOf(ref) : null;
+    const p = ref ? prpOf(ref, true) : null;
     if (!p) return;
     if (k === 'reason') {
       press(el, 'data-reason');
@@ -441,7 +478,7 @@ export async function renderMaintenance(ctx) {
       write(null, { op: 'ticket.reopen', ticketId: Number(el.getAttribute('data-id')) }, ref + ' reopened');
       return;
     }
-    const p = prpOf(ref);
+    const p = prpOf(ref, false);
     if (!p) return;
     if (el.hasAttribute('data-create')) { showCreate(p, 'card'); return; }
     if (el.hasAttribute('data-reject')) { showReject(p, 'card'); return; }
@@ -474,12 +511,7 @@ export async function renderMaintenance(ctx) {
     clearTimeout(st.typing);
   });
 
-  await refresh();
-  // Onglet par defaut : Proposals s'il y a des propositions en attente, sinon Open.
-  if (!hashTab && ctx.isCurrent() && st.view === 'proposals' && st.meta && !(Number(st.meta.counts.proposals) > 0)) {
-    st.view = 'open';
-    await refresh();
-  }
+  await boot();
   const linked = hq.get('ref');
   if (linked && ctx.isCurrent()) await openLinked(linked.trim().toUpperCase());
 

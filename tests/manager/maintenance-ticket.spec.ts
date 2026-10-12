@@ -36,11 +36,6 @@ const lists = async (page: any) => (await fetchLog(page)).filter((l) => l.url.in
 const acts = async (page: any) => (await fetchLog(page)).filter((l) => l.url.includes('action=mnt.act')).map((l) => JSON.parse(l.body));
 const hashOf = (page: any) => page.evaluate(() => location.hash);
 const sheet = (page: any) => page.locator('#sheet');
-const choose = (page: any, sel: string, value: string) => page.locator(sel).evaluate((el: HTMLSelectElement, v: string) => {
-  el.value = v;
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-}, value);
 // Formulaires multipart envoyes (le journal du faux serveur ne garde que les corps texte).
 async function watchForms(page: any) {
   await page.evaluate(() => {
@@ -341,8 +336,8 @@ test('+ New ticket : champs, appartement obligatoire, ticket.create, toast', asy
   await s.locator('[data-mact="new-send"]').click();
   await expect(s.locator('.sheet-err')).toHaveText('Choose an apartment.');
   expect(await acts(page)).toHaveLength(0);
-  await choose(page, '#mtApt', 'L2');
-  await choose(page, '#mtCat', 'lock_door');
+  await sheet(page).getByLabel('Apartment', { exact: true }).selectOption('L2');
+  await sheet(page).getByLabel('Category', { exact: true }).selectOption('lock_door');
   await s.locator('[data-urg="high"]').click();
   await s.locator('#mtNote').fill('Owner reported');
   await s.locator('[data-mact="new-send"]').click();
