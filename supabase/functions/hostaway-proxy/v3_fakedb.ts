@@ -20,6 +20,11 @@ const UNIQUE: Record<string, string[]> = {
   security_contacts_doc: ["id"],
   extra_cleanings: ["reservation_key"],
   app_config: ["key"],
+  maintenance_proposals: ["dedup_key"],
+};
+// Index uniques partiels (WHERE ...) : la contrainte ne vaut que si les deux lignes passent le filtre.
+const UNIQUE_WHERE: Record<string, (r: any) => boolean> = {
+  maintenance_proposals: (r) => r.status === "pending",
 };
 
 // Tables dont created_at est rempli par la base a l'insertion.
@@ -73,6 +78,8 @@ export function fakeDb(seed: Record<string, any[]> = {}, opts: { maxRows?: numbe
     const selected = () => list().filter(match);
     const sameUnique = (a: any, b: any) => {
       const cols = UNIQUE[table] ?? [];
+      const where = UNIQUE_WHERE[table];
+      if (where && !(where(a) && where(b))) return false;
       return cols.length > 0 && cols.every((c) => String(a[c]) === String(b[c]));
     };
 
