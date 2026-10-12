@@ -85,3 +85,26 @@ Deno.test("citations : doublon refuse, 11e supprime la plus ancienne, tri par da
   const s = appendQuote([q(5)], q(2));
   assertEquals(s.quotes.map((x) => x.message_id), ["m2", "m5"]);
 });
+
+Deno.test("ingestion : titre vide et issues non tableau", () => {
+  assertEquals(parseIngest({ issues: [item({ title: "   " })] }), { error: "Invalid issue 1: title." });
+  assertEquals(parseIngest({ issues: "x" }), { error: "Invalid issues." });
+});
+
+Deno.test("ingestion : dates impossibles et fuseau absent refuses", () => {
+  assertEquals(parseIngest({ issues: [item({ stayFrom: "2026-02-31" })] }), { error: "Invalid issue 1: stayFrom." });
+  assertEquals(parseIngest({ issues: [item({ stayTo: "2026-13-01" })] }), { error: "Invalid issue 1: stayTo." });
+  assertEquals(parseIngest({ issues: [item({ at: "2026-02-31T10:00:00Z" })] }), { error: "Invalid issue 1: at." });
+  assertEquals(parseIngest({ issues: [item({ at: "2026-10-12T08:00" })] }), { error: "Invalid issue 1: at." });
+  assert("issues" in (parseIngest({ issues: [item({ at: "2026-10-12T08:00:00+04:00" })] }) as any));
+});
+
+Deno.test("citations : added faux si la nouvelle est ecartee par la limite", () => {
+  const q = (n: number) => ({ message_id: "m" + n, at: "2026-10-" + String(10 + n).padStart(2, "0") + "T00:00:00Z", text: "t" });
+  let quotes: any[] = [];
+  for (let n = 2; n <= 11; n++) quotes = appendQuote(quotes, q(n)).quotes;
+  const r = appendQuote(quotes, q(1));
+  assertEquals(r.added, false);
+  assertEquals(r.quotes.length, 10);
+  assertEquals(r.quotes[0].message_id, "m2");
+});

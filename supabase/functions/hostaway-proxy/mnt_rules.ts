@@ -54,8 +54,14 @@ export type IngestIssue = {
 };
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const isDay = (s: string) => DAY_RE.test(s) && !Number.isNaN(Date.parse(s + "T00:00:00Z"));
-const ISO_DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+// Aller-retour par Date : refuse les jours impossibles (2026-02-31).
+const isDay = (s: string) => {
+  if (!DAY_RE.test(s)) return false;
+  const t = Date.parse(s + "T00:00:00Z");
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
+};
+// Date-heure ISO avec fuseau obligatoire (Z ou +hh:mm / -hh:mm).
+const ISO_DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
 
 export function parseIngest(body: any): { issues: IngestIssue[] } | { error: string } {
   const list = body?.issues;
@@ -76,7 +82,7 @@ export function parseIngest(body: any): { issues: IngestIssue[] } | { error: str
     const messageId = str(it.messageId);
     if (!messageId) return bad("messageId");
     const at = typeof it.at === "string" ? it.at.trim() : "";
-    if (!ISO_DT_RE.test(at) || Number.isNaN(Date.parse(at))) return bad("at");
+    if (!ISO_DT_RE.test(at) || !isDay(at.slice(0, 10)) || Number.isNaN(Date.parse(at))) return bad("at");
     const title = str(it.title).slice(0, MNT_TITLE_MAX).trim();
     if (!title) return bad("title");
     if (!(MNT_CATEGORIES as readonly string[]).includes(it.category)) return bad("category");
@@ -105,5 +111,6 @@ type Quote = { message_id: string; at: string; text: string };
 export function appendQuote(quotes: Quote[], q: Quote): { quotes: Quote[]; added: boolean } {
   if (quotes.some((x) => x.message_id === q.message_id)) return { quotes, added: false };
   const all = [...quotes, q].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-  return { quotes: all.slice(-MNT_QUOTES_MAX), added: true };
+  const kept = all.slice(-MNT_QUOTES_MAX);
+  return { quotes: kept, added: kept.includes(q) };
 }
