@@ -31,7 +31,7 @@ import {
 } from "./insp_write.ts";
 import { getSecurityContacts, setSecurityContacts } from "./security_contacts.ts";
 import { sessionActor } from "./actor.ts";
-import { mgrAccess, MGR_LOOKBACK_DAYS, normalizeMgrReservations, type MgrReservation } from "./mgr_rules.ts";
+import { mgrAccess, MGR_LOOKBACK_DAYS, normalizeMgrReservations, splitListing, type MgrReservation } from "./mgr_rules.ts";
 import { mgrToday } from "./mgr_api.ts";
 import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
@@ -49,6 +49,10 @@ import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
 import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
 import { buildDisputeUpdate, disputeAccess } from "./disputes.ts";
 import { healthScore, mgrApartment, mgrApartmentCleanings, mgrApartments, readHealthInputs } from "./mgr_apartment.ts";
+import { mntAccess } from "./mnt_rules.ts";
+import { mntList, parseMntQuery } from "./mnt_read.ts";
+import { mntAct } from "./mnt_act.ts";
+import { mntIngest } from "./mnt_ingest.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -78,6 +82,8 @@ const SERVER_ONLY_ACTIONS = new Set([
   "getMacCommands",
   "getHermesCommands",
   "hrCheckExpiries",
+  // Propositions maintenance poussees par le job VPS (messages guests).
+  "mnt.proposals.ingest",
   "setSecurityContacts",
 ]);
 const TOKEN_URL = "https://api.hostaway.com/v1/accessTokens";
@@ -894,6 +900,62 @@ async function notifyAssignee(sb: any, task: any): Promise<void> {
   }
 }
 
+// ========== Maintenance : pushes ==========
+// Meme expediteur que les tickets v3 (sendPush) : seul l'urgent traverse les
+// heures de silence. Aucun nom de guest dans les textes.
+const MNT_PUSH_URL = "https://stunning-kleicha-f61101.netlify.app/";
+
+// Nouvel assigne d'un ticket maintenance (mnt.act). Appelee sous keepAlive.
+async function notifyMntAssignee(
+  sb: any, t: { ticketId: number; memberId: number; title: string; urgent: boolean },
+): Promise<void> {
+  const payload = {
+    title: (t.urgent ? "Urgent: " : "New ticket: ") + t.title,
+    body: "Assigned to you. Open HK Planner to see the details.",
+    url: MNT_PUSH_URL,
+    tag: "mnt-ticket-" + String(t.ticketId),
+  };
+  const opts: { dedupeKey: string; priority?: string } = {
+    dedupeKey: "mnt-assign:" + String(t.ticketId) + ":" + String(t.memberId),
+  };
+  if (t.urgent) opts.priority = "urgent";
+  const r = await sendPush(sb, t.memberId, payload, opts);
+  if (r.skipped) console.log("[mnt] assign push skipped for " + String(t.memberId) + ": " + r.skipped);
+}
+
+// Proposition urgente venue d'un guest (mnt.proposals.ingest) : maintenance et
+// managers actifs, comme un signalement urgent de cleaner.
+async function notifyMntUrgent(
+  sb: any, p: { id: number; title: string; listingId: string | null },
+): Promise<void> {
+  let place = "Unknown apartment";
+  if (p.listingId) {
+    const { data: row } = await sb.from("listing_config")
+      .select("internal_name, listing_name, apt_number").eq("listing_id", p.listingId).maybeSingle();
+    if (row) {
+      const { apt, bld } = splitListing(row);
+      place = apt ? "Apt " + apt + " · " + bld : bld;
+    }
+  }
+  const { data: members, error } = await sb.from("cleaners")
+    .select("id").eq("is_active", true).in("role", ["maintenance", "manager"]);
+  if (error) throw error;
+  const payload = {
+    title: "Urgent from a guest: " + p.title,
+    body: place + " · Open HK Planner to review it.",
+    url: MNT_PUSH_URL,
+    tag: "mnt-proposal-" + String(p.id),
+  };
+  const ids: number[] = (members ?? []).map((m: any) => Number(m.id));
+  for (const cid of new Set(ids)) {
+    try {
+      await sendPush(sb, cid, payload, { dedupeKey: "mnt-urgent:" + String(p.id) + ":" + String(cid), priority: "urgent" });
+    } catch (e) {
+      console.warn("[mnt] urgent push failed for " + String(cid) + ": " + String(e));
+    }
+  }
+}
+
 // ========== Phase 3 : photos bucket helpers ==========
 const PHOTO_BUCKET = "cleaning-photos";
 
@@ -950,6 +1012,8 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["mgr.team", "GET"], ["mgr.people", "GET"],
   ["mgr.apartments", "GET"], ["mgr.apartment", "GET"],
   ["mgr.setup", "GET"], ["mgr.reports", "GET"],
+  // ===== Maintenance (spec 2026-10-12, phase 1) =====
+  ["mnt.list", "GET"], ["mnt.act", "POST"], ["mnt.proposals.ingest", "POST"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1523,6 +1587,45 @@ Deno.serve(async (req: Request) => {
       if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
       const r = await mgrProblemAct(sb, me!, body, {
         notifyTask: (t) => keepAlive(notifyAssignee(sb, t).catch((e) => console.warn("[notifyAssignee mgr]", e))),
+      });
+      return jsonResp(r.body, r.status);
+    }
+
+    // ==================== MAINTENANCE (spec 2026-10-12) ====================
+    // Liste par onglet (propositions, ouverts, termines). Session email, role
+    // manager ou maintenance.
+    if (action === "mnt.list") {
+      const me = await currentUser(sb, req);
+      const acc = mntAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const q = parseMntQuery(url.searchParams);
+      if ("error" in q) return jsonResp({ error: q.error }, 400);
+      const r = await mntList(sb, me!, q);
+      return jsonResp(r.body, r.status);
+    }
+
+    // Gestes maintenance. Auteur pris dans la session ; la notification du nouvel
+    // assigne ne fait jamais echouer le geste.
+    if (action === "mnt.act") {
+      const me = await currentUser(sb, req);
+      const acc = mntAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await mntAct(sb, me!, body, {
+        notifyAssignee: (t) => keepAlive(Promise.resolve().then(() => notifyMntAssignee(sb, t))
+          .catch((e) => console.warn("[mnt] assign push", e))),
+      });
+      return jsonResp(r.body, r.status);
+    }
+
+    // Propositions du job VPS. Secret serveur deja verifie (SERVER_ONLY_ACTIONS).
+    if (action === "mnt.proposals.ingest") {
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await mntIngest(sb, body, {
+        notifyUrgent: (p) => keepAlive(Promise.resolve().then(() => notifyMntUrgent(sb, p))
+          .catch((e) => console.warn("[mnt] urgent push", e))),
       });
       return jsonResp(r.body, r.status);
     }
