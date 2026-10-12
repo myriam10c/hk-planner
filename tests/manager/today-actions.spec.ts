@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { bootMgr, fetchLog, MANAGER, me } from './helpers';
 import { NOW, todayBody } from './fixtures';
+import { IDEM, noIdem } from './planning-fixtures';
 
 const TODAY = (body: any = todayBody()) => ({ match: 'action=mgr.today', status: 200, body });
 const OK = { status: 'success' };
@@ -14,6 +15,11 @@ function assignedBody() {
 }
 const writes = async (page: any, action: string) =>
   (await fetchLog(page)).filter((l) => l.url.includes('action=' + action)).map((l) => JSON.parse(l.body));
+// Chaque ecriture de Today porte sa cle d'idempotence (createGestures), jamais d'auteur.
+const keyed = (rows: any[]) => {
+  for (const r of rows) { expect(r.idem).toMatch(IDEM); expect(r).not.toHaveProperty('actor'); expect(r).not.toHaveProperty('author'); }
+  return noIdem(rows);
+};
 
 test('Assign depuis Today : assignCleaner en mode set, sans actor, Today recharge', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { match: 'action=assignCleaner', status: 200, body: OK }, TODAY(assignedBody())], { email: true, clock: NOW });
@@ -24,7 +30,7 @@ test('Assign depuis Today : assignCleaner en mode set, sans actor, Today recharg
   await expect(sheet.locator('[data-pick="4"]')).toContainText('1 job today');
   await sheet.locator('[data-pick="4"]').click();
   await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender assigned to Faiza');
-  expect(await writes(page, 'assignCleaner')).toEqual([
+  expect(keyed(await writes(page, 'assignCleaner'))).toEqual([
     { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [4], mode: 'set', service_type: 'CHC' },
   ]);
   await expect(page.locator('.person.unassigned')).not.toContainText('Apt 308');
@@ -55,7 +61,7 @@ test('Reassign depuis une fiche d arrivee garde le type de service', async ({ pa
   await expect(page.locator('#sheet [data-pick="4"]')).toHaveAttribute('aria-current', 'true');
   await page.locator('#sheet [data-pick="10"]').click();
   await expect(page.locator('#toast')).toContainText('assigned to Pionah');
-  expect(await writes(page, 'assignCleaner')).toEqual([
+  expect(keyed(await writes(page, 'assignCleaner'))).toEqual([
     { reservation_key: '2026-10-09_Cy Doe', cleaner_ids: [10], mode: 'set', service_type: 'CHC' },
   ]);
 });
@@ -67,9 +73,11 @@ test('Mark done depuis une arrivee, puis Undo : setDone true puis false, sans ac
   await expect(page.locator('#toast')).toContainText('Apt 103 · Damac Reva marked done');
   await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
   await expect.poll(async () => (await writes(page, 'setDone')).length).toBe(2);
-  expect(await writes(page, 'setDone')).toEqual([
+  const done = await writes(page, 'setDone');
+  expect(keyed(done)).toEqual([
     { key: '2026-10-09_Cy Doe', done: true }, { key: '2026-10-09_Cy Doe', done: false },
   ]);
+  expect(done[0].idem).not.toBe(done[1].idem);
 });
 
 test('Undo done depuis une arrivee deja prete', async ({ page }) => {
@@ -77,7 +85,7 @@ test('Undo done depuis une arrivee deja prete', async ({ page }) => {
   await page.locator('.arr', { hasText: 'Apt 404' }).click();
   await page.locator('#sheet').getByRole('button', { name: 'Undo done' }).click();
   await expect(page.locator('#toast')).toContainText('back to not done');
-  expect(await writes(page, 'setDone')).toEqual([{ key: '2026-10-05_Fa Ho', done: false }]);
+  expect(keyed(await writes(page, 'setDone'))).toEqual([{ key: '2026-10-05_Fa Ho', done: false }]);
 });
 
 test('ecriture lente, fiche fermee puis autre fiche, refus 409 : toast, pas d erreur dans l autre fiche', async ({ page }) => {
@@ -115,4 +123,33 @@ test('tap pendant une ecriture : toast Saving, wait a second', async ({ page }) 
   });
   await expect(page.locator('#toast')).toContainText('Saving, wait a second.');
   expect((await writes(page, 'setDone')).length).toBe(0);
+});
+
+test('Assign du jour, Undo : cle neuve pour l Undo, liste d avant remise', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
+  await page.locator('.person.unassigned .job', { hasText: 'Apt 308' }).getByRole('button', { name: 'Assign' }).click();
+  await page.locator('#sheet [data-pick="10"]').click();
+  await expect(page.locator('#toast')).toContainText('assigned to Pionah');
+  await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
+  const w = await writes(page, 'assignCleaner');
+  expect(keyed(w)).toEqual([
+    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [10], mode: 'set', service_type: 'CHC' },
+    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [], mode: 'set', service_type: 'CHC' },
+  ]);
+  expect(w[0].idem).not.toBe(w[1].idem);
+});
+
+test('Assign du jour, reseau coupe puis meme geste : la meme cle est reprise', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 0, body: {}, fail: true, once: true },
+    { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
+  await page.locator('.person.unassigned .job', { hasText: 'Apt 308' }).getByRole('button', { name: 'Assign' }).click();
+  await page.locator('#sheet [data-pick="10"]').click();
+  await expect(page.locator('#sheet .sheet-err')).toHaveText('No connection. Try again.');
+  await page.locator('#sheet [data-pick="10"]').click();
+  await expect(page.locator('#toast')).toContainText('assigned to Pionah');
+  const w = await writes(page, 'assignCleaner');
+  expect(w.length).toBe(2);
+  expect(w[0].idem).toMatch(IDEM);
+  expect(w[1].idem).toBe(w[0].idem);
 });

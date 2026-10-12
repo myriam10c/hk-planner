@@ -1,6 +1,6 @@
 // Ecran Today : HTML pur construit a partir de la reponse mgr.today. Aucun appel
 // reseau ici, aucun calcul de statut : le proxy les rend deja faits.
-import { aptLabel, dubaiTime, esc, I, placeLabel } from '/manager/ui/dom.js';
+import { addDays, aptLabel, dubaiTime, esc, I, placeLabel } from '/manager/ui/dom.js';
 import { dayShort, jobsOn, namesOf as plNamesOf, nextLine as plNextLine } from '/manager/screens/planning-rules.js';
 
 const ROLE = { cleaner: 'Cleaner', subcontractor: 'Subcontractor', manager: 'Manager', maintenance: 'Maintenance' };
@@ -90,11 +90,17 @@ function jobBtn(j) {
     + esc(nextLine(j) + jobNotes(j)) + '</span></span></button>';
 }
 
-// Jours du bloc : Today, Tomorrow, puis cinq jours (a.days), a.sel le jour choisi.
+// Jours du bloc (a.days, a partir du jour des donnees), a.sel le jour choisi. Libelles
+// Today et Tomorrow selon l'horloge (a.clock) : le bloc d'hier n'est jamais appele Today.
+function chipLabel(d, clock) {
+  if (clock && d === clock) return 'Today';
+  if (clock && d === addDays(clock, 1)) return 'Tomorrow';
+  return dayShort(d);
+}
 function dayChips(a) {
   if (!a) return '';
-  return '<div class="chiprow wdays" role="group" aria-label="Day">' + a.days.map((d, i) => '<button type="button" class="chip" data-wday="' + esc(d) + '" aria-pressed="'
-    + (d === a.sel ? 'true' : 'false') + '">' + esc(i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayShort(d)) + '</button>').join('') + '</div>';
+  return '<div class="chiprow wdays" role="group" aria-label="Day">' + a.days.map((d) => '<button type="button" class="chip" data-wday="' + esc(d) + '" aria-pressed="'
+    + (d === a.sel ? 'true' : 'false') + '">' + esc(chipLabel(d, a.clock)) + '</button>').join('') + '</div>';
 }
 const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
 
@@ -138,10 +144,12 @@ function whoHtml(data, ro, ahead) {
 
 // Un autre jour (a.sel), lu dans mgr.planning (a.week : { data, fresh, loading, error }).
 // Annules jamais montres ; un menage fait n'est jamais propose a l'assignation.
-// Groupe Not assigned (btn non vide) : seul un statut warn est repete, comme pour aujourd'hui.
-function aheadRow(j, btn) {
+// o.unassigned : ligne du groupe Not assigned, ou seul un statut warn est repete (comme pour
+// aujourd'hui). o.btn : bouton Assign ou Reassign, vide en lecture seule.
+function aheadRow(j, o) {
   const extra = j.kind === 'extra';
-  const lead = j.tone === 'idle' || (btn && j.tone !== 'warn') ? '' : '<span class="st ' + esc(j.tone) + '">' + esc(j.word) + '</span> · ';
+  const btn = o.btn || '';
+  const lead = j.tone === 'idle' || (o.unassigned && j.tone !== 'warn') ? '' : '<span class="st ' + esc(j.tone) + '">' + esc(j.word) + '</span> · ';
   const notes = [j.next ? plNextLine(j.next) : '', j.postponedFrom ? 'postponed from ' + ddmm(j.postponedFrom) : '',
     !extra && !j.checkout ? 'checkout time not set' : ''].filter(Boolean).join(' · ');
   return '<div class="job static"><span class="tm">' + esc(extra ? 'Extra' : (j.checkout || '--:--')) + '<small>' + (extra ? 'clean' : 'out') + '</small></span>'
@@ -171,7 +179,7 @@ function aheadHtml(a) {
   if (un.length) {
     h += '<div class="person unassigned"><div class="person-h"><span class="av" aria-hidden="true">!</span><div><div class="nm">Not assigned</div>'
       + '<div class="rl">Nobody on these cleanings yet</div></div><span class="cnt">' + un.length + '</span></div><div class="jobs">'
-      + un.map((j) => aheadRow(j, ro ? ' ' : '<button class="btn sm primary" type="button" data-wassign="' + esc(j.key) + '">Assign</button>')).join('')
+      + un.map((j) => aheadRow(j, { unassigned: true, btn: ro ? '' : '<button class="btn sm primary" type="button" data-wassign="' + esc(j.key) + '">Assign</button>' })).join('')
       + '</div></div>';
   }
   for (const p of d.people) {
@@ -179,7 +187,8 @@ function aheadHtml(a) {
     if (!p.assignable && !mine.length) continue;
     h += '<div class="person"><div class="person-h"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><div><div class="nm">' + esc(p.name)
       + '</div><div class="rl">' + esc((ROLE[p.role] || p.role) + (off.has(p.id) ? ' · On leave' : '')) + '</div></div><span class="cnt">' + mine.length + '</span></div><div class="jobs">'
-      + (mine.length ? mine.map((j) => aheadRow(j, '')).join('') : '<div class="empty">Nothing planned for ' + esc(label) + '.</div>') + '</div></div>';
+      + (mine.length ? mine.map((j) => aheadRow(j, { btn: ro || j.state === 'done' ? '' : '<button class="btn sm" type="button" data-wassign="' + esc(j.key) + '">Reassign</button>' })).join('')
+        : '<div class="empty">Nothing planned for ' + esc(label) + '.</div>') + '</div></div>';
   }
   return h + '</section>';
 }
@@ -320,7 +329,8 @@ export function pickerSheet(data, t, ro) {
     + '<div class="sheet-f"><button class="btn" type="button" data-close>Cancel</button></div>';
 }
 
-// Choix d'une personne pour un menage d'un autre jour (donnees mgr.planning) : un tap = assigne.
+// Choix d'une personne pour un menage d'un autre jour (donnees mgr.planning) : un tap = assigne
+// (Assign ou Reassign, meme panneau).
 // Une personne en conge ce jour-la ne peut pas etre choisie.
 export function aheadPickerSheet(d, j) {
   const day = d.days.find((x) => x.date === j.date);
@@ -330,7 +340,8 @@ export function aheadPickerSheet(d, j) {
   const opts = d.people.filter((p) => p.assignable).map((p) => {
     const leave = off.has(p.id);
     const current = j.assigned.length === 1 && j.assigned[0] === p.id;
-    const sub = leave ? 'On leave' : plural(n[p.id] || 0, 'job') + ' that day';
+    // Meme lecture que le choix d'aujourd'hui : « Role · N jobs that day ».
+    const sub = (ROLE[p.role] || p.role) + ' · ' + (leave ? 'On leave' : plural(n[p.id] || 0, 'job') + ' that day');
     return '<button type="button" data-wpick="' + p.id + '" data-key="' + esc(j.key) + '"' + (current ? ' aria-current="true"' : '')
       + (leave ? ' disabled data-off' : '') + '><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><span><b>' + esc(p.name)
       + '</b><small>' + esc(sub) + '</small></span></button>';

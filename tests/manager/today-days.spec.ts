@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { bootMgr, fetchLog, MANAGER, me, noHorizontalScroll } from './helpers';
+import { bootMgr, fetchDone, fetchLog, MANAGER, me, noHorizontalScroll } from './helpers';
 import { NOW, todayBody } from './fixtures';
 import { daysOf, IDEM, OK, planningBody } from './planning-fixtures';
 
@@ -96,9 +96,9 @@ test('Assign sur un autre jour : conge grise, assignCleaner avec idem et sans au
   await expect(sheet.getByRole('heading', { name: 'Assign a cleaner' })).toBeVisible();
   await expect(sheet).toContainText('Sat 10');
   await expect(sheet.locator('[data-wpick="4"]')).toBeDisabled();
-  await expect(sheet.locator('[data-wpick="4"]')).toContainText('On leave');
-  await expect(sheet.locator('[data-wpick="12"]')).toContainText('1 job that day');
-  await expect(sheet.locator('[data-wpick="10"]')).toContainText('0 jobs that day');
+  await expect(sheet.locator('[data-wpick="4"]')).toContainText('Cleaner · On leave');
+  await expect(sheet.locator('[data-wpick="12"]')).toContainText('Subcontractor · 1 job that day');
+  await expect(sheet.locator('[data-wpick="10"]')).toContainText('Cleaner · 0 jobs that day');
   await sheet.locator('[data-wpick="10"]').click();
   await expect(page.locator('#toast')).toContainText('Apt 707 · Marina Gate assigned to Pionah');
   await expect(sheet).toHaveAttribute('aria-hidden', 'true');
@@ -144,7 +144,9 @@ test('reponse tardive : la semaine lente ne repeint pas le jour choisi ensuite',
   await chip(page, '2026-10-12').click();
   await expect(page.getByRole('heading', { name: 'Who does what, Mon 12', exact: true })).toBeVisible();
   await expect(who(page).locator('.person.unassigned')).toContainText('Apt 1301');
-  await page.waitForTimeout(1800);
+  // Attendre que la reponse lente soit rendue (sans delai fixe), puis verifier qu'elle n'a rien repeint.
+  await expect.poll(async () => (await fetchDone(page)).filter((u) => u.includes('start=2026-10-05')).length).toBe(1);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(null))));
   await expect(page.getByRole('heading', { name: 'Who does what, Mon 12', exact: true })).toBeVisible();
   await expect(who(page).locator('.person.unassigned')).toContainText('Apt 1301');
   await expect(chip(page, '2026-10-12')).toHaveAttribute('aria-pressed', 'true');
@@ -188,4 +190,89 @@ test('semaine non fraiche apres un rechargement en echec : plus de Assign, Recon
   });
   await expect(page.locator('#toast')).toContainText('Reconnect to make changes.');
   expect((await writes(page, 'assignCleaner')).length).toBe(1);
+});
+
+test('Reassign sur un autre jour : bouton dans les groupes de personnes (pas pour un menage fait), meme choix', async ({ page }) => {
+  const body = weekBody();
+  body.jobs.push(PJ({ key: '2026-10-10_Ze Ta', listingId: 'L14', apt: '141', bld: 'Zeta Tower', date: '2026-10-10', guest: 'Ze Ta',
+    assigned: [10], serviceType: 'CHC', state: 'done', tone: 'ok', word: 'Done' }));
+  await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, WEEK1(body)], { email: true, clock: NOW });
+  await chip(page, '2026-10-10').click();
+  const elite = who(page).locator('.person', { hasText: 'Elite Cleaning' });
+  const row = elite.locator('.job', { hasText: 'Apt 505' });
+  await expect(row.getByRole('button', { name: 'Reassign' })).toBeVisible();
+  // Menage fait : pas de Reassign.
+  await expect(who(page).locator('.person', { hasText: 'Pionah' }).locator('.job', { hasText: 'Apt 141' }).getByRole('button')).toHaveCount(0);
+  await row.getByRole('button', { name: 'Reassign' }).click();
+  const sheet = page.locator('#sheet');
+  await expect(sheet.getByRole('heading', { name: 'Assign a cleaner' })).toBeVisible();
+  await expect(sheet.locator('[data-wpick="12"]')).toHaveAttribute('aria-current', 'true');
+  await expect(sheet).toContainText('Now: Elite Cleaning.');
+  await sheet.locator('[data-wpick="10"]').click();
+  await expect(page.locator('#toast')).toContainText('Apt 505 · Tower E assigned to Pionah');
+  const w = await writes(page, 'assignCleaner');
+  expect(w.length).toBe(1);
+  expect(w[0].idem).toMatch(IDEM);
+  const { idem, ...b } = w[0];
+  expect(b).toEqual({ reservation_key: '2026-10-10_Fa Ho', cleaner_ids: [10], mode: 'set', service_type: 'CHC' });
+  await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
+  const { idem: _i, ...b2 } = (await writes(page, 'assignCleaner'))[1];
+  expect(b2).toEqual({ reservation_key: '2026-10-10_Fa Ho', cleaner_ids: [12], mode: 'set', service_type: 'CHC' });
+});
+
+test('apres minuit : les puces partent du jour des donnees, le bloc d hier n est jamais appele Today', async ({ page }) => {
+  // Horloge au samedi 10 (Dubai), donnees du vendredi 9 encore a l'ecran.
+  const sat = new Date('2026-10-10T07:00:00Z');
+  await bootMgr(page, [me(MANAGER), TODAY(), WEEK1()], { email: true, clock: sat });
+  const chips = who(page).locator('[data-wday]');
+  await expect(chips).toHaveText(['Fri 9', 'Today', 'Tomorrow', 'Mon 12', 'Tue 13', 'Wed 14', 'Thu 15']);
+  await expect(chip(page, '2026-10-09')).toHaveAttribute('aria-pressed', 'true');
+  // La puce Today (samedi) montre bien samedi, lu dans mgr.planning.
+  await chip(page, '2026-10-10').click();
+  await expect(page.getByRole('heading', { name: 'Who does what, Sat 10', exact: true })).toBeVisible();
+  await expect(who(page).locator('.person.unassigned')).toContainText('Apt 707');
+});
+
+test('clavier : apres un toucher sur une puce, le focus reste sur la puce', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), WEEK1(weekBody(), { delay: 300 })], { email: true, clock: NOW });
+  await chip(page, '2026-10-10').focus();
+  await page.keyboard.press('Enter');
+  await expect(who(page)).toContainText('Loading Sat 10…');
+  await expect(chip(page, '2026-10-10')).toBeFocused();
+  await expect(who(page).locator('.person.unassigned')).toContainText('Apt 707');
+  await expect(chip(page, '2026-10-10')).toBeFocused();
+  await chip(page, '2026-10-09').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Who does what today', exact: true })).toBeVisible();
+  await expect(chip(page, '2026-10-09')).toBeFocused();
+});
+
+test('semaine lue il y a plus de 60 s : relue avant le choix de personne', async ({ page }) => {
+  const later = weekBody();
+  later.jobs.find((j: any) => j.key === '2026-10-10_Fa Ho').assigned = [10];
+  await bootMgr(page, [me(MANAGER), TODAY(), { ...WEEK1(), once: true }, WEEK1(later)], { email: true, clock: NOW });
+  await chip(page, '2026-10-10').click();
+  await who(page).locator('.person.unassigned .job', { hasText: 'Apt 707' }).getByRole('button', { name: 'Assign' }).click();
+  await expect(page.locator('#sheet [data-wpick="10"]')).toContainText('0 jobs that day');
+  await page.locator('#sheet [data-close]').first().click();
+  expect((await plCalls(page)).length).toBe(1);
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await who(page).locator('.person.unassigned .job', { hasText: 'Apt 707' }).getByRole('button', { name: 'Assign' }).click();
+  // Fiche ouverte sur la reponse fraiche : Pionah a maintenant Apt 505 ce jour-la.
+  await expect(page.locator('#sheet [data-wpick="10"]')).toContainText('1 job that day');
+  expect((await plCalls(page)).length).toBe(2);
+});
+
+test('semaine de plus de 60 s, relecture en echec : pas de choix, Reconnect, anciennes donnees gardees', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), { ...WEEK1(), once: true }, { match: 'action=mgr.planning', status: 0, body: {}, fail: true }],
+    { email: true, clock: NOW });
+  await chip(page, '2026-10-10').click();
+  await expect(who(page).locator('.person.unassigned')).toContainText('Apt 707');
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await who(page).locator('.person.unassigned .job', { hasText: 'Apt 707' }).getByRole('button', { name: 'Assign' }).click();
+  await expect(page.locator('#toast')).toContainText('Reconnect to make changes.');
+  await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
+  await expect(who(page).locator('.person.unassigned')).toContainText('Apt 707');
+  expect((await writes(page, 'assignCleaner')).length).toBe(0);
 });

@@ -69,8 +69,17 @@ export async function bootMgr(
         const make = () => (typeof r.raw === 'string'
           ? new Response(r.raw, { status: r.status, headers: { 'Content-Type': r.contentType || 'text/csv' } })
           : new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } }));
-        if (r.delay) return new Promise((res) => setTimeout(() => res(make()), r.delay));
-        return Promise.resolve(make());
+        // Reponse rendue (meme tardive) : notee a part dans mgrFetchDone, pour attendre sans delai fixe.
+        const done = () => {
+          try {
+            const l = JSON.parse(localStorage.getItem('mgrFetchDone') || '[]');
+            l.push(url);
+            localStorage.setItem('mgrFetchDone', JSON.stringify(l.slice(-100)));
+          } catch (e) { /* quota */ }
+          return make();
+        };
+        if (r.delay) return new Promise((res) => setTimeout(() => res(done()), r.delay));
+        return Promise.resolve(done());
       }
       return Promise.resolve(new Response(JSON.stringify({ error: 'no fake route' }), { status: 500, headers: { 'Content-Type': 'application/json' } }));
     }) as any;
@@ -85,6 +94,13 @@ export async function fetchLog(page: Page) {
   return await page.evaluate(() => {
     try { return JSON.parse(localStorage.getItem('mgrFetchLog') || '[]'); } catch (e) { return []; }
   }) as Array<{ url: string; body: string; headers: any }>;
+}
+
+// URL des reponses deja rendues par le faux serveur (y compris les reponses lentes).
+export async function fetchDone(page: Page) {
+  return await page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('mgrFetchDone') || '[]'); } catch (e) { return []; }
+  }) as string[];
 }
 
 export async function noHorizontalScroll(page: Page) {

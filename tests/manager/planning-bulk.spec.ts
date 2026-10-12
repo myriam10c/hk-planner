@@ -17,17 +17,24 @@ async function pick(page: Page, mobile: boolean, key: string, day: string, force
   await card(page, key).click({ force });
 }
 
-test('Select : mode selection, la carte se coche sans ouvrir la fiche, Cancel vide tout', async ({ page }, info) => {
+test('Select : mode selection, la carte se coche sans ouvrir la fiche, Done selecting vide tout', async ({ page }, info) => {
   await boot(page, []);
   await expect(selectBtn(page)).toHaveText('Select');
+  // Nom stable, sans aria-pressed ; le compte vit dans un noeud aria-live persistant.
+  await expect(selectBtn(page)).not.toHaveAttribute('aria-pressed', /.*/);
+  const live = page.locator('.pl-live[aria-live="polite"]');
+  await expect(live).toHaveCount(1);
+  await live.evaluate((el) => { (el as any).__mark = 1; });
   await selectBtn(page).click();
-  await expect(selectBtn(page)).toHaveText('Cancel');
+  await expect(selectBtn(page)).toHaveText('Done selecting');
   await pick(page, isMobile(info), '2026-10-09_Bo Ray', '2026-10-09');
   await expect(card(page, '2026-10-09_Bo Ray')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
   await expect(bar(page)).toContainText('1 selected');
   await card(page, '2026-10-09_Cy Doe').click();
   await expect(bar(page)).toContainText('2 selected');
+  await expect(live).toHaveText('2 selected');
+  expect(await live.evaluate((el) => (el as any).__mark)).toBe(1);
   await card(page, '2026-10-09_Cy Doe').click();
   await expect(card(page, '2026-10-09_Cy Doe')).toHaveAttribute('aria-pressed', 'false');
   await expect(bar(page)).toContainText('1 selected');
@@ -46,7 +53,7 @@ test('Clear dans la barre : vide la selection, reste en mode selection', async (
   await pick(page, isMobile(info), '2026-10-09_Bo Ray', '2026-10-09');
   await bar(page).getByRole('button', { name: 'Clear' }).click();
   await expect(bar(page)).toHaveCount(0);
-  await expect(selectBtn(page)).toHaveText('Cancel');
+  await expect(selectBtn(page)).toHaveText('Done selecting');
   await expect(card(page, '2026-10-09_Bo Ray')).toHaveAttribute('aria-pressed', 'false');
 });
 
@@ -123,10 +130,10 @@ test('Assign groupe : conge grise, une ecriture par menage avec sa cle, toast et
   await expect(page.locator('#toast')).toContainText('2 cleanings back to their previous assignment');
 });
 
-test('echec partiel : K of N, appartement et message du serveur, Undo seulement pour les reussis', async ({ page }, info) => {
+test('echec partiel (refus 4xx) : Not assigned avec le message du serveur, le lot continue, Undo seulement pour les reussis', async ({ page }, info) => {
   await boot(page, [
     { match: 'action=assignCleaner', status: 200, body: OK, once: true },
-    { match: 'action=assignCleaner', status: 500, body: { error: 'Cleaner already busy' }, once: true },
+    { match: 'action=assignCleaner', status: 409, body: { error: 'Cleaner already busy' }, once: true },
     { match: 'action=assignCleaner', status: 200, body: OK },
   ]);
   await selectBtn(page).click();
@@ -139,6 +146,11 @@ test('echec partiel : K of N, appartement et message du serveur, Undo seulement 
     '2 of 3 assigned to Elite Cleaning. Not assigned: Apt 909 · Bloom Height (Cleaner already busy).');
   expect((await writes(page, 'assignCleaner')).map((b) => b.reservation_key))
     .toEqual(['2026-10-09_Bo Ray', '2026-10-09_Cy Doe', '2026-10-09_Di Fox']);
+  // Le menage refuse reste seul coche, en mode selection.
+  await expect(selectBtn(page)).toHaveText('Done selecting');
+  await expect(bar(page)).toContainText('1 selected');
+  await expect(card(page, '2026-10-09_Cy Doe')).toHaveAttribute('aria-pressed', 'true');
+  await expect(card(page, '2026-10-09_Bo Ray')).toHaveAttribute('aria-pressed', 'false');
   await page.locator('#toast [data-undo]').click();
   await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(5);
   const all = await writes(page, 'assignCleaner');
@@ -168,4 +180,191 @@ test('lecture seule (cache perime) : pas de bouton Select', async ({ page }) => 
   await expect(page.locator('main .banner')).toContainText('Data from 10:00');
   await expect(page.locator('.pj').first()).toBeVisible();
   await expect(selectBtn(page)).toHaveCount(0);
+});
+
+// Cinq menages sans personne le vendredi 9 (Bo Ray, Cy Doe et trois de plus).
+function fiveBody() {
+  const body = planningBody();
+  const base = body.jobs.find((j: any) => j.key === '2026-10-09_Cy Doe');
+  for (const [k, apt] of [['Ja Ke', '701'], ['Li Mu', '702'], ['No Op', '703']]) {
+    body.jobs.push({ ...base, key: '2026-10-09_' + k, listingId: 'L' + apt, apt, bld: 'Tower Q', guest: k, tone: 'bad', word: 'Unassigned' });
+  }
+  return body;
+}
+
+test('reseau coupe pendant le lot : progression, arret net, Not confirmed, echecs gardes coches, nouvel essai avec la meme cle', async ({ page }, info) => {
+  await boot(page, [
+    { match: 'action=assignCleaner', status: 200, body: OK, once: true, delay: 1200 },
+    { match: 'action=assignCleaner', status: 0, body: {}, fail: true, once: true, delay: 1200 },
+    { match: 'action=assignCleaner', status: 200, body: OK },
+  ]);
+  await selectBtn(page).click();
+  await pick(page, isMobile(info), '2026-10-09_Bo Ray', '2026-10-09');
+  await card(page, '2026-10-09_Cy Doe').click();
+  await card(page, '2026-10-09_Di Fox').click();
+  await bar(page).getByRole('button', { name: 'Assign' }).click();
+  const sh = page.locator('#sheet');
+  await sh.locator('[data-pa="bulk-pick"][data-id="12"]').click();
+  await expect(sh.locator('#bulkProg')).toHaveText('Assigning 1 of 3…');
+  await expect(sh.locator('#bulkProg')).toHaveAttribute('role', 'status');
+  // Pendant le lot, une carte ne bouge pas.
+  await page.evaluate(() => (document.querySelector('.pj[data-job="2026-10-09_Bo Ray"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await expect(page.locator('#toast')).toContainText('Saving, wait a second.');
+  await expect(sh.locator('#bulkProg')).toHaveText('Assigning 2 of 3…');
+  await expect(page.locator('#toast')).toContainText(
+    '1 of 3 assigned to Elite Cleaning. Not confirmed: Apt 909 · Bloom Height, Apt 805 · Azizi Riviera 39.');
+  // Le troisieme n'a pas ete envoye.
+  const w = await writes(page, 'assignCleaner');
+  expect(w.map((b) => b.reservation_key)).toEqual(['2026-10-09_Bo Ray', '2026-10-09_Cy Doe']);
+  await expect(sh).toHaveAttribute('aria-hidden', 'true');
+  await expect(selectBtn(page)).toHaveText('Done selecting');
+  await expect(bar(page)).toContainText('2 selected');
+  await expect(card(page, '2026-10-09_Cy Doe')).toHaveAttribute('aria-pressed', 'true');
+  await expect(card(page, '2026-10-09_Di Fox')).toHaveAttribute('aria-pressed', 'true');
+  await expect(card(page, '2026-10-09_Bo Ray')).toHaveAttribute('aria-pressed', 'false');
+  // Nouvel essai : Assign puis un toucher ; Cy Doe reprend sa cle (issue inconnue).
+  await bar(page).getByRole('button', { name: 'Assign' }).click();
+  await sh.locator('[data-pa="bulk-pick"][data-id="12"]').click();
+  await expect(page.locator('#toast')).toContainText('2 cleanings assigned to Elite Cleaning');
+  const all = await writes(page, 'assignCleaner');
+  expect(all.map((b) => b.reservation_key)).toEqual(['2026-10-09_Bo Ray', '2026-10-09_Cy Doe', '2026-10-09_Cy Doe', '2026-10-09_Di Fox']);
+  expect(all[2].idem).toBe(all[1].idem);
+  expect(all[3].idem).toMatch(IDEM);
+  await expect(selectBtn(page)).toHaveText('Select');
+});
+
+test('erreur 5xx : Not confirmed, le lot continue ; au plus trois appartements nommes puis and N more', async ({ page }) => {
+  await boot(page, [
+    { match: 'action=assignCleaner', status: 502, body: { error: 'Bad gateway' } },
+  ], fiveBody());
+  await selectBtn(page).click();
+  await page.getByRole('button', { name: 'Select all unassigned' }).click();
+  await expect(bar(page)).toContainText('5 selected');
+  await bar(page).getByRole('button', { name: 'Assign' }).click();
+  await page.locator('#sheet [data-pa="bulk-pick"][data-id="10"]').click();
+  await expect(page.locator('#toast')).toHaveText(
+    '0 of 5 assigned to Pionah. Not confirmed: Apt 103 · Damac Reva, Apt 909 · Bloom Height, Apt 701 · Tower Q and 2 more.');
+  expect((await writes(page, 'assignCleaner')).length).toBe(5);
+  await expect(page.locator('#toast [data-undo]')).toHaveCount(0);
+  await expect(bar(page)).toContainText('5 selected');
+});
+
+test('fiche groupee : avertissement de remplacement, compte du jour ou de la semaine', async ({ page }, info) => {
+  await boot(page, []);
+  const mobile = isMobile(info);
+  await selectBtn(page).click();
+  await pick(page, mobile, '2026-10-09_Bo Ray', '2026-10-09');
+  await card(page, '2026-10-09_Di Fox').click();
+  await bar(page).getByRole('button', { name: 'Assign' }).click();
+  const sh = page.locator('#sheet');
+  await expect(sh).toContainText('Replaces the current cleaner on 1 cleaning.');
+  // Un seul jour : compte de ce jour (Pionah a Di Fox et l'extra le vendredi 9).
+  await expect(sh.locator('[data-pa="bulk-pick"][data-id="10"]')).toContainText('2 jobs that day');
+  await expect(sh.locator('[data-pa="bulk-pick"][data-id="12"]')).toContainText('0 jobs that day');
+  await sh.locator('[data-close]').first().click();
+  await pick(page, mobile, '2026-10-10_Fa Ho', '2026-10-10');
+  await bar(page).getByRole('button', { name: 'Assign' }).click();
+  await expect(sh).toContainText('Replaces the current cleaner on 2 cleanings.');
+  await expect(sh.locator('[data-pa="bulk-pick"][data-id="12"]')).toContainText('1 job this week');
+});
+
+test('Select all unassigned suit le filtre de personne', async ({ page }, info) => {
+  await boot(page, []);
+  await page.locator('[data-filter="10"]').click();
+  await selectBtn(page).click();
+  await page.getByRole('button', { name: 'Select all unassigned' }).click();
+  await expect(bar(page)).toHaveCount(0);
+  await page.locator('[data-filter="none"]').click();
+  await page.getByRole('button', { name: 'Select all unassigned' }).click();
+  await expect(bar(page)).toContainText('2 selected');
+  await expect(card(page, '2026-10-09_Bo Ray')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('Undo d un lot : une nouvelle selection faite entre-temps reste', async ({ page }, info) => {
+  await boot(page, [{ match: 'action=assignCleaner', status: 200, body: OK }]);
+  const mobile = isMobile(info);
+  await selectBtn(page).click();
+  await pick(page, mobile, '2026-10-09_Bo Ray', '2026-10-09');
+  await bar(page).getByRole('button', { name: 'Assign' }).click();
+  await page.locator('#sheet [data-pa="bulk-pick"][data-id="10"]').click();
+  await expect(page.locator('#toast')).toContainText('1 cleaning assigned to Pionah');
+  await expect(selectBtn(page)).toHaveText('Select');
+  await selectBtn(page).click();
+  await card(page, '2026-10-09_Cy Doe').click();
+  await expect(bar(page)).toContainText('1 selected');
+  await page.locator('#toast [data-undo]').click();
+  await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
+  await expect(page.locator('#toast')).toContainText('1 cleaning back to their previous assignment');
+  await expect(selectBtn(page)).toHaveText('Done selecting');
+  await expect(bar(page)).toContainText('1 selected');
+  await expect(card(page, '2026-10-09_Cy Doe')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('clavier : le focus reste sur Select, sur la carte cochee et sur Select all apres le repeint', async ({ page }, info) => {
+  await boot(page, []);
+  if (isMobile(info)) await page.locator('.pl-strip [data-day="2026-10-09"]').click();
+  await selectBtn(page).focus();
+  await page.keyboard.press('Enter');
+  await expect(selectBtn(page)).toHaveText('Done selecting');
+  await expect(selectBtn(page)).toBeFocused();
+  await card(page, '2026-10-09_Cy Doe').focus();
+  await page.keyboard.press('Enter');
+  await expect(card(page, '2026-10-09_Cy Doe')).toHaveAttribute('aria-pressed', 'true');
+  await expect(card(page, '2026-10-09_Cy Doe')).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(card(page, '2026-10-09_Cy Doe')).toHaveAttribute('aria-pressed', 'false');
+  await expect(card(page, '2026-10-09_Cy Doe')).toBeFocused();
+  const all = page.locator('[data-select-all]');
+  await all.focus();
+  await page.keyboard.press('Enter');
+  await expect(bar(page)).toContainText('2 selected');
+  await expect(all).toBeFocused();
+});
+
+test('donnees de plus de 60 s : la semaine est relue avant la fiche groupee', async ({ page }, info) => {
+  const later = planningBody();
+  later.jobs.find((j: any) => j.key === '2026-10-09_Bo Ray').assigned = [12];
+  await bootMgr(page, [me(MANAGER), { ...PLAN(), once: true }, PLAN(later)], { email: true, hash: HASH, clock: PNOW });
+  await selectBtn(page).click();
+  await pick(page, isMobile(info), '2026-10-09_Bo Ray', '2026-10-09');
+  await page.clock.setFixedTime(new Date(PNOW.getTime() + 61_000));
+  await bar(page).getByRole('button', { name: 'Assign' }).click();
+  const sh = page.locator('#sheet');
+  await expect(sh).toHaveAttribute('aria-hidden', 'false');
+  expect((await fetchLog(page)).filter((l) => l.url.includes('action=mgr.planning')).length).toBe(2);
+  // La fiche est construite sur la reponse fraiche : Bo Ray a maintenant quelqu'un.
+  await expect(sh).toContainText('Replaces the current cleaner on 1 cleaning.');
+});
+
+test('donnees de plus de 60 s, relecture en echec : anciennes donnees gardees, aucune fiche, Reconnect', async ({ page }, info) => {
+  await bootMgr(page, [me(MANAGER), { ...PLAN(), once: true }, { match: 'action=mgr.planning', status: 0, body: {}, fail: true }],
+    { email: true, hash: HASH, clock: PNOW });
+  await selectBtn(page).click();
+  await pick(page, isMobile(info), '2026-10-09_Bo Ray', '2026-10-09');
+  await page.clock.setFixedTime(new Date(PNOW.getTime() + 61_000));
+  await bar(page).getByRole('button', { name: 'Assign' }).click();
+  await expect(page.locator('#toast')).toContainText('Reconnect to make changes.');
+  await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
+  await expect(card(page, '2026-10-09_Bo Ray')).toBeVisible();
+  expect((await writes(page, 'assignCleaner')).length).toBe(0);
+});
+
+test('donnees de plus de 60 s : Assign d un seul menage relit la semaine avant le choix', async ({ page }, info) => {
+  await bootMgr(page, [me(MANAGER), PLAN()], { email: true, hash: HASH, clock: PNOW });
+  if (isMobile(info)) await page.locator('.pl-strip [data-day="2026-10-09"]').click();
+  await card(page, '2026-10-09_Bo Ray').click();
+  await page.clock.setFixedTime(new Date(PNOW.getTime() + 61_000));
+  await page.locator('#sheet [data-pa="assign"]').click();
+  await expect(page.locator('#sheet h2')).toHaveText('Assign');
+  expect((await fetchLog(page)).filter((l) => l.url.includes('action=mgr.planning')).length).toBe(2);
+});
+
+test('retour sur l onglet : la semaine affichee est relue', async ({ page }) => {
+  await boot(page, []);
+  await expect(page.locator('.pj').first()).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(async () => (await fetchLog(page)).filter((l) => l.url.includes('action=mgr.planning')).length).toBe(2);
 });

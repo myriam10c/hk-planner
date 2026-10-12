@@ -24,8 +24,9 @@ function header(s) {
   const asof = s.data ? '<div class="asof' + (s.stale ? ' stale' : '') + '">Data as of ' + esc(dubaiTime(s.data.generatedAt)) + '</div>' : '';
   const add = s.data && !s.ro ? '<button class="btn sm primary" type="button" data-add-extra>Add extra</button>' : '';
   // Mode selection (assignation groupee) : jamais en lecture seule.
+  // Nom stable : le libelle dit l'etat, sans aria-pressed (lu « Done selecting », jamais « Cancel, pressed »).
   const sel = s.data && !s.ro
-    ? '<button class="btn sm" type="button" data-select aria-pressed="' + (s.sel ? 'true' : 'false') + '">' + (s.sel ? 'Cancel' : 'Select') + '</button>'
+    ? '<button class="btn sm" type="button" data-select>' + (s.sel ? 'Done selecting' : 'Select') + '</button>'
     : '';
   return '<header class="top pl-top"><div><h1>Planning</h1><div class="date">' + esc(weekLabel(s.start)) + '</div>' + asof + '</div>'
     + '<div class="pl-tools"><div class="pl-nav" role="group" aria-label="Week">'
@@ -129,7 +130,8 @@ function selectRow(s) {
 }
 function bulkBar(s) {
   if (!s.sel || s.ro || !s.picked.size) return '';
-  return '<div class="pl-bulk" role="region" aria-label="Selection"><span class="pl-bulk-n" role="status">' + s.picked.size + ' selected</span>'
+  // Le compte annonce vit dans un noeud aria-live persistant (planning.js), pas ici.
+  return '<div class="pl-bulk" role="region" aria-label="Selection"><span class="pl-bulk-n" aria-hidden="true">' + s.picked.size + ' selected</span>'
     + '<button class="btn primary" type="button" data-bulk="assign">Assign</button>'
     + '<button class="btn" type="button" data-bulk="clear">Clear</button></div>';
 }
@@ -212,24 +214,32 @@ export function assignSheet(d, j, ro, s) {
 
 // Assignation groupee : un toucher sur une personne assigne tous les menages coches.
 // Une personne en conge l'un des jours coches est grisee avec le premier de ces jours.
+// Tous les menages sur un meme jour : compte de ce jour-la ; sinon compte de la semaine.
 export function bulkSheet(d, jobs, ro) {
   const n = jobs.length;
   const title = 'Assign ' + n + ' cleaning' + (n === 1 ? '' : 's');
   if (ro) return head(title, weekLabel(d.start)) + '<div class="sheet-b"></div>' + roFoot();
   const dates = [...new Set(jobs.map((j) => j.date))].sort();
-  const week = {};
-  for (const x of d.jobs) if (!x.cancelled) for (const id of x.assigned) week[id] = (week[id] || 0) + 1;
+  const oneDay = dates.length === 1 ? dates[0] : null;
+  const count = {};
+  for (const x of d.jobs) {
+    if (x.cancelled || (oneDay && x.date !== oneDay)) continue;
+    for (const id of x.assigned) count[id] = (count[id] || 0) + 1;
+  }
   const opts = d.people.filter((p) => p.assignable).map((p) => {
     const offDay = dates.find((date) => { const day = d.days.find((x) => x.date === date); return !!day && day.off.includes(p.id); });
-    const k = week[p.id] || 0;
-    const sub = offDay ? 'On leave ' + dayShort(offDay) : k + ' job' + (k === 1 ? '' : 's') + ' this week';
+    const k = count[p.id] || 0;
+    const sub = offDay ? 'On leave ' + dayShort(offDay) : k + ' job' + (k === 1 ? '' : 's') + (oneDay ? ' that day' : ' this week');
     return '<button type="button" data-pa="bulk-pick" data-id="' + p.id + '"' + (offDay ? ' disabled data-off' : '') + '>'
       + '<span class="av pc-' + esc(p.slot) + '" aria-hidden="true">' + esc(initials(p.name)) + '</span>'
       + '<span><b>' + esc(p.name) + '</b><small>' + esc(sub) + '</small></span></button>';
   }).join('');
   const days = dates.map((x) => dayShort(x)).join(', ');
+  const taken = jobs.filter((j) => j.assigned.length).length;
+  const warn = taken ? '<p class="sheet-warn" role="note">Replaces the current cleaner on ' + taken + ' cleaning' + (taken === 1 ? '' : 's') + '.</p>' : '';
   return head(title, days)
-    + '<div class="sheet-b"><p class="note">Tap a person to assign all selected cleanings to them.</p><div class="pick">' + opts + '</div></div>'
+    + '<div class="sheet-b"><p class="note">Tap a person to assign all selected cleanings to them.</p>' + warn
+    + '<p class="pl-prog" role="status" id="bulkProg"></p><div class="pick">' + opts + '</div></div>'
     + '<div class="sheet-f"><button class="btn" type="button" data-close>Cancel</button></div>';
 }
 

@@ -4,16 +4,18 @@
 // gardee sur l'appareil, en lecture seule). Gestes : les actions existantes du
 // proxy, une cle d'idempotence par geste, jamais d'auteur envoye.
 import { get, post } from '/manager/api.js';
-import { createGestures } from '/manager/gesture.js';
+import { createGestures, uncertain } from '/manager/gesture.js';
 import { clearCache, loadCache, saveCache } from '/manager/today-cache.js';
 import {
-  addDays, closeSheet, dubaiTime, dubaiToday, esc, openSheet, placeLabel, sheetBusy, sheetError, sheetIsOpen, toast,
+  addDays, closeSheet, dubaiTime, dubaiToday, esc, focusBack, focusMark, openSheet, placeLabel, sheetBusy, sheetError, sheetIsOpen, toast,
 } from '/manager/ui/dom.js';
-import { dayShort, defaultDay, LAUNDRY_ITEMS, laundryParse, namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
+import { dayShort, defaultDay, filterJobs, LAUNDRY_ITEMS, laundryParse, namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
 import * as V from '/manager/screens/planning-view.js';
 
 const KEY = 'mgrPlanningCache';
 const RO_LINE = 'Reconnect to make changes.';
+// Au-dela, la semaine est relue avant d'ouvrir un choix de personne.
+const STALE_MS = 60000;
 
 export async function renderPlanning(ctx) {
   const main = ctx.main;
@@ -22,7 +24,7 @@ export async function renderPlanning(ctx) {
   const st = {
     start: weekStartOf(today), today, day: today, data: null, savedAt: 0, fresh: false,
     loading: true, error: null, busy: false, filter: null, seq: 0, sheet: null, pick: new Set(),
-    sel: false, picked: new Set(),
+    sel: false, picked: new Set(), bulk: false, fetchedAt: 0,
   };
   const gestures = createGestures();
   // Assignation groupee : un suivi de geste par menage, garde pour la vie de l'ecran.
@@ -61,13 +63,26 @@ export async function renderPlanning(ctx) {
     return '<div class="banner" role="status"><span>Data from ' + esc(when) + ', updating.</span></div>';
   }
 
+  // Compte de la selection annonce aux lecteurs d'ecran : un seul noeud pour la vie de l'ecran.
+  const live = document.createElement('p');
+  live.className = 'pl-live';
+  live.setAttribute('aria-live', 'polite');
+  document.body.appendChild(live);
+  function updateLive() {
+    const t = st.sel && !readOnly() && st.picked.size ? st.picked.size + ' selected' : '';
+    if (live.textContent !== t) live.textContent = t;
+  }
+
   function paint() {
     if (!ctx.isCurrent()) return;
+    const mark = focusMark(main);
     main.innerHTML = V.screenHtml({
       data: st.data, start: st.start, today: st.today, day: st.day, wide: mq.matches, filter: st.filter,
       loading: st.loading, error: st.error, banner: banner(), stale: !st.fresh, ro: readOnly(),
       sel: st.sel && !readOnly(), picked: st.picked,
     });
+    focusBack(main, mark);
+    updateLive();
   }
 
   // true quand l'erreur a deja ete traitee par une sortie de l'ecran.
@@ -93,6 +108,7 @@ export async function renderPlanning(ctx) {
       if (mine !== st.seq || !ctx.isCurrent()) return;
       st.data = d;
       st.savedAt = Date.now();
+      st.fetchedAt = st.savedAt;
       st.fresh = true;
       saveCache(KEY, d, st.savedAt);
     } catch (e) {
@@ -186,11 +202,31 @@ export async function renderPlanning(ctx) {
     return write(j.key, 'setDone', { key: j.key, done: val }, where + (val ? ' marked done' : ' back to not done'),
       () => write(j.key, 'setDone', { key: j.key, done: !val }, where + (val ? ' back to not done' : ' marked done')));
   }
-  ACT.assign = (j) => {
+  // Semaine lue il y a plus d'une minute : relue avant d'ouvrir un choix de personne.
+  // Relecture en echec : anciennes donnees gardees, mais aucune ecriture.
+  let reloading = false;
+  async function freshEnough() {
+    if (readOnly()) { toast(RO_LINE); return false; }
+    if (Date.now() - st.fetchedAt <= STALE_MS) return true;
+    if (reloading) return false;
+    const start = st.start;
+    reloading = true;
+    await refresh();
+    reloading = false;
+    if (!ctx.isCurrent() || st.start !== start) return false;
+    if (readOnly()) { toast(RO_LINE); return false; }
+    return true;
+  }
+  ACT.assign = async (j) => {
     if (!j) return;
-    if (readOnly()) { toast(RO_LINE); return; }
-    st.pick = new Set(j.assigned);
-    show(j.key, 'assign');
+    const key = j.key;
+    if (!(await freshEnough())) return;
+    if (!heldHere(key)) return;
+    const cur = job(key);
+    if (!cur) { closeSheet(); return; }
+    if (!V.selectable(cur)) { show(key, 'detail'); return; }
+    st.pick = new Set(cur.assigned);
+    show(key, 'assign');
   };
   ACT.toggle = (j, el) => {
     if (!j || el.disabled) return;
@@ -303,43 +339,69 @@ export async function renderPlanning(ctx) {
   };
 
   // Assignation groupee (Select) : ecritures assignCleaner l'une apres l'autre, chacune
-  // avec sa cle ; on continue apres un refus et on rend compte a la fin.
+  // avec sa cle. Un refus du serveur (4xx) n'arrete pas le lot ; reseau coupe ou delai
+  // depasse l'arrete : le reste n'est pas envoye et compte comme non confirme.
   function pickedJobs() {
     if (!st.data) return [];
     return st.data.jobs.filter((j) => st.picked.has(j.key) && V.selectable(j))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   }
   const many = (n) => n + ' cleaning' + (n === 1 ? '' : 's');
-  // items : [{ j, ids, service }] ; rend { ok: [items], failed: [{ item, message }] } ou null (sortie d'ecran).
-  async function runBulk(items) {
+  function progress(verb, i, n) {
+    const el = document.getElementById('bulkProg');
+    if (el) el.textContent = verb + ' ' + i + ' of ' + n + '…';
+  }
+  // items : [{ j, ids, service }] ; rend { ok: [items], failed: [{ item, message, unsure }] } ou null (sortie d'ecran).
+  // unsure : l'ecriture a peut-etre eu lieu (delai, reseau, 5xx) ou n'a pas ete tentee.
+  async function runBulk(items, verb) {
     const ok = [], failed = [];
-    for (const it of items) {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      progress(verb, i + 1, items.length);
       const body = { reservation_key: it.j.key, cleaner_ids: it.ids, mode: 'set', service_type: it.service };
       try {
         await gesturesFor(it.j.key).run('assignCleaner|' + JSON.stringify(body), (idem) => post('assignCleaner', { ...body, idem }));
         ok.push(it);
       } catch (e) {
         if (handleAccess(e)) return null;
-        failed.push({ item: it, message: e.message });
+        failed.push({ item: it, message: e.message, unsure: uncertain(e) });
+        if (e.kind === 'offline' || e.kind === 'timeout') {
+          for (const rest of items.slice(i + 1)) failed.push({ item: rest, message: '', unsure: true });
+          break;
+        }
       }
     }
     return { ok, failed };
   }
-  function notAssigned(failed) {
-    return failed.map((f) => (placeLabel(f.item.j) || 'Apartment') + ' (' + f.message + ')').join('; ');
+  // Au plus trois appartements nommes par partie, puis « and N more ».
+  function places(list, withMsg) {
+    const names = list.slice(0, 3).map((f) => (placeLabel(f.item.j) || 'Apartment') + (withMsg && f.message ? ' (' + f.message + ')' : ''));
+    return names.join(', ') + (list.length > 3 ? ' and ' + (list.length - 3) + ' more' : '');
   }
-  async function bulkWrite(items, report) {
+  function failText(failed, refusedWord) {
+    const unsure = failed.filter((f) => f.unsure), refused = failed.filter((f) => !f.unsure);
+    return (unsure.length ? ' Not confirmed: ' + places(unsure, false) + '.' : '')
+      + (refused.length ? ' ' + refusedWord + ': ' + places(refused, true) + '.' : '');
+  }
+  // own : lot lance depuis la selection. Apres un echec, seuls les menages en echec restent
+  // coches (mode selection garde) pour un nouvel essai en un toucher. Un Undo ne touche
+  // jamais a la selection (elle peut etre une nouvelle selection du manager).
+  async function bulkWrite(items, report, own) {
     if (st.busy) { toast('Saving, wait a second.'); return; }
     if (readOnly()) { toast(RO_LINE); return; }
     st.busy = true;
+    st.bulk = true;
     sheetBusy(true);
-    const r = await runBulk(items);
+    const r = await runBulk(items, own ? 'Assigning' : 'Restoring');
     st.busy = false;
+    st.bulk = false;
     unbusy();
     if (!r) return;
     if (st.sheet && st.sheet.key === '__bulk') closeSheet();
     report(r);
-    endSelect();
+    if (own) {
+      if (r.failed.length) { st.sel = true; st.picked = new Set(r.failed.map((f) => f.item.j.key)); } else endSelect();
+    }
     refresh();
   }
   function bulkAssign(id) {
@@ -350,21 +412,28 @@ export async function renderPlanning(ctx) {
     bulkWrite(items, (r) => {
       const undo = r.ok.length ? () => bulkUndo(r.ok) : undefined;
       if (!r.failed.length) { toast(many(r.ok.length) + ' assigned to ' + who, undo); return; }
-      toast(r.ok.length + ' of ' + items.length + ' assigned to ' + who + '. Not assigned: ' + notAssigned(r.failed) + '.', undo);
-    });
+      toast(r.ok.length + ' of ' + items.length + ' assigned to ' + who + '.' + failText(r.failed, 'Not assigned'), undo);
+    }, true);
   }
   // Undo : chaque menage reussi revient a sa propre liste d'avant (meme type de service).
   function bulkUndo(done) {
     const items = done.map((it) => ({ j: it.j, ids: it.prev, service: it.service }));
     bulkWrite(items, (r) => {
       if (!r.failed.length) { toast(many(r.ok.length) + ' back to their previous assignment'); return; }
-      toast(r.ok.length + ' of ' + items.length + ' back to their previous assignment. Not restored: ' + notAssigned(r.failed) + '.');
-    });
+      toast(r.ok.length + ' of ' + items.length + ' back to their previous assignment.' + failText(r.failed, 'Not restored'));
+    }, false);
   }
   ACT['bulk-pick'] = (j, el) => {
     if (el.disabled) return;
     bulkAssign(Number(el.getAttribute('data-id')));
   };
+  async function openBulk() {
+    if (!(await freshEnough())) return;
+    const jobs = pickedJobs();
+    if (!jobs.length) return;
+    st.sheet = { key: '__bulk', view: 'bulk' };
+    openSheet(V.bulkSheet(st.data, jobs, readOnly()));
+  }
   function onSelectClick(el) {
     if (el.hasAttribute('data-select')) {
       if (st.sel) endSelect(); else if (!readOnly()) st.sel = true;
@@ -372,8 +441,9 @@ export async function renderPlanning(ctx) {
       return;
     }
     if (el.hasAttribute('data-select-all')) {
-      const list = mq.matches ? st.data.jobs : st.data.jobs.filter((j) => j.date === st.day);
-      for (const j of list) if (V.selectable(j) && !j.assigned.length) st.picked.add(j.key);
+      // Meme liste que celle affichee : le jour (telephone) ou la semaine (ordinateur), filtre de personne compris.
+      const shown = mq.matches ? st.data.jobs : st.data.jobs.filter((j) => j.date === st.day);
+      for (const j of filterJobs(shown, st.filter)) if (V.selectable(j) && !j.assigned.length) st.picked.add(j.key);
       paint();
       return;
     }
@@ -381,10 +451,8 @@ export async function renderPlanning(ctx) {
     if (b === 'clear') { st.picked = new Set(); paint(); return; }
     if (b === 'assign') {
       if (readOnly()) { toast(RO_LINE); return; }
-      const jobs = pickedJobs();
-      if (!jobs.length) return;
-      st.sheet = { key: '__bulk', view: 'bulk' };
-      openSheet(V.bulkSheet(st.data, jobs, readOnly()));
+      if (!pickedJobs().length) return;
+      openBulk();
     }
   }
 
@@ -400,6 +468,11 @@ export async function renderPlanning(ctx) {
       const f = el.getAttribute('data-filter');
       st.filter = f === 'all' || String(st.filter) === f ? null : f;
       paint();
+      return;
+    }
+    // Pendant un lot : ni carte ni selection ne bougent.
+    if (st.bulk && (el.hasAttribute('data-job') || el.hasAttribute('data-select') || el.hasAttribute('data-select-all') || el.hasAttribute('data-bulk'))) {
+      toast('Saving, wait a second.');
       return;
     }
     if (el.hasAttribute('data-select') || el.hasAttribute('data-select-all') || el.hasAttribute('data-bulk')) { onSelectClick(el); return; }
@@ -426,11 +499,16 @@ export async function renderPlanning(ctx) {
   }
 
   const onMq = () => paint();
+  // Retour sur l'onglet : la semaine affichee est relue (un autre manager a pu assigner).
+  const onVis = () => { if (document.visibilityState === 'visible' && !st.busy && ctx.isCurrent()) refresh(); };
   document.addEventListener('click', onClick);
+  document.addEventListener('visibilitychange', onVis);
   mq.addEventListener('change', onMq);
   ctx.onLeave(() => {
     document.removeEventListener('click', onClick);
+    document.removeEventListener('visibilitychange', onVis);
     mq.removeEventListener('change', onMq);
+    live.remove();
   });
   await refresh();
 }

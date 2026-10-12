@@ -3,7 +3,7 @@
 import { get, post } from '/manager/api.js';
 import { clearToday, loadToday, saveToday } from '/manager/today-cache.js';
 import { createGestures } from '/manager/gesture.js';
-import { addDays, announceBadge, closeSheet, dubaiTime, esc, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
+import { addDays, announceBadge, closeSheet, dubaiTime, esc, focusBack, focusMark, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { aheadPickerSheet, arrivalSheet, boardHtml, jobSheet, pickerSheet } from '/manager/screens/today-view.js';
 import { namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
 import { createProblemPanel } from '/manager/problem-panel.js';
@@ -16,6 +16,9 @@ function dubaiParts(ms) {
 }
 function dubaiDay(ms) { const p = dubaiParts(ms); return p.year + '-' + p.month + '-' + p.day; }
 
+// Au-dela, la semaine d'un autre jour est relue avant d'ouvrir le choix de personne.
+const STALE_MS = 60000;
+
 function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div></header>' + inner; }
 
 export async function renderToday(ctx) {
@@ -23,7 +26,8 @@ export async function renderToday(ctx) {
   // day : jour choisi dans « Who does what » (null = aujourd'hui).
   const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null, day: null };
   // Semaines mgr.planning lues pour les autres jours, en memoire pour la vie de l'ecran :
-  // start -> { data, fresh, loading, error, seq }. wseq : garde contre une reponse tardive.
+  // start -> { data, fresh, loading, error, seq, at }. wseq : garde contre une reponse tardive.
+  // at : heure de la derniere reponse fraiche.
   const weeks = {};
   let wseq = 0;
   const gestures = createGestures();
@@ -60,18 +64,26 @@ export async function renderToday(ctx) {
     return h;
   }
 
-  // Jours du bloc : aujourd'hui (Dubai), demain, puis cinq jours.
+  // Jours du bloc : le jour des donnees chargees (Today), puis six jours. Partir du jour
+  // des donnees (et pas de l'horloge) : apres minuit, la puce du jour reste celle du bloc
+  // affiche, et son libelle suit l'horloge (jamais « Today » pour le bloc d'hier).
   function aheadState() {
-    const today = dubaiDay(Date.now());
-    const days = [0, 1, 2, 3, 4, 5, 6].map((n) => addDays(today, n));
-    const sel = st.day && days.includes(st.day) ? st.day : today;
-    return { days, sel, week: sel === today ? null : weeks[weekStartOf(sel)] || null };
+    const clock = dubaiDay(Date.now());
+    const base = st.data && st.data.day ? st.data.day : clock;
+    const days = [0, 1, 2, 3, 4, 5, 6].map((n) => addDays(base, n));
+    const sel = st.day && days.includes(st.day) ? st.day : base;
+    return { days, sel, clock, week: sel === base ? null : weeks[weekStartOf(sel)] || null };
   }
   function otherDay() { const a = aheadState(); return a.sel === a.days[0] ? null : a.sel; }
 
   function paint() {
     if (!ctx.isCurrent()) return;
-    if (st.data) { main.innerHTML = boardHtml(st.data, Date.now(), banner(), !st.fresh, readOnly(), aheadState()); return; }
+    const mark = focusMark(main);
+    if (st.data) {
+      main.innerHTML = boardHtml(st.data, Date.now(), banner(), !st.fresh, readOnly(), aheadState());
+      focusBack(main, mark);
+      return;
+    }
     if (st.loading) { main.innerHTML = shellHtml('<p class="boot" role="status">Loading today…</p>'); return; }
     main.innerHTML = shellHtml('<div class="err-card" role="alert"><p>' + esc(st.error ? st.error.message : 'Could not load.')
       + '</p><button class="btn primary" type="button" data-retry>Retry</button></div>');
@@ -111,7 +123,7 @@ export async function renderToday(ctx) {
   // Semaine d'un autre jour : seule la derniere demande pour cette semaine compte, et
   // l'ecran n'est repeint que si le jour choisi est encore dans cette semaine.
   async function loadWeek(start) {
-    const w = weeks[start] || (weeks[start] = { data: null, fresh: false, loading: false, error: null, seq: 0 });
+    const w = weeks[start] || (weeks[start] = { data: null, fresh: false, loading: false, error: null, seq: 0, at: 0 });
     const mine = ++wseq;
     w.seq = mine;
     w.loading = true;
@@ -122,6 +134,7 @@ export async function renderToday(ctx) {
       if (w.seq !== mine || !ctx.isCurrent()) return;
       w.data = d;
       w.fresh = true;
+      w.at = Date.now();
     } catch (e) {
       if (w.seq !== mine || !ctx.isCurrent()) return;
       if (handleAccess(e)) return;
@@ -152,6 +165,26 @@ export async function renderToday(ctx) {
   }
   // Ecriture sur un autre jour : semaine fraiche obligatoire, cle d'idempotence par geste,
   // jamais d'auteur, puis rechargement de cette semaine (le jour choisi reste).
+  // Choix de personne d'un autre jour : semaine relue d'abord si lue il y a plus d'une minute.
+  // Relecture en echec : anciennes donnees gardees, ecriture refusee.
+  let opening = false;
+  async function openAhead(key) {
+    let t = aheadJob(key);
+    if (!t) return;
+    if (!t.w.fresh) { refuseRo(); return; }
+    if (Date.now() - t.w.at > STALE_MS) {
+      if (opening) return;
+      opening = true;
+      await loadWeek(t.start);
+      opening = false;
+      if (!ctx.isCurrent()) return;
+      t = aheadJob(key);
+      if (!t) return;
+      if (!t.w.fresh) { refuseRo(); return; }
+    }
+    st.sheetKey = t.j.key;
+    openSheet(aheadPickerSheet(t.w.data, t.j));
+  }
   async function aheadWrite(start, key, body, okMsg, undoFn) {
     if (st.busy) { busyToast(); return; }
     const w = weeks[start];
@@ -220,10 +253,12 @@ export async function renderToday(ctx) {
     if (st.busy) { busyToast(); return; }
     if (readOnly()) { refuseRo(); return; }
     st.busy = true;
-    try { await fn(); } catch (e) { toast(e.message); }
+    try { await fn(); } catch (e) { if (!handleAccess(e)) toast(e.message); }
     st.busy = false;
     refresh();
   }
+  // Ecriture du jour : cle d'idempotence par geste (reprise au reessai incertain), jamais d'auteur.
+  const send = (action, body) => () => gestures.run(action + '|' + JSON.stringify(body), (idem) => post(action, { ...body, idem }));
 
   async function write(t, call, okMsg, undoCall) {
     if (st.busy) { busyToast(); return; }
@@ -252,18 +287,18 @@ export async function renderToday(ctx) {
     const prev = t.assigned.slice();
     const service = t.serviceType || 'CHC';
     return write(t,
-      () => post('assignCleaner', { reservation_key: key, cleaner_ids: [Number(id)], mode: 'set', service_type: service }),
+      send('assignCleaner', { reservation_key: key, cleaner_ids: [Number(id)], mode: 'set', service_type: service }),
       placeLabel(t) + ' assigned to ' + nameOf(id),
-      () => post('assignCleaner', { reservation_key: key, cleaner_ids: prev, mode: 'set', service_type: service }));
+      send('assignCleaner', { reservation_key: key, cleaner_ids: prev, mode: 'set', service_type: service }));
   }
 
   function setDone(key, val) {
     const t = targetFor(key);
     if (!t) return;
     return write(t,
-      () => post('setDone', { key, done: val }),
+      send('setDone', { key, done: val }),
       placeLabel(t) + (val ? ' marked done' : ' back to not done'),
-      () => post('setDone', { key, done: !val }));
+      send('setDone', { key, done: !val }));
   }
 
   function onClick(e) {
@@ -281,8 +316,7 @@ export async function renderToday(ctx) {
       if (!t) return;
       if (!t.w.fresh) { refuseRo(); return; }
       if (el.hasAttribute('data-wpick')) { aheadAssign(t.j.key, el.getAttribute('data-wpick')); return; }
-      st.sheetKey = t.j.key;
-      openSheet(aheadPickerSheet(t.w.data, t.j));
+      openAhead(t.j.key);
       return;
     }
     if (el.hasAttribute('data-pick') || el.hasAttribute('data-assign') || el.hasAttribute('data-done')) {
@@ -322,11 +356,19 @@ export async function renderToday(ctx) {
 
   // Fiche et gestes des problemes : meme panneau que l'ecran Problems.
   const panel = createProblemPanel({ readOnly, onChange: () => refresh(), handleAccess });
+  // Retour sur l'onglet : la semaine du jour affiche (autre jour) est relue.
+  const onVis = () => {
+    if (document.visibilityState !== 'visible' || !ctx.isCurrent() || st.busy) return;
+    const d = otherDay();
+    if (d) loadWeek(weekStartOf(d));
+  };
   document.addEventListener('click', onClick);
   document.addEventListener('keydown', onKey);
+  document.addEventListener('visibilitychange', onVis);
   ctx.onLeave(() => {
     document.removeEventListener('click', onClick);
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('visibilitychange', onVis);
     panel.dispose();
   });
   await refresh();

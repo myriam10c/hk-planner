@@ -123,3 +123,21 @@ export function sheetError(msg) {
 export function announceBadge(n) {
   document.dispatchEvent(new CustomEvent('mgr:badge', { detail: { problems: Number(n) || 0 } }));
 }
+
+// Repeint d'un ecran (innerHTML) : le focus clavier revient sur l'element qui porte le
+// meme attribut avec la meme valeur (puce de jour, carte, bouton Select...).
+const FOCUS_ATTRS = ['data-wday', 'data-wassign', 'data-job', 'data-select', 'data-select-all', 'data-bulk', 'data-day', 'data-filter',
+  'data-week', 'data-add-extra', 'data-retry', 'data-wretry'];
+export function focusMark(root) {
+  const a = document.activeElement;
+  if (!a || a === root || !root.contains(a)) return null;
+  for (const k of FOCUS_ATTRS) {
+    if (a.hasAttribute(k)) return '[' + k + '="' + CSS.escape(a.getAttribute(k)) + '"]';
+  }
+  return null;
+}
+export function focusBack(root, mark) {
+  if (!mark) return;
+  const el = root.querySelector(mark);
+  if (el && document.activeElement !== el) el.focus({ preventScroll: true });
+}

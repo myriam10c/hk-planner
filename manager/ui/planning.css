@@ -72,3 +72,6 @@
   background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r-md);box-shadow:var(--shadow);padding:var(--s2) var(--s3)}
 .pl-bulk-n{flex:1 1 auto;font-weight:600;min-width:0}
 @media (min-width:960px){ .pl-bulk{bottom:var(--s4)} }
+.pl-prog{margin:0;font-weight:600;color:var(--ink-2)}
+/* Compte de la selection pour les lecteurs d'ecran : noeud persistant, invisible. */
+.pl-live{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
