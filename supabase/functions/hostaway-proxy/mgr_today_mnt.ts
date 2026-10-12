@@ -26,7 +26,7 @@ export async function loadTodayMaintenance(sb: any, o: {
       readPendingProposals(sb),
       mntPage(sb, "vendors", "id, name, is_active", (x) => x),
     ]);
-    const ctx = { ...mntCtx([], Object.values(o.people), vendorRows, { today: todayDubai(o.nowMs) }), listings: o.listings };
+    const ctx = mntCtx([], Object.values(o.people), vendorRows, { today: todayDubai(o.nowMs), listings: o.listings });
     const c = mntOpenCounts(open);
     return {
       counts: {

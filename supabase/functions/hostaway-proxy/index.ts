@@ -1556,10 +1556,11 @@ Deno.serve(async (req: Request) => {
       return jsonResp(r.body, r.status);
     }
 
-    // Boite Problems : liste filtree et paginee. Memes regles d'acces que Today.
+    // Boite Problems (taches d'equipe) : liste filtree et paginee. Managers et
+    // maintenance (ruling C : une push de tache ouvre #/tasks) ; une reference MNT reste refusee (409).
     if (action === "mgr.problems") {
       const me = await currentUser(sb, req);
-      const acc = mgrAccess(bearerToken(req) !== null, me);
+      const acc = planningAccess(bearerToken(req) !== null, me);
       if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
       const pq = parseInboxQuery(url.searchParams);
       if (!pq.ok) return jsonResp({ error: pq.error }, 400);
@@ -1572,7 +1573,7 @@ Deno.serve(async (req: Request) => {
 
     if (action === "mgr.problem.get") {
       const me = await currentUser(sb, req);
-      const acc = mgrAccess(bearerToken(req) !== null, me);
+      const acc = planningAccess(bearerToken(req) !== null, me);
       if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
       const r = await mgrProblemGet(sb, { ref: url.searchParams.get("ref") ?? "", nowMs: Date.now() });
       return jsonResp(r.body, r.status);
@@ -1583,7 +1584,7 @@ Deno.serve(async (req: Request) => {
     // comme updateTeamTask.
     if (action === "mgr.problem.act") {
       const me = await currentUser(sb, req);
-      const acc = mgrAccess(bearerToken(req) !== null, me);
+      const acc = planningAccess(bearerToken(req) !== null, me);
       if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
       const body = await req.json().catch(() => null);
       if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
@@ -1606,17 +1607,13 @@ Deno.serve(async (req: Request) => {
       return jsonResp(r.body, r.status);
     }
 
-    // Fiche d'un ticket (MNT-n) ou d'une proposition (PRP-n). Photos signees 1 heure.
+    // Fiche d'un ticket (MNT-n) ou d'une proposition (PRP-n). Photos signees 1 heure
+    // par mnt_get.ts (un seul signataire, par lot).
     if (action === "mnt.get") {
       const me = await currentUser(sb, req);
       const acc = mntAccess(bearerToken(req) !== null, me);
       if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
-      const r = await mntGet(sb, url.searchParams.get("ref") ?? "", {
-        signUrl: async (path: string) => {
-          const { data, error } = await sb.storage.from("cleaning-photos").createSignedUrl(path, 3600);
-          return error || !data?.signedUrl ? null : String(data.signedUrl);
-        },
-      });
+      const r = await mntGet(sb, url.searchParams.get("ref") ?? "");
       return jsonResp(r.body, r.status);
     }
 
@@ -4251,90 +4248,12 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ status: "success", ...results });
     }
 
-    // ========== DISPATCH maintenance_tickets → team_tasks ==========
-    // Tickets maintenance ouverts, non assignés, créés depuis < N jours → tâche Semax.
-    // Auth via X-App-Secret seul. Idempotent via source_ref=maint:{id}.
+    // ========== DISPATCH maintenance_tickets → team_tasks (arrete) ==========
+    // Phase 2 maintenance (ruling A) : les tickets se traitent dans l'ecran
+    // Maintenance, plus aucune copie en tache d'equipe. Le job VPS peut continuer
+    // d'appeler l'action : elle ne lit ni n'ecrit plus rien.
     if (action === "dispatchMaintenance" && req.method === "POST") {
-      const body = await req.json().catch(() => ({}));
-      const lookbackDays = Math.min(Number(body.lookback_days) || 3, 30);
-      const limit = Math.min(Number(body.limit) || 50, 200);
-
-      // Lookup Semax + agent system
-      const { data: cleanersData } = await sb.from("cleaners")
-        .select("id, name").eq("is_active", true);
-      const cmap = new Map<string, number>();
-      (cleanersData || []).forEach((c: any) => cmap.set(c.name.trim().toLowerCase(), c.id));
-      const SEMAX = cmap.get("semax") ?? null;
-      const AGENT = cmap.get("medini ceo agent") ?? null;
-      if (!SEMAX) return jsonResp({ error: "Semax cleaner introuvable" }, 500);
-
-      const sinceIso = new Date(Date.now() - lookbackDays * 86400_000).toISOString();
-      const { data: tickets, error: tErr } = await sb.from("maintenance_tickets")
-        .select("id, listing_id, title, description, category, priority, apartment_mention, sla_deadline, created_at, guest_risk")
-        .eq("status", "open")
-        .is("assigned_technician_id", null)
-        .is("assigned_vendor_id", null)
-        .or("to_confirm.is.null,to_confirm.eq.false")
-        .gte("created_at", sinceIso)
-        .order("created_at", { ascending: false })
-        .limit(limit);
-      if (tErr) throw tErr;
-
-      const results: any = { scanned: tickets?.length || 0, dispatched: 0, deduped: 0, errors: 0, tasks: [] };
-
-      // Mapping priorité ticket → team_task
-      const prioMap: Record<string, string> = {
-        urgent: "urgent", high: "high", medium: "normal", normal: "normal", low: "low",
-      };
-      // Échéance par défaut si pas de sla_deadline
-      const dueFromPriority = (p: string): string => {
-        const hours = p === "urgent" ? 24 : p === "high" ? 48 : 72;
-        return new Date(Date.now() + hours * 3600_000).toISOString();
-      };
-
-      for (const t of tickets || []) {
-        const sourceRef = `maint:${t.id}`;
-        // Idempotence : skip si tâche existe déjà
-        const { data: existing } = await sb.from("team_tasks").select("id").eq("source_ref", sourceRef).maybeSingle();
-        if (existing) { results.deduped++; continue; }
-
-        const tPriority = prioMap[(t.priority || "normal").toLowerCase()] || "normal";
-        const titlePrefix = tPriority === "urgent" ? "🚨" : "🔧";
-        const aptHint = t.apartment_mention || "";
-        const row: Record<string, any> = {
-          title: `${titlePrefix} ${t.title}`,
-          description: [
-            t.description?.trim() || "",
-            t.category ? `Category: ${t.category}` : "",
-            t.guest_risk ? `⚠ Guest risk: ${t.guest_risk}` : "",
-            `Ticket #${t.id}` + (aptHint ? ` · ${aptHint}` : ""),
-          ].filter(Boolean).join("\n"),
-          priority: tPriority,
-          source: "system",
-          source_ref: sourceRef,
-          category: "maintenance",
-          listing_id: t.listing_id || null,
-          assigned_cleaner_id: SEMAX,
-          created_by_cleaner_id: AGENT,
-          due_at: t.sla_deadline || dueFromPriority(tPriority),
-        };
-
-        const { data: newTask, error: insErr } = await sb.from("team_tasks").insert(row).select().single();
-        if (insErr) {
-          if (insErr.code === "23505") {
-            results.deduped++;
-          } else {
-            results.errors++;
-            console.warn(`[dispatchMaintenance] insert failed ticket=${t.id}:`, insErr);
-          }
-          continue;
-        }
-        results.dispatched++;
-        results.tasks.push({ ticket_id: t.id, task_id: newTask.id, title: newTask.title, priority: newTask.priority });
-        keepAlive(notifyAssignee(sb, newTask).catch(e => console.warn("[notif maintenance]", e)));
-      }
-
-      return jsonResp({ status: "success", ...results });
+      return jsonResp({ status: "disabled", created: 0 });
     }
 
     // ========== REVIEWS + HERMES cache (synced from VPS) ==========

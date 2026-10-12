@@ -148,10 +148,12 @@ export async function mgrPlanning(sb: any, o: {
     const ng = r.nextGuest && r.nextGuest.date ? { date: String(r.nextGuest.date), hour: hourOrNull(r.nextGuest.checkInTime) } : null;
     add(key, "checkout", String(r.listingId), String(r.checkOut), hourOrNull(r.checkOutTime), txt(r.guest), ng, null);
   }
+  // Prix des extras (facture, paie de la cleaner) : jamais pour le role maintenance (revue finale #6).
+  const prices = o.me.role !== "maintenance";
   for (const e of extras) {
     add(String(e.reservation_key), "extra", String(e.listing_id ?? ""), String(e.cleaning_date), null, null, null, {
       id: Number(e.id), label: String(e.label ?? "Extra cleaning"), guestName: txt(e.guest_name),
-      priceBilled: num(e.price_billed), cleanerPrice: num(e.cleaner_price), notes: txt(e.notes), cleaningDate: String(e.cleaning_date),
+      priceBilled: prices ? num(e.price_billed) : null, cleanerPrice: prices ? num(e.cleaner_price) : null, notes: txt(e.notes), cleaningDate: String(e.cleaning_date),
     });
   }
   jobs.sort((a, b) =>

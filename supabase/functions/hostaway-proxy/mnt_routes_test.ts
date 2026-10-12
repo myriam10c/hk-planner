@@ -89,8 +89,10 @@ Deno.test("phase 2 : routes mnt.get (GET) et mnt.photo (POST), session et mntAcc
   const g = bloc("mnt.get");
   const ga = g.indexOf("mntAccess(bearerToken(req) !== null, me)");
   assert(ga > g.indexOf("await currentUser(sb, req)") && g.indexOf("await currentUser(sb, req)") >= 0);
-  assert(g.indexOf('mntGet(sb, url.searchParams.get("ref") ?? "", {') > ga);
-  assert(g.includes('createSignedUrl(path, 3600)'));
+  assert(g.indexOf('mntGet(sb, url.searchParams.get("ref") ?? "")') > ga);
+  // Un seul signataire, dans mnt_get.ts (lot createSignedUrls) : plus de doublon ici.
+  assert(g.includes('mntGet(sb, url.searchParams.get("ref") ?? "")'));
+  assertEquals(g.includes("createSignedUrl"), false);
   const p = bloc("mnt.photo");
   const pa = p.indexOf("mntAccess(bearerToken(req) !== null, me)");
   assert(pa >= 0);
@@ -121,5 +123,22 @@ Deno.test("phase 2 : setCancelled et setPostponed acceptent manager et maintenan
     const b = src.slice(debut, src.indexOf("req.json()", debut));
     assert(b.includes('if (me && !MGR_PLANNING_ROLES.includes(me.role)) return jsonResp({ error: "manager role required" }, 403);'), a);
     assertEquals(b.includes('me.role !== "manager"'), false, a);
+  }
+});
+
+Deno.test("S1 ruling A : dispatchMaintenance ne lit ni n'ecrit plus rien", () => {
+  const debut = src.indexOf('if (action === "dispatchMaintenance" && req.method === "POST")');
+  assert(debut >= 0);
+  const b = src.slice(debut, src.indexOf("if (action ===", debut + 10));
+  assert(b.includes('return jsonResp({ status: "disabled", created: 0 });'));
+  assertEquals(b.includes("sb.from("), false);
+  assertEquals(src.includes("[dispatchMaintenance] insert failed"), false);
+});
+
+Deno.test("S3 ruling C : mgr.problems, mgr.problem.get et mgr.problem.act ouverts a maintenance (planningAccess)", () => {
+  for (const a of ["mgr.problems", "mgr.problem.get", "mgr.problem.act"]) {
+    const b = bloc(a);
+    assert(b.includes("planningAccess(bearerToken(req) !== null, me)"), a);
+    assertEquals(b.includes("mgrAccess("), false, a);
   }
 });

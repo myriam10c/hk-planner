@@ -90,18 +90,18 @@ Deno.test("boite : taches d'equipe ouvertes seulement, copies maint:<id> des tic
   assertEquals(rows.some((r) => r.kind === "MNT"), false);
 });
 
-Deno.test("tri stable : urgence, ce qui touche aujourd'hui, le plus ancien, MNT avant TSK, id", () => {
+Deno.test("tri stable des taches : urgence, ce qui touche aujourd'hui, le plus ancien (echeance sinon creation), id", () => {
   const rows = [
-    ticketRow(TK({ id: 2, priority: "high", created_at: "2026-06-01T08:00:00Z" }), CTX),
-    ticketRow(TK({ id: 3, priority: "high", listing_id: "L2", created_at: "2026-10-05T08:00:00Z" }), CTX),
-    ticketRow(TK({ id: 4, priority: "urgent", created_at: "2026-10-08T08:00:00Z" }), CTX),
-    taskRow(TS({ id: 4, priority: "high", due_at: "2026-06-01T08:00:00Z" }), CTX),
-    ticketRow(TK({ id: 1, priority: "high", created_at: "2026-06-01T08:00:00Z" }), CTX),
-    ticketRow(TK({ id: 5, priority: "low", created_at: "garbage" }), CTX),
-    ticketRow(TK({ id: 6, priority: "low", created_at: "2026-01-01T08:00:00Z" }), CTX),
+    taskRow(TS({ id: 2, priority: "high", created_at: "2026-06-01T08:00:00Z" }), CTX),
+    taskRow(TS({ id: 3, priority: "high", listing_id: "L2", created_at: "2026-10-05T08:00:00Z" }), CTX),
+    taskRow(TS({ id: 4, priority: "urgent", created_at: "2026-10-08T08:00:00Z" }), CTX),
+    taskRow(TS({ id: 7, priority: "high", created_at: "2026-10-09T08:00:00Z", due_at: "2026-06-01T08:00:00Z" }), CTX),
+    taskRow(TS({ id: 1, priority: "high", created_at: "2026-06-01T08:00:00Z" }), CTX),
+    taskRow(TS({ id: 5, priority: "low", created_at: "garbage" }), CTX),
+    taskRow(TS({ id: 6, priority: "low", created_at: "2026-01-01T08:00:00Z" }), CTX),
   ];
   const once = rankRows(rows).map((r) => r.ref);
-  assertEquals(once, ["MNT-4", "MNT-3", "MNT-1", "MNT-2", "TSK-4", "MNT-6", "MNT-5"]);
+  assertEquals(once, ["TSK-4", "TSK-3", "TSK-1", "TSK-2", "TSK-7", "TSK-6", "TSK-5"]);
   assertEquals(rankRows(rows.slice().reverse()).map((r) => r.ref), once);
 });
 
@@ -117,7 +117,7 @@ const Q = (o: Record<string, unknown> = {}) =>
 
 Deno.test("filtres Urgent, Mine, Unassigned, Apartment, Source, combinables", () => {
   const refs = (o: any, me = 8) => filterRows(ROWS, Q(o), me).map((r) => r.ref);
-  assertEquals(ROWS.map((r) => r.ref), ["TSK-13", "MNT-429", "MNT-501", "MNT-500", "TSK-14"]);
+  assertEquals(ROWS.map((r) => r.ref), ["TSK-13", "MNT-429", "MNT-501", "TSK-14", "MNT-500"]);
   assertEquals(refs({ urgent: true }), ["TSK-13", "MNT-429"]);
   assertEquals(refs({ mine: true }), ["MNT-501"]);
   assertEquals(refs({ mine: true }, 5), ["TSK-13"]);

@@ -19,7 +19,7 @@ import {
 } from "./v3.ts";
 import type { V3EventType } from "./v3.ts";
 import { ownedPhoto, resolvePhotoId, sansEchec } from "./v3_photos.ts";
-import { sendPush } from "./push.ts";
+import { APP_URL, sendPush } from "./push.ts";
 
 // L'envoi de push est injecte pour que les tests observent qui est prevenu, et
 // avec quelle priorite, sans dependre des secrets VAPID.
@@ -77,7 +77,7 @@ export async function notifyProblem(
   const payload = {
     title: (urgent ? "Urgent: " : "") + title,
     body: "Reported by " + me.name + ". Open HK Planner to see the details.",
-    url: "https://stunning-kleicha-f61101.netlify.app/",
+    url: APP_URL + "/?mnt=" + String(ticketId),
     tag: "v3-ticket-" + String(ticketId),
   };
   for (const cid of [...new Set(destinataires)]) {

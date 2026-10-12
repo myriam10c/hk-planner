@@ -241,6 +241,9 @@ Deno.test("reportProblem cree le ticket, l'assigne a la permanence et pousse", a
   assertEquals(spy.envois.map((e) => e.cleanerId).sort(), [1, 5]);
   assertEquals(spy.envois[0].payload.title, "AC · Bedroom");
   assertEquals(spy.envois[0].payload.body.includes("Faiza"), true);
+  // S5 : la push ouvre le ticket (/?mnt=<id>), pas la racine.
+  assertEquals(spy.envois.map((e) => e.payload.url),
+    ["https://stunning-kleicha-f61101.netlify.app/?mnt=" + ticket.id, "https://stunning-kleicha-f61101.netlify.app/?mnt=" + ticket.id]);
 });
 
 // La priorite vient de l'urgence choisie par la cleaner, jamais d'un champ

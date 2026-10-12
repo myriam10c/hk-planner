@@ -40,6 +40,9 @@ const seed = () => fakeDb({
   ],
   vendors: [{ id: 3, name: "CoolFix", is_active: true }, { id: 2, name: "Old Co", is_active: false }],
   job_events: [], cleaning_log: [], ticket_comments: [], maintenance_costs: [],
+  photos: [{ id: 1, storage_path: "tickets/431/a.jpg", ticket_id: 431, cleaner_id: 7, kind: "photo" },
+    { id: 2, storage_path: "v3/2026-10-12/other.jpg", ticket_id: 429, cleaner_id: 7, kind: "photo" }],
+  team_tasks: [],
 });
 let n = 0;
 const act = (sb: any, body: any, deps: any = {}) => mntAct(sb, ME, { idem: "idem-mnt-" + (++n), ...body }, { nowMs: NOW, ...deps });
@@ -196,10 +199,15 @@ Deno.test("ticket.start : todo et waiting_parts seulement ; clos = 409", async (
   assertEquals((await act(sb, { op: "ticket.start", ticketId: 430 })).status, 200);
   assertEquals(await act(sb, { op: "ticket.start", ticketId: 300 }), { status: 409, body: { error: "This ticket is closed. Reopen it first." } });
   assertEquals(await err(sb, { op: "ticket.start", ticketId: 431 }), "This ticket is already in progress.");
-  assertEquals(await err(sb, { op: "ticket.start", ticketId: 433 }), "This ticket cannot be started now.");
   assertEquals(await act(sb, { op: "ticket.start", ticketId: 9999 }), { status: 404, body: { error: "Not found." } });
   assertEquals(logs(sb), [["ticket_429", "mnt_ticket.start", "Semax"], ["ticket_432", "mnt_ticket.start", "Semax"], ["ticket_430", "mnt_ticket.start", "Semax"]]);
   assertEquals(sb.tables.job_events.length, 3);
+});
+
+Deno.test("S4 ruling F : ticket.start accepte to_confirm (Reopen as still broken)", async () => {
+  const sb = seed();
+  assertEquals(await act(sb, { op: "ticket.start", ticketId: 433 }), { status: 200, body: { ok: true, ticketId: 433, status: "in_progress" } });
+  assertEquals(ticket(sb, 433).status, "in_progress");
 });
 
 Deno.test("ticket.waiting_parts : note en commentaire si donnee", async () => {
@@ -487,4 +495,88 @@ Deno.test("F7 : statut nul ou hors liste = pas clos, done passe ; clos = 409", a
   assertEquals((await act(sb, { op: "ticket.done", ticketId: 430 })).status, 200);
   assertEquals([ticket(sb, 429).status, ticket(sb, 430).status], ["resolved", "resolved"]);
   assertEquals(await err(sb, { op: "ticket.done", ticketId: 300 }), "This ticket is closed. Reopen it first.");
+});
+
+Deno.test("S1 ruling A : done ferme les copies Hermes ouvertes maint:<id>, reopen ne les recree pas, echec sans effet", async () => {
+  const sb = seed();
+  sb.tables.team_tasks.push(
+    { id: 1, source_ref: "maint:429", status: "open", completed_at: null },
+    { id: 2, source_ref: "maint:429", status: "in_progress", completed_at: null },
+    { id: 3, source_ref: "maint:429", status: "cancelled", completed_at: null },
+    { id: 4, source_ref: "maint:430", status: "open", completed_at: null },
+  );
+  assertEquals((await act(sb, { op: "ticket.done", ticketId: 429 })).status, 200);
+  assertEquals(sb.tables.team_tasks.map((t: any) => [t.id, t.status, t.completed_at, t.completed_by_cleaner_id ?? null]), [
+    [1, "done", NOW_ISO, 7], [2, "done", NOW_ISO, 7], [3, "cancelled", null, null], [4, "open", null, null],
+  ]);
+  assertEquals((await act(sb, { op: "ticket.reopen", ticketId: 429 })).status, 200);
+  assertEquals(sb.tables.team_tasks.length, 4);
+  assertEquals(sb.tables.team_tasks.filter((t: any) => t.status === "done").length, 2);
+  const s2 = seed();
+  s2.tables.team_tasks.push({ id: 5, source_ref: "maint:430", status: "open", completed_at: null });
+  s2.fail["team_tasks.update"] = { message: "db down" };
+  assertEquals(await act(s2, { op: "ticket.done", ticketId: 430 }), { status: 200, body: { ok: true, ticketId: 430, status: "resolved" } });
+  assertEquals([ticket(s2, 430).status, s2.tables.team_tasks[0].status], ["resolved", "open"]);
+});
+
+const inspSeed = () => {
+  const sb = seed();
+  sb.tables.maintenance_tickets.push({ id: 501, listing_id: "L1", title: "Bedroom: lamp", category: "other", priority: "medium",
+    status: "open", source: "inspection", source_ref: "inspection:6:bedrooms", description: "Lamp broken",
+    assigned_technician_id: null, assigned_vendor_id: null });
+  sb.tables.inspections = [{ id: 6, listing_id: "L1", inspector_id: 5, inspection_date: "2026-10-07", finished_at: "2026-10-07T09:00:00Z" }];
+  sb.tables.inspection_items = [
+    { id: 1, inspection_id: 6, zone: "bedrooms", status: "not_ok", outcome: "maintenance", ticket_id: 501,
+      fix_scheduled_for: null, fix_scheduled_slot: null },
+    { id: 2, inspection_id: 6, zone: "kitchen", status: "not_ok", outcome: "fixed", ticket_id: 501,
+      fix_scheduled_for: null, fix_scheduled_slot: null },
+  ];
+  return sb;
+};
+const WALTER = { cleaner_id: 8, name: "Walter", role: "manager", color: "#000" };
+
+Deno.test("S2 ruling B : due sur un ticket d'inspection = date de rectification de la zone (maintenance seulement)", async () => {
+  const sb = inspSeed();
+  const r = await mntAct(sb, WALTER, { idem: "idem-insp-due-0001", op: "ticket.due", ticketId: 501, date: "2026-10-14" }, { nowMs: NOW });
+  assertEquals(r, { status: 200, body: { ok: true, ticketId: 501, dueOn: "2026-10-14" } });
+  assertEquals(ticket(sb, 501).due_on, "2026-10-14");
+  assertEquals(sb.tables.inspection_items.map((i: any) => [i.zone, i.fix_scheduled_for, i.fix_scheduled_slot]),
+    [["bedrooms", "2026-10-14", null], ["kitchen", null, null]]);
+  await mntAct(sb, WALTER, { idem: "idem-insp-due-0002", op: "ticket.due", ticketId: 501, date: null }, { nowMs: NOW });
+  assertEquals(sb.tables.inspection_items[0].fix_scheduled_for, null);
+  // Ticket hors inspection : aucune zone touchee.
+  await mntAct(sb, WALTER, { idem: "idem-insp-due-0003", op: "ticket.due", ticketId: 429, date: "2026-10-15" }, { nowMs: NOW });
+  assertEquals(sb.tables.inspection_items.map((i: any) => i.fix_scheduled_for), [null, null]);
+});
+
+Deno.test("S2 ruling B : refus ou echec de la date de rectification = geste quand meme reussi (meme semantique qu'avant)", async () => {
+  const sb = inspSeed();
+  // Semax n'est ni manager ni l'inspecteur : setFixSchedule refuse (403), le ticket garde sa date.
+  const r = await act(sb, { op: "ticket.due", ticketId: 501, date: "2026-10-14" });
+  assertEquals(r.status, 200);
+  assertEquals([ticket(sb, 501).due_on, sb.tables.inspection_items[0].fix_scheduled_for], ["2026-10-14", null]);
+  const s2 = inspSeed();
+  s2.fail["inspection_items.select"] = { message: "db down" };
+  const r2 = await mntAct(s2, WALTER, { idem: "idem-insp-due-0004", op: "ticket.due", ticketId: 501, date: "2026-10-14" }, { nowMs: NOW });
+  assertEquals([r2.status, ticket(s2, 501).due_on], [200, "2026-10-14"]);
+});
+
+Deno.test("S7 : done n'accepte qu'une photo deposee sur ce ticket, sinon 400 sans rien ecrire", async () => {
+  const sb = seed();
+  const PHOTO_GONE = "Photo not found. Add it again.";
+  for (const photoPath of ["v3/2026-10-12/other.jpg", "nowhere/x.jpg", "https://evil.test/x.jpg"]) {
+    assertEquals(await act(sb, { op: "ticket.done", ticketId: 431, photoPath }), { status: 400, body: { error: PHOTO_GONE } });
+  }
+  assertEquals([ticket(sb, 431).status, sb.tables.job_events.length], ["in_progress", 0]);
+  assertEquals((await act(sb, { op: "ticket.done", ticketId: 431, photoPath: "tickets/431/a.jpg" })).status, 200);
+  assertEquals(ticket(sb, 431).resolution_photo_path, "tickets/431/a.jpg");
+  const s2 = seed();
+  s2.fail["photos.select"] = { message: "db down" };
+  let msg = "";
+  try {
+    await act(s2, { op: "ticket.done", ticketId: 431, photoPath: "tickets/431/a.jpg" });
+  } catch (e) {
+    msg = String((e as any)?.message ?? e);
+  }
+  assertEquals([msg, ticket(s2, 431).status], ["db down", "in_progress"]);
 });

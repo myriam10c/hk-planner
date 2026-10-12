@@ -36,23 +36,36 @@ export function parseMntRef(ref: unknown): { kind: "MNT" | "PRP"; id: number } |
 
 const str = (v: unknown): string | null => (v === null || v === undefined || String(v).trim() === "" ? null : String(v));
 
-// Signature par defaut : une URL d'une heure sur le bucket des photos.
-function defaultSigner(sb: any) {
-  return async (path: string): Promise<string | null> => {
-    const { data, error } = await sb.storage.from(V3_PHOTO_BUCKET).createSignedUrl(path, MNT_SIGN_SECONDS);
-    return error || !data?.signedUrl ? null : String(data.signedUrl);
+// Signature par lot (un seul createSignedUrls par fiche, comme l'ancienne fiche
+// Problems). Seuls des chemins du bucket sont signes : ni http(s), ni data (revue
+// finale #9). Un lot rate rend {} : la fiche s'affiche sans les photos.
+export type MntSigner = (paths: string[]) => Promise<Record<string, string>>;
+export function bucketSigner(sb: any): MntSigner {
+  return async (paths) => {
+    const { data, error } = await sb.storage.from(V3_PHOTO_BUCKET).createSignedUrls(paths, MNT_SIGN_SECONDS);
+    if (error || !Array.isArray(data)) return {};
+    const out: Record<string, string> = {};
+    for (const d of data) if (d && d.signedUrl && !d.error) out[String(d.path)] = String(d.signedUrl);
+    return out;
   };
 }
-
-// Une signature ratee rend null, jamais une erreur : la fiche s'affiche sans la photo.
-function signerOf(sign: (path: string) => Promise<string | null>) {
-  const memo = new Map<string, Promise<string | null>>();
-  return (p: unknown): Promise<string | null> => {
-    const s = String(p ?? "").trim();
-    if (!s || /^data:/i.test(s)) return Promise.resolve(null);
-    if (/^https?:/i.test(s)) return Promise.resolve(s);
-    if (!memo.has(s)) memo.set(s, sign(s).then((u) => (u ? String(u) : null), () => null));
-    return memo.get(s)!;
+const storagePath = (p: unknown): string | null => {
+  const s = String(p ?? "").trim();
+  return !s || /^[a-z][a-z0-9+.-]*:/i.test(s) ? null : s;
+};
+async function signAll(signer: MntSigner, raw: unknown[]): Promise<(p: unknown) => string | null> {
+  const paths = [...new Set(raw.map(storagePath).filter((p): p is string => p !== null))];
+  let urls: Record<string, string> = {};
+  if (paths.length) {
+    try {
+      urls = (await signer(paths)) ?? {};
+    } catch (e) {
+      console.warn("[mnt_get] signature des photos ratee: " + String((e as any)?.message ?? e));
+    }
+  }
+  return (p) => {
+    const s = storagePath(p);
+    return s && urls[s] ? String(urls[s]) : null;
   };
 }
 
@@ -103,7 +116,7 @@ async function one(sb: any, table: string, cols: string, id: number): Promise<an
 
 const isOpen = (t: any) => t && (MGR_OPEN_TICKET_STATUSES as readonly string[]).includes(String(t.status));
 
-async function ticketDetail(sb: any, t: any, today: string, sign: (p: unknown) => Promise<string | null>): Promise<MntTicketDetail> {
+async function ticketDetail(sb: any, t: any, today: string, signer: MntSigner): Promise<MntTicketDetail> {
   const id = Number(t.id);
   const pid = t.proposal_id === null || t.proposal_id === undefined || t.proposal_id === "" ? null : Number(t.proposal_id);
   const [r, comments, logs, shots, prop] = await Promise.all([
@@ -134,13 +147,14 @@ async function ticketDetail(sb: any, t: any, today: string, sign: (p: unknown) =
   const row = mntTicketRow(t, ctx, isDone);
 
   const pics = byId(shots).filter((s: any) => String(s.kind ?? "photo") !== "voice");
-  const [picUrls, commentUrls, resolutionPhotoUrl, reportedUrl] = await Promise.all([
-    Promise.all(pics.map((s: any) => sign(s.storage_path))),
-    Promise.all(comments.map((c: any) => sign(c.photo_path))),
-    sign(t.resolution_photo_path),
-    // Photo du signalement d'origine, si elle n'est pas deja une ligne de photos.
-    t.photo_path && !pics.some((s: any) => String(s.storage_path) === String(t.photo_path)) ? sign(t.photo_path) : Promise.resolve(null),
-  ]);
+  // Photo du signalement d'origine, si elle n'est pas deja une ligne de photos.
+  const reported = t.photo_path && !pics.some((s: any) => String(s.storage_path) === String(t.photo_path)) ? t.photo_path : null;
+  const sign = await signAll(signer, [...pics.map((s: any) => s.storage_path), ...comments.map((c: any) => c.photo_path),
+    t.resolution_photo_path, reported]);
+  const picUrls = pics.map((s: any) => sign(s.storage_path));
+  const commentUrls = comments.map((c: any) => sign(c.photo_path));
+  const resolutionPhotoUrl = sign(t.resolution_photo_path);
+  const reportedUrl = reported ? sign(reported) : null;
   const who = (cid: unknown) => (cid === null || cid === undefined ? "Unknown" : ctx.names[String(cid)] ?? "Member " + cid);
 
   const history: MntHistoryItem[] = [];
@@ -195,7 +209,7 @@ async function proposalDetail(sb: any, p: any, today: string): Promise<MntPropos
 }
 
 export async function mntGet(
-  sb: any, ref: string, o: { nowMs?: number; signUrl?: (path: string) => Promise<string | null> } = {},
+  sb: any, ref: string, o: { nowMs?: number; signUrls?: MntSigner } = {},
 ): Promise<{ status: number; body: GetBody }> {
   const p = parseMntRef(ref);
   if (!p) return { status: 400, body: { error: "Invalid reference." } };
@@ -204,7 +218,7 @@ export async function mntGet(
     if (p.kind === "MNT") {
       const t = await one(sb, "maintenance_tickets", MNT_TICKET_COLS + ", description, photo_path, resolution_photo_path", p.id);
       if (!t) return { status: 404, body: { error: NOT_FOUND } };
-      const ticket = await ticketDetail(sb, t, today, signerOf(o.signUrl ?? defaultSigner(sb)));
+      const ticket = await ticketDetail(sb, t, today, o.signUrls ?? bucketSigner(sb));
       return { status: 200, body: { kind: "ticket", ticket } };
     }
     const row = await one(sb, "maintenance_proposals", MNT_PROPOSAL_COLS, p.id);
@@ -225,7 +239,10 @@ export async function mntPhoto(sb: any, me: SessionUser, form: FormData): Promis
   const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
   if (!Number.isInteger(n) || n <= 0) return { status: 400, body: { error: "ticketId required" } };
   const { data: tk, error } = await sb.from("maintenance_tickets").select("id").eq("id", n).maybeSingle();
-  if (error) throw error;
+  if (error) {
+    console.error("[mnt_get] mnt.photo MNT-" + n + " illisible:", (error as any)?.message ?? String(error));
+    return { status: 503, body: { error: MNT_UNAVAILABLE } };
+  }
   if (!tk) return { status: 404, body: { error: NOT_FOUND } };
   const f = new FormData();
   const idem = form.get("idem");

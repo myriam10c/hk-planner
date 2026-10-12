@@ -116,7 +116,8 @@ Deno.test("mgr.problems : taches d'equipe seulement, meme tri que Today, compteu
     { id: 8, name: "Walter", role: "manager", takesTasks: true },
     { id: 4, name: "Faiza", role: "cleaner", takesTasks: false },
   ]);
-  assertEquals(b.vendors, [{ id: 3, name: "CoolFix", specialty: "AC" }]);
+  // S9 : plus de lecture des prestataires, la forme garde vendors vide.
+  assertEquals(b.vendors, []);
 });
 
 Deno.test("mgr.problems : filtres et pages ; total apres filtre, compteurs avant filtre", async () => {

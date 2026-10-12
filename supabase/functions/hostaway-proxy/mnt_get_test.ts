@@ -4,7 +4,11 @@ import { mntGet, type MntProposalDetail, type MntTicketDetail, mntPhoto } from "
 
 const NOW = Date.parse("2026-10-12T21:30:00Z");
 const ME = { cleaner_id: 7, name: "Semax", role: "manager" } as any;
-const sign = async (p: string) => "https://signed.test/" + p;
+let batches: string[][] = [];
+const sign = async (ps: string[]) => {
+  batches.push(ps);
+  return Object.fromEntries(ps.map((p) => [p, "https://signed.test/" + p]));
+};
 
 const TK = (id: number, o: any = {}) => ({
   id, listing_id: "L1", title: "Ticket " + id, category: "ac", priority: "high", status: "open", source: "guest_message",
@@ -68,7 +72,7 @@ const db = () => fakeDb({
 });
 
 Deno.test("mnt.get ticket : ligne, description, citations, historique trie, photos signees", async () => {
-  const r = await mntGet(db(), "MNT-12", { nowMs: NOW, signUrl: sign });
+  const r = await mntGet(db(), "MNT-12", { nowMs: NOW, signUrls: sign });
   assertEquals(r.status, 200);
   const b = r.body as { kind: "ticket"; ticket: MntTicketDetail };
   assertEquals(b.kind, "ticket");
@@ -103,7 +107,7 @@ Deno.test("mnt.get ticket : ligne, description, citations, historique trie, phot
 });
 
 Deno.test("mnt.get ticket : reference en minuscules acceptee, ticket sans proposition", async () => {
-  const r = await mntGet(db(), " mnt-14 ", { nowMs: NOW, signUrl: sign });
+  const r = await mntGet(db(), " mnt-14 ", { nowMs: NOW, signUrls: sign });
   assertEquals(r.status, 200);
   const t = (r.body as any).ticket as MntTicketDetail;
   assertEquals(t.proposal, null);
@@ -114,7 +118,7 @@ Deno.test("mnt.get ticket : reference en minuscules acceptee, ticket sans propos
 });
 
 Deno.test("mnt.get proposition : ouverts du meme logement, ticket ouvert signale", async () => {
-  const r = await mntGet(db(), "PRP-6", { nowMs: NOW, signUrl: sign });
+  const r = await mntGet(db(), "PRP-6", { nowMs: NOW, signUrls: sign });
   assertEquals(r.status, 200);
   const b = r.body as { kind: "proposal"; proposal: MntProposalDetail };
   assertEquals(b.kind, "proposal");
@@ -125,35 +129,37 @@ Deno.test("mnt.get proposition : ouverts du meme logement, ticket ouvert signale
     { id: 13, ref: "MNT-13", title: "Leak", category: "plumbing" },
     { id: 14, ref: "MNT-14", title: "Door", category: "lock_door" },
   ]);
-  const sans = await mntGet(db(), "PRP-7", { nowMs: NOW, signUrl: sign });
+  const sans = await mntGet(db(), "PRP-7", { nowMs: NOW, signUrls: sign });
   assertEquals((sans.body as any).proposal.sameListingOpen, []);
 });
 
 Deno.test("mnt.get : 404, 400, 503", async () => {
-  assertEquals(await mntGet(db(), "MNT-99", { signUrl: sign }), { status: 404, body: { error: "Not found." } });
-  assertEquals(await mntGet(db(), "PRP-99", { signUrl: sign }), { status: 404, body: { error: "Not found." } });
+  assertEquals(await mntGet(db(), "MNT-99", { signUrls: sign }), { status: 404, body: { error: "Not found." } });
+  assertEquals(await mntGet(db(), "PRP-99", { signUrls: sign }), { status: 404, body: { error: "Not found." } });
   for (const bad of ["", "MNT-", "MNT-0", "TSK-3", "PRP-abc", "MNT-12x"]) {
-    assertEquals(await mntGet(db(), bad, { signUrl: sign }), { status: 400, body: { error: "Invalid reference." } });
+    assertEquals(await mntGet(db(), bad, { signUrls: sign }), { status: 400, body: { error: "Invalid reference." } });
   }
   const sb = db();
   sb.fail["maintenance_tickets.select"] = { message: "boom" };
-  assertEquals(await mntGet(sb, "MNT-12", { signUrl: sign }), { status: 503, body: { error: "Maintenance is unavailable right now. Try again." } });
+  assertEquals(await mntGet(sb, "MNT-12", { signUrls: sign }), { status: 503, body: { error: "Maintenance is unavailable right now. Try again." } });
 });
 
 Deno.test("mnt.get : une signature ratee donne null, jamais une erreur", async () => {
-  const r = await mntGet(db(), "MNT-12", { nowMs: NOW, signUrl: async () => { throw new Error("storage down"); } });
+  const r = await mntGet(db(), "MNT-12", { nowMs: NOW, signUrls: async () => { throw new Error("storage down"); } });
   assertEquals(r.status, 200);
   const t = (r.body as any).ticket as MntTicketDetail;
   assertEquals(t.resolutionPhotoUrl, null);
   assertEquals(t.photos, []);
   assertEquals(t.history.find((h) => h.text === "added a photo")!.photoUrl, null);
-  const r2 = await mntGet(db(), "MNT-12", { nowMs: NOW, signUrl: async () => null });
+  const r2 = await mntGet(db(), "MNT-12", { nowMs: NOW, signUrls: async () => ({}) });
   assertEquals((r2.body as any).ticket.resolutionPhotoUrl, null);
 });
 
-Deno.test("mnt.get : signature par defaut via le bucket, 1 heure", async () => {
-  const r = await mntGet(db(), "MNT-12", { nowMs: NOW });
+Deno.test("mnt.get : signature par defaut via le bucket, 1 heure, un seul lot", async () => {
+  const s0 = db();
+  const r = await mntGet(s0, "MNT-12", { nowMs: NOW });
   assertEquals((r.body as any).ticket.resolutionPhotoUrl, "https://signed.test/v3/2026-10-03/after.jpg?exp=3600");
+  assertEquals((s0 as any).storage.signBatches.length, 1);
   const sb = db();
   sb.fail["storage.sign"] = { message: "down" };
   const r2 = await mntGet(sb, "MNT-12", { nowMs: NOW });
@@ -206,4 +212,26 @@ Deno.test("mnt.photo : un jobId envoye est ignore, la photo ne va qu'au ticket",
   assertEquals(r.status, 200);
   const row = sb.tables.photos.find((p: any) => p.id === (r.body as any).photoId);
   assertEquals([row.ticket_id, row.job_id, row.item_name], [13, null, null]);
+});
+
+Deno.test("S7/S8 : un seul lot de signature, chemins du bucket seulement (http et data jamais rendus)", async () => {
+  batches = [];
+  const sb = db();
+  sb.tables.maintenance_tickets.find((t: any) => t.id === 12).resolution_photo_path = "https://evil.test/x.jpg";
+  sb.tables.ticket_comments.push({ id: 4, ticket_id: 12, author: "Ismael", comment: "Data", created_at: "2026-10-02T12:00:00Z",
+    photo_path: "data:image/png;base64,AAAA" });
+  const r = await mntGet(sb, "MNT-12", { nowMs: NOW, signUrls: sign });
+  const t = (r.body as any).ticket as MntTicketDetail;
+  assertEquals(t.resolutionPhotoUrl, null);
+  assertEquals(t.history.find((h) => h.text === "Data")!.photoUrl, null);
+  assertEquals(batches.length, 1);
+  assertEquals(batches[0].sort(), ["v3/2026-10-02/c.jpg", "v3/2026-10-02/p1.jpg"]);
+});
+
+Deno.test("S8 : mnt.photo, lecture du ticket ratee = 503 lisible, rien depose", async () => {
+  const sb = db();
+  sb.fail["maintenance_tickets.select"] = { message: "boom" };
+  assertEquals(await mntPhoto(sb, ME, form({ idem: "idem-mnt-photo-0008", file: jpeg(), ticketId: "12" })),
+    { status: 503, body: { error: "Maintenance is unavailable right now. Try again." } });
+  assertEquals(sb.storage.uploads.length, 0);
 });

@@ -11,7 +11,10 @@ import {
   type ActionResult,
 } from "./v3.ts";
 import { sansEchec } from "./v3_photos.ts";
-import { MGR_CLOSED_TICKET_STATUSES, MGR_TICKET_ASSIGNEE_ROLES, problemRef } from "./mgr_inbox.ts";
+import {
+  MGR_CLOSED_TICKET_STATUSES, MGR_INSPECTION_SOURCE, MGR_MIRROR_PREFIX, MGR_OPEN_TASK_STATUSES, MGR_TICKET_ASSIGNEE_ROLES, problemRef,
+} from "./mgr_inbox.ts";
+import { setFixSchedule } from "./insp_write.ts";
 import {
   MNT_CATEGORIES, MNT_REJECT_REASONS, MNT_TEXT_MAX, MNT_TITLE_MAX, MNT_URGENCIES, type MntCategory, type MntUrgency,
   priorityFor, proposalRef,
@@ -42,11 +45,12 @@ type Op =
 
 type Notice = { ticketId: number; memberId: number; title: string; urgent: boolean };
 type Done = { result: Record<string, unknown>; after: Array<[string, () => Promise<unknown>]>; notify?: Notice };
-type Ctx = { sb: any; me: SessionUser; nowIso: string; today: string; idem: string };
+type Ctx = { sb: any; me: SessionUser; nowMs: number; nowIso: string; today: string; idem: string };
 
 const CLOSED = "This ticket is closed. Reopen it first.";
 const HANDLED = "This proposal was already handled.";
 const NOT_FOUND = "Not found.";
+const PHOTO_GONE = "Photo not found. Add it again.";
 const TODO = ["open", "assigned"];
 
 const bad = (status: number, error: string): ActionResult => ({ status, body: { error } });
@@ -201,8 +205,9 @@ function refusal(a: Op, prop: any, tk: any): string | null {
   if (a.op === "ticket.reopen") return isClosed(tk) ? null : "This ticket is not closed.";
   if (isClosed(tk)) return CLOSED;
   if (a.op === "ticket.start") {
+    // to_confirm compris : Reopen as still broken (ruling F).
     if (st === "in_progress") return "This ticket is already in progress.";
-    if (!TODO.includes(st) && st !== "waiting_parts") return "This ticket cannot be started now.";
+    if (!TODO.includes(st) && st !== "waiting_parts" && st !== "to_confirm") return "This ticket cannot be started now.";
   }
   return null;
 }
@@ -389,6 +394,11 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
     }
     result.status = "resolved";
     details = { from: tk.status ?? null, cost: a.cost };
+    // Copies Hermes encore ouvertes (taches d'equipe maint:<id>) : fermees apres coup,
+    // jamais une cause d'echec ; Reopen ne les recree pas (ruling A).
+    after.push(["copies Hermes de MNT-" + id, () => mustWrite(c.sb.from("team_tasks")
+      .update({ status: "done", completed_at: c.nowIso, completed_by_cleaner_id: c.me.cleaner_id })
+      .eq("source_ref", MGR_MIRROR_PREFIX + id).in("status", MGR_OPEN_TASK_STATUSES))]);
   } else if (a.op === "ticket.reopen") {
     const status = tk.assigned_technician_id != null || tk.assigned_vendor_id != null ? "assigned" : "open";
     await updateTicket(c, id, { status, resolved_at: null, closed_at: null });
@@ -410,6 +420,19 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
     await updateTicket(c, id, { due_on: a.date });
     result.dueOn = a.date;
     details = { date: a.date };
+    if (String(tk.source ?? "") === MGR_INSPECTION_SOURCE) {
+      // La date de rectification de la zone (ecran Inspections) suit la meme date,
+      // comme le faisait le geste schedule de mgr.problem.act (ruling B).
+      after.push(["date de rectification de MNT-" + id, async () => {
+        const { data: items, error: e } = await c.sb.from("inspection_items").select("inspection_id, zone, outcome").eq("ticket_id", id);
+        if (e) throw e;
+        for (const it of items ?? []) {
+          if (it.outcome !== "maintenance") continue;
+          const r = await setFixSchedule(c.sb, c.me, { inspectionId: it.inspection_id, zone: it.zone, date: a.date, slot: null }, c.nowMs);
+          if (r.status !== 200) throw new Error(String((r.body as any)?.error ?? "fix date refused"));
+        }
+      }]);
+    }
   } else if (a.op === "ticket.comment") {
     const rows = await mustWrite(c.sb.from("ticket_comments").insert({ ticket_id: id, author: c.me.name, comment: a.text })
       .select("id, created_at"));
@@ -441,6 +464,13 @@ export async function mntAct(sb: any, me: SessionUser, body: any, deps: MntActDe
     tk = await readRow(sb, "maintenance_tickets", a.ticketId);
     if (!tk) return bad(404, NOT_FOUND);
   }
+  // Photo de cloture : seulement une photo deposee sur CE ticket (mnt.photo).
+  if (a.op === "ticket.done" && a.photoPath !== null) {
+    const { data: ph, error: pe } = await sb.from("photos").select("id").eq("storage_path", a.photoPath).eq("ticket_id", a.ticketId)
+      .maybeSingle();
+    if (pe) throw pe;
+    if (!ph) return bad(400, PHOTO_GONE);
+  }
   let whoName: string | null = null;
   if ("memberId" in a) {
     const w = await checkWho(sb, a);
@@ -459,7 +489,7 @@ export async function mntAct(sb: any, me: SessionUser, body: any, deps: MntActDe
     return bad(409, refused);
   }
 
-  const c: Ctx = { sb, me, nowIso: new Date(nowMs).toISOString(), today, idem };
+  const c: Ctx = { sb, me, nowMs, nowIso: new Date(nowMs).toISOString(), today, idem };
   let done: Done;
   try {
     if (a.op === "proposal.accept") done = await doAccept(c, a, { ...prop });

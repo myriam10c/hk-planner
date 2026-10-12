@@ -74,9 +74,9 @@ const seed = () => fakeDb({
   ] } }],
 });
 
-async function run(db = seed()) {
+async function run(db = seed(), me: any = ME) {
   const r = await mgrPlanning(db, {
-    start: START, today: TODAY, nowMs: AT_11, me: ME,
+    start: START, today: TODAY, nowMs: AT_11, me,
     loadCheckouts: async () => ({ reservations: CHECKOUTS, cachedAt: null }),
   });
   assertEquals(r.status, 200);
@@ -158,4 +158,10 @@ Deno.test("mgr.planning : une table illisible leve (jamais une semaine calculee 
   let err = "";
   try { await run(db); } catch (e) { err = (e as Error).message; }
   assertEquals(err, "[mgr] cleaning_assignments: boom");
+});
+
+Deno.test("S6 : role maintenance = prix des extras omis (null), le reste de l'extra garde", async () => {
+  const b = await run(seed(), { cleaner_id: 7, name: "Semax", role: "maintenance", color: "" });
+  const x = byKey(b, "extra_2026-10-09_mabc");
+  assertEquals(x.extra, { id: 31, label: "Deep clean", guestName: "Owner", priceBilled: null, cleanerPrice: null, notes: "Bring the steamer", cleaningDate: TODAY });
 });

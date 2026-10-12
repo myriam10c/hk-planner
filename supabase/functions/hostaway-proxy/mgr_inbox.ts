@@ -16,8 +16,9 @@ export const MGR_OPEN_TASK_STATUSES = ["open", "in_progress"];
 export const MGR_CLOSED_TASK_STATUSES = ["done", "cancelled"];
 export const MGR_CLEANER_REPORT_SOURCE = "hk_planner_v3";
 export const MGR_INSPECTION_SOURCE = "inspection";
-// dispatchMaintenance (Hermes) recopie chaque ticket non assigne en tache d'equipe
-// avec source_ref « maint:<id> » : le ticket est le probleme, la copie n'est jamais listee.
+// dispatchMaintenance (Hermes) recopiait chaque ticket non assigne en tache d'equipe
+// avec source_ref « maint:<id> » (arrete en phase 2) : la copie n'est jamais listee,
+// et mnt.act ticket.done ferme celles qui restent ouvertes.
 export const MGR_MIRROR_PREFIX = "maint:";
 export const MGR_TICKET_ASSIGNEE_ROLES = ["manager", "maintenance", "cleaner"];
 export const MGR_TASK_ASSIGNEE_ROLES = ["manager", "maintenance"];
@@ -78,9 +79,9 @@ const STATUS_NOTE: Record<string, string> = {
   waiting_parts: " Waiting for parts.",
   to_confirm: " Checked by a cleaner, to confirm and close.",
 };
-const SOURCE_PARAM: Record<string, InboxSource> = {
-  maintenance: "Maintenance", inspection: "Inspection", cleaner: "Cleaner report", task: "Team task",
-};
+const SOURCE_PARAM: Record<string, InboxSource> = { task: "Team task" };
+// Anciennes sources de tickets : encore acceptees (liens deja ouverts), sans effet.
+const OLD_TICKET_SOURCES = new Set(["maintenance", "inspection", "cleaner"]);
 
 export function problemRef(kind: InboxKind, id: number): string {
   return kind + "-" + id;
@@ -230,17 +231,16 @@ export function taskRow(t: RawTask, c: InboxCtx): InboxRow {
   };
 }
 
-// Ordre total et stable : urgence, puis ce qui touche aujourd'hui (arrivee, puis
-// depart), puis le plus ancien (taches : echeance, sinon creation ; tickets :
-// creation), puis MNT avant TSK, puis id. Meme ordre pour Today et Problems.
+// Ordre total et stable des taches : urgence, puis ce qui touche aujourd'hui
+// (arrivee, puis depart), puis le plus ancien (echeance, sinon creation), puis id.
+// Meme ordre pour Today et Tasks. Les tickets sont tries par mnt_read.ts.
 export function rankRows(rows: InboxRow[]): InboxRow[] {
   const key = (r: InboxRow) => {
-    const t = Date.parse(r.kind === "TSK" ? (r.dueAt ?? r.createdAt) : r.createdAt);
+    const t = Date.parse(r.dueAt ?? r.createdAt);
     return Number.isFinite(t) ? t : Number.MAX_SAFE_INTEGER;
   };
   return rows.slice().sort((a, b) =>
-    RANK[a.priority] - RANK[b.priority] || a.todayBoost - b.todayBoost || key(a) - key(b) ||
-    (a.kind === b.kind ? 0 : a.kind === "MNT" ? -1 : 1) || a.id - b.id);
+    RANK[a.priority] - RANK[b.priority] || a.todayBoost - b.todayBoost || key(a) - key(b) || a.id - b.id);
 }
 
 // Boite Problems (ecran Tasks) : taches d'equipe seulement depuis la phase 2
@@ -293,9 +293,10 @@ export function apartmentsOf(rows: InboxRow[]): Array<{ listingId: string; apt: 
 
 export function parseInboxQuery(p: URLSearchParams): { ok: true; q: InboxQuery } | { ok: false; error: string } {
   const src = p.get("source") ?? "";
-  if (src && !Object.prototype.hasOwnProperty.call(SOURCE_PARAM, src)) return { ok: false, error: "Unknown source." };
-  // Sources de tickets (maintenance, inspection, cleaner) : ignorees, la boite ne sert plus que des taches.
-  const source = src && SOURCE_PARAM[src] === "Team task" ? SOURCE_PARAM[src] : null;
+  if (src && !Object.prototype.hasOwnProperty.call(SOURCE_PARAM, src) && !OLD_TICKET_SOURCES.has(src)) {
+    return { ok: false, error: "Unknown source." };
+  }
+  const source = Object.prototype.hasOwnProperty.call(SOURCE_PARAM, src) ? SOURCE_PARAM[src] : null;
   const offset = p.has("offset") ? Number(p.get("offset")) : 0;
   if (!Number.isInteger(offset) || offset < 0) return { ok: false, error: "Invalid offset." };
   const limit = p.has("limit") ? Number(p.get("limit")) : MGR_PAGE_DEFAULT;

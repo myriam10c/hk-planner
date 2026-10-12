@@ -106,10 +106,11 @@ export type MntCtx = {
 };
 export function mntCtx(
   listingRows: any[], people: any[], vendorRows: any[],
-  o: { today: string; openById?: Record<string, any>; resolvedBy?: Record<string, string> },
+  o: { today: string; openById?: Record<string, any>; resolvedBy?: Record<string, string>; listings?: Record<string, Label> },
 ): MntCtx {
   return {
-    listings: listingMap(listingRows),
+    // Libelles deja calcules (coeur de Today) : pris tels quels, listingRows ignore.
+    listings: o.listings ?? listingMap(listingRows),
     names: Object.fromEntries(people.map((p: any) => [String(p.id), String(p.name ?? "").trim() || "Member " + p.id])),
     vendorNames: Object.fromEntries(vendorRows.map((v: any) => [String(v.id), String(v.name ?? "").trim() || "Vendor " + v.id])),
     openById: o.openById ?? {}, resolvedBy: o.resolvedBy ?? {}, today: o.today,
