@@ -44,8 +44,8 @@ Deno.test("statut d'un menage de la semaine", () => {
   assertEquals(planStatus({ ...base, state: "done", nextBefore: true }), { tone: "ok", word: "Done" });
   assertEquals(planStatus({ ...base, nextBefore: true }), { tone: "bad", word: "Guest arrives first" });
   assertEquals(planStatus({ ...base, assigned: 0 }), { tone: "bad", word: "Unassigned" });
-  assertEquals(planStatus({ ...base, assigned: 0, usuallyElite: true }), { tone: "warn", word: "Usually Elite · not logged yet" });
-  assertEquals(planStatus({ ...base, assigned: 0, usuallyElite: true, date: "2026-10-11" }), { tone: "warn", word: "Usually Elite" });
+  assertEquals(planStatus({ ...base, assigned: 0, usuallyElite: true }), { tone: "warn", word: "Not logged yet" });
+  assertEquals(planStatus({ ...base, assigned: 0, usuallyElite: true, date: "2026-10-11" }), { tone: "bad", word: "Unassigned" });
   // Menage Elite du 07 : saisie attendue le 08 a 14:00, depassee le 09 a 11:00.
   assertEquals(planStatus({ ...base, assigned: 0, usuallyElite: true, date: "2026-10-07" }), { tone: "bad", word: "Unassigned" });
   assertEquals(planStatus({ ...base, state: "in_progress" }), { tone: "idle", word: "In progress" });

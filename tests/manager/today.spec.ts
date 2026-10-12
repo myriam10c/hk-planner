@@ -19,8 +19,8 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(page.locator('.strip')).toContainText('without a cleaner');
       await expect(page.getByText('No cleaner assigned, and urgent ticket open: Gas not working (MNT-429).')).toBeVisible();
       await expect(page.getByText('Not started yet, Faiza. Guest in 4 h, checkout time not set.')).toBeVisible();
-      await expect(page.locator('.arr', { hasText: 'Owner stay' })).toContainText('Usually Elite · not logged yet');
-      await expect(page.locator('.person.unassigned')).toContainText('Usually Elite · not logged yet');
+      await expect(page.locator('.arr', { hasText: 'Owner stay' })).toContainText('Not logged yet');
+      await expect(page.locator('.person.unassigned')).toContainText('Not logged yet');
       const faiza = page.locator('.person', { hasText: 'Faiza' }).first();
       await expect(faiza).toContainText('--:--');
       await expect(faiza).toContainText('checkout time not set');

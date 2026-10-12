@@ -172,7 +172,7 @@ function makeJob(
   else if (!assigned.length) {
     const elite = c.eliteListings.has(listingId) && c.nowMs < eliteLogDeadlineMs(c.day);
     tone = elite ? "warn" : "bad";
-    word = elite ? "Usually Elite · not logged yet" : "Unassigned";
+    word = elite ? "Not logged yet" : "Unassigned";
   } else {
     tone = risk ? "warn" : "idle";
     word = state === "in_progress" ? "In progress" : "Not started";

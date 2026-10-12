@@ -107,7 +107,7 @@ function whoHtml(data, ro) {
     }
     h += '</div>';
     if (list.some((j) => j.tone === 'warn')) {
-      h += '<div class="note">Elite Cleaning logs its jobs the next day around 14:00. Lines marked "Usually Elite" may already be covered: confirm with Elite before reassigning.</div>';
+      h += '<div class="note">Elite Cleaning logs its jobs the next day around 14:00. Lines marked "Not logged yet" may already be done by Elite: confirm with Elite before reassigning.</div>';
     }
     h += '</div>';
   }
@@ -179,7 +179,7 @@ function arrivalsHtml(data) {
     + '<span class="stline"><span class="st ' + r.tone + '">' + esc(r.word) + '</span> <span class="cause">' + esc(r.cause) + '</span></span></span></button>').join('');
   h += '<details class="rules"><summary>How status is computed</summary><ul>'
     + '<li><b>Ready</b>: a cleaning was marked done in HK Planner after the previous checkout, and no urgent ticket is open on the apartment.</li>'
-    + '<li><b>At risk</b>: a cleaner is assigned but the cleaning is not marked done, and the guest arrives within ' + data.riskHours + ' hours. Also an apartment usually cleaned by Elite whose job is not logged yet (Elite logs the next day around 14:00).</li>'
+    + '<li><b>At risk</b>: a cleaner is assigned but the cleaning is not marked done, and the guest arrives within ' + data.riskHours + ' hours. Also an unassigned cleaning that Elite may have done but not logged yet (Elite logs the next day around 14:00).</li>'
     + '<li><b>Blocked</b>: no cleaner is assigned, or an urgent maintenance ticket is open on the apartment.</li>'
     + '<li><b>Scheduled</b>: a cleaner is assigned and the guest arrives in more than ' + data.riskHours + ' hours.</li>'
     + '<li>Owner stays count as arrivals. Without a checkout in the last 14 days, there is no cleaning to check.</li></ul></details>';

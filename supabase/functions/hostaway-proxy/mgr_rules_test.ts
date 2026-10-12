@@ -105,7 +105,7 @@ Deno.test("Elite le lendemain : ambre avant 14:00 le lendemain du menage, rouge 
   const prev = P({ checkoutDate: "2026-10-08", cleaningDate: "2026-10-08", usuallyElite: true });
   assertEquals(st(prev, Date.parse("2026-10-09T09:59:00Z")), {
     tone: "warn", word: "At risk",
-    cause: "Usually Elite · not logged yet. Elite logs its jobs the next day around 14:00.",
+    cause: "Not logged yet. Elite logs its jobs the next day around 14:00.",
   });
   assertEquals(st(prev, Date.parse("2026-10-09T10:00:00Z")),
     { tone: "bad", word: "Blocked", cause: "No cleaner assigned. Checkout 08/10." });

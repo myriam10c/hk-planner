@@ -14,6 +14,7 @@ import {
 } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
 import { heroPhotoFromHostaway } from "./v3_day_extras.ts";
+import { fillMissingListings } from "./listing_fill.ts";
 import { loadTeam, resolveViewAs } from "./v3_viewas.ts";
 import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
 import { deletePhoto } from "./v3_photos.ts";
@@ -233,6 +234,34 @@ function extractAptNumber(s: string | null | undefined): string | null {
 const CHECKOUTS_FRESH_MS = 2 * 60 * 1000;   // newer: serve as-is, no revalidate
 const CHECKOUTS_STALE_MS = 10 * 60 * 1000;  // older: fetch Hostaway synchronously
 
+// Logements vus dans les reservations Hostaway et absents de listing_config :
+// ajoutes en arriere-plan (listing_fill.ts), meme fiche que syncListings.
+function fillListingsLater(sb: any, raw: any[]): void {
+  const ids = (raw ?? []).map((r: any) => String(r?.listingMapId || r?.listingId || "")).filter(Boolean);
+  if (!ids.length) return;
+  const job = (async () => {
+    const token = await getAccessToken();
+    const h = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
+    const added = await fillMissingListings(sb, ids, async (id) => {
+      const resp = await fetch(API_BASE + "/listings/" + id, { headers: h });
+      if (!resp.ok) return null;
+      return (await resp.json())?.result ?? null;
+    }, (l: any) => {
+      const bedrooms = l.bedroomsNumber != null ? Number(l.bedroomsNumber) : 0;
+      const unitType = extractUnitType(l);
+      const internalName = l.internalListingName || null;
+      return {
+        listing_id: String(l.id), listing_name: l.name || "", bedrooms, price: priceForTag(unitType, bedrooms),
+        unit_type: unitType, internal_name: internalName,
+        apt_number: extractAptNumber(internalName) || extractAptNumber(l.name) || extractAptNumber(l.address) || null,
+        updated_at: new Date().toISOString(), hero_photo_url: heroPhotoFromHostaway(l),
+      };
+    });
+    if (added.length) console.log("[listing_fill] added " + added.join(", "));
+  })().catch((e) => console.error("[listing_fill] failed:", (e as any)?.message));
+  try { (globalThis as any).EdgeRuntime?.waitUntil?.(job); } catch (_e) { /* best effort */ }
+}
+
 async function buildCheckoutsPayload(sb: any, startDate: string, endDate: string) {
   const token = await getAccessToken();
   const validStatuses = ['new','modified','confirmed','ownerStay','reserved'];
@@ -269,6 +298,7 @@ async function buildCheckoutsPayload(sb: any, startDate: string, endDate: string
     fetchAllPages(departuresUrl, authHeaders),
     fetchAllPages(arrivalsUrl, authHeaders),
   ]);
+  fillListingsLater(sb, [...depResults, ...arrResults]);
   const arrivalsMap: Record<string, Array<{ date: string; guest: string; checkInTime: number | null }>> = {};
   arrResults.forEach((r: any) => {
     if (!validStatuses.includes(r.status)) return;
@@ -348,6 +378,7 @@ async function loadInspReservations(sb: any, day: string): Promise<{ reservation
         fetchAllPages(API_BASE + "/reservations?arrivalEndDate=" + d + "&departureStartDate=" + d, h),
         fetchAllPages(API_BASE + "/reservations?arrivalStartDate=" + d + "&arrivalEndDate=" + plusDays(d, 21), h),
       ]);
+      fillListingsLater(sb, [...touching, ...upcoming]);
       return normalizeReservations([...touching, ...upcoming]);
     },
     waitUntil: (p) => { try { (globalThis as any).EdgeRuntime?.waitUntil?.(p); } catch (_e) {} },
@@ -367,6 +398,7 @@ async function loadMgrReservations(sb: any, day: string): Promise<{ reservations
         fetchAllPages(API_BASE + "/reservations?departureStartDate=" + plusDays(d, -MGR_LOOKBACK_DAYS) + "&departureEndDate=" + d, h),
         fetchAllPages(API_BASE + "/reservations?arrivalStartDate=" + d + "&arrivalEndDate=" + plusDays(d, MGR_LOOKBACK_DAYS), h),
       ]);
+      fillListingsLater(sb, [...deps, ...arrs]);
       return normalizeMgrReservations([...deps, ...arrs]);
     },
     waitUntil: (p) => { try { (globalThis as any).EdgeRuntime?.waitUntil?.(p); } catch (_e) { /* best effort */ } },

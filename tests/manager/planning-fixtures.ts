@@ -44,7 +44,7 @@ export function planningBody(over: any = {}) {
       J({ key: '2026-10-09_Bo Ray', listingId: 'L2', apt: '103', bld: 'Damac Reva', date: '2026-10-09', guest: 'Bo Ray',
         next: { date: '2026-10-09', time: '15:00', sameDay: true, before: false }, tone: 'bad', word: 'Unassigned' }),
       J({ key: '2026-10-09_Cy Doe', listingId: 'L9', apt: '909', bld: 'Bloom Height', date: '2026-10-09', guest: 'Cy Doe',
-        tone: 'warn', word: 'Usually Elite · not logged yet' }),
+        tone: 'warn', word: 'Not logged yet' }),
       J({ key: '2026-10-09_Di Fox', listingId: 'L3', apt: '805', bld: 'Azizi Riviera 39', date: '2026-10-09', checkout: null, guest: 'Di Fox',
         next: { date: '2026-10-10', time: '16:00', sameDay: false, before: false }, assigned: [10], serviceType: 'CHC' }),
       J({ key: 'extra_2026-10-09_mabc', kind: 'extra', listingId: 'L8', apt: '808', bld: 'Tower H', date: '2026-10-09', checkout: null, guest: null,

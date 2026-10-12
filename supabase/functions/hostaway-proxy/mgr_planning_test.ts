@@ -117,7 +117,7 @@ Deno.test("mgr.planning : statuts, heures, reports, linge, extras", async () => 
   assertEquals([di.checkout, di.state, di.tone, di.word], [null, "not_started", "warn", "Not marked done"]);
   const bo = byKey(b, "2026-10-09_Bo Ray");
   assertEquals([bo.guest, bo.next, bo.tone], ["Bo Ray", { date: TODAY, time: "15:00", sameDay: true, before: false }, "bad"]);
-  assertEquals([byKey(b, "2026-10-09_Cy Doe").tone, byKey(b, "2026-10-09_Cy Doe").word], ["warn", "Usually Elite · not logged yet"]);
+  assertEquals([byKey(b, "2026-10-09_Cy Doe").tone, byKey(b, "2026-10-09_Cy Doe").word], ["warn", "Not logged yet"]);
   const x = byKey(b, "extra_2026-10-09_mabc");
   assertEquals([x.kind, x.guest, x.next, x.assigned, x.tone, x.word], ["extra", null, null, [10], "idle", "Scheduled"]);
   assertEquals(x.extra, { id: 31, label: "Deep clean", guestName: "Owner", priceBilled: 250, cleanerPrice: 120, notes: "Bring the steamer", cleaningDate: TODAY });

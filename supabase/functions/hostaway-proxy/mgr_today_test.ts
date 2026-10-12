@@ -71,7 +71,7 @@ Deno.test("menages du jour : departs, report, extra ; annule et inquiry exclus ;
   assertEquals(by["2026-10-09_Cy Doe"].checkout, null);
   assertEquals(by["2026-10-09_Cy Doe"].assigned, [4]);
   assertEquals([by["2026-10-09_Cy Doe"].tone, by["2026-10-09_Cy Doe"].word], ["warn", "Not started"]);
-  assertEquals([by["2026-10-09_Lu Mo"].tone, by["2026-10-09_Lu Mo"].word], ["warn", "Usually Elite · not logged yet"]);
+  assertEquals([by["2026-10-09_Lu Mo"].tone, by["2026-10-09_Lu Mo"].word], ["warn", "Not logged yet"]);
   assertEquals(by["2026-10-07_Jo La"].postponedFrom, "2026-10-07");
   assertEquals(by["2026-10-07_Jo La"].checkout, null);
   assertEquals(by["extra_2026-10-09_deep"].kind, "extra");
@@ -95,7 +95,7 @@ Deno.test("arrivees a 11:00 : bloque, a risque (00:00), pret, sejour proprietair
     ["101", "15:00", "Guest", "bad", "No cleaner assigned, and urgent ticket open: Gas not working (MNT-429)."],
     ["202", "15:00", "Guest", "warn", "Not started yet, Faiza. Guest in 4 h, checkout time not set."],
     ["404", "15:00", "Guest", "ok", "Cleaned by Elite Cleaning after the 05/10 checkout."],
-    ["303", "16:00", "Owner stay", "warn", "Usually Elite · not logged yet. Elite logs its jobs the next day around 14:00."],
+    ["303", "16:00", "Owner stay", "warn", "Not logged yet. Elite logs its jobs the next day around 14:00."],
   ]);
   assertEquals(a.counts, { ok: 1, warn: 2, bad: 1, idle: 0 });
   const l2 = a.rows[1];

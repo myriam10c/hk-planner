@@ -159,7 +159,7 @@ export function arrivalStatus(i: {
     if (p.usuallyElite && i.nowMs < eliteLogDeadlineMs(p.cleaningDate)) {
       return {
         tone: "warn", word: "At risk",
-        cause: "Usually Elite · not logged yet. Elite logs its jobs the next day around " + hhmm(MGR_ELITE_LOG_HOUR) + ".",
+        cause: "Not logged yet. Elite logs its jobs the next day around " + hhmm(MGR_ELITE_LOG_HOUR) + ".",
       };
     }
     const turn = p.checkoutDate === i.day && p.checkoutHour != null

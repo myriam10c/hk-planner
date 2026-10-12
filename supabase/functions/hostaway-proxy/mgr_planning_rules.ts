@@ -49,8 +49,8 @@ export function hourOrNull(v: unknown): number | null {
 export type PlanState = "done" | "in_progress" | "not_started";
 
 // Mot et ton d'un menage de la semaine. Ordre : annule, fait, arrivee avant le
-// menage (report trop loin), personne (Elite habituel tant que sa saisie du
-// lendemain 14:00 n'est pas passee), en cours, passe non fait, prevu.
+// menage (report trop loin), personne (Elite habituel, jour passe ou du jour,
+// tant que sa saisie du lendemain 14:00 n'est pas passee), en cours, passe non fait, prevu.
 export function planStatus(i: {
   date: string; today: string; nowMs: number; assigned: number; state: PlanState;
   cancelled: boolean; usuallyElite: boolean; nextBefore: boolean;
@@ -59,8 +59,10 @@ export function planStatus(i: {
   if (i.state === "done") return { tone: "ok", word: "Done" };
   if (i.nextBefore) return { tone: "bad", word: "Guest arrives first" };
   if (!i.assigned) {
-    if (i.usuallyElite && i.nowMs < eliteLogDeadlineMs(i.date)) {
-      return { tone: "warn", word: i.date > i.today ? "Usually Elite" : "Usually Elite · not logged yet" };
+    // Jour a venir : a assigner, Elite compris. Jour passe ou du jour : Elite
+    // saisit le lendemain vers 14:00, le menage est peut-etre deja fait.
+    if (i.usuallyElite && i.date <= i.today && i.nowMs < eliteLogDeadlineMs(i.date)) {
+      return { tone: "warn", word: "Not logged yet" };
     }
     return { tone: "bad", word: "Unassigned" };
   }
