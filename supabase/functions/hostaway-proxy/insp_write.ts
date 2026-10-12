@@ -248,7 +248,7 @@ export async function setFixSchedule(sb: any, me: SessionUser, body: any, now = 
   if (!INSP_ZONE_KEYS.has(zone)) return bad(400, "unknown zone");
   const { data: insp } = await sb.from("inspections").select("*").eq("id", id).maybeSingle();
   if (!insp) return bad(404, "Inspection not found.");
-  if (me.role !== "manager" && Number(insp.inspector_id) !== Number(me.cleaner_id)) return bad(403, "forbidden");
+  if (me.role !== "manager" && me.role !== "maintenance" && Number(insp.inspector_id) !== Number(me.cleaner_id)) return bad(403, "forbidden");
   const { data: item } = await sb.from("inspection_items").select("*").eq("inspection_id", id).eq("zone", zone).maybeSingle();
   if (!item) return bad(404, "This zone was not checked in this inspection.");
   if (item.status !== "not_ok" || item.outcome !== "maintenance") {

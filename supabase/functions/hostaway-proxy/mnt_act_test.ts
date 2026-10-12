@@ -549,12 +549,12 @@ Deno.test("S2 ruling B : due sur un ticket d'inspection = date de rectification 
   assertEquals(sb.tables.inspection_items.map((i: any) => i.fix_scheduled_for), [null, null]);
 });
 
-Deno.test("S2 ruling B : refus ou echec de la date de rectification = geste quand meme reussi (meme semantique qu'avant)", async () => {
+Deno.test("S2 ruling B : echec de la date de rectification = geste quand meme reussi (meme semantique qu'avant)", async () => {
   const sb = inspSeed();
-  // Semax n'est ni manager ni l'inspecteur : setFixSchedule refuse (403), le ticket garde sa date.
+  // Semax (maintenance) est admis par setFixSchedule : la date du ticket synchronise la zone.
   const r = await act(sb, { op: "ticket.due", ticketId: 501, date: "2026-10-14" });
   assertEquals(r.status, 200);
-  assertEquals([ticket(sb, 501).due_on, sb.tables.inspection_items[0].fix_scheduled_for], ["2026-10-14", null]);
+  assertEquals([ticket(sb, 501).due_on, sb.tables.inspection_items[0].fix_scheduled_for], ["2026-10-14", "2026-10-14"]);
   const s2 = inspSeed();
   s2.fail["inspection_items.select"] = { message: "db down" };
   const r2 = await mntAct(s2, WALTER, { idem: "idem-insp-due-0004", op: "ticket.due", ticketId: 501, date: "2026-10-14" }, { nowMs: NOW });

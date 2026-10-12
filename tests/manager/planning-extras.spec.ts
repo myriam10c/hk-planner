@@ -144,3 +144,12 @@ test('F4 : un manager garde le lien Apartment sheet', async ({ page }, info) => 
   await expect(page.locator('#sheet').getByRole('link', { name: 'Apartment sheet' })).toBeVisible();
   await expect(page.locator('#sheet')).toContainText('Price billed');
 });
+
+test('F4 : un manager voit les deux champs de prix meme si l extra n en a pas', async ({ page }, info) => {
+  await bootMgr(page, [me(MANAGER), PLAN(semaxBody())], { email: true, hash: HASH, clock: PNOW });
+  await openJob(page, isMobile(info), 'extra_2026-10-09_mabc', '2026-10-09');
+  const sh = page.locator('#sheet');
+  await sh.getByRole('button', { name: 'Edit extra' }).click();
+  await expect(sh.locator('#xPrice')).toHaveCount(1);
+  await expect(sh.locator('#xRate')).toHaveCount(1);
+});

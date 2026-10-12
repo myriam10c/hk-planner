@@ -305,7 +305,7 @@ export async function renderPlanning(ctx) {
   function extraBody() {
     const v = (id) => { const el = document.getElementById(id); return el ? String(el.value).trim() : ''; };
     const listing = v('xListing'), date = v('xDate'), price = v('xPrice'), rate = v('xRate');
-    // Prix caches (extra sans prix lisible, role maintenance) : jamais envoyes, le serveur garde les siens.
+    // Prix caches (role maintenance) : jamais envoyes, le serveur garde les siens.
     const priced = !!document.getElementById('xPrice');
     if (!listing) return { error: 'Choose an apartment.' };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'Choose a date.' };

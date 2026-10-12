@@ -143,8 +143,17 @@ Deno.test("setFixSchedule : l'inspectrice auteure pose la date, item et ticket a
 Deno.test("setFixSchedule : un manager peut, un autre cleaner non", async () => {
   const db = seed(); const id = await withTicket(db);
   assertEquals((await setFixSchedule(db, WALTER, { inspectionId: id, zone: "ac", date: "2026-10-12" }, NOW)).status, 200);
-  assertEquals((await setFixSchedule(db, SEMAX, { inspectionId: id, zone: "ac", date: "2026-10-13" }, NOW)).status, 403);
+  const OTHER = { cleaner_id: 9, name: "Other", role: "cleaner", color: "#222" };
+  assertEquals((await setFixSchedule(db, OTHER, { inspectionId: id, zone: "ac", date: "2026-10-13" }, NOW)).status, 403);
   assertEquals(db.tables.inspection_items[0].fix_scheduled_for, "2026-10-12");
+});
+
+Deno.test("setFixSchedule : Semax (maintenance) peut poser la date, ticket mis a jour", async () => {
+  const db = seed(); const id = await withTicket(db);
+  const r = await setFixSchedule(db, SEMAX, { inspectionId: id, zone: "ac", date: "2026-10-13", slot: "morning" }, NOW);
+  assertEquals(r.status, 200);
+  assertEquals(db.tables.inspection_items[0].fix_scheduled_for, "2026-10-13");
+  assert((db.tables.maintenance_tickets[0].description as string).includes("Fix date: 13 Oct 2026"));
 });
 
 Deno.test("setFixSchedule : effacer la date (null) retire la ligne du ticket", async () => {

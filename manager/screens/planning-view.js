@@ -163,8 +163,8 @@ export function jobSheet(d, j, ro, s) {
   if (j.extra) {
     kv('Extra', esc(j.extra.label || 'Extra cleaning'));
     if (j.extra.guestName) kv('Guest or client', esc(j.extra.guestName));
-    if (j.extra.priceBilled != null) kv('Price billed', esc(j.extra.priceBilled + ' AED'));
-    if (j.extra.cleanerPrice != null) kv('Cleaner rate', esc(j.extra.cleanerPrice + ' AED'));
+    if ((!s || s.manager !== false) && j.extra.priceBilled != null) kv('Price billed', esc(j.extra.priceBilled + ' AED'));
+    if ((!s || s.manager !== false) && j.extra.cleanerPrice != null) kv('Cleaner rate', esc(j.extra.cleanerPrice + ' AED'));
     if (j.extra.notes) kv('Notes', esc(j.extra.notes));
   }
   kv('Linen', j.laundry ? esc(laundryLine(j.laundry)) : 'Not counted');
@@ -287,10 +287,10 @@ const EXTRA_TYPES = ['Mid-stay', 'Owner turnover', 'Deep clean', 'Post-construct
 
 // Creation (j null) ou modification d'un menage en plus. L'assignation d'un extra
 // existant passe par Assign, comme tout menage.
-export function extraSheet(d, j, ro) {
+export function extraSheet(d, j, ro, s) {
   const x = j && j.extra ? j.extra : null;
-  // Extra existant sans aucun prix (le serveur les omet pour le role maintenance) : champs de prix caches.
-  const noPrices = !!x && x.priceBilled == null && x.cleanerPrice == null;
+  // Prix caches selon le ROLE (maintenance), jamais selon les donnees : un manager voit toujours les deux champs.
+  const noPrices = !!s && s.manager === false;
   const f = x
     ? { listing: j.listingId, date: x.cleaningDate, label: x.label || '', guest: x.guestName || '',
       price: x.priceBilled == null ? '' : String(x.priceBilled), rate: x.cleanerPrice == null ? '' : String(x.cleanerPrice), notes: x.notes || '' }
