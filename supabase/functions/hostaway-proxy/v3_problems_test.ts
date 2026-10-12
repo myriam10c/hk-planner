@@ -64,10 +64,10 @@ async function signale(sb: any, me: any = FAIZA, extra: Record<string, unknown> 
 // Tables et roles
 // ---------------------------------------------------------------------------
 
-Deno.test("V3_EVENT_TYPES suit la contrainte CHECK de la migration 20261010090000", () => {
+Deno.test("V3_EVENT_TYPES suit la contrainte CHECK de la migration 20261012120000", () => {
   assertEquals([...V3_EVENT_TYPES].sort(), [
     "add_problem_photo", "check_ticket", "delete_photo", "delete_problem", "finish_job",
-    "mgr_problem_act", "report_problem", "set_problem_note", "set_problem_voice", "start_job", "tick",
+    "mgr_problem_act", "mnt_act", "mnt_ingest", "report_problem", "set_problem_note", "set_problem_voice", "start_job", "tick",
     "update_problem", "upload_photo", "upload_voice",
   ]);
 });
