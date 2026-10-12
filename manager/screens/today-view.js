@@ -193,19 +193,23 @@ function aheadHtml(a) {
   return h + '</section>';
 }
 
-function problemsHtml(data) {
-  const c = data.problems.counts;
-  let h = '<section class="card o2" aria-labelledby="h-prob"><div class="sec-head"><h2 id="h-prob">Open problems</h2><span class="meta">Top 5 by urgency</span></div>'
-    + '<div class="counts"><div class="count"><b class="tnum">' + c.ticketsOpen + '</b><span>maintenance tickets, ' + c.ticketsUrgent + ' urgent</span></div>'
-    + '<div class="count"><b class="tnum">' + c.ticketsNoTech + '</b><span>tickets with no technician</span></div>'
-    + '<div class="count"><b class="tnum">' + c.teamTasksOverdue + '</b><span>team tasks overdue, of ' + c.teamTasksOpen + ' open</span></div></div>';
-  if (!data.problems.top.length) h += '<div class="empty pad">Nothing open.</div>';
-  h += data.problems.top.map((p) => '<button class="prob" type="button" data-open="prob" data-ref="' + esc(p.ref) + '" data-nav-row>'
-    + '<span class="bar ' + p.tone + '"></span><span class="body"><span class="src"><span class="pill ' + p.tone + '">' + esc(p.label) + '</span><span>'
-    + esc(p.source) + ' <span class="mono">' + esc(p.ref) + '</span></span></span><span class="ttl">' + esc(p.title) + '</span>'
-    + (p.apt || p.bld ? '<span class="where">' + esc(placeLabel(p)) + '</span>' : '') + '<span class="why">' + esc(p.why) + '</span></span></button>').join('');
-  h += '<div class="sec-foot"><span class="t3">Including ' + c.inspectionTicketsOpen + ' from inspections and '
-    + c.cleanerReportsOpen + ' cleaner reports.</span><a class="link" href="#/maintenance">Open maintenance</a></div>';
+// Bloc Maintenance : compteurs, 5 premiers tickets ouverts (liens vers l'ecran Maintenance).
+const MNT_TONE = { urgent: 'bad', high: 'warn' };
+const MNT_STAGE = { todo: 'To do', in_progress: 'In progress', waiting_parts: 'Waiting parts', to_confirm: 'To confirm' };
+function maintenanceHtml(data) {
+  let h = '<section class="card o2" aria-labelledby="h-prob"><div class="sec-head"><h2 id="h-prob">Maintenance</h2><span class="meta">Top 5 by urgency</span></div>';
+  const m = data.maintenance;
+  if (!m) return h + '<div class="empty pad">Maintenance is unavailable right now.</div></section>';
+  const c = m.counts;
+  h += '<div class="counts"><a class="count" href="#/maintenance"><b class="tnum">' + c.proposals + '</b><span>' + c.proposals + ' proposals to check</span></a>'
+    + '<div class="count"><b class="tnum">' + c.urgent + '</b><span>' + c.urgent + ' urgent tickets</span></div>'
+    + '<div class="count"><b class="tnum">' + c.unassigned + '</b><span>' + c.unassigned + ' with nobody</span></div></div>';
+  if (!m.top.length) h += '<div class="empty pad">Nothing open.</div>';
+  h += m.top.map((t) => '<a class="prob" href="#/maintenance?ref=' + encodeURIComponent(t.ref) + '" data-nav-row>'
+    + '<span class="bar ' + (MNT_TONE[t.priority] || 'ok') + '"></span><span class="body"><span class="src"><span>' + esc(MNT_STAGE[t.stage] || '')
+    + '</span><span class="mono">' + esc(t.ref) + '</span></span><span class="ttl">' + esc(t.title) + '</span>'
+    + (t.apt || t.bld ? '<span class="where">' + esc(placeLabel(t)) + '</span>' : '') + '</span></a>').join('');
+  h += '<div class="sec-foot"><span class="t3"></span><a class="link" href="#/maintenance">Open maintenance</a></div>';
   return h + '</section>';
 }
 
@@ -257,7 +261,7 @@ function arrivalsHtml(data) {
 export function boardHtml(data, nowMs, banner, stale, ro, ahead) {
   return header(data, banner, stale) + alertHtml(data, nowMs) + stripHtml(data)
     + '<div class="board"><div class="col">' + whoHtml(data, ro, ahead) + controlHtml(data) + '</div><div class="col">'
-    + problemsHtml(data) + arrivalsHtml(data) + '</div></div>';
+    + maintenanceHtml(data) + arrivalsHtml(data) + '</div></div>';
 }
 
 function sheetHead(title, sub) {

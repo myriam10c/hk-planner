@@ -11,7 +11,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await bootMgr(page, [me(MANAGER), TODAY()], { email: true, clock: NOW });
       const h = (name: string) => page.getByRole('heading', { name, exact: true });
       await expect(h('Who does what today')).toBeVisible();
-      await expect(h('Open problems')).toBeVisible();
+      await expect(h('Maintenance')).toBeVisible();
       await expect(h('Team control')).toBeVisible();
       await expect(h('Ready for today’s arrivals')).toBeVisible();
       await expect(page.getByText('Data as of 11:00')).toBeVisible();
@@ -30,11 +30,11 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
       const y = async (name: string) => (await h(name).boundingBox())!.y;
       if (info.project.name === 'mgr-mobile') {
-        expect(await y('Who does what today')).toBeLessThan(await y('Open problems'));
-        expect(await y('Open problems')).toBeLessThan(await y('Team control'));
+        expect(await y('Who does what today')).toBeLessThan(await y('Maintenance'));
+        expect(await y('Maintenance')).toBeLessThan(await y('Team control'));
         expect(await y('Team control')).toBeLessThan(await y('Ready for today’s arrivals'));
       } else {
-        expect(Math.abs((await y('Who does what today')) - (await y('Open problems')))).toBeLessThan(2);
+        expect(Math.abs((await y('Who does what today')) - (await y('Maintenance')))).toBeLessThan(2);
       }
     });
   });

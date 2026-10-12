@@ -1,4 +1,4 @@
-import { ROW, ROW_TSK } from './problem-fixtures';
+import { ROW_TSK } from './problem-fixtures';
 // Reponse mgr.today au format de supabase/functions/hostaway-proxy/mgr_api.ts.
 export const DAY = '2026-10-09';
 export const NOW = new Date('2026-10-09T07:00:00Z'); // 11:00 Dubai
@@ -32,7 +32,18 @@ export function todayBody(over: any = {}) {
     },
     problems: {
       counts: { urgent: 21, ticketsOpen: 70, ticketsUrgent: 19, ticketsNoTech: 69, teamTasksOpen: 135, teamTasksOverdue: 19, inspectionTicketsOpen: 11, cleanerReportsOpen: 0 },
-      top: [ROW(), ROW_TSK],
+      top: [ROW_TSK],
+    },
+    maintenance: {
+      counts: { proposals: 3, proposalsUrgent: 1, open: 70, urgent: 19, unassigned: 69 },
+      top: [
+        { id: 429, ref: 'MNT-429', listingId: 'L1', apt: '308', bld: 'Binghatti Lavender', title: 'Gas not working', category: 'plumbing',
+          priority: 'urgent', status: 'open', stage: 'todo', origin: 'manual', assignee: null, dueOn: null, createdAt: '2026-10-08T06:00:00Z',
+          startedAt: null, resolvedAt: null, resolvedBy: null, resolutionNotes: null, actualCost: null, proposalId: null },
+        { id: 430, ref: 'MNT-430', listingId: 'L2', apt: '103', bld: 'Damac Reva', title: 'AC leaking', category: 'ac',
+          priority: 'medium', status: 'waiting_parts', stage: 'waiting_parts', origin: 'inspection', assignee: { kind: 'member', id: 7, name: 'Semax' },
+          dueOn: null, createdAt: '2026-10-07T06:00:00Z', startedAt: null, resolvedAt: null, resolvedBy: null, resolutionNotes: null, actualCost: null, proposalId: null },
+      ],
     },
     control: {
       inspections: { proposed: 4, claimed: 1, done: 0, unfinished: [{ apt: '414', bld: 'Azizi Riviera 11', inspector: 'Hillal', date: '05/10' }] },

@@ -120,3 +120,5 @@
 .wdays{padding:0 var(--s4) var(--s3)}
 .wpad{padding:0 var(--s4) var(--s3)}
 .wpad .banner{margin-bottom:0}
+a.prob{text-decoration:none}
+a.count{text-decoration:none;color:inherit}

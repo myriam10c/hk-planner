@@ -3,10 +3,9 @@
 import { get, post } from '/manager/api.js';
 import { clearToday, loadToday, saveToday } from '/manager/today-cache.js';
 import { createGestures } from '/manager/gesture.js';
-import { addDays, announceBadge, closeSheet, dubaiTime, esc, focusBack, focusMark, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
+import { addDays, announceMntBadge, closeSheet, dubaiTime, esc, focusBack, focusMark, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { aheadPickerSheet, arrivalSheet, boardHtml, jobSheet, pickerSheet } from '/manager/screens/today-view.js';
 import { namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
-import { createProblemPanel } from '/manager/problem-panel.js';
 
 function dubaiParts(ms) {
   const p = {};
@@ -110,7 +109,7 @@ export async function renderToday(ctx) {
       st.savedAt = Date.now();
       st.fresh = true;
       saveToday(d, st.savedAt);
-      announceBadge(d.problems.counts.urgent);
+      if (d.maintenance) announceMntBadge(d.maintenance.counts.proposals);
     } catch (e) {
       if (handleAccess(e)) return;
       st.error = e;
@@ -338,13 +337,10 @@ export async function renderToday(ctx) {
     } else if (op === 'arr') {
       const a = st.data.arrivals.rows.find((x) => x.id === el.getAttribute('data-id'));
       if (a) { st.sheetKey = a.prevKey || null; openSheet(arrivalSheet(st.data, a, now, readOnly())); }
-    } else if (op === 'prob') {
-      const p = st.data.problems.top.find((x) => x.ref === el.getAttribute('data-ref'));
-      if (p) { st.sheetKey = null; panel.open(p.ref, p); }
     }
   }
 
-  // Fleches haut / bas entre les lignes d'un meme bloc (problemes, arrivees).
+  // Fleches haut / bas entre les lignes d'un meme bloc (maintenance, arrivees).
   function onKey(e) {
     if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || sheetIsOpen()) return;
     const row = document.activeElement && document.activeElement.closest ? document.activeElement.closest('[data-nav-row]') : null;
@@ -354,8 +350,6 @@ export async function renderToday(ctx) {
     if (next) { e.preventDefault(); next.focus(); }
   }
 
-  // Fiche et gestes des problemes : meme panneau que l'ecran Problems.
-  const panel = createProblemPanel({ readOnly, onChange: () => refresh(), handleAccess });
   // Retour sur l'onglet : la semaine du jour affiche (autre jour) est relue.
   const onVis = () => {
     if (document.visibilityState !== 'visible' || !ctx.isCurrent() || st.busy) return;
@@ -369,7 +363,6 @@ export async function renderToday(ctx) {
     document.removeEventListener('click', onClick);
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('visibilitychange', onVis);
-    panel.dispose();
   });
   await refresh();
 }
