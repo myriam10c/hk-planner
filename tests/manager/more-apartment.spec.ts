@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { bootMgr, fetchLog, MANAGER, me, noHorizontalScroll, type FakeRoute } from './helpers';
 import { isMobile, openJob, PLAN, PNOW } from './planning-fixtures';
-import { detailBody, listBody } from './problem-fixtures';
+import { detailTask, listBody } from './problem-fixtures';
 
 // Reponses au format de supabase/functions/hostaway-proxy/mgr_apartment.ts.
 const LIST_BODY = {
@@ -177,9 +177,9 @@ test('Planning : la fiche d un menage renvoie a la fiche logement', async ({ pag
   await expect(page.locator('#sheet').getByRole('link', { name: 'Apartment sheet' })).toHaveAttribute('href', '#/more/apartment/L1');
 });
 
-test('Problems : la fiche d un probleme renvoie a la fiche logement', async ({ page }) => {
+test('Tasks : la fiche d une tache renvoie a la fiche logement', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), { match: 'action=mgr.problems', status: 200, body: listBody() },
-    { match: 'action=mgr.problem.get', status: 200, body: detailBody() }, LIST, CL(), ONE()], { email: true, clock: PNOW, hash: '#/problems' });
+    { match: 'action=mgr.problem.get', status: 200, body: detailTask() }, LIST, CL(), ONE()], { email: true, clock: PNOW, hash: '#/tasks' });
   await page.locator('.prow').first().click();
   const link = page.locator('#sheet').getByRole('link', { name: 'Apartment sheet' });
   await expect(link).toHaveAttribute('href', '#/more/apartment/L1');
@@ -210,9 +210,9 @@ for (const scheme of ['light', 'dark'] as const) {
   });
 }
 
-test('fiche logement : les references de tickets sont des liens vers Problems', async ({ page }) => {
+test('fiche logement : les references de tickets sont des liens vers Maintenance', async ({ page }) => {
   await boot(page, '#/more/apartment/L1', [LIST, CL(), ONE()]);
   const link = page.locator('main [data-sec="open"]').getByRole('link', { name: 'MNT-429' });
-  await expect(link).toHaveAttribute('href', '#/problems?ref=MNT-429');
-  await expect(page.locator('main [data-sec="recent"]').getByRole('link', { name: 'MNT-400' })).toHaveAttribute('href', '#/problems?ref=MNT-400');
+  await expect(link).toHaveAttribute('href', '#/maintenance?ref=MNT-429');
+  await expect(page.locator('main [data-sec="recent"]').getByRole('link', { name: 'MNT-400' })).toHaveAttribute('href', '#/maintenance?ref=MNT-400');
 });

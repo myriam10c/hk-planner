@@ -1,45 +1,79 @@
 // App manager /manager/ (spec 2026-10-09-hk-manager-app-design.md) : acces,
-// navigation Today · Planning · Problems · Inspections · More, routeur par hash.
+// navigation par role, routeur par hash. Manager : Today · Planning · Maintenance ·
+// Inspections · More (Tasks sous More). Maintenance (Semax) : Maintenance · Planning.
 import { getSession } from '/v3/session.js';
 import { get } from '/manager/api.js';
 import { decideAccess } from '/manager/access.js';
 import { closeSheet, I, initSheet, toggleTheme } from '/manager/ui/dom.js';
 import { renderPlaceholder } from '/manager/screens/placeholder.js';
 
-const VIEWS = [
-  { id: 'today', label: 'Today' }, { id: 'planning', label: 'Planning' }, { id: 'problems', label: 'Problems' },
-  { id: 'inspections', label: 'Inspections' }, { id: 'more', label: 'More' },
-];
+const LABELS = { today: 'Today', planning: 'Planning', maintenance: 'Maintenance', inspections: 'Inspections', more: 'More' };
+// Par role : entrees de navigation, vues permises (Tasks vit sous More), vue d'arrivee.
+const ROLES = {
+  manager: { nav: ['today', 'planning', 'maintenance', 'inspections', 'more'], extra: ['tasks'], landing: 'today' },
+  maintenance: { nav: ['maintenance', 'planning'], extra: [], landing: 'maintenance' },
+};
+// Vue cachee de la navigation -> entree marquee courante.
+const PARENT = { tasks: 'more' };
 // Ecrans livres : module et fonction de rendu. Les autres restent provisoires.
 const SCREENS = {
   today: ['/manager/screens/today.js', 'renderToday'],
   planning: ['/manager/screens/planning.js', 'renderPlanning'],
-  problems: ['/manager/screens/problems.js', 'renderProblems'],
+  maintenance: ['/manager/screens/maintenance.js', 'renderMaintenance'],
+  tasks: ['/manager/screens/problems.js', 'renderProblems'],
   inspections: ['/manager/screens/inspections.js', 'renderInspections'],
   more: ['/manager/screens/more.js', 'renderMore'],
 };
+const ROLE_KEY = 'mgrRole';
 const main = document.getElementById('main');
 let me = null;
-// Problemes urgents ouverts, annonces par Today et Problems (evenement mgr:badge).
-let urgent = 0;
+// Propositions en attente, annoncees par Maintenance et Today (evenement mgr:mntbadge).
+let proposals = 0;
 let seq = 0;
 let leaving = [];
 let listening = false;
 
+// Role confirme par le serveur ; sans reponse (session a renouveler, hors ligne),
+// le dernier role confirme sur cet appareil, sinon manager.
+function roleOf() {
+  let r = me && me.role;
+  if (!r) { try { r = localStorage.getItem(ROLE_KEY); } catch (e) { r = null; } }
+  return ROLES[r] ? r : 'manager';
+}
+function rememberRole(r) { try { localStorage.setItem(ROLE_KEY, r); } catch (e) { /* stockage indisponible */ } }
+
+// Anciens liens #/problems : taches -> #/tasks, tickets MNT -> #/maintenance (requete gardee).
+function legacyHash(hash) {
+  const m = /^#\/?problems(?:\?(.*))?$/.exec(hash || '');
+  if (!m) return null;
+  const q = m[1] || '';
+  const ref = new URLSearchParams(q).get('ref') || '';
+  return (/^MNT-/.test(ref) ? '#/maintenance' : '#/tasks') + (q ? '?' + q : '');
+}
+
+// Vue demandee par le hash ; hors des vues du role -> vue d'arrivee, hash reecrit
+// par replaceState (pas de hashchange, pas d'entree d'historique en plus).
 function currentView() {
-  const v = (location.hash || '#/today').replace(/^#\/?/, '').split(/[/?]/)[0];
-  return VIEWS.some((x) => x.id === v) ? v : 'today';
+  const old = legacyHash(location.hash);
+  if (old) history.replaceState(history.state, '', old);
+  const r = ROLES[roleOf()];
+  const v = (location.hash || '').replace(/^#\/?/, '').split(/[/?]/)[0];
+  if (r.nav.includes(v) || r.extra.includes(v)) return v;
+  history.replaceState(history.state, '', '#/' + r.landing);
+  return r.landing;
 }
 
 function badge(id) {
-  if (id !== 'problems' || urgent <= 0) return '';
-  return '<span class="nbadge" aria-label="' + urgent + ' urgent">' + (urgent > 99 ? '99+' : urgent) + '</span>';
+  if (id !== 'maintenance' || proposals <= 0) return '';
+  return '<span class="nbadge" aria-label="' + proposals + ' to review">' + (proposals > 99 ? '99+' : proposals) + '</span>';
 }
 
 function renderNav(view) {
-  const link = (cls, v, inner) => '<a class="' + cls + '" href="#/' + v.id + '"' + (view === v.id ? ' aria-current="page"' : '') + '>' + inner + '</a>';
-  document.getElementById('sideNav').innerHTML = VIEWS.map((v) => link('navlink', v, I[v.id] + '<span>' + v.label + '</span>' + badge(v.id))).join('');
-  document.getElementById('tabbar').innerHTML = VIEWS.map((v) => link('tab', v, '<span class="tab-wrap">' + I[v.id] + badge(v.id) + '</span>' + v.label)).join('');
+  const cur = PARENT[view] || view;
+  const views = ROLES[roleOf()].nav;
+  const link = (cls, id, inner) => '<a class="' + cls + '" href="#/' + id + '"' + (cur === id ? ' aria-current="page"' : '') + '>' + inner + '</a>';
+  document.getElementById('sideNav').innerHTML = views.map((id) => link('navlink', id, I[id] + '<span>' + LABELS[id] + '</span>' + badge(id))).join('');
+  document.getElementById('tabbar').innerHTML = views.map((id) => link('tab', id, '<span class="tab-wrap">' + I[id] + badge(id) + '</span>' + LABELS[id])).join('');
   document.getElementById('sideFoot').textContent = me ? 'Signed in as ' + me.name : 'Offline';
 }
 
@@ -76,10 +110,10 @@ function startShell() {
   if (!listening) {
     listening = true;
     window.addEventListener('hashchange', route);
-    document.addEventListener('mgr:badge', (e) => {
-      const n = Math.max(0, Number(e.detail && e.detail.problems) || 0);
-      if (n === urgent) return;
-      urgent = n;
+    document.addEventListener('mgr:mntbadge', (e) => {
+      const n = Math.max(0, Number(e.detail && e.detail.proposals) || 0);
+      if (n === proposals) return;
+      proposals = n;
       renderNav(currentView());
     });
   }
@@ -119,7 +153,8 @@ async function boot() {
   const d = decideAccess(s, cleaner);
   if (d.go) { location.replace(d.go); return; }
   if (d.screen === 'email') { emailRequired(); return; }
-  me = { id: cleaner.id, name: cleaner.name };
+  me = { id: cleaner.id, name: cleaner.name, role: cleaner.role };
+  rememberRole(cleaner.role);
   await startShell();
 }
 

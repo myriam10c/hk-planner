@@ -99,7 +99,7 @@ const reste = async (page: any, ms = 2500) => {
 };
 const banner = (page: any) => page.locator('#mgrBanner');
 
-test('decision pure : manager en session email seulement, a partir du 11/10 Dubai, jamais en legacy', async ({ page }) => {
+test('decision pure : manager ou maintenance en session email seulement, a partir du 11/10 Dubai, jamais en legacy', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof (window as any).mgrCutoverDue === 'function', null, { timeout: 10_000 });
   const r = await page.evaluate(() => {
@@ -116,8 +116,8 @@ test('decision pure : manager en session email seulement, a partir du 11/10 Duba
   });
   expect(r.consts).toEqual(['2026-10-11', '2026-11-10', '/manager/', 'hkMgrRedirectAt']);
   expect(r.le10).toEqual([false, false, false, false, false, false]);
-  expect(r.le11).toEqual([true, false, false, false, false, false]);
-  expect(r.le12).toEqual([true, false, false, false, false, false]);
+  expect(r.le11).toEqual([true, false, false, true, false, false]);
+  expect(r.le12).toEqual([true, false, false, true, false, false]);
   expect(r.pin).toBe(false);
   expect(r.legacy).toBe(false);
 });
@@ -134,9 +134,35 @@ test('session email manager le 10/10 23:59 Dubai : reste, sans bandeau', async (
   await expect(banner(page)).toHaveCount(0);
 });
 
-test('lien de push /?task=12 : renvoye vers /manager/#/problems?ref=TSK-12', async ({ page }) => {
-  await boot(page, { at: APRES, email: true, routes: routesFor(WALTER, 'walter@example.com'), path: '/?task=12' });
-  await versManager(page, '#/problems?ref=TSK-12');
+for (const [path, hash] of [
+  ['/?task=12', '#/tasks?ref=TSK-12'], ['/?mnt=12', '#/maintenance?ref=MNT-12'], ['/?prp=5', '#/maintenance?ref=PRP-5'],
+] as const) {
+  test('lien de push ' + path + ' : renvoye vers /manager/' + hash, async ({ page }) => {
+    await boot(page, { at: APRES, email: true, routes: routesFor(WALTER, 'walter@example.com'), path });
+    await versManager(page, hash);
+  });
+}
+
+test('lien de push /?mnt=abc (id invalide) : /manager/ sans ref', async ({ page }) => {
+  await boot(page, { at: APRES, email: true, routes: routesFor(WALTER, 'walter@example.com'), path: '/?mnt=abc' });
+  await versManager(page);
+});
+
+test('session email maintenance (Semax) le 11/10 : renvoyee vers /manager/, lien ticket compris', async ({ page }) => {
+  await boot(page, { at: APRES, email: true, routes: routesFor(SEMAX, 'semax@example.com'), path: '/?mnt=12' });
+  await versManager(page, '#/maintenance?ref=MNT-12');
+});
+
+test('session PIN maintenance le 11/10 : reste, bandeau de connexion par email', async ({ page }) => {
+  await boot(page, { at: APRES, pin: SEMAX, mode: true, routes: routesFor(SEMAX, 'semax@example.com') });
+  await reste(page, 3000);
+  await expect(banner(page)).toContainText('The new manager app needs your email sign-in.');
+});
+
+test('?legacy=1 : une session email maintenance garde l ancienne app avec le bandeau', async ({ page }) => {
+  await boot(page, { at: APRES, email: true, routes: routesFor(SEMAX, 'semax@example.com'), path: '/?legacy=1' });
+  await reste(page, 3000);
+  await expect(banner(page)).toContainText('You are using the old manager app.');
 });
 
 test('connexion email d un manager le 11/10 : renvoye vers /manager/', async ({ page }) => {
@@ -252,8 +278,7 @@ test('session email cleaner le 11/10 : toujours vers /v3/, jamais /manager/', as
 });
 
 for (const [nom, membre, email] of [
-  ['Elite subcontractor (PIN)', ELITE, false], ['maintenance (PIN)', SEMAX, false],
-  ['Elite subcontractor (email)', ELITE, true], ['maintenance (email)', SEMAX, true],
+  ['Elite subcontractor (PIN)', ELITE, false], ['Elite subcontractor (email)', ELITE, true],
 ] as const) {
   test('le 11/10, ' + nom + ' n est jamais renvoye vers /manager/', async ({ page }) => {
     await boot(page, {

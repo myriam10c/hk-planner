@@ -472,6 +472,8 @@ test('un membre qui a deja une adresse n est pas invite a creer un compte', asyn
 });
 
 test('Create your account envoie linkEmail puis ouvre la session email', async ({ page }) => {
+  // Semax (maintenance) en session email part vers /manager/ depuis la phase 2 : ancienne app gardee.
+  await keepOldApp(page);
   await pinLoginFromCreateLink(page, [
     { match: 'action=linkEmail', status: 200, body: { status: 'success' } },
     { match: '/auth/v1/token', status: 200, body: SESSION },

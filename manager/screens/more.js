@@ -16,6 +16,7 @@ const SECTIONS = {
 const WITH_ID = new Set(['apartment', 'hr', 'setup']);
 
 const ROWS = [
+  { title: 'Tasks', desc: 'Team tasks: assign, schedule and close', href: '#/tasks' },
   { title: 'Team', desc: 'Accounts, roles and invitations', href: '#/more/team' },
   { title: 'Apartment', desc: 'One sheet per apartment: cleanings, linen, tickets, inspections, security contacts', href: '#/more/apartment' },
   { title: 'Reviews', desc: 'Review disputes', href: '#/more/reviews' },

@@ -1,9 +1,9 @@
-// Ecran Problems (spec 2026-10-09, sections 3 et 4) : une boite de tri pour les
-// tickets (maintenance, inspections, signalements cleaner) et les taches d'equipe.
-// Puces de filtre, recherche, pages de 50, fiche et gestes partages avec Today.
+// Ecran Tasks (#/tasks, sous More ; ex Problems, spec 2026-10-09 sections 3 et 4) :
+// les taches d'equipe seules depuis la phase 2 maintenance (les tickets vivent dans
+// Maintenance). Puces de filtre, recherche, pages de 50, fiche et gestes partages avec Today.
 import { get } from '/manager/api.js';
 import { clearCache, loadCache, saveCache } from '/manager/today-cache.js';
-import { announceBadge, closeSheet, dubaiTime, dubaiToday, esc, openSheet, sheetIsOpen, toast } from '/manager/ui/dom.js';
+import { closeSheet, dubaiTime, dubaiToday, esc, openSheet, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { attachSwipe } from '/manager/ui/swipe.js';
 import { createProblemPanel } from '/manager/problem-panel.js';
 import { apartmentSheet, chipsHtml, listHtml, problemsShell } from '/manager/screens/problems-view.js';
@@ -11,7 +11,7 @@ import { apartmentSheet, chipsHtml, listHtml, problemsShell } from '/manager/scr
 export const PROBLEMS_CACHE = 'mgrProblemsCache';
 export const PAGE = 50;
 const SEARCH_DELAY_MS = 250;
-const NO_FILTER = { urgent: false, mine: false, unassigned: false, listingId: null, source: null, q: '' };
+const NO_FILTER = { urgent: false, mine: false, unassigned: false, listingId: null, q: '' };
 
 export function queryOf(f, offset) {
   const p = { offset: String(offset), limit: String(PAGE) };
@@ -19,11 +19,10 @@ export function queryOf(f, offset) {
   if (f.mine) p.mine = '1';
   if (f.unassigned) p.unassigned = '1';
   if (f.listingId) p.listingId = f.listingId;
-  if (f.source) p.source = f.source;
   if (f.q) p.q = f.q;
   return p;
 }
-export function hasFilter(f) { return !!(f.urgent || f.mine || f.unassigned || f.listingId || f.source || f.q); }
+export function hasFilter(f) { return !!(f.urgent || f.mine || f.unassigned || f.listingId || f.q); }
 
 export async function renderProblems(ctx) {
   const main = ctx.main;
@@ -110,7 +109,6 @@ export async function renderProblems(ctx) {
       st.fresh = true;
       st.savedAt = Date.now();
       if (!hasFilter(f)) saveCache(PROBLEMS_CACHE, d, st.savedAt);
-      announceBadge(d.counts.urgent);
     } catch (e) {
       if (mine !== st.seq) return;
       if (handleAccess(e)) return;
@@ -147,7 +145,7 @@ export async function renderProblems(ctx) {
 
   function onClick(e) {
     const el = e.target && e.target.closest
-      ? e.target.closest('[data-chip],[data-src],[data-apt-open],[data-apt],[data-more],[data-retry],[data-clear],[data-row]') : null;
+      ? e.target.closest('[data-chip],[data-apt-open],[data-apt],[data-more],[data-retry],[data-clear],[data-row]') : null;
     if (!el || !ctx.isCurrent()) return;
     if (el.hasAttribute('data-retry')) { refresh(); return; }
     if (el.hasAttribute('data-more')) { loadMore(); return; }
@@ -157,7 +155,6 @@ export async function renderProblems(ctx) {
       if (k === 'urgent' || k === 'mine' || k === 'unassigned') setFilter((f) => { f[k] = !f[k]; });
       return;
     }
-    if (el.hasAttribute('data-src')) { const v = el.getAttribute('data-src') || null; setFilter((f) => { f.source = v; }); return; }
     if (el.hasAttribute('data-apt-open')) { if (st.data) openSheet(apartmentSheet(st.data.apartments, st.f.listingId)); return; }
     if (el.hasAttribute('data-apt')) { const v = el.getAttribute('data-apt') || null; closeSheet(); setFilter((f) => { f.listingId = v; }); return; }
     const ref = el.getAttribute('data-ref');
@@ -237,16 +234,16 @@ export async function renderProblems(ctx) {
     },
   });
 
-  // Lien profond : #/problems?ref=REF. Le hash suit la fiche ouverte par replaceState
+  // Lien profond : #/tasks?ref=REF. Le hash suit la fiche ouverte par replaceState
   // (pas de hashchange, donc pas de nouveau rendu ni d'entree d'historique en plus).
   function refFromHash() {
     const q = (location.hash.split('?')[1] || '');
     return new URLSearchParams(q).get('ref') || null;
   }
   function syncHash() {
-    if (!ctx.isCurrent() || location.hash.split('?')[0] !== '#/problems') return;
+    if (!ctx.isCurrent() || location.hash.split('?')[0] !== '#/tasks') return;
     const ref = panel.current();
-    const want = ref ? '#/problems?ref=' + encodeURIComponent(ref) : '#/problems';
+    const want = ref ? '#/tasks?ref=' + encodeURIComponent(ref) : '#/tasks';
     if (location.hash !== want) history.replaceState(history.state, '', want);
   }
   const sheetEl = document.getElementById('sheet');

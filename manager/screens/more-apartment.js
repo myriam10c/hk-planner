@@ -2,7 +2,7 @@
 // Lecture seule. La fiche reprend menages, linge, tickets, inspections, contacts securite
 // et le score de sante calcules par le proxy (mgr_apartment.ts) ; rien n'est recalcule ici.
 // Les mots de passe de portail ne sortent pas du proxy : lien vers l'onglet Security actuel.
-// Les references de tickets ouvrent Problems sur la fiche du ticket (#/problems?ref=).
+// Les references de tickets ouvrent Maintenance sur la fiche du ticket (#/maintenance?ref=).
 import { get } from '/manager/api.js';
 import { ddmm, esc, I, placeLabel } from '/manager/ui/dom.js';
 
@@ -134,7 +134,7 @@ function cleaningsHtml(d, state) {
 }
 
 function refLink(ref) {
-  return '<a class="ap-ref ap-link mono" href="#/problems?ref=' + encodeURIComponent(ref) + '">' + esc(ref) + '</a>';
+  return '<a class="ap-ref ap-link mono" href="#/maintenance?ref=' + encodeURIComponent(ref) + '">' + esc(ref) + '</a>';
 }
 
 function ticketsHtml(d) {

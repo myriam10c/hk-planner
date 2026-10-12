@@ -12,8 +12,10 @@ export const ROW_TSK = ROW({
   since: '14/05', dueAt: '2026-05-15T08:00:00Z', due: '15/05', overdue: true, todayBoost: 0,
   why: 'A guest arrives today at 15:00. Assigned to Semax, overdue since 15/05.',
 });
-export const ROW_INS = ROW({
-  ref: 'MNT-501', id: 501, source: 'Inspection', priority: 'normal', label: 'Normal', tone: 'idle', title: 'Bedroom: lamp broken',
+// Taches d'equipe seules : depuis la phase 2, mgr.problems ne sert plus les tickets.
+export const TROW = (o: any = {}) => ROW({ ref: 'TSK-429', kind: 'TSK', id: 429, source: 'Team task', ...o });
+export const ROW_TSK_501 = ROW({
+  ref: 'TSK-501', kind: 'TSK', id: 501, source: 'Team task', priority: 'normal', label: 'Normal', tone: 'idle', title: 'Bedroom: lamp broken',
   status: 'assigned', listingId: 'L2', apt: '103', bld: 'Damac Reva', assignee: { kind: 'member', id: 8, name: 'Walter' },
   createdAt: '2026-10-07T08:00:00Z', since: '07/10', dueAt: '2026-10-12T19:59:59.000Z', due: '12/10', todayBoost: 1,
   why: 'Checkout today at 12:00. Open since 07/10, assigned to Walter.',
@@ -33,19 +35,20 @@ export function detailBody(over: any = {}) {
     ...over,
   }));
 }
+export const detailTask = (over: any = {}) => detailBody({ problem: TROW(), mirror: null, vendors: [], ...over });
 export const detailTsk = () => detailBody({ problem: ROW_TSK, mirror: null, vendors: [], photos: [], description: 'Check the AC' });
 export const ACT_OK = (o: any = {}) => ({ status: 'success', ...o });
 export function listBody(over: any = {}) {
   return JSON.parse(JSON.stringify({
     day: '2026-10-09', generatedAt: '2026-10-09T07:00:00.000Z', bookingsCachedAt: null, bookingsUnavailable: false,
     me: { id: 8, name: 'Walter' },
-    counts: { open: 3, urgent: 2, mine: 1, unassigned: 1, overdue: 1, bySource: { Maintenance: 1, Inspection: 1, 'Cleaner report': 0, 'Team task': 1 } },
+    counts: { open: 3, urgent: 2, mine: 1, unassigned: 1, overdue: 1, bySource: { Maintenance: 0, Inspection: 0, 'Cleaner report': 0, 'Team task': 3 } },
     apartments: [{ listingId: 'L1', apt: '308', bld: 'Binghatti Lavender', n: 2 }, { listingId: 'L2', apt: '103', bld: 'Damac Reva', n: 1 }],
-    total: 3, offset: 0, limit: 50, rows: [ROW(), ROW_TSK, ROW_INS],
-    assignees: ASSIGNEES, vendors: [{ id: 3, name: 'CoolFix', specialty: 'AC' }],
+    total: 3, offset: 0, limit: 50, rows: [TROW(), ROW_TSK, ROW_TSK_501],
+    assignees: ASSIGNEES, vendors: [],
     ...over,
   }));
 }
 export function manyRows(n: number, start: number) {
-  return Array.from({ length: n }, (_, i) => ROW({ ref: 'MNT-' + (start + i), id: start + i, title: 'Problem ' + (start + i), priority: 'low', label: 'Low', tone: 'idle' }));
+  return Array.from({ length: n }, (_, i) => TROW({ ref: 'TSK-' + (start + i), id: start + i, title: 'Problem ' + (start + i), priority: 'low', label: 'Low', tone: 'idle' }));
 }

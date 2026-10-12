@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { bootMgr, fetchLog, MANAGER, me } from './helpers';
 import { NOW } from './fixtures';
-import { ACT_OK, detailBody, detailTsk, listBody } from './problem-fixtures';
+import { ACT_OK, detailTask, detailTsk, listBody } from './problem-fixtures';
 
 const ROUTES = () => [
   me(MANAGER),
   { match: 'action=mgr.problems', status: 200, body: listBody() },
   { match: 'ref=TSK-13', status: 200, body: detailTsk() },
-  { match: 'action=mgr.problem.get', status: 200, body: detailBody() },
+  { match: 'action=mgr.problem.get', status: 200, body: detailTask() },
   { match: 'action=mgr.problem.act', status: 200, body: ACT_OK() },
 ];
 const acts = async (page: any) =>
@@ -15,7 +15,7 @@ const acts = async (page: any) =>
 
 test('clavier : j/k et fleches, Entree, Echap, A, S, C avec Undo, / pour chercher', async ({ page }, info) => {
   test.skip(info.project.name !== 'mgr-desktop', 'clavier : ordinateur');
-  await bootMgr(page, ROUTES(), { email: true, clock: NOW, hash: '#/problems' });
+  await bootMgr(page, ROUTES(), { email: true, clock: NOW, hash: '#/tasks' });
   const rows = page.locator('.prow');
   await expect(rows).toHaveCount(3);
   await page.keyboard.press('j');
@@ -35,13 +35,13 @@ test('clavier : j/k et fleches, Entree, Echap, A, S, C avec Undo, / pour cherche
   await expect(sheet).toHaveAttribute('aria-hidden', 'true');
   await expect(rows.nth(0)).toBeFocused();
   await page.keyboard.press('a');
-  await expect(sheet.getByRole('heading', { name: 'Assign MNT-429' })).toBeVisible();
+  await expect(sheet.getByRole('heading', { name: 'Assign TSK-429' })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.keyboard.press('s');
-  await expect(sheet.getByRole('heading', { name: 'Schedule MNT-429' })).toBeVisible();
+  await expect(sheet.getByRole('heading', { name: 'Schedule TSK-429' })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.keyboard.press('c');
-  await expect(page.locator('#toast')).toContainText('MNT-429 closed');
+  await expect(page.locator('#toast')).toContainText('TSK-429 closed');
   await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
   await expect.poll(async () => (await acts(page)).map((a) => a.verb)).toEqual(['close', 'reopen']);
   await page.keyboard.press('/');
@@ -53,7 +53,7 @@ test('clavier : j/k et fleches, Entree, Echap, A, S, C avec Undo, / pour cherche
 
 test('clavier dans la fiche ouverte : C ferme ce probleme-la', async ({ page }, info) => {
   test.skip(info.project.name !== 'mgr-desktop', 'clavier : ordinateur');
-  await bootMgr(page, ROUTES(), { email: true, clock: NOW, hash: '#/problems' });
+  await bootMgr(page, ROUTES(), { email: true, clock: NOW, hash: '#/tasks' });
   await page.locator('.prow').nth(1).click();
   await expect(page.locator('#sheet').getByRole('heading', { name: 'AC not cooling' })).toBeVisible();
   await page.locator('#sheet .sheet-h').click();
@@ -90,7 +90,7 @@ async function swipe(page: any, nth: number, dx: number, o: { startX?: number; t
 
 test('glisser : gauche ferme avec Undo, droite ouvre Assign ; court, vertical ou depuis le bord : rien', async ({ page }, info) => {
   test.skip(info.project.name !== 'mgr-mobile', 'glisser : telephone');
-  await bootMgr(page, ROUTES(), { email: true, clock: NOW, hash: '#/problems' });
+  await bootMgr(page, ROUTES(), { email: true, clock: NOW, hash: '#/tasks' });
   await expect(page.locator('.prow')).toHaveCount(3);
   const intent = await page.evaluate(async () => {
     const m = await import('/manager/ui/swipe.js');
@@ -102,7 +102,7 @@ test('glisser : gauche ferme avec Undo, droite ouvre Assign ; court, vertical ou
   await swipe(page, 0, -120, { dy: 200 });
   expect((await acts(page)).length).toBe(0);
   await swipe(page, 0, -150, { tap: true });
-  await expect(page.locator('#toast')).toContainText('MNT-429 closed');
+  await expect(page.locator('#toast')).toContainText('TSK-429 closed');
   await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
   await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
   await expect.poll(async () => (await acts(page)).map((a) => a.verb)).toEqual(['close', 'reopen']);

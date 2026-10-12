@@ -629,8 +629,9 @@ async function v3BootCheck(setupCheck){
   return maybeGoV3();
 }
 // ===== Bascule des managers vers /manager/ (phase 6a, 11/10/2026) =====
-// A partir de MGR_CUTOVER_DATE (jour Dubai), une session EMAIL role 'manager'
-// confirmee par le serveur pendant cette page est renvoyee vers /manager/, qui
+// A partir de MGR_CUTOVER_DATE (jour Dubai), une session EMAIL role 'manager' ou
+// 'maintenance' (Semax, phase 2 maintenance) confirmee par le serveur pendant
+// cette page est renvoyee vers /manager/, qui
 // n'accepte que les sessions email. Une session PIN manager reste ici et voit un
 // bandeau qui l'invite a se connecter par email. Meme echappatoire que pour les
 // cleaners : `?legacy=1` (V3_LEGACY_KEY) garde l'ancienne app pour l'onglet,
@@ -640,21 +641,28 @@ const MGR_LEGACY_UNTIL='2026-11-10';
 const MGR_CUTOVER_PATH='/manager/';
 const MGR_REDIRECT_KEY='hkMgrRedirectAt';
 const MGR_BANNER_HIDDEN_KEY='hkMgrBannerHidden';
+const MGR_ROLES=['manager','maintenance'];
 function mgrCutoverDue(role,isEmailSession,dubaiDate,legacy){
-  return role==='manager'&&!!isEmailSession&&!legacy&&String(dubaiDate)>=MGR_CUTOVER_DATE;
+  return MGR_ROLES.indexOf(role)!==-1&&!!isEmailSession&&!legacy&&String(dubaiDate)>=MGR_CUTOVER_DATE;
 }
 (function(){
   try{
     if(new URLSearchParams(location.search).get('legacy')==='0') sessionStorage.removeItem(MGR_REDIRECT_KEY);
   }catch(e){}
 }());
-// Lien de push d'une tache d'equipe (/?task=<id>) lu au chargement : render()
-// reecrit l'URL (writeUrlState) avant la decision de bascule et l'effacerait.
-const MGR_BOOT_TASK=(function(){
-  try{ const id=new URLSearchParams(location.search).get('task'); return /^\d+$/.test(id||'')?id:null; }catch(e){ return null; }
+// Liens de push lus au chargement : render() reecrit l'URL (writeUrlState) avant
+// la decision de bascule et les effacerait. Ticket (/?mnt=<id>), proposition
+// (/?prp=<id>) -> Maintenance ; tache d'equipe (/?task=<id>) -> Tasks.
+const MGR_BOOT_HASH=(function(){
+  try{
+    const q=new URLSearchParams(location.search);
+    const pick=[['mnt','#/maintenance?ref=MNT-'],['prp','#/maintenance?ref=PRP-'],['task','#/tasks?ref=TSK-']];
+    for(const [k,h] of pick){ const id=q.get(k); if(/^\d+$/.test(id||'')) return h+id; }
+  }catch(e){}
+  return '';
 }());
 function mgrCutoverTarget(){
-  return MGR_CUTOVER_PATH+(MGR_BOOT_TASK?'#/problems?ref=TSK-'+MGR_BOOT_TASK:'');
+  return MGR_CUTOVER_PATH+MGR_BOOT_HASH;
 }
 let leavingForMgr=false;
 // Vrai quand la garde anti-boucle a retenu un renvoi : le manager reste dans
@@ -666,7 +674,7 @@ function maybeGoManager(){
   if(authScreen) return false;
   if(v3Offline()) return false;
   if(!authAccessToken) return false;
-  if(v3ConfirmedRole!=='manager') return false;
+  if(MGR_ROLES.indexOf(v3ConfirmedRole)===-1) return false;
   if(!mgrCutoverDue(v3ConfirmedRole,!!authAccessToken,dubaiDateOf(Date.now()),v3LegacyChosen())) return false;
   // Garde anti-boucle : /manager/ renvoie vers la racine toute session qu'il
   // refuse ; un second renvoi dans les 30 s laisse l'ancienne app s'ouvrir.
@@ -684,12 +692,15 @@ function maybeGoManager(){
 }
 // Bandeau de la vue manager, hors de #app (render() reecrit #app a chaque tour) :
 // legacy avec session email, ou session PIN qui doit passer a l'email.
+// Maintenance (Semax) vit dans la vue cleanerMode (#cleaner) mais a droit au bandeau.
 function mgrBannerKind(){
-  if(leavingForMgr||leavingForV3||authScreen||cleanerMode) return null;
-  if(window.location.hash==='#cleaner') return null; // ecran PIN
+  if(leavingForMgr||leavingForV3||authScreen) return null;
+  const mnt=!!(cleanerMode&&cleanerMode.role==='maintenance');
+  if(cleanerMode&&!mnt) return null;
+  if(!mnt&&window.location.hash==='#cleaner') return null; // ecran PIN
   if(String(dubaiDateOf(Date.now()))<MGR_CUTOVER_DATE) return null;
   try{ if(sessionStorage.getItem(MGR_BANNER_HIDDEN_KEY)==='1') return null; }catch(e){}
-  if(authAccessToken) return (v3ConfirmedRole==='manager'&&(v3LegacyChosen()||mgrLoopBlocked))?'legacy':null;
+  if(authAccessToken) return (MGR_ROLES.indexOf(v3ConfirmedRole)!==-1&&(v3LegacyChosen()||mgrLoopBlocked))?'legacy':null;
   if(cleanerToken) return 'pin';
   return null;
 }

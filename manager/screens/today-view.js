@@ -205,7 +205,7 @@ function problemsHtml(data) {
     + esc(p.source) + ' <span class="mono">' + esc(p.ref) + '</span></span></span><span class="ttl">' + esc(p.title) + '</span>'
     + (p.apt || p.bld ? '<span class="where">' + esc(placeLabel(p)) + '</span>' : '') + '<span class="why">' + esc(p.why) + '</span></span></button>').join('');
   h += '<div class="sec-foot"><span class="t3">Including ' + c.inspectionTicketsOpen + ' from inspections and '
-    + c.cleanerReportsOpen + ' cleaner reports.</span><a class="link" href="#/problems">All problems</a></div>';
+    + c.cleanerReportsOpen + ' cleaner reports.</span><a class="link" href="#/maintenance">Open maintenance</a></div>';
   return h + '</section>';
 }
 

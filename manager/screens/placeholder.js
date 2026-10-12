@@ -4,7 +4,8 @@ import { esc } from '/manager/ui/dom.js';
 const P = {
   today: { title: 'Today', text: 'Today could not be loaded.', href: '#/today', cta: 'Try again' },
   planning: { title: 'Planning', text: 'The week grid comes in a later phase. Until then, plan cleanings in the current app.', href: '/?legacy=1', cta: 'Open planning in the current app' },
-  problems: { title: 'Problems', text: 'One inbox for tickets, inspection findings, cleaner reports and team tasks comes in the next phase.', href: '/?legacy=1', cta: 'Open maintenance in the current app' },
+  maintenance: { title: 'Maintenance', text: 'Maintenance could not be loaded.', href: '/?legacy=1', cta: 'Open maintenance in the current app' },
+  tasks: { title: 'Tasks', text: 'Tasks could not be loaded.', href: '/?legacy=1', cta: 'Open the current app' },
   inspections: { title: 'Inspections', text: 'Inspections move into this app in a later phase.', href: '/inspections/', cta: 'Open Inspections' },
 };
 

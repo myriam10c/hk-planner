@@ -13,12 +13,22 @@ test('cleaner en session email : renvoyee vers /v3/', async ({ page }) => {
   await expect(page.locator('h1')).toHaveText('V3 STUB');
 });
 
-for (const role of ['maintenance', 'subcontractor']) {
-  test('role ' + role + ' : renvoye vers l ancienne app', async ({ page }) => {
-    await bootMgr(page, [me(member(role))], { email: true });
-    await expect(page.locator('h1')).toHaveText('ROOT STUB');
-  });
-}
+test('role subcontractor : renvoye vers l ancienne app', async ({ page }) => {
+  await bootMgr(page, [me(member('subcontractor'))], { email: true });
+  await expect(page.locator('h1')).toHaveText('ROOT STUB');
+});
+
+test('role maintenance en session email : coquille, atterrit sur Maintenance', async ({ page }) => {
+  await bootMgr(page, [me(member('maintenance'))], { email: true });
+  await expect(page.getByRole('heading', { name: 'Maintenance', exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#/maintenance');
+});
+
+test('role maintenance en session PIN seulement : ecran email', async ({ page }) => {
+  await bootMgr(page, [me(member('maintenance'))], { pin: 'pin-tok' });
+  await expect(page.getByRole('heading', { name: 'Sign in with your email' })).toBeVisible();
+  await expect(page.locator('#tabbar a')).toHaveCount(0);
+});
 
 test('manager en session PIN seulement : ecran email, aucun appel mgr.today', async ({ page }) => {
   await bootMgr(page, [me(MANAGER)], { pin: 'pin-tok' });
