@@ -73,3 +73,38 @@ select.mt-input{height:44px}
 .mt-mergebtn{justify-content:flex-start;white-space:normal;text-align:left;overflow-wrap:anywhere;padding:8px 14px}
 @media (min-width:520px){ .mt-two{grid-template-columns:repeat(2,minmax(0,1fr))} }
 @media (max-width:400px){ .mt-topbtns .btn{padding:0 10px;font-size:14px} .top.mt-top h1{font-size:30px} }
+
+/* Fiche ticket (maquette 4) : etapes, faits, historique, gestes ; feuilles de geste. */
+.mt-tkh{min-width:0}
+.mt-tkref{font-size:12px;color:var(--ink-3);overflow-wrap:anywhere}
+.mt-tkh h2{overflow-wrap:anywhere}
+.mt-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;font-size:12px;text-align:center}
+.mt-steps li{padding:6px 2px;border-radius:8px;background:var(--sunk);color:var(--ink-3);min-width:0;overflow-wrap:anywhere}
+.mt-steps .mt-step-past{background:var(--ok-tint);color:var(--ok-ink);font-weight:600}
+.mt-steps .mt-step-cur{background:var(--accent-tint);color:var(--accent);font-weight:700;outline:2px solid var(--accent);outline-offset:-2px}
+.mt-facts{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:8px 12px;margin:0;font-size:14px}
+.mt-facts dt{color:var(--ink-3)}
+.mt-facts dd{margin:0;font-weight:600;overflow-wrap:anywhere;min-width:0}
+.mt-desc{font-style:normal}
+.mt-histbox{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:12px;min-width:0}
+.mt-hist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.mt-hist li{display:flex;gap:10px;font-size:14px;min-width:0}
+.mt-hist time{flex:none;width:72px;font-size:12px;color:var(--ink-3);padding-top:2px}
+.mt-hbody{min-width:0;overflow-wrap:anywhere;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.mt-hbody > b + span{white-space:pre-wrap}
+.mt-hq{font-style:italic;color:var(--ink-2);white-space:pre-wrap}
+.mt-hbody a:not(.mt-thumb){color:var(--accent);font-weight:600;display:inline-block;padding:4px 0}
+.mt-hempty{margin:0}
+.mt-thumb{display:inline-block;width:64px;height:64px;border-radius:10px;overflow:hidden;border:1px solid var(--line);flex:none}
+.mt-thumbimg{width:100%;height:100%;object-fit:cover;display:block}
+.mt-photos{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.mt-tkf{flex-direction:column;align-items:stretch}
+.mt-tkmain{display:flex;gap:var(--s2);flex-wrap:wrap}
+.mt-tkmain .btn{min-width:0}
+.mt-tkmore{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s2)}
+.mt-tkmore .btn{min-width:0;padding:0 6px}
+.mt-photorow{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;min-width:0}
+.mt-filebtn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.mt-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0)}
+.mt-photoname{min-width:0;overflow-wrap:anywhere;font-size:14px}
+input[type="date"].mt-input{height:44px}

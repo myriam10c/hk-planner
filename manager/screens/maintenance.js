@@ -1,9 +1,10 @@
 // Ecran Maintenance (#/maintenance, spec 2026-10-12 section 6, maquettes 1, 2, 3, 5) :
 // onglets Proposals, Open, Done ; valider, rejeter ou fusionner une proposition.
 // Lecture : mnt.list (une liste gardee en memoire par onglet), mnt.get pour un lien
-// ?ref=PRP-n. Gestes : mnt.act, une cle d'idempotence par geste (createGestures),
-// jamais d'auteur envoye. Donnees non fraiches : aucun geste, « Reconnect to make changes. ».
-import { get, post } from '/manager/api.js';
+// ?ref=PRP-n ou MNT-n (fiche ticket, maquette 4). Gestes : mnt.act, une cle
+// d'idempotence par geste (createGestures), jamais d'auteur envoye ; photo de cloture
+// par mnt.photo avant ticket.done. Donnees non fraiches : aucun geste, « Reconnect to make changes. ».
+import { get, post, upload } from '/manager/api.js';
 import { createGestures } from '/manager/gesture.js';
 import {
   announceMntBadge, closeSheet, dubaiTime, openSheet, sheetBusy, sheetError, sheetIsOpen, toast,
@@ -13,6 +14,8 @@ import * as V from '/manager/screens/maintenance-view.js';
 const TABS = ['proposals', 'open', 'done'];
 const FILTERS = ['mine', 'urgent', 'unassigned'];
 const SEARCH_DELAY_MS = 250;
+const DUE_MAX_DAYS = 60; // MNT_DUE_MAX_DAYS (mnt_act.ts)
+const COST_RE = /^\d+(\.\d{1,2})?$/; // meme regle que parseCost (mnt_act.ts)
 
 export async function renderMaintenance(ctx) {
   const main = ctx.main;
@@ -22,8 +25,11 @@ export async function renderMaintenance(ctx) {
   const st = {
     view: hashTab || 'proposals', tabInHash: !!hashTab, filter: 'all', q: '', lists: {}, meta: null,
     loading: false, error: null, seq: 0, busy: false, typing: null, prp: null, from: 'card',
+    tk: null, tkSeq: 0, photo: null,
   };
   const gestures = createGestures();
+  // Cles des envois de photo, a part : une photo deja deposee n'est pas renvoyee.
+  const photoGestures = createGestures();
   const tabOf = (v) => (v === 'rejected' ? 'proposals' : v);
   const cur = () => st.lists[st.view] || null;
   const readOnly = () => !cur() || !cur().fresh || !st.meta;
@@ -120,6 +126,13 @@ export async function renderMaintenance(ctx) {
     watcher.observe(document.getElementById('sheetInner'), { childList: true });
   }
 
+  // Feuille qui appartient au geste : la reference affichee, ou 'NEW' pour + New ticket.
+  function owns(key) {
+    if (!key || !sheetIsOpen()) return false;
+    if (key === 'NEW') return !!document.querySelector('#sheet [data-mnew]');
+    return shownRef() === key;
+  }
+
   function setView(v) {
     if (v === st.view) return;
     st.view = v;
@@ -135,20 +148,20 @@ export async function renderMaintenance(ctx) {
     if (st.busy) { toast('Saving, wait a second.'); return null; }
     if (readOnly()) { toast(V.RO_LINE); return null; }
     st.busy = true;
-    if (ref && shownRef() === ref) sheetBusy(true);
+    if (owns(ref)) sheetBusy(true);
     let r;
     try {
       r = await gestures.run('mnt.act|' + JSON.stringify(body), (idem) => post('mnt.act', { ...body, idem }));
     } catch (e) {
       st.busy = false;
-      if (ref && shownRef() === ref) sheetBusy(false);
+      if (owns(ref)) sheetBusy(false);
       if (handleAccess(e)) return null;
-      if (ref && shownRef() === ref) sheetError(e.message); else toast(e.message);
+      if (owns(ref)) sheetError(e.message); else toast(e.message);
       if (e.status === 409 || e.status === 404) refresh();
       return null;
     }
     st.busy = false;
-    if (ref && shownRef() === ref) { sheetBusy(false); closeSheet(); }
+    if (owns(ref)) { sheetBusy(false); closeSheet(); }
     toast(typeof okMsg === 'function' ? okMsg(r || {}) : okMsg);
     refresh();
     return r;
@@ -192,22 +205,39 @@ export async function renderMaintenance(ctx) {
   function press(el, attr) {
     document.querySelectorAll('#sheet [' + attr + ']').forEach((b) => b.setAttribute('aria-pressed', b === el ? 'true' : 'false'));
   }
-  function sendAccept(p) {
+  // Champs d'un ticket (Create ticket, + New ticket) ; null apres une erreur dans la feuille.
+  function ticketFields(needApt) {
     const title = ($('mtTitle').value || '').trim();
-    if (!title) { sheetError('Write a title first.'); return; }
+    if (!title) { sheetError('Write a title first.'); return null; }
+    const listingId = $('mtApt').value || null;
+    if (needApt && !listingId) { sheetError('Choose an apartment.'); return null; }
     const u = pressed('[data-urg]');
     const w = pressed('[data-who]');
     const body = {
-      op: 'proposal.accept', proposalId: p.id, title, listingId: $('mtApt').value || null, category: $('mtCat').value,
+      title, listingId, category: $('mtCat').value,
       urgency: u ? u.getAttribute('data-urg') : 'normal', note: ($('mtNote').value || '').trim(),
     };
     const who = w ? w.getAttribute('data-who') : 'none';
     if (who === 'vendor') {
       const v = $('mtVendor').value;
-      if (!v) { sheetError('Choose a vendor.'); return; }
+      if (!v) { sheetError('Choose a vendor.'); return null; }
       body.vendorId = Number(v);
     } else if (who.startsWith('m:')) body.memberId = Number(who.slice(2));
-    write(p.ref, body, (r) => (r.ref || 'Ticket') + ' created');
+    return body;
+  }
+  function sendAccept(p) {
+    const f = ticketFields(false);
+    if (!f) return;
+    write(p.ref, { op: 'proposal.accept', proposalId: p.id, ...f }, (r) => (r.ref || 'Ticket') + ' created');
+  }
+  function showNew() {
+    if (readOnly()) { toast(V.RO_LINE); return; }
+    openSheet(V.newTicketSheet(st.meta));
+  }
+  function sendNew() {
+    const f = ticketFields(true);
+    if (!f) return;
+    write('NEW', { op: 'ticket.create', ...f }, (r) => (r.ref || 'Ticket') + ' created');
   }
   function sendReject(p) {
     const r = pressed('[data-reason]');
@@ -220,14 +250,140 @@ export async function renderMaintenance(ctx) {
     write(p.ref, body, p.ref + ' rejected');
   }
 
-  // Crochet de la tache 5 : fiche ticket. Provisoire, la reference et Close.
-  function openTicket(ref) { openSheet(V.ticketStubSheet(ref)); }
+  // --- Fiche ticket (maquette 4) ---------------------------------------------
+  // mnt.get?ref=MNT-n ; feuille de chargement d'abord (la reference passe dans le hash).
+  // Fermee entre-temps : rien n'est rouvert. Inconnu : toast et retour a la liste.
+  async function openTicket(ref) {
+    const mine = ++st.tkSeq;
+    openSheet(V.ticketLoadingSheet(ref));
+    let d;
+    try {
+      d = await get('mnt.get', { ref });
+    } catch (e) {
+      if (!ctx.isCurrent() || mine !== st.tkSeq || handleAccess(e)) return;
+      if (e.status === 404 || e.status === 400) { ticketMissing(ref); return; }
+      if (shownRef() === ref) openSheet(V.ticketErrorSheet(ref, e.message));
+      return;
+    }
+    if (!ctx.isCurrent() || mine !== st.tkSeq) return;
+    if (!d || d.kind !== 'ticket' || !d.ticket) { ticketMissing(ref); return; }
+    if (shownRef() !== ref) return;
+    st.tk = d.ticket;
+    showTicket();
+  }
+  function ticketMissing(ref) {
+    if (shownRef() === ref) closeSheet();
+    toast('This ticket was not found.');
+    syncHash();
+  }
+  function showTicket() { openSheet(V.ticketSheet(st.tk, readOnly(), Date.now())); }
+  function tkSub(html) {
+    if (readOnly()) { toast(V.RO_LINE); return; }
+    openSheet(html);
+  }
+  const tkBody = (t, op, extra) => ({ op, ticketId: t.id, ...(extra || {}) });
+
+  // Cloture : la photo d'abord (mnt.photo, sa propre cle), puis ticket.done avec le
+  // chemin rendu. Envoi de photo rate : la feuille reste, aucun ticket.done.
+  async function sendDone(t) {
+    if (st.busy) { toast('Saving, wait a second.'); return; }
+    if (readOnly()) { toast(V.RO_LINE); return; }
+    const note = ($('mtDoneNote').value || '').trim();
+    const cost = ($('mtCost').value || '').trim();
+    if (cost && !COST_RE.test(cost)) { sheetError('Cost must be a number.'); return; }
+    const input = $('mtPhoto');
+    const file = input && input.files && input.files[0] ? input.files[0] : null;
+    let photoPath = null;
+    if (file) {
+      const key = t.id + '|' + file.name + '|' + file.size + '|' + file.lastModified;
+      if (st.photo && st.photo.key === key) photoPath = st.photo.path;
+      else {
+        st.busy = true;
+        sheetBusy(true);
+        let r;
+        try {
+          r = await photoGestures.run('mnt.photo|' + key, (idem) => upload('mnt.photo', { idem, file, ticketId: String(t.id) }));
+        } catch (e) {
+          st.busy = false;
+          if (owns(t.ref)) sheetBusy(false);
+          if (handleAccess(e)) return;
+          if (owns(t.ref)) sheetError(e.message); else toast(e.message);
+          return;
+        }
+        st.busy = false;
+        if (!r || !r.path) {
+          if (owns(t.ref)) { sheetBusy(false); sheetError('The photo was not saved. Try again.'); }
+          return;
+        }
+        st.photo = { key, path: r.path };
+        photoPath = r.path;
+        if (!owns(t.ref)) return;
+      }
+    }
+    const body = tkBody(t, 'ticket.done', { note });
+    if (photoPath) body.photoPath = photoPath;
+    if (cost) body.cost = cost;
+    write(t.ref, body, t.ref + ' done');
+  }
+
+  function onTicketClick(k, el, t) {
+    const ref = t.ref;
+    if (k === 'tk-retry') { openTicket(ref); return; }
+    if (k === 'tk-back') { showTicket(); return; }
+    if (k === 'tk-start') { write(ref, tkBody(t, 'ticket.start'), ref + ' started'); return; }
+    if (k === 'tk-broken') { write(ref, tkBody(t, 'ticket.start'), ref + ' reopened'); return; }
+    if (k === 'tk-reopen') { write(ref, tkBody(t, 'ticket.reopen'), ref + ' reopened'); return; }
+    if (k === 'tk-done') { tkSub(V.doneSheet(t)); return; }
+    if (k === 'tk-waiting') { tkSub(V.waitingSheet(t)); return; }
+    if (k === 'tk-comment') { tkSub(V.commentSheet(t)); return; }
+    if (k === 'tk-assign') { tkSub(V.assignSheet(t, st.meta)); return; }
+    if (k === 'tk-due') { tkSub(V.dueSheet(t, Date.now(), DUE_MAX_DAYS)); return; }
+    if (k === 'tk-photo-clear') { const i = $('mtPhoto'); if (i) i.value = ''; photoName(); return; }
+    if (k === 'tk-done-send') { sendDone(t); return; }
+    if (k === 'tk-wait-send') {
+      const note = ($('mtWaitNote').value || '').trim();
+      write(ref, tkBody(t, 'ticket.waiting_parts', note ? { note } : null), ref + ' waiting parts');
+      return;
+    }
+    if (k === 'tk-comment-send') {
+      const text = ($('mtComment').value || '').trim();
+      if (!text) { sheetError('Write a comment first.'); return; }
+      write(ref, tkBody(t, 'ticket.comment', { text }), 'Comment added to ' + ref);
+      return;
+    }
+    if (k === 'tk-assign-send') {
+      const a = pressed('[data-asg]');
+      const v = a ? a.getAttribute('data-asg') : '';
+      if (!v) { sheetError('Choose a person or a vendor.'); return; }
+      if (v === 'none') { write(ref, tkBody(t, 'ticket.assign', { unassign: true }), 'Nobody follows ' + ref + ' now'); return; }
+      const id = Number(v.slice(2));
+      const list = v.startsWith('v:') ? (st.meta.vendors || []) : (st.meta.team || []);
+      const who = list.find((x) => Number(x.id) === id);
+      const extra = v.startsWith('v:') ? { vendorId: id } : { memberId: id };
+      write(ref, tkBody(t, 'ticket.assign', extra), ref + ' assigned to ' + (who ? who.name : 'them'));
+      return;
+    }
+    if (k === 'tk-due-send') {
+      const d = ($('mtDue').value || '').trim();
+      if (!d) { sheetError('Choose a date.'); return; }
+      write(ref, tkBody(t, 'ticket.due', { date: d }), ref + ' due ' + d.slice(8, 10) + '/' + d.slice(5, 7));
+      return;
+    }
+    if (k === 'tk-due-clear') write(ref, tkBody(t, 'ticket.due', { date: null }), 'Due date removed from ' + ref);
+  }
+
+  // Nom de la photo choisie dans la feuille Mark done, avec Remove.
+  function photoName() {
+    const i = $('mtPhoto');
+    const out = $('mtPhotoName');
+    if (!i || !out) return;
+    const f = i.files && i.files[0];
+    out.innerHTML = f ? V.photoChosenHtml(f.name) : '';
+  }
 
   function onSheetClick(el) {
     const k = el.getAttribute('data-mact');
     const ref = shownRef();
-    const p = ref ? prpOf(ref) : null;
-    if (!p) return;
     if (k === 'urg') { press(el, 'data-urg'); return; }
     if (k === 'who') {
       press(el, 'data-who');
@@ -235,6 +391,15 @@ export async function renderMaintenance(ctx) {
       if (box) box.hidden = el.getAttribute('data-who') !== 'vendor';
       return;
     }
+    if (k === 'asg') { press(el, 'data-asg'); return; }
+    if (k === 'new-send') { sendNew(); return; }
+    if (k && k.startsWith('tk-')) {
+      if (st.tk && ref === st.tk.ref) onTicketClick(k, el, st.tk);
+      else if (k === 'tk-retry' && ref) openTicket(ref);
+      return;
+    }
+    const p = ref ? prpOf(ref) : null;
+    if (!p) return;
     if (k === 'reason') {
       press(el, 'data-reason');
       const box = $('mtWhyBox');
@@ -269,7 +434,7 @@ export async function renderMaintenance(ctx) {
       return;
     }
     if (el.hasAttribute('data-clear')) { st.filter = 'all'; st.q = ''; search.value = ''; refresh(); return; }
-    if (el.hasAttribute('data-new')) { openSheet(V.newTicketStubSheet()); return; }
+    if (el.hasAttribute('data-new')) { showNew(); return; }
     if (el.hasAttribute('data-ticket')) { openTicket(el.getAttribute('data-ticket')); return; }
     const ref = el.getAttribute('data-ref');
     if (el.hasAttribute('data-reopen')) {
@@ -294,11 +459,17 @@ export async function renderMaintenance(ctx) {
     }, SEARCH_DELAY_MS);
   }
 
+  function onChange(e) {
+    if (ctx.isCurrent() && e.target && e.target.id === 'mtPhoto') photoName();
+  }
+
   document.addEventListener('click', onClick);
+  document.addEventListener('change', onChange);
   search.addEventListener('input', onInput);
   ctx.onLeave(() => {
     if (watcher) watcher.disconnect();
     document.removeEventListener('click', onClick);
+    document.removeEventListener('change', onChange);
     search.removeEventListener('input', onInput);
     clearTimeout(st.typing);
   });
@@ -312,7 +483,7 @@ export async function renderMaintenance(ctx) {
   const linked = hq.get('ref');
   if (linked && ctx.isCurrent()) await openLinked(linked.trim().toUpperCase());
 
-  // Lien profond : PRP-n lu par mnt.get, MNT-n vers la fiche ticket (tache 5).
+  // Lien profond : PRP-n lu par mnt.get, MNT-n vers la fiche ticket.
   async function openLinked(ref) {
     if (/^MNT-\d+$/.test(ref)) { openTicket(ref); return; }
     const missing = () => { toast('This proposal was not found.'); syncHash(); };

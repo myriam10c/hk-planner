@@ -219,8 +219,9 @@ test('double touche : un seul envoi ; reessai apres coupure : meme cle', async (
   expect(a[1].idem).toBe(a[0].idem);
 });
 
-test('Open : groupes, ligne priorite et origine, filtres un a la fois, recherche, fiche provisoire', async ({ page }) => {
-  await bootMgr(page, ALL(), { email: true, clock: NOW_MNT, hash: '#/maintenance?tab=open' });
+test('Open : groupes, ligne priorite et origine, filtres un a la fois, recherche, fiche ticket', async ({ page }) => {
+  const detail = { kind: 'ticket', ticket: { ...OPEN().tickets[0], description: null, history: [], photos: [], resolutionPhotoUrl: null, proposal: null } };
+  await bootMgr(page, [...ALL(), { match: 'ref=MNT-14', status: 200, body: detail }], { email: true, clock: NOW_MNT, hash: '#/maintenance?tab=open' });
   await expect(page.locator('.mt-gh')).toHaveText(['To do 2', 'In progress 1']);
   const r = page.locator('.mt-row');
   await expect(r.nth(0).locator('.mt-rttl')).toHaveText('AC not cooling');
@@ -247,9 +248,9 @@ test('Open : groupes, ligne priorite et origine, filtres un a la fois, recherche
   expect((await lists(page)).pop()).toContain('tab=open');
 
   await r.nth(0).click();
-  await expect(sheet(page).getByRole('heading', { name: 'MNT-14' })).toBeVisible();
+  await expect(sheet(page).getByRole('heading', { name: 'AC not cooling' })).toBeVisible();
   expect(await hashOf(page)).toBe('#/maintenance?ref=MNT-14');
-  await sheet(page).locator('.sheet-f [data-close]').click();
+  await sheet(page).locator('.sheet-h [data-close]').click();
   await expect(page.locator('#sheet.on')).toHaveCount(0);
   await expect.poll(() => hashOf(page)).toBe('#/maintenance?tab=open');
 });

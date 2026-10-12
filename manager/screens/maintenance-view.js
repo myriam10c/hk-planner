@@ -290,17 +290,16 @@ export function defaultWho(team) {
   return m ? 'm:' + m.id : 'none';
 }
 
-// Feuille Create ticket (maquette 2) : champs pre-remplis depuis la proposition.
-export function createSheet(p, meta, ro, from) {
-  const sub = 'From a guest message, ' + whenShort(quoteAt(p), Date.now());
-  if (ro) return head(p.ref, 'Create ticket', sub) + '<div class="sheet-b">' + quotesHtml(p) + '</div>' + roFoot('Close');
+// Champs d'un ticket (Create ticket et + New ticket) : titre, appartement, categorie,
+// urgence, intervenant, note. pre : valeurs de depart (proposition ou ticket neuf).
+function ticketFields(pre, meta) {
   const ls = sortListings(meta.listings || []);
-  if (p.listingId && !ls.some((l) => l.id === p.listingId)) ls.unshift({ id: p.listingId, apt: p.apt, bld: p.bld });
-  const apt = '<select id="mtApt" class="mt-input">' + (p.listingId ? '' : '<option value="">Choose an apartment</option>')
-    + ls.map((l) => '<option value="' + esc(l.id) + '"' + (l.id === p.listingId ? ' selected' : '') + '>' + esc(placeLabel(l) || 'Listing ' + l.id) + '</option>').join('') + '</select>';
+  if (pre.listingId && !ls.some((l) => l.id === pre.listingId)) ls.unshift({ id: pre.listingId, apt: pre.apt, bld: pre.bld });
+  const apt = '<select id="mtApt" class="mt-input">' + (pre.listingId ? '' : '<option value="">Choose an apartment</option>')
+    + ls.map((l) => '<option value="' + esc(l.id) + '"' + (l.id === pre.listingId ? ' selected' : '') + '>' + esc(placeLabel(l) || 'Listing ' + l.id) + '</option>').join('') + '</select>';
   const cat = '<select id="mtCat" class="mt-input">' + Object.keys(CATEGORY).map((k) =>
-    '<option value="' + k + '"' + (k === p.category ? ' selected' : '') + '>' + esc(CATEGORY[k]) + '</option>').join('') + '</select>';
-  const urg = URGENCY.some(([k]) => k === p.urgency) ? p.urgency : 'normal';
+    '<option value="' + k + '"' + (k === pre.category ? ' selected' : '') + '>' + esc(CATEGORY[k]) + '</option>').join('') + '</select>';
+  const urg = URGENCY.some(([k]) => k === pre.urgency) ? pre.urgency : 'normal';
   const seg = '<div class="mt-seg" role="group" aria-label="Urgency">' + URGENCY.map(([k, l]) =>
     '<button type="button" class="mt-segbtn mt-u-' + k + '" data-mact="urg" data-urg="' + k + '" aria-pressed="' + (k === urg ? 'true' : 'false') + '">' + l + '</button>').join('') + '</div>';
   const who = defaultWho(meta.team);
@@ -310,16 +309,30 @@ export function createSheet(p, meta, ro, from) {
     + ((meta.vendors || []).length ? chip('vendor', 'Vendor') : '') + chip('none', 'Nobody yet') + '</div>'
     + '<div id="mtVendorBox" hidden><label class="mt-label" for="mtVendor">Vendor</label><select id="mtVendor" class="mt-input"><option value="">Choose a vendor</option>'
     + (meta.vendors || []).map((v) => '<option value="' + esc(v.id) + '">' + esc(v.name) + '</option>').join('') + '</select></div>';
-  const b = quotesHtml(p)
-    + '<div class="mt-field"><label class="mt-label" for="mtTitle">Title</label><input id="mtTitle" class="mt-input" type="text" maxlength="120" value="' + esc(p.title) + '"></div>'
+  return '<div class="mt-field"><label class="mt-label" for="mtTitle">Title</label><input id="mtTitle" class="mt-input" type="text" maxlength="120" value="' + esc(pre.title || '') + '"></div>'
     + '<div class="mt-field"><label class="mt-label" for="mtApt">Apartment</label>' + apt + '</div>'
     + '<div class="mt-two"><div class="mt-field"><label class="mt-label" for="mtCat">Category</label>' + cat + '</div>'
     + '<div class="mt-field"><span class="mt-label">Urgency</span>' + seg + '</div></div>'
     + '<div class="mt-field"><span class="mt-label">Who follows it</span>' + chips + '</div>'
     + '<div class="mt-field"><label class="mt-label" for="mtNote">Note (optional)</label><textarea id="mtNote" class="mt-input mt-text" rows="2" maxlength="2000"></textarea></div>';
-  return head(p.ref, 'Create ticket', sub) + '<div class="sheet-b">' + b + '</div>'
+}
+
+// Feuille Create ticket (maquette 2) : champs pre-remplis depuis la proposition.
+export function createSheet(p, meta, ro, from) {
+  const sub = 'From a guest message, ' + whenShort(quoteAt(p), Date.now());
+  if (ro) return head(p.ref, 'Create ticket', sub) + '<div class="sheet-b">' + quotesHtml(p) + '</div>' + roFoot('Close');
+  return head(p.ref, 'Create ticket', sub) + '<div class="sheet-b">' + quotesHtml(p) + ticketFields(p, meta) + '</div>'
     + '<div class="sheet-f"><button class="btn primary mt-btn mt-grow" type="button" data-mact="accept-send">Create ticket</button>'
     + '<button class="btn mt-btn" type="button" data-mact="back">Back</button></div>';
+}
+
+// Feuille + New ticket : memes champs, vides ; marquee data-mnew (aucune reference dans le hash).
+export function newTicketSheet(meta) {
+  return '<div class="sheet-h" data-mnew><div><h2 id="sheetTitle">New ticket</h2></div>'
+    + '<button class="iconbtn x" type="button" data-close aria-label="Close">' + I.close + '</button></div>'
+    + '<div class="sheet-b">' + ticketFields({ title: '', listingId: null, category: 'other', urgency: 'normal' }, meta) + '</div>'
+    + '<div class="sheet-f"><button class="btn primary mt-btn mt-grow" type="button" data-mact="new-send">Create ticket</button>'
+    + '<button class="btn mt-btn" type="button" data-close>Cancel</button></div>';
 }
 
 // Feuille Reject : raison obligatoire, texte obligatoire pour Other.
@@ -334,12 +347,174 @@ export function rejectSheet(p, ro) {
     + '<button class="btn mt-btn" type="button" data-mact="back">Back</button></div>';
 }
 
-// Crochets de la tache 5 : fiche ticket et nouveau ticket, provisoires.
-export function ticketStubSheet(ref) {
-  return head(ref, ref, '') + '<div class="sheet-b"><p class="t3">Ticket details are coming soon.</p></div>'
-    + '<div class="sheet-f"><button class="btn mt-btn" type="button" data-close>Close</button></div>';
+
+// --- Fiche ticket (maquette 4) ---------------------------------------------------
+
+const ORIGIN_LINE = {
+  guest_message: 'from a guest message', cleaner_report: 'from a cleaner report', inspection: 'from an inspection', manual: 'created by hand',
+};
+const STEPS = ['Created', 'Assigned', 'In progress', 'Done'];
+const STAGE_PILL = { waiting_parts: 'Waiting parts', to_confirm: 'To confirm' };
+
+// Prenom du guest de la proposition liee, sinon « Guest ».
+export function guestLabel(prop) {
+  const first = String((prop && prop.guestName) || '').trim().split(/\s+/)[0];
+  return first || 'Guest';
 }
-export function newTicketStubSheet() {
-  return head(null, 'New ticket', '') + '<div class="sheet-b"><p class="t3">Creating a ticket by hand is coming soon.</p></div>'
-    + '<div class="sheet-f"><button class="btn mt-btn" type="button" data-close>Close</button></div>';
+function stepIndex(t) {
+  if (t.stage === 'done') return 3;
+  if (t.stage === 'todo') return t.assignee ? 1 : 0;
+  return 2;
+}
+function stepsHtml(t) {
+  const cur = stepIndex(t);
+  return '<ol class="mt-steps" aria-label="Status">' + STEPS.map((l, i) => '<li class="'
+    + (i < cur ? 'mt-step-past' : i === cur ? 'mt-step-cur' : '') + '"' + (i === cur ? ' aria-current="step"' : '') + '>' + l + '</li>').join('') + '</ol>';
+}
+function dayLabel(day) { return weekdayDay(day + 'T08:00:00Z'); }
+function guestFact(prop) {
+  if (!prop) return '';
+  if (prop.guestInNow && prop.stayTo) return 'In now, until ' + dayLabel(prop.stayTo);
+  return stayLine(prop.stayFrom, prop.stayTo);
+}
+function dueFact(dueOn, nowMs) {
+  if (!dueOn) return 'Not set';
+  const today = dubaiToday(nowMs);
+  if (dueOn < today) return '<span class="mt-bad">Overdue ' + esc(ddmm(dueOn)) + '</span>';
+  if (dueOn === today) return 'Today';
+  return esc(dayLabel(dueOn));
+}
+function factsHtml(t, nowMs) {
+  const prio = PRIORITY[t.priority] ? t.priority : 'medium';
+  const row = (k, v) => '<dt>' + k + '</dt><dd>' + v + '</dd>';
+  let h = row('Urgency', '<span' + (prio === 'urgent' ? ' class="mt-bad"' : '') + '>' + esc(PRIORITY[prio]) + '</span>')
+    + row('Who follows it', t.assignee ? esc(t.assignee.name) : 'Nobody yet');
+  const g = guestFact(t.proposal);
+  if (g) h += row('Guest', esc(g));
+  if (t.stage !== 'done') h += row('Due', dueFact(t.dueOn, nowMs));
+  return '<dl class="mt-facts">' + h + '</dl>';
+}
+const safeUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u) ? u : '');
+function thumb(url) {
+  const u = safeUrl(url);
+  if (!u) return '';
+  return '<a class="mt-thumb" href="' + esc(u) + '" target="_blank" rel="noopener" aria-label="Open photo full size">'
+    + '<img class="mt-thumbimg" src="' + esc(u) + '" alt="" loading="lazy" width="64" height="64"></a>';
+}
+// Historique : heure, qui, texte. Les citations du guest viennent d'ici seulement.
+function historyHtml(t, nowMs) {
+  const items = t.history || [];
+  if (!items.length) return '<p class="t3 mt-hempty">No history yet.</p>';
+  const guest = guestLabel(t.proposal);
+  const conv = t.proposal && t.proposal.conversationId;
+  return '<ol class="mt-hist">' + items.map((x) => {
+    let body;
+    if (x.kind === 'guest') {
+      body = '<b>' + esc(guest) + '</b> <span class="mt-hq">' + quoteText(x.text) + '</span>'
+        + (conv ? ' <a href="' + esc(hostawayUrl(conv)) + '" target="_blank" rel="noopener">Hostaway</a>' : '');
+    } else {
+      body = '<b>' + esc(x.who || 'Unknown') + '</b> <span class="mt-htext">' + esc(x.text) + '</span>';
+    }
+    return '<li><time class="mono">' + esc(whenShort(x.at, nowMs)) + '</time><div class="mt-hbody">' + body
+      + (x.photoUrl ? thumb(x.photoUrl) : '') + '</div></li>';
+  }).join('') + '</ol>';
+}
+// Photos hors historique (photo du signalement) et photo de cloture.
+function extraPhotos(t) {
+  const seen = new Set((t.history || []).map((x) => x.photoUrl).filter(Boolean));
+  const urls = (t.photos || []).map((p) => p.url).filter((u) => u && !seen.has(u));
+  if (t.resolutionPhotoUrl) urls.push(t.resolutionPhotoUrl);
+  const h = urls.map(thumb).join('');
+  return h ? '<div class="mt-photos" aria-label="Photos">' + h + '</div>' : '';
+}
+function tkBtn(k, label, primary) {
+  return '<button class="btn mt-btn' + (primary ? ' primary mt-grow' : '') + '" type="button" data-mact="' + k + '">' + label + '</button>';
+}
+function stageButtons(t) {
+  const s = t.stage;
+  if (s === 'done') return '<div class="mt-tkmain">' + tkBtn('tk-reopen', 'Reopen', false) + '</div>';
+  let main;
+  if (s === 'in_progress') main = tkBtn('tk-done', 'Done', true) + tkBtn('tk-waiting', 'Waiting parts');
+  else if (s === 'waiting_parts') main = tkBtn('tk-start', 'Start', true) + tkBtn('tk-done', 'Done');
+  else if (s === 'to_confirm') main = tkBtn('tk-done', 'Confirm fixed', true) + tkBtn('tk-broken', 'Reopen as still broken');
+  else main = tkBtn('tk-start', 'Start', true) + tkBtn('tk-waiting', 'Waiting parts');
+  return '<div class="mt-tkmain">' + main + '</div><div class="mt-tkmore">'
+    + tkBtn('tk-comment', 'Comment') + tkBtn('tk-assign', 'Reassign') + tkBtn('tk-due', 'Due date') + '</div>';
+}
+function tkHead(t) {
+  const where = [placeLabel(t), CATEGORY[t.category] || ''].filter(Boolean).join(' · ');
+  return '<div class="sheet-h" data-mref="' + esc(t.ref) + '"><div class="mt-tkh">'
+    + '<div class="mono mt-tkref">' + esc(t.ref) + ' · ' + esc(ORIGIN_LINE[t.origin] || ORIGIN_LINE.manual) + '</div>'
+    + '<h2 id="sheetTitle">' + esc(t.title) + '</h2>' + (where ? '<div class="sub mt-tkwhere">' + esc(where) + '</div>' : '') + '</div>'
+    + '<button class="iconbtn x" type="button" data-close aria-label="Close">' + I.close + '</button></div>';
+}
+
+export function ticketLoadingSheet(ref) {
+  return head(ref, ref, '') + '<div class="sheet-b"><p class="boot" role="status">Loading ' + esc(ref) + '…</p></div>';
+}
+export function ticketErrorSheet(ref, msg) {
+  return head(ref, ref, '') + '<div class="sheet-b"><div class="err-card" role="alert"><p>' + esc(msg) + '</p></div></div>'
+    + '<div class="sheet-f"><button class="btn primary mt-btn mt-grow" type="button" data-mact="tk-retry">Retry</button>'
+    + '<button class="btn mt-btn" type="button" data-close>Close</button></div>';
+}
+
+// Fiche ticket : en-tete, etapes, faits, historique, gestes selon l'etape.
+export function ticketSheet(t, ro, nowMs) {
+  let b = (STAGE_PILL[t.stage] ? '<div class="mt-pills"><span class="pill warn mt-stage">' + STAGE_PILL[t.stage] + '</span></div>' : '')
+    + stepsHtml(t) + factsHtml(t, nowMs);
+  if (t.stage === 'done') {
+    b += '<p class="mt-line mt-tkdone">' + doneLine(t) + '</p>' + (t.resolutionNotes ? '<p class="mt-note">' + quoteText(t.resolutionNotes) + '</p>' : '');
+  }
+  if (t.description) b += '<p class="mt-note mt-desc">' + esc(t.description) + '</p>';
+  b += '<section class="mt-histbox" aria-label="History"><h3 class="mt-label">History</h3>' + historyHtml(t, nowMs) + extraPhotos(t) + '</section>';
+  const f = ro ? roFoot('Close') : '<div class="sheet-f mt-tkf">' + stageButtons(t) + '</div>';
+  return tkHead(t) + '<div class="sheet-b">' + b + '</div>' + f;
+}
+
+function subHead(t, title) { return head(t.ref, title, t.ref + ' · ' + t.title); }
+const subFoot = (send, label) => '<div class="sheet-f"><button class="btn primary mt-btn mt-grow" type="button" data-mact="' + send + '">' + label + '</button>'
+  + '<button class="btn mt-btn" type="button" data-mact="tk-back">Back</button></div>';
+
+// Cloture : note, photo (envoyee avant le geste), cout reel facultatif.
+export function doneSheet(t) {
+  const b = '<div class="mt-field"><label class="mt-label" for="mtDoneNote">What was done (optional)</label>'
+    + '<textarea id="mtDoneNote" class="mt-input mt-text" rows="3" maxlength="2000"></textarea></div>'
+    + '<div class="mt-field"><span class="mt-label">Photo (optional)</span><div class="mt-photorow">'
+    + '<label class="btn mt-btn mt-filebtn" for="mtPhoto">Add photo</label>'
+    + '<input id="mtPhoto" class="mt-file" type="file" accept="image/*" capture="environment">'
+    + '<span id="mtPhotoName" class="t3 mt-photoname"></span></div></div>'
+    + '<div class="mt-field"><label class="mt-label" for="mtCost">Cost (AED), optional</label>'
+    + '<input id="mtCost" class="mt-input" type="text" inputmode="decimal" autocomplete="off" maxlength="12"></div>';
+  return subHead(t, 'Mark done') + '<div class="sheet-b">' + b + '</div>' + subFoot('tk-done-send', 'Mark done');
+}
+export function waitingSheet(t) {
+  return subHead(t, 'Waiting parts') + '<div class="sheet-b"><div class="mt-field"><label class="mt-label" for="mtWaitNote">What is missing (optional)</label>'
+    + '<textarea id="mtWaitNote" class="mt-input mt-text" rows="2" maxlength="2000"></textarea></div></div>' + subFoot('tk-wait-send', 'Save');
+}
+export function commentSheet(t) {
+  return subHead(t, 'Comment') + '<div class="sheet-b"><div class="mt-field"><label class="mt-label" for="mtComment">Comment</label>'
+    + '<textarea id="mtComment" class="mt-input mt-text" rows="3" maxlength="2000"></textarea></div></div>' + subFoot('tk-comment-send', 'Send');
+}
+// Reassign : membres de l'equipe, prestataires, personne. L'intervenant actuel est choisi.
+export function assignSheet(t, meta) {
+  const cur = t.assignee ? (t.assignee.kind === 'vendor' ? 'v:' : 'm:') + t.assignee.id : 'none';
+  const chip = (v, label) => '<button type="button" class="mt-chip" data-mact="asg" data-asg="' + esc(v) + '" aria-pressed="' + (v === cur ? 'true' : 'false') + '">' + esc(label) + '</button>';
+  const team = (meta.team || []).map((m) => chip('m:' + m.id, m.name)).join('');
+  const vendors = (meta.vendors || []).map((v) => chip('v:' + v.id, v.name)).join('');
+  const b = '<div class="mt-field"><span class="mt-label">Team</span><div class="mt-whos" role="group" aria-label="Team">' + team + '</div></div>'
+    + (vendors ? '<div class="mt-field"><span class="mt-label">Vendors</span><div class="mt-whos" role="group" aria-label="Vendors">' + vendors + '</div></div>' : '')
+    + '<div class="mt-field"><div class="mt-whos">' + chip('none', 'Nobody') + '</div></div>';
+  return subHead(t, 'Reassign') + '<div class="sheet-b">' + b + '</div>' + subFoot('tk-assign-send', 'Save');
+}
+export function dueSheet(t, nowMs, maxDays) {
+  const today = dubaiToday(nowMs);
+  const b = '<div class="mt-field"><label class="mt-label" for="mtDue">Due date</label>'
+    + '<input id="mtDue" class="mt-input" type="date" min="' + today + '" max="' + addDays(today, maxDays) + '" value="' + esc(t.dueOn || '') + '"></div>';
+  return subHead(t, 'Due date') + '<div class="sheet-b">' + b + '</div>'
+    + '<div class="sheet-f"><button class="btn primary mt-btn mt-grow" type="button" data-mact="tk-due-send">Save</button>'
+    + (t.dueOn ? '<button class="btn mt-btn" type="button" data-mact="tk-due-clear">Clear date</button>' : '')
+    + '<button class="btn mt-btn" type="button" data-mact="tk-back">Back</button></div>';
+}
+export function photoChosenHtml(name) {
+  return '<span class="mt-photofile">' + esc(name) + '</span> <button class="link mt-link" type="button" data-mact="tk-photo-clear">Remove</button>';
 }

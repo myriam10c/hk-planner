@@ -17,7 +17,7 @@ function timeoutMs() {
   return t > 0 ? t : TIMEOUT_MS;
 }
 
-// Telechargements : 60 s (le crochet de test raccourcit aussi ce delai).
+// Telechargements et envois de photos : 60 s (le crochet de test raccourcit aussi ce delai).
 function downloadTimeoutMs() {
   const t = Number(typeof window !== 'undefined' ? window.__MGR_TIMEOUT_MS : 0);
   return t > 0 ? t : 60000;
@@ -32,7 +32,7 @@ async function headers() {
 }
 
 // Appel avec delai client : rend la reponse brute, leve ApiError sur delai ou reseau.
-async function fetchTimed(url, init) {
+async function fetchTimed(url, init, ms) {
   const ctrl = new AbortController();
   let timer = null;
   // Course plutot que la seule annulation : un fetch qui ignore le signal ne
@@ -41,7 +41,7 @@ async function fetchTimed(url, init) {
     timer = setTimeout(() => {
       try { ctrl.abort(); } catch (e) { /* deja fini */ }
       rej(new ApiError('HK Planner is taking too long to answer. Try again.', 'timeout', 0));
-    }, timeoutMs());
+    }, ms || timeoutMs());
   });
   let res;
   try {
@@ -55,8 +55,8 @@ async function fetchTimed(url, init) {
   return res;
 }
 
-async function send(url, init) {
-  const res = await fetchTimed(url, init);
+async function send(url, init, ms) {
+  const res = await fetchTimed(url, init, ms);
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) throw new ApiError('Please sign in again.', 'auth', 401);
   if (res.status === 403) throw new ApiError(data.error || 'Not allowed.', 'forbidden', 403);
@@ -119,6 +119,22 @@ export async function post(action, body) {
   return send(API + '?action=' + encodeURIComponent(action), {
     method: 'POST', headers: { ...(await headers()), 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
+}
+
+// Envoi multipart (photo d'un ticket) : memes en-tetes que post() sans Content-Type
+// (le navigateur pose la frontiere), delai de 60 s comme les telechargements, memes
+// ApiError. fields : un FormData, ou un objet { cle: texte | Blob } converti ici.
+export async function upload(action, fields) {
+  let form = fields;
+  if (!(typeof FormData !== 'undefined' && fields instanceof FormData)) {
+    form = new FormData();
+    for (const k of Object.keys(fields || {})) {
+      const v = fields[k];
+      if (v === undefined || v === null) continue;
+      form.append(k, typeof Blob !== 'undefined' && v instanceof Blob ? v : String(v));
+    }
+  }
+  return send(API + '?action=' + encodeURIComponent(action), { method: 'POST', headers: await headers(), body: form }, downloadTimeoutMs());
 }
 
 // Cle d'idempotence d'un geste (meme format que v3 et inspections, validIdem
