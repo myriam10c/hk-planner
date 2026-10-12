@@ -243,10 +243,18 @@ Deno.test("Review Focus 3 : cout vide = null sans ligne ; 0 est un vrai cout ; n
   assertEquals(ticket(sb, 430).actual_cost, 120);
   assertEquals(await err(sb, { op: "ticket.done", ticketId: 432, cost: "abc" }), "Cost must be a number.");
   assertEquals(await err(sb, { op: "ticket.done", ticketId: 432, cost: "Infinity" }), "Cost must be a number.");
+  for (const cost of [-5, "-5", "0x10", "1e3", "12.345", "1,5", Infinity, NaN, true, {}]) {
+    assertEquals(await err(sb, { op: "ticket.done", ticketId: 432, cost }), "Cost must be a number.");
+  }
   assertEquals(ticket(sb, 432).status, "waiting_parts");
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => c.ticket_id), [429, 430]);
+  await act(sb, { op: "ticket.done", ticketId: 432, cost: " 12.5 " });
+  assertEquals(ticket(sb, 432).actual_cost, 12.5);
+  await act(sb, { op: "ticket.done", ticketId: 433, cost: 99.999 });
+  assertEquals(ticket(sb, 433).actual_cost, 99.999);
 });
 
-Deno.test("ticket.done : ecriture du ticket ratee = cle liberee, ligne de cout retiree, erreur remontee", async () => {
+Deno.test("ticket.done : ecriture du ticket ratee = cle liberee, aucune ligne de cout, erreur remontee", async () => {
   const sb = seed();
   sb.fail["maintenance_tickets.update"] = { message: "db down" };
   let msg = "";
@@ -254,6 +262,49 @@ Deno.test("ticket.done : ecriture du ticket ratee = cle liberee, ligne de cout r
   assertEquals(msg, "db down");
   assertEquals(sb.tables.job_events.length, 0);
   assertEquals(sb.tables.maintenance_costs.length, 0);
+});
+
+Deno.test("ticket.done : deux telephones en meme temps = une seule cloture, une seule ligne de cout", async () => {
+  const sb = seed();
+  const [a, b] = await Promise.all([
+    act(sb, { op: "ticket.done", ticketId: 429, cost: 50 }),
+    act(sb, { op: "ticket.done", ticketId: 429, cost: 70 }),
+  ]);
+  assertEquals([a.status, b.status].sort(), [200, 409]);
+  assertEquals((a.status === 409 ? a : b).body, { error: "This ticket is closed. Reopen it first." });
+  assertEquals(sb.tables.maintenance_costs.length, 1);
+  assertEquals(sb.tables.cleaning_log.filter((l: any) => l.action === "mnt_ticket.done").length, 1);
+  assertEquals(sb.tables.job_events.length, 1);
+});
+
+Deno.test("ticket.done : ticket clos entre la lecture et l'ecriture = 409, cle liberee, aucune ligne de cout", async () => {
+  const sb = seed();
+  const orig = sb.from;
+  (sb as any).from = (table: string) => {
+    const q = orig(table);
+    if (table === "maintenance_tickets") {
+      const upd = q.update;
+      q.update = (v: any) => { ticket(sb, 429).status = "resolved"; return upd(v); };
+    }
+    return q;
+  };
+  assertEquals(await act(sb, { op: "ticket.done", ticketId: 429, cost: 50 }), { status: 409, body: { error: "This ticket is closed. Reopen it first." } });
+  assertEquals(sb.tables.maintenance_costs.length, 0);
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(sb.tables.cleaning_log.length, 0);
+});
+
+Deno.test("ticket.done : ligne de cout ratee = ticket remis dans son etat, cle liberee, erreur remontee", async () => {
+  const sb = seed();
+  sb.fail["maintenance_costs.insert"] = { message: "db down" };
+  let msg = "";
+  try { await act(sb, { op: "ticket.done", ticketId: 431, cost: 10, note: "x" }); } catch (e) { msg = (e as any).message; }
+  assertEquals(msg, "db down");
+  const t = ticket(sb, 431);
+  assertEquals([t.status, t.resolved_at ?? null, t.actual_cost ?? null, t.resolution_notes ?? null], ["in_progress", null, null, null]);
+  assertEquals(sb.tables.job_events.length, 0);
+  delete sb.fail["maintenance_costs.insert"];
+  assertEquals((await act(sb, { op: "ticket.done", ticketId: 431, cost: 10 })).status, 200);
 });
 
 Deno.test("ticket.reopen : clos seulement ; assigned si quelqu'un est assigne, sinon open", async () => {

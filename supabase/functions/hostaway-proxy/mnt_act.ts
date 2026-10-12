@@ -11,7 +11,7 @@ import {
   type ActionResult,
 } from "./v3.ts";
 import { sansEchec } from "./v3_photos.ts";
-import { MGR_CLOSED_TICKET_STATUSES, MGR_TICKET_ASSIGNEE_ROLES, problemRef } from "./mgr_inbox.ts";
+import { MGR_CLOSED_TICKET_STATUSES, MGR_OPEN_TICKET_STATUSES, MGR_TICKET_ASSIGNEE_ROLES, problemRef } from "./mgr_inbox.ts";
 import {
   MNT_CATEGORIES, MNT_REJECT_REASONS, MNT_TEXT_MAX, MNT_TITLE_MAX, MNT_URGENCIES, type MntCategory, type MntUrgency,
   priorityFor, proposalRef,
@@ -23,7 +23,7 @@ const PHOTO_PATH_MAX = 300;
 
 export type MntActDeps = {
   nowMs?: number;
-  notifyAssignee?: (t: { ticketId: number; memberId: number; title: string; urgent: boolean }) => void;
+  notifyAssignee?: (t: { ticketId: number; memberId: number; title: string; urgent: boolean }) => void | Promise<void>;
 };
 
 type Who = { memberId: number | null; vendorId: number | null };
@@ -87,15 +87,17 @@ function parseNewTicket(body: any): NewTicket | { error: string } {
   return { title, listingId: lid || null, category: body.category, urgency: body.urgency, note: cleanText(body?.note), ...w };
 }
 
-// Cout : absent ou vide = pas de cout ; un nombre fini >= 0 est un vrai cout (0 compris) ;
-// un nombre negatif est ignore ; tout le reste est refuse.
+// Cout : absent ou vide = pas de cout ; un nombre fini >= 0 est un vrai cout (0 compris).
+// En texte, seulement un decimal simple (2 decimales au plus) : ni signe, ni hexa, ni exposant.
+const COST_RE = /^\d+(\.\d{1,2})?$/;
+const NOT_A_COST = { error: "Cost must be a number." };
 function parseCost(v: unknown): { cost: number | null } | { error: string } {
   if (v === undefined || v === null) return { cost: null };
-  if (typeof v === "string" && !v.trim()) return { cost: null };
-  if (typeof v !== "number" && typeof v !== "string") return { error: "Cost must be a number." };
-  const n = Number(v);
-  if (!Number.isFinite(n)) return { error: "Cost must be a number." };
-  return { cost: n >= 0 ? n : null };
+  if (typeof v === "number") return Number.isFinite(v) && v >= 0 ? { cost: v } : NOT_A_COST;
+  if (typeof v !== "string") return NOT_A_COST;
+  const t = v.trim();
+  if (!t) return { cost: null };
+  return COST_RE.test(t) ? { cost: Number(t) } : NOT_A_COST;
 }
 
 export function parseMntAct(body: any, today: string): Op | { error: string; status?: number } {
@@ -232,6 +234,8 @@ const notice = (ticketId: number, memberId: number | null, title: string, urgent
 // Proposition prise sous condition (encore pending) : une autre decision entre la
 // lecture et l'ecriture donne 0 ligne, donc 409 sans rien ecrire d'autre.
 class Handled extends Error {}
+// Etat change entre la lecture et l'ecriture conditionnelle : 409 avec ce message.
+class Refused extends Error {}
 async function takeProposal(c: Ctx, id: number, values: Record<string, unknown>): Promise<void> {
   const hit = await mustWrite(c.sb.from("maintenance_proposals")
     .update({ ...values, decided_by: c.me.name, decided_at: c.nowIso, updated_at: c.nowIso })
@@ -334,24 +338,28 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
         mustWrite(c.sb.from("ticket_comments").insert({ ticket_id: id, author: c.me.name, comment: a.note }))]);
     }
   } else if (a.op === "ticket.done") {
-    // La ligne de cout passe avant le ticket : si le ticket ne s'ecrit pas, on la retire.
-    let costId: number | null = null;
+    // Cloture gardee : seul un ticket encore ouvert passe a resolved. Deux telephones
+    // en meme temps donnent une seule cloture ; l'autre recoit 409 (cle liberee).
+    const hit = await mustWrite(c.sb.from("maintenance_tickets").update({
+      status: "resolved", resolved_at: c.nowIso, resolution_notes: a.note || null,
+      resolution_photo_path: a.photoPath, actual_cost: a.cost, last_update: c.nowIso,
+    }).eq("id", id).in("status", MGR_OPEN_TICKET_STATUSES).select("id"));
+    if (!hit.length) throw new Refused(CLOSED);
+    // La ligne de cout suit la cloture ; si elle ne s'ecrit pas, le ticket reprend son etat d'avant.
     if (a.cost !== null) {
-      const rows = await mustWrite(c.sb.from("maintenance_costs").insert({
-        ticket_id: id, listing_id: tk.listing_id ?? null, category: tk.category ?? null, description: tk.title ?? null,
-        amount: a.cost, vendor_id: tk.assigned_vendor_id ?? null, date: c.today,
-      }).select("id"));
-      costId = rows.length ? Number(rows[0].id) : null;
-    }
-    try {
-      await updateTicket(c, id, {
-        status: "resolved", resolved_at: c.nowIso, resolution_notes: a.note || null,
-        resolution_photo_path: a.photoPath, actual_cost: a.cost,
-      });
-    } catch (e) {
-      const cid = costId;
-      if (cid !== null) await sansEchec("cout " + cid + " non retire", () => mustWrite(c.sb.from("maintenance_costs").delete().eq("id", cid)));
-      throw e;
+      try {
+        await mustWrite(c.sb.from("maintenance_costs").insert({
+          ticket_id: id, listing_id: tk.listing_id ?? null, category: tk.category ?? null, description: tk.title ?? null,
+          amount: a.cost, vendor_id: tk.assigned_vendor_id ?? null, date: c.today,
+        }));
+      } catch (e) {
+        await sansEchec("ticket MNT-" + id + " non remis dans son etat", () => mustWrite(c.sb.from("maintenance_tickets").update({
+          status: tk.status ?? "open", resolved_at: tk.resolved_at ?? null, resolution_notes: tk.resolution_notes ?? null,
+          resolution_photo_path: tk.resolution_photo_path ?? null, actual_cost: tk.actual_cost ?? null,
+          last_update: tk.last_update ?? c.nowIso,
+        }).eq("id", id)));
+        throw e;
+      }
     }
     result.status = "resolved";
     details = { from: tk.status ?? null, cost: a.cost };
@@ -434,6 +442,7 @@ export async function mntAct(sb: any, me: SessionUser, body: any, deps: MntActDe
   } catch (e) {
     await releaseEvent(sb, idem);
     if (e instanceof Handled) return bad(409, HANDLED);
+    if (e instanceof Refused) return bad(409, e.message);
     throw e;
   }
   await sansEchec("resultat non memorise pour " + idem, () => recordResult(sb, idem, done.result));
