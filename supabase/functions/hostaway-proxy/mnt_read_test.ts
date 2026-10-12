@@ -83,7 +83,7 @@ Deno.test("propositions en attente : urgent, high, normal puis updated_at decroi
     id: 2, ref: "PRP-2", listingId: "L2", apt: "2609", bld: "Nobles by Tiger", title: "Proposal 2",
     category: "ac", categoryLabel: "AC", urgency: "urgent", guestName: "Guest 2", stayFrom: "2026-10-10", stayTo: "2026-10-13",
     guestInNow: true, quotes: [{ message_id: "m2", at: "2026-10-11T10:00:00Z", text: "AC broken" }], conversationId: "C2",
-    reservationId: "R2", openTicket: { id: 10, ref: "MNT-10", title: "Ticket 10" }, status: "pending", rejectReason: null,
+    reservationId: "R2", openTicket: { id: 10, ref: "MNT-10", title: "Ticket 10" }, status: "pending", rejectReason: null, rejectNote: null, ticket: null,
     decidedBy: null, decidedAt: null, createdAt: "2026-10-11T10:00:00Z", updatedAt: "2026-10-11T09:00:00Z",
   });
   const p3 = b.proposals[2];
@@ -196,4 +196,30 @@ Deno.test("erreur de lecture : 503", async () => {
     console.error = orig;
   }
   assertEquals(errs.length, 6);
+});
+
+Deno.test("F2 : motif de rejet et ticket d'une proposition fusionnee lus", async () => {
+  const sb = db();
+  const p4 = sb.tables.maintenance_proposals.find((p: any) => p.id === 4);
+  p4.reject_reason = "other";
+  p4.reject_note = "Guest asked about towels";
+  sb.tables.maintenance_proposals.find((p: any) => p.id === 5).ticket_id = 11;
+  const b = await list(Q({ rejected: true }), sb);
+  assertEquals(b.proposals.map((p) => [p.id, p.rejectReason, p.rejectNote, p.ticket]), [
+    [5, null, null, { id: 11, ref: "MNT-11" }], [4, "other", "Guest asked about towels", null],
+  ]);
+  assertEquals((await list(Q())).proposals.map((p) => [p.rejectNote, p.ticket]), [[null, null], [null, null], [null, null], [null, null]]);
+});
+
+Deno.test("F3 : clos par l'ancien chemin (closed_at seul) dans les faits, date = resolved_at ?? closed_at", async () => {
+  const sb = db();
+  sb.tables.maintenance_tickets.push(
+    TK(24, { status: "closed", resolved_at: null, closed_at: "2026-10-12T08:00:00Z" }),
+    TK(25, { status: "closed", resolved_at: null, closed_at: "2026-08-01T08:00:00Z" }),
+    TK(26, { status: "resolved", resolved_at: "2026-10-09T08:00:00Z", closed_at: "2026-10-12T09:00:00Z" }),
+  );
+  const b = await list(Q({ tab: "done" }), sb);
+  assertEquals(b.tickets.map((t) => [t.id, t.resolvedAt]), [
+    [24, "2026-10-12T08:00:00Z"], [21, "2026-10-11T08:00:00Z"], [20, "2026-10-10T08:00:00Z"], [26, "2026-10-09T08:00:00Z"],
+  ]);
 });

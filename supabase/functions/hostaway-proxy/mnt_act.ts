@@ -11,7 +11,7 @@ import {
   type ActionResult,
 } from "./v3.ts";
 import { sansEchec } from "./v3_photos.ts";
-import { MGR_CLOSED_TICKET_STATUSES, MGR_OPEN_TICKET_STATUSES, MGR_TICKET_ASSIGNEE_ROLES, problemRef } from "./mgr_inbox.ts";
+import { MGR_CLOSED_TICKET_STATUSES, MGR_TICKET_ASSIGNEE_ROLES, problemRef } from "./mgr_inbox.ts";
 import {
   MNT_CATEGORIES, MNT_REJECT_REASONS, MNT_TEXT_MAX, MNT_TITLE_MAX, MNT_URGENCIES, type MntCategory, type MntUrgency,
   priorityFor, proposalRef,
@@ -338,21 +338,47 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
         mustWrite(c.sb.from("ticket_comments").insert({ ticket_id: id, author: c.me.name, comment: a.note }))]);
     }
   } else if (a.op === "ticket.done") {
-    // Cloture gardee : seul un ticket encore ouvert passe a resolved. Deux telephones
-    // en meme temps donnent une seule cloture ; l'autre recoit 409 (cle liberee).
+    // Cloture gardee : seul un ticket pas clos (meme notion que isClosed, statut nul
+    // compris) passe a resolved. Deux telephones en meme temps donnent une seule
+    // cloture ; l'autre recoit 409 (cle liberee). actual_cost n'est pas touche ici :
+    // sans cout, le cout precedent reste (lignes et actual_cost).
     const hit = await mustWrite(c.sb.from("maintenance_tickets").update({
       status: "resolved", resolved_at: c.nowIso, resolution_notes: a.note || null,
-      resolution_photo_path: a.photoPath, actual_cost: a.cost, last_update: c.nowIso,
-    }).eq("id", id).in("status", MGR_OPEN_TICKET_STATUSES).select("id"));
+      resolution_photo_path: a.photoPath, last_update: c.nowIso,
+    }).eq("id", id).or("status.is.null,status.not.in.(" + MGR_CLOSED_TICKET_STATUSES.join(",") + ")").select("id"));
     if (!hit.length) throw new Refused(CLOSED);
-    // La ligne de cout suit la cloture ; si elle ne s'ecrit pas, le ticket reprend son etat d'avant.
+    // Avec un cout, il remplace celui du ticket (Reopen puis Done corrige un cout sans le compter deux fois) :
+    // nouvelle ligne, puis retrait des anciennes, puis actual_cost. Si une etape rate, les anciennes lignes
+    // sont remises et le ticket reprend son etat d'avant.
     if (a.cost !== null) {
+      let oldRows: any[] = [];
+      let newId: number | null = null;
+      let oldGone = false;
       try {
-        await mustWrite(c.sb.from("maintenance_costs").insert({
+        oldRows = await mustWrite(c.sb.from("maintenance_costs").select("*").eq("ticket_id", id));
+        const ins = await mustWrite(c.sb.from("maintenance_costs").insert({
           ticket_id: id, listing_id: tk.listing_id ?? null, category: tk.category ?? null, description: tk.title ?? null,
           amount: a.cost, vendor_id: tk.assigned_vendor_id ?? null, date: c.today,
-        }));
+        }).select("id"));
+        newId = ins.length ? Number(ins[0].id) : null;
+        if (oldRows.length) {
+          oldGone = true;
+          await mustWrite(c.sb.from("maintenance_costs").delete().in("id", oldRows.map((r) => r.id)));
+        }
+        await mustWrite(c.sb.from("maintenance_tickets").update({ actual_cost: a.cost }).eq("id", id));
       } catch (e) {
+        const nid = newId;
+        if (nid !== null) {
+          await sansEchec("cout " + nid + " de MNT-" + id + " non retire", () => mustWrite(c.sb.from("maintenance_costs").delete().eq("id", nid)));
+        }
+        if (oldGone) {
+          // L'effacement a pu ne rien retirer : on ne remet que les lignes absentes.
+          await sansEchec("anciens couts de MNT-" + id + " non remis", async () => {
+            const still = new Set((await mustWrite(c.sb.from("maintenance_costs").select("id").eq("ticket_id", id))).map((r) => String(r.id)));
+            const back = oldRows.filter((r) => !still.has(String(r.id)));
+            if (back.length) await mustWrite(c.sb.from("maintenance_costs").insert(back));
+          });
+        }
         await sansEchec("ticket MNT-" + id + " non remis dans son etat", () => mustWrite(c.sb.from("maintenance_tickets").update({
           status: tk.status ?? "open", resolved_at: tk.resolved_at ?? null, resolution_notes: tk.resolution_notes ?? null,
           resolution_photo_path: tk.resolution_photo_path ?? null, actual_cost: tk.actual_cost ?? null,
@@ -408,6 +434,8 @@ export async function mntAct(sb: any, me: SessionUser, body: any, deps: MntActDe
   if ("proposalId" in a) {
     prop = await readRow(sb, "maintenance_proposals", a.proposalId);
     if (!prop) return bad(404, NOT_FOUND);
+    // Comme ticket.create : jamais de ticket sans appartement.
+    if (a.op === "proposal.accept" && !a.listingId && !has(String(prop.listing_id ?? "").trim())) return bad(400, "Choose an apartment.");
   }
   if ("ticketId" in a) {
     tk = await readRow(sb, "maintenance_tickets", a.ticketId);

@@ -219,3 +219,67 @@ Deno.test("ingest : plusieurs problemes dans un lot", async () => {
   const ids = props(sb).map((p: any) => p.id);
   assertEquals(r.body, { created: [ids[0], ids[1]], appended: [ids[0]], skipped: 0 });
 });
+
+Deno.test("F5 : ajout concurrent entre la lecture et l'ecriture, aucune citation perdue", async () => {
+  const db = seed();
+  await run(db, [issue()]);
+  const row = db.tables.maintenance_proposals[0];
+  let first = true;
+  // Une autre ingestion ajoute M2 juste avant notre ecriture : notre update ne doit rien toucher.
+  const sb = {
+    ...db,
+    from(t: string) {
+      const q = db.from(t);
+      if (t !== "maintenance_proposals") return q;
+      const upd = q.update;
+      q.update = (v: any) => {
+        if (first) {
+          first = false;
+          // Nouvel objet : la base rend des copies, la ligne lue par l'ingestion ne bouge pas.
+          db.tables.maintenance_proposals[0] = { ...row, updated_at: "2026-10-12T08:00:30.000Z",
+            quotes: [...row.quotes, { message_id: "M2", at: "2026-10-12T07:10:00Z", text: "Other" }] };
+        }
+        return upd(v);
+      };
+      return q;
+    },
+  };
+  const r = await run(sb, [issue({ messageId: "M3", at: "2026-10-12T07:20:00Z", quote: "Third" })]);
+  assertEquals(r.body, { created: [], appended: [row.id], skipped: 0 });
+  assertEquals(props(db).length, 1);
+  assertEquals(props(db)[0].quotes.map((q: any) => q.message_id), ["M1", "M2", "M3"]);
+});
+
+Deno.test("F5 : updated_at nul sur une ancienne ligne, l'ajout passe quand meme", async () => {
+  const sb = seed({
+    maintenance_proposals: [{ id: 5, conversation_id: "C1", category: "ac", status: "pending", dedup_key: "C1|ac",
+      urgency: "normal", updated_at: null, quotes: [{ message_id: "M0", at: "2026-10-12T06:00:00Z", text: "x" }] }],
+  });
+  const r = await run(sb, [issue()]);
+  assertEquals(r.body, { created: [], appended: [5], skipped: 0 });
+  assertEquals(props(sb)[0].quotes.map((q: any) => q.message_id), ["M0", "M1"]);
+});
+
+Deno.test("F6 : citation plus ancienne que les 10 gardees, l'urgence monte quand meme (appended, une notification)", async () => {
+  const quotes = Array.from({ length: 10 }, (_, i) => ({ message_id: "K" + i, at: "2026-10-12T07:" + String(10 + i) + ":00Z", text: "q" + i }));
+  const sb = seed({
+    maintenance_proposals: [{ id: 5, conversation_id: "C1", category: "ac", status: "pending", dedup_key: "C1|ac",
+      urgency: "normal", title: "AC", updated_at: "2026-10-12T07:30:00Z", quotes }],
+  });
+  const calls: any[] = [];
+  const notifyUrgent = (p: any) => calls.push(p);
+  const old = (id: string, urgency: string) => issue({ messageId: id, at: "2026-10-12T06:00:00Z", urgency });
+  // meme urgence ou plus basse : rien ne change, skipped
+  assertEquals((await run(sb, [old("O1", "normal")], { notifyUrgent })).body, { created: [], appended: [], skipped: 1 });
+  assertEquals(props(sb)[0].updated_at, "2026-10-12T07:30:00Z");
+  // high : monte, sans notification
+  assertEquals((await run(sb, [old("O2", "high")], { notifyUrgent })).body, { created: [], appended: [5], skipped: 0 });
+  assertEquals([props(sb)[0].urgency, calls.length], ["high", 0]);
+  // urgent : monte et notifie une fois
+  assertEquals((await run(sb, [old("O3", "urgent")], { notifyUrgent })).body, { created: [], appended: [5], skipped: 0 });
+  assertEquals([props(sb)[0].urgency, calls.length], ["urgent", 1]);
+  assertEquals(calls[0], { id: 5, title: "AC", listingId: "L1" });
+  assertEquals((await run(sb, [old("O4", "urgent")], { notifyUrgent })).body, { created: [], appended: [], skipped: 1 });
+  assertEquals(calls.length, 1);
+  assertEquals(props(sb)[0].quotes.map((q: any) => q.message_id), quotes.map((q) => q.message_id));
+});

@@ -42,7 +42,7 @@ async function ingestOne(sb: any, it: IngestIssue, nowIso: string): Promise<Outc
   const key = dedupKey(it.conversationId, it.category);
   const quote = { message_id: it.messageId, at: it.at, text: it.quote };
   const rows = rowsOrThrow(
-    await sb.from("maintenance_proposals").select("id, status, urgency, quotes, title, dedup_key")
+    await sb.from("maintenance_proposals").select("id, status, urgency, quotes, title, dedup_key, updated_at")
       .eq("conversation_id", it.conversationId).eq("category", it.category),
     "maintenance_proposals",
   );
@@ -52,15 +52,18 @@ async function ingestOne(sb: any, it: IngestIssue, nowIso: string): Promise<Outc
   const pending = rows.find((r) => r.status === "pending" && r.dedup_key === key);
   if (pending) {
     const { quotes, added } = appendQuote(quotesOf(pending), quote);
-    if (!added) return { kind: "skipped" };
     const before = (pending.urgency ?? "normal") as MntUrgency;
     const urgency = RANK[before] ? higher(before, it.urgency) : it.urgency;
-    const hit = rowsOrThrow(
-      await sb.from("maintenance_proposals").update({ quotes, urgency, updated_at: nowIso })
-        .eq("id", pending.id).eq("status", "pending").select("id"),
-      "maintenance_proposals update",
-    );
-    // Decidee entre la lecture et l'ecriture : on recommence depuis la lecture.
+    // Citation plus ancienne que les MNT_QUOTES_MAX gardees : elle tombe, mais son urgence
+    // compte quand meme. Ni citation ni urgence nouvelle : rien a ecrire.
+    if (!added && urgency === before) return { kind: "skipped" };
+    // Verrou optimiste sur updated_at lu : un autre ajout entre la lecture et l'ecriture
+    // donne 0 ligne, et on recommence depuis la lecture (aucune citation perdue).
+    let upd = sb.from("maintenance_proposals").update(added ? { quotes, urgency, updated_at: nowIso } : { urgency, updated_at: nowIso })
+      .eq("id", pending.id).eq("status", "pending");
+    upd = pending.updated_at == null ? upd.is("updated_at", null) : upd.eq("updated_at", pending.updated_at);
+    const hit = rowsOrThrow(await upd.select("id"), "maintenance_proposals update");
+    // Decidee ou modifiee entre la lecture et l'ecriture : on recommence depuis la lecture.
     if (!hit.length) throw new Retry();
     return {
       kind: "appended", id: Number(pending.id), title: String(pending.title ?? it.title),

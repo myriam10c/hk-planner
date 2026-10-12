@@ -60,10 +60,19 @@ export function fakeDb(seed: Record<string, any[]> = {}, opts: { maxRows?: numbe
     const match = (r: any) =>
       filters.every((f) =>
         f.kind === "or"
-          // PostgREST or("col.is.null,col.eq.v") : une des alternatives suffit.
-          ? String(f.val).split(",").some((alt) => {
-            const [c, op, ...rest] = alt.split(".");
-            const v = rest.join(".");
+          // PostgREST or("col.is.null,col.eq.v,col.not.in.(a,b)") : une des alternatives suffit.
+          // Decoupe aux virgules hors parentheses ; in / not.in suivent SQL (NULL ne passe jamais).
+          ? (String(f.val).match(/(?:[^,(]|\([^)]*\))+/g) ?? []).some((alt) => {
+            const [c, op0, ...rest0] = alt.split(".");
+            const neg = op0 === "not";
+            const op = neg ? rest0[0] : op0;
+            const v = (neg ? rest0.slice(1) : rest0).join(".");
+            if (op === "in") {
+              const cur = lire(r, c);
+              if (cur === undefined || cur === null) return false;
+              const has = v.replace(/^\(|\)$/g, "").split(",").includes(String(cur));
+              return neg ? !has : has;
+            }
             return op === "is" && v === "null" ? (lire(r, c) ?? null) === null
               : op === "eq" && String(lire(r, c)) === v;
           })

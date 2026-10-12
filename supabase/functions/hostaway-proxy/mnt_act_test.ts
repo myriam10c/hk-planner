@@ -232,7 +232,7 @@ Deno.test("Review Focus 3 : cout vide = null sans ligne ; 0 est un vrai cout ; n
     const s = seed();
     const r = await mntAct(s, ME, { idem: "idem-cost-" + (++n), op: "ticket.done", ticketId: 429, cost, photoPath: "" }, { nowMs: NOW });
     assertEquals(r.status, 200);
-    assertEquals([ticket(s, 429).status, ticket(s, 429).actual_cost, ticket(s, 429).resolution_photo_path, ticket(s, 429).resolution_notes],
+    assertEquals([ticket(s, 429).status, ticket(s, 429).actual_cost ?? null, ticket(s, 429).resolution_photo_path, ticket(s, 429).resolution_notes],
       ["resolved", null, null, null]);
     assertEquals(s.tables.maintenance_costs.length, 0);
   }
@@ -410,4 +410,81 @@ Deno.test("accept : insertion du ticket ratee = proposition remise en attente, c
   assertEquals(sb.tables.job_events.length, 0);
   delete sb.fail["maintenance_tickets.insert"];
   assertEquals((await act(sb, ACCEPT)).status, 200);
+});
+
+Deno.test("F1 : done 50, reopen, done 80 = une seule ligne de 80 et actual_cost 80", async () => {
+  const sb = seed();
+  assertEquals((await act(sb, { op: "ticket.done", ticketId: 429, cost: 50 })).status, 200);
+  assertEquals((await act(sb, { op: "ticket.reopen", ticketId: 429 })).status, 200);
+  assertEquals((await act(sb, { op: "ticket.done", ticketId: 429, cost: 80 })).status, 200);
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 80]]);
+  assertEquals([ticket(sb, 429).status, ticket(sb, 429).actual_cost], ["resolved", 80]);
+});
+
+Deno.test("F1 : done 50, reopen, done sans cout = la ligne de 50 reste et actual_cost 50", async () => {
+  const sb = seed();
+  await act(sb, { op: "ticket.done", ticketId: 429, cost: 50 });
+  await act(sb, { op: "ticket.reopen", ticketId: 429 });
+  for (const cost of [undefined, ""]) {
+    assertEquals((await act(sb, { op: "ticket.done", ticketId: 429, cost })).status, 200);
+    assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 50]]);
+    assertEquals([ticket(sb, 429).status, ticket(sb, 429).actual_cost], ["resolved", 50]);
+    await act(sb, { op: "ticket.reopen", ticketId: 429 });
+  }
+});
+
+Deno.test("F1 : remplacement du cout rate = ancienne ligne et ancien actual_cost gardes, ticket remis", async () => {
+  const sb = seed();
+  await act(sb, { op: "ticket.done", ticketId: 429, cost: 50 });
+  await act(sb, { op: "ticket.reopen", ticketId: 429 });
+  sb.fail["maintenance_costs.insert"] = { message: "db down" };
+  let msg = "";
+  try { await act(sb, { op: "ticket.done", ticketId: 429, cost: 80 }); } catch (e) { msg = (e as any).message; }
+  assertEquals(msg, "db down");
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 50]]);
+  assertEquals([ticket(sb, 429).status, ticket(sb, 429).actual_cost], ["open", 50]);
+  delete sb.fail["maintenance_costs.insert"];
+  // Le retrait des anciennes lignes rate une fois (le retrait de la nouvelle ligne, ensuite, passe).
+  let once = true;
+  const orig = sb.from;
+  (sb as any).from = (table: string) => {
+    const q = orig(table);
+    if (table !== "maintenance_costs") return q;
+    const del = q.delete;
+    q.delete = () => {
+      const r = del();
+      if (once) { once = false; r.then = (res: any) => Promise.resolve({ data: null, error: { message: "db down" } }).then(res); }
+      return r;
+    };
+    return q;
+  };
+  msg = "";
+  try { await act(sb, { op: "ticket.done", ticketId: 429, cost: 80 }); } catch (e) { msg = (e as any).message; }
+  assertEquals(msg, "db down");
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 50]]);
+  assertEquals([ticket(sb, 429).status, ticket(sb, 429).actual_cost], ["open", 50]);
+});
+
+Deno.test("F4 : accept sans appartement ni dans le corps ni sur la proposition = 400, rien d'ecrit", async () => {
+  const sb = seed();
+  proposal(sb, 12).listing_id = null;
+  const body = { ...ACCEPT, proposalId: 12, listingId: undefined, category: "wifi_tv", urgency: "normal" };
+  assertEquals(await act(sb, body), { status: 400, body: { error: "Choose an apartment." } });
+  assertEquals(await act(sb, { ...body, listingId: "  " }), { status: 400, body: { error: "Choose an apartment." } });
+  assertEquals(sb.writes.length, 0);
+  const r = await act(sb, { ...body, listingId: "L2" });
+  assertEquals(ticket(sb, Number(r.body.ticketId)).listing_id, "L2");
+  // la proposition porte deja un appartement : le corps peut s'en passer
+  const r2 = await act(sb, { ...ACCEPT, listingId: undefined });
+  assertEquals(ticket(sb, Number(r2.body.ticketId)).listing_id, "L1");
+});
+
+Deno.test("F7 : statut nul ou hors liste = pas clos, done passe ; clos = 409", async () => {
+  const sb = seed();
+  ticket(sb, 429).status = null;
+  ticket(sb, 430).status = "on_hold";
+  assertEquals((await act(sb, { op: "ticket.done", ticketId: 429 })).status, 200);
+  assertEquals((await act(sb, { op: "ticket.done", ticketId: 430 })).status, 200);
+  assertEquals([ticket(sb, 429).status, ticket(sb, 430).status], ["resolved", "resolved"]);
+  assertEquals(await err(sb, { op: "ticket.done", ticketId: 300 }), "This ticket is closed. Reopen it first.");
 });
