@@ -83,6 +83,16 @@ Deno.test("myReports rend les signalements meme si noms et logements sont illisi
   assertEquals(rows[0].listingLabel, "Apartment");
 });
 
+// Revue finale (G9) : une date de creation illisible ne s'invente pas en
+// « aujourd'hui » ; le Profile n'affiche alors aucun jour.
+Deno.test("myReports rend reportedOn null quand created_at est illisible", async () => {
+  const sb = base([ticket(1, { created_at: "pas une date" })]);
+  const r = await myReports(sb, FAIZA as any, NOW);
+  const rows = (r.body as any).reports;
+  assertEquals(rows.length, 1);
+  assertEquals(rows[0].reportedOn, null);
+});
+
 Deno.test("myReports leve quand les tickets sont illisibles", async () => {
   const sb = base([]);
   sb.fail["maintenance_tickets.select"] = { message: "boom" };

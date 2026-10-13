@@ -33,8 +33,8 @@ export type { PushFn } from "./v3_problems.ts";
 
 // Statuts dont une cleaner ne fait jamais sortir un ticket. `to_confirm` n'en
 // fait pas partie : re-verifier un ticket deja en attente de confirmation est
-// sans effet de bord.
-export const V3_TICKET_CLOSED = ["resolved", "cancelled"];
+// sans effet de bord. Partage par checkTicket et ticketStill.
+export const V3_TICKET_CLOSED = ["resolved", "closed", "cancelled"];
 
 // Branchement 2026-10-05 (tache 2) : le corps est celui de l'app conversation,
 // { jobId?, listingId, kind, urgency, where, note?, photoId? | photoIdem?, idem }.
@@ -264,7 +264,6 @@ export async function checkTicket(sb: any, me: SessionUser, body: any): Promise<
 // sans changer le statut. Meme ossature que checkTicket : cle, rejeu, controle du
 // ticket (cle liberee sur tout refus), ecriture decisive, puis accessoires.
 export const V3_STILL_COMMENT = "Still there during the cleaning.";
-const FERMES_STILL = ["resolved", "closed", "cancelled"];
 
 export async function ticketStill(
   sb: any, me: SessionUser, body: any,
@@ -295,7 +294,7 @@ export async function ticketStill(
     // Ticket clos : rien a faire, mais un 200 (ruling du controleur) ; un 409
     // ferait rejouer la file hors ligne sans fin. Ni commentaire ni push. Le
     // resultat est memorise : un rejeu rend la meme reponse.
-    if (FERMES_STILL.indexOf(String(ticket.status ?? "")) !== -1) {
+    if (V3_TICKET_CLOSED.indexOf(String(ticket.status ?? "")) !== -1) {
       const deja = { ok: true, alreadyClosed: true };
       await sansEchec("resultat non memorise pour " + String(idem),
         () => recordResult(sb, String(idem), deja));

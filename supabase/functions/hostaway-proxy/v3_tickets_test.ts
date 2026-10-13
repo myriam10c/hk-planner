@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import {
-  checkTicket, reportProblem, ticketStill, uploadPhoto, V3_MAX_PHOTO_BYTES,
+  checkTicket, reportProblem, ticketStill, uploadPhoto, V3_MAX_PHOTO_BYTES, V3_TICKET_CLOSED,
 } from "./v3_tickets.ts";
 
 const FAIZA = { cleaner_id: 3, name: "Faiza", role: "cleaner", color: "#e94560" };
@@ -452,6 +452,19 @@ Deno.test("checkTicket refuse un ticket inconnu ou deja clos", async () => {
   assertEquals(sb.tables.ticket_comments.length, 0);
 });
 
+// Revue finale (G9) : un ticket `closed` est clos comme resolved et cancelled.
+// Avant, checkTicket le repassait en to_confirm.
+Deno.test("checkTicket refuse aussi un ticket au statut closed", async () => {
+  const sb = baseTickets();
+  sb.tables.maintenance_tickets.push({ id: 73, listing_id: "102", title: "X", status: "closed" });
+  const r = await checkTicket(sb, FAIZA as any, { ticketId: 73, photoId: 55, idem: "idem-check-0013" });
+  assertEquals(r.status, 400);
+  assertEquals((r.body as any).error, "ticket is already closed");
+  assertEquals(sb.tables.maintenance_tickets[0].status, "closed");
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(sb.tables.ticket_comments.length, 0);
+});
+
 // La photo designee doit etre celle de la cleaner qui parle. Les identifiants de
 // photos sont des entiers de sequence, donc previsibles : sans ce controle, un
 // compte pourrait attacher le cliche d'une autre a un ticket.
@@ -712,4 +725,8 @@ Deno.test("ticketStill libere sa cle si le commentaire ne s'ecrit pas", async ()
   } catch { leve = true; }
   assertEquals(leve, true);
   assertEquals(sb.tables.job_events.length, 0);
+});
+
+Deno.test("V3_TICKET_CLOSED couvre resolved, closed et cancelled", () => {
+  assertEquals([...V3_TICKET_CLOSED].sort(), ["cancelled", "closed", "resolved"]);
 });

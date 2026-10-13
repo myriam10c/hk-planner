@@ -5,7 +5,8 @@
 // L'auteur d'un ticket de l'app est `reported_by`, qui porte le nom affiche de la
 // session (reportProblem, v3_tickets.ts). On filtre donc sur ce nom ET sur la
 // source hk_planner_v3 : un ticket desktop au meme nom n'est pas un signalement
-// de l'app.
+// de l'app. Limite connue : deux cleaners au meme nom affiche voient leurs
+// signalements melanges, et un renommage cache les signalements d'avant.
 import type { ActionResult, SessionUser } from "./v3.ts";
 import { plusDays, todayDubai } from "./v3.ts";
 import { assigneeOf, assigneeNames, dubaiDayOf, nomDuLogement } from "./v3_myday.ts";
@@ -18,7 +19,7 @@ export interface V3Report {
   title: string;
   place: string;
   listingLabel: string;
-  reportedOn: string;
+  reportedOn: string | null;
   status: V3ReportStatus;
   techName: string | null;
 }
@@ -71,7 +72,9 @@ export async function myReports(sb: any, me: SessionUser, nowMs: number): Promis
         title,
         place: placeOf(title),
         listingLabel: nomDuLogement(listings[String(t.listing_id ?? "")], null),
-        reportedOn: dubaiDayOf(t.created_at) ?? today,
+        // Date illisible : null, jamais une date inventee (le Profile n'affiche
+        // alors aucun jour), comme myDay.
+        reportedOn: dubaiDayOf(t.created_at),
         status: STATUT[String(t.status)],
         techName: assigneeOf(t, noms),
         _ms: Date.parse(String(t.created_at ?? "")) || 0,
