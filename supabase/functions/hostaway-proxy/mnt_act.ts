@@ -1,7 +1,8 @@
 // Gestes de la section Maintenance (action mnt.act, phase 1 serveur) : valider,
 // rejeter ou fusionner une proposition, creer un ticket, le faire avancer
 // (start, waiting_parts, done, reopen), l'assigner, lui donner une echeance,
-// le commenter. Meme ordre que mgr_problem_act.ts : validation, cle, rejeu,
+// le commenter (meme clos), corriger les details de cloture d'un ticket clos
+// (edit_closed : note, cout) sans le rouvrir. Meme ordre que mgr_problem_act.ts : validation, cle, rejeu,
 // etat, ecriture ; une ecriture ratee libere la cle (et defait ce qui a deja
 // ete ecrit), les effets secondaires (journal, notification) ne font jamais
 // echouer un geste ecrit. Auteur toujours pris dans la session, jamais dans le corps.
@@ -41,13 +42,16 @@ type Op =
   | { op: "ticket.done"; ticketId: number; note: string; photoPath: string | null; cost: number | null }
   | ({ op: "ticket.assign"; ticketId: number; unassign: boolean } & Who)
   | { op: "ticket.due"; ticketId: number; date: string | null }
-  | { op: "ticket.comment"; ticketId: number; text: string };
+  | { op: "ticket.comment"; ticketId: number; text: string }
+  // note null = note gardee ; "" = note effacee. cost null = cout garde.
+  | { op: "ticket.edit_closed"; ticketId: number; note: string | null; cost: number | null };
 
 type Notice = { ticketId: number; memberId: number; title: string; urgent: boolean };
 type Done = { result: Record<string, unknown>; after: Array<[string, () => Promise<unknown>]>; notify?: Notice };
 type Ctx = { sb: any; me: SessionUser; nowMs: number; nowIso: string; today: string; idem: string };
 
 const CLOSED = "This ticket is closed. Reopen it first.";
+const NOT_CLOSED = "This ticket is not closed.";
 const HANDLED = "This proposal was already handled.";
 const NOT_FOUND = "Not found.";
 const PHOTO_GONE = "Photo not found. Add it again.";
@@ -129,7 +133,8 @@ export function parseMntAct(body: any, today: string): Op | { error: string; sta
     if (!t.listingId) return { error: "Choose an apartment." };
     return { op, ...t };
   }
-  const ops = ["ticket.start", "ticket.reopen", "ticket.waiting_parts", "ticket.done", "ticket.assign", "ticket.due", "ticket.comment"];
+  const ops = ["ticket.start", "ticket.reopen", "ticket.waiting_parts", "ticket.done", "ticket.assign", "ticket.due", "ticket.comment",
+    "ticket.edit_closed"];
   if (!ops.includes(op)) return { error: "Unknown action." };
   const ticketId = posInt(body?.ticketId);
   let parsed: Op | { error: string };
@@ -158,6 +163,16 @@ export function parseMntAct(body: any, today: string): Op | { error: string; sta
       if (d > plusDays(today, MNT_DUE_MAX_DAYS)) return { error: "The date is too far ahead." };
       parsed = { op, ticketId: 0, date: d };
     }
+  } else if (op === "ticket.edit_closed") {
+    // Note : absente = gardee, texte (vide compris) = remplacee. Cout : meme lecture que done,
+    // vide = cout garde (jamais un cout invente).
+    const c = parseCost(body?.cost);
+    if ("error" in c) return c;
+    const raw = body?.note;
+    if (raw !== undefined && raw !== null && typeof raw !== "string") return { error: "Invalid note." };
+    const note = raw === undefined ? null : cleanText(raw ?? "");
+    if (note === null && c.cost === null) return { error: "Nothing to change." };
+    parsed = { op, ticketId: 0, note, cost: c.cost };
   } else {
     const text = cleanText(body?.text);
     if (!text) return { error: "Write a comment first." };
@@ -202,7 +217,7 @@ function refusal(a: Op, prop: any, tk: any): string | null {
   }
   if (a.op === "ticket.create" || a.op === "ticket.comment") return null;
   const st = String(tk?.status ?? "open");
-  if (a.op === "ticket.reopen") return isClosed(tk) ? null : "This ticket is not closed.";
+  if (a.op === "ticket.reopen" || a.op === "ticket.edit_closed") return isClosed(tk) ? null : NOT_CLOSED;
   if (isClosed(tk)) return CLOSED;
   if (a.op === "ticket.start") {
     // to_confirm compris : Reopen as still broken (ruling F).
@@ -323,6 +338,44 @@ async function doCreate(c: Ctx, a: Extract<Op, { op: "ticket.create" }>): Promis
 const updateTicket = (c: Ctx, id: number, values: Record<string, unknown>) =>
   mustWrite(c.sb.from("maintenance_tickets").update({ ...values, last_update: c.nowIso }).eq("id", id));
 
+// Cout d'un ticket remplace (ticket.done et ticket.edit_closed) : jamais compte deux
+// fois. Nouvelle ligne, puis retrait des anciennes, puis actual_cost. Si une etape
+// rate, les anciennes lignes sont remises, `restore` remet le ticket dans son etat
+// d'avant, et l'erreur remonte.
+async function replaceCost(c: Ctx, id: number, tk: any, cost: number, restore: () => Promise<unknown>): Promise<void> {
+  let oldRows: any[] = [];
+  let newId: number | null = null;
+  let oldGone = false;
+  try {
+    oldRows = await mustWrite(c.sb.from("maintenance_costs").select("*").eq("ticket_id", id));
+    const ins = await mustWrite(c.sb.from("maintenance_costs").insert({
+      ticket_id: id, listing_id: tk.listing_id ?? null, category: tk.category ?? null, description: tk.title ?? null,
+      amount: cost, vendor_id: tk.assigned_vendor_id ?? null, date: c.today,
+    }).select("id"));
+    newId = ins.length ? Number(ins[0].id) : null;
+    if (oldRows.length) {
+      oldGone = true;
+      await mustWrite(c.sb.from("maintenance_costs").delete().in("id", oldRows.map((r) => r.id)));
+    }
+    await mustWrite(c.sb.from("maintenance_tickets").update({ actual_cost: cost }).eq("id", id));
+  } catch (e) {
+    const nid = newId;
+    if (nid !== null) {
+      await sansEchec("cout " + nid + " de MNT-" + id + " non retire", () => mustWrite(c.sb.from("maintenance_costs").delete().eq("id", nid)));
+    }
+    if (oldGone) {
+      // L'effacement a pu ne rien retirer : on ne remet que les lignes absentes.
+      await sansEchec("anciens couts de MNT-" + id + " non remis", async () => {
+        const still = new Set((await mustWrite(c.sb.from("maintenance_costs").select("id").eq("ticket_id", id))).map((r) => String(r.id)));
+        const back = oldRows.filter((r) => !still.has(String(r.id)));
+        if (back.length) await mustWrite(c.sb.from("maintenance_costs").insert(back));
+      });
+    }
+    await sansEchec("ticket MNT-" + id + " non remis dans son etat", restore);
+    throw e;
+  }
+}
+
 async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { op: "ticket.create" }>, tk: any, whoName: string | null):
   Promise<Done> {
   const id = a.ticketId;
@@ -356,41 +409,11 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
     // nouvelle ligne, puis retrait des anciennes, puis actual_cost. Si une etape rate, les anciennes lignes
     // sont remises et le ticket reprend son etat d'avant.
     if (a.cost !== null) {
-      let oldRows: any[] = [];
-      let newId: number | null = null;
-      let oldGone = false;
-      try {
-        oldRows = await mustWrite(c.sb.from("maintenance_costs").select("*").eq("ticket_id", id));
-        const ins = await mustWrite(c.sb.from("maintenance_costs").insert({
-          ticket_id: id, listing_id: tk.listing_id ?? null, category: tk.category ?? null, description: tk.title ?? null,
-          amount: a.cost, vendor_id: tk.assigned_vendor_id ?? null, date: c.today,
-        }).select("id"));
-        newId = ins.length ? Number(ins[0].id) : null;
-        if (oldRows.length) {
-          oldGone = true;
-          await mustWrite(c.sb.from("maintenance_costs").delete().in("id", oldRows.map((r) => r.id)));
-        }
-        await mustWrite(c.sb.from("maintenance_tickets").update({ actual_cost: a.cost }).eq("id", id));
-      } catch (e) {
-        const nid = newId;
-        if (nid !== null) {
-          await sansEchec("cout " + nid + " de MNT-" + id + " non retire", () => mustWrite(c.sb.from("maintenance_costs").delete().eq("id", nid)));
-        }
-        if (oldGone) {
-          // L'effacement a pu ne rien retirer : on ne remet que les lignes absentes.
-          await sansEchec("anciens couts de MNT-" + id + " non remis", async () => {
-            const still = new Set((await mustWrite(c.sb.from("maintenance_costs").select("id").eq("ticket_id", id))).map((r) => String(r.id)));
-            const back = oldRows.filter((r) => !still.has(String(r.id)));
-            if (back.length) await mustWrite(c.sb.from("maintenance_costs").insert(back));
-          });
-        }
-        await sansEchec("ticket MNT-" + id + " non remis dans son etat", () => mustWrite(c.sb.from("maintenance_tickets").update({
-          status: tk.status ?? "open", resolved_at: tk.resolved_at ?? null, resolution_notes: tk.resolution_notes ?? null,
-          resolution_photo_path: tk.resolution_photo_path ?? null, actual_cost: tk.actual_cost ?? null,
-          last_update: tk.last_update ?? c.nowIso,
-        }).eq("id", id)));
-        throw e;
-      }
+      await replaceCost(c, id, tk, a.cost, () => mustWrite(c.sb.from("maintenance_tickets").update({
+        status: tk.status ?? "open", resolved_at: tk.resolved_at ?? null, resolution_notes: tk.resolution_notes ?? null,
+        resolution_photo_path: tk.resolution_photo_path ?? null, actual_cost: tk.actual_cost ?? null,
+        last_update: tk.last_update ?? c.nowIso,
+      }).eq("id", id)));
     }
     result.status = "resolved";
     details = { from: tk.status ?? null, cost: a.cost };
@@ -399,6 +422,24 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
     after.push(["copies Hermes de MNT-" + id, () => mustWrite(c.sb.from("team_tasks")
       .update({ status: "done", completed_at: c.nowIso, completed_by_cleaner_id: c.me.cleaner_id })
       .eq("source_ref", MGR_MIRROR_PREFIX + id).in("status", MGR_OPEN_TASK_STATUSES))]);
+  } else if (a.op === "ticket.edit_closed") {
+    // Ticket garde clos : ecriture conditionnelle sur un statut clos. Rouvert entre la
+    // lecture et l'ecriture = 409 (cle liberee), rien d'autre ecrit.
+    const values: Record<string, unknown> = { last_update: c.nowIso };
+    if (a.note !== null) values.resolution_notes = a.note || null;
+    const hit = await mustWrite(c.sb.from("maintenance_tickets").update(values)
+      .eq("id", id).in("status", MGR_CLOSED_TICKET_STATUSES).select("id"));
+    if (!hit.length) throw new Refused(NOT_CLOSED);
+    if (a.cost !== null) {
+      await replaceCost(c, id, tk, a.cost, () => mustWrite(c.sb.from("maintenance_tickets").update({
+        resolution_notes: tk.resolution_notes ?? null, actual_cost: tk.actual_cost ?? null,
+        last_update: tk.last_update ?? c.nowIso,
+      }).eq("id", id)));
+    }
+    const notes = a.note !== null ? (a.note || null) : (tk.resolution_notes ?? null);
+    const cost = a.cost !== null ? a.cost : (tk.actual_cost === null || tk.actual_cost === undefined ? null : Number(tk.actual_cost));
+    result = { ...result, status: String(tk.status), resolutionNotes: notes, actualCost: cost };
+    details = { ...(a.note !== null ? { note: a.note || null } : {}), cost: a.cost, fromCost: tk.actual_cost ?? null };
   } else if (a.op === "ticket.reopen") {
     const status = tk.assigned_technician_id != null || tk.assigned_vendor_id != null ? "assigned" : "open";
     await updateTicket(c, id, { status, resolved_at: null, closed_at: null });

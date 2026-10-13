@@ -82,6 +82,7 @@ function eventText(action: string, d: any): string | null {
     case "mnt_ticket.waiting_parts": return "set waiting parts";
     case "mnt_ticket.done": return "closed the ticket";
     case "mnt_ticket.reopen": return "reopened";
+    case "mnt_ticket.edit_closed": return "edited the closing details";
     case "mnt_ticket.assign": return d.to ? "assigned to " + String(d.to) : "unassigned";
     case "mnt_ticket.due": return d.date ? "set due date " + ddmm(String(d.date)) : "removed the due date";
     case "mnt_ticket.comment": return null;
@@ -233,7 +234,8 @@ export async function mntGet(
 // Photo d'un ticket depuis l'ecran Maintenance. Meme depot que v3.uploadPhoto
 // (types, tailles, chemin, ligne photos, idempotence upload_photo) : on lui passe
 // un formulaire reduit a idem, file et ticketId, donc jamais de menage ni d'objet.
-// Le ticket doit exister ; ce controle passe avant la pose de la cle.
+// Le ticket doit exister (ouvert ou clos : une photo s'ajoute a un ticket ferme sans le
+// rouvrir) ; ce controle passe avant la pose de la cle.
 export async function mntPhoto(sb: any, me: SessionUser, form: FormData): Promise<ActionResult> {
   const raw = form.get("ticketId");
   const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;

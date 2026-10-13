@@ -580,3 +580,105 @@ Deno.test("S7 : done n'accepte qu'une photo deposee sur ce ticket, sinon 400 san
   }
   assertEquals([msg, ticket(s2, 431).status], ["db down", "in_progress"]);
 });
+
+// ---------- Ticket ferme : commentaire, details de cloture (13/10/2026) ----------
+const closedAt50 = async () => {
+  const sb = seed();
+  await act(sb, { op: "ticket.done", ticketId: 429, cost: 50, note: "Fixed the leak" });
+  sb.tables.cleaning_log.length = 0;
+  return sb;
+};
+const closing = (sb: any, id = 429) => {
+  const t = ticket(sb, id);
+  return [t.status, t.resolved_at, t.resolution_notes ?? null, t.actual_cost ?? null];
+};
+
+Deno.test("Review Focus 4 : commentaire sur un ticket clos = statut, resolved_at et note de cloture inchanges", async () => {
+  const sb = await closedAt50();
+  const before = closing(sb);
+  const r = await act(sb, { op: "ticket.comment", ticketId: 429, text: "Owner asked for the invoice" });
+  assertEquals(r.status, 200);
+  assertEquals(closing(sb), before);
+  assertEquals(before, ["resolved", NOW_ISO, "Fixed the leak", 50]);
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 50]]);
+});
+
+Deno.test("Review Focus 3 : edit_closed cout 80 sur un ticket clos a 50 = une seule ligne de 80, ticket toujours clos", async () => {
+  const sb = await closedAt50();
+  const r = await act(sb, { op: "ticket.edit_closed", ticketId: 429, note: "Fixed the leak, new seal", cost: "80" });
+  assertEquals(r, { status: 200, body: { ok: true, ticketId: 429, status: "resolved", resolutionNotes: "Fixed the leak, new seal", actualCost: 80 } });
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 80]]);
+  assertEquals(closing(sb), ["resolved", NOW_ISO, "Fixed the leak, new seal", 80]);
+  assertEquals(logs(sb), [["ticket_429", "mnt_ticket.edit_closed", "Semax"]]);
+  assertEquals(sb.tables.cleaning_log[0].details, { note: "Fixed the leak, new seal", cost: 80, fromCost: 50 });
+});
+
+Deno.test("Review Focus 3 : edit_closed cout vide = 50 intact ; note seule remplacee ; note vide efface", async () => {
+  const sb = await closedAt50();
+  for (const cost of [undefined, null, "", "  "]) {
+    assertEquals((await act(sb, { op: "ticket.edit_closed", ticketId: 429, note: "Seal replaced", cost })).status, 200);
+    assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 50]]);
+    assertEquals(closing(sb), ["resolved", NOW_ISO, "Seal replaced", 50]);
+  }
+  assertEquals((await act(sb, { op: "ticket.edit_closed", ticketId: 429, note: "  " })).body.resolutionNotes, null);
+  assertEquals(closing(sb), ["resolved", NOW_ISO, null, 50]);
+  // Note absente = note gardee, seul le cout change.
+  ticket(sb, 429).resolution_notes = "Kept";
+  assertEquals((await act(sb, { op: "ticket.edit_closed", ticketId: 429, cost: 0 })).status, 200);
+  assertEquals(closing(sb), ["resolved", NOW_ISO, "Kept", 0]);
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 0]]);
+});
+
+Deno.test("edit_closed : ticket pas clos = 409 sans rien ecrire ; saisie invalide = 400 ; rien a changer = 400", async () => {
+  const sb = seed();
+  assertEquals(await act(sb, { op: "ticket.edit_closed", ticketId: 431, cost: 10 }), { status: 409, body: { error: "This ticket is not closed." } });
+  assertEquals([ticket(sb, 431).status, ticket(sb, 431).actual_cost ?? null, sb.tables.maintenance_costs.length], ["in_progress", null, 0]);
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(await err(sb, { op: "ticket.edit_closed", ticketId: 300, cost: "-5" }), "Cost must be a number.");
+  assertEquals(await err(sb, { op: "ticket.edit_closed", ticketId: 300, note: 12 }), "Invalid note.");
+  assertEquals(await err(sb, { op: "ticket.edit_closed", ticketId: 300 }), "Nothing to change.");
+  assertEquals(await err(sb, { op: "ticket.edit_closed", ticketId: 300, cost: "" }), "Nothing to change.");
+  assertEquals((await act(sb, { op: "ticket.edit_closed", ticketId: 999, cost: 1 })).status, 404);
+  // statut closed compte comme clos
+  assertEquals((await act(sb, { op: "ticket.edit_closed", ticketId: 301, note: "Old note fixed" })).status, 200);
+  assertEquals([ticket(sb, 301).status, ticket(sb, 301).resolution_notes], ["closed", "Old note fixed"]);
+});
+
+Deno.test("edit_closed : rouvert entre la lecture et l'ecriture = 409, cle liberee, rien ecrit", async () => {
+  const sb = await closedAt50();
+  const orig = sb.from;
+  (sb as any).from = (table: string) => {
+    const q = orig(table);
+    if (table === "maintenance_tickets") {
+      const upd = q.update;
+      q.update = (v: any) => { ticket(sb, 429).status = "open"; return upd(v); };
+    }
+    return q;
+  };
+  assertEquals(await act(sb, { op: "ticket.edit_closed", ticketId: 429, cost: 80, idem: "idem-edit-race-01" }),
+    { status: 409, body: { error: "This ticket is not closed." } });
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 50]]);
+  assertEquals(sb.tables.job_events.some((e: any) => e.idem_key === "idem-edit-race-01"), false);
+});
+
+Deno.test("edit_closed : remplacement du cout rate = ligne de 50, note et actual_cost d'avant remis, ticket clos", async () => {
+  const sb = await closedAt50();
+  sb.fail["maintenance_costs.insert"] = { message: "db down" };
+  let msg = "";
+  try { await act(sb, { op: "ticket.edit_closed", ticketId: 429, note: "New", cost: 80 }); } catch (e) { msg = (e as any).message; }
+  assertEquals(msg, "db down");
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 50]]);
+  assertEquals(closing(sb), ["resolved", NOW_ISO, "Fixed the leak", 50]);
+  delete sb.fail["maintenance_costs.insert"];
+  assertEquals((await act(sb, { op: "ticket.edit_closed", ticketId: 429, cost: 80 })).status, 200);
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 80]]);
+});
+
+Deno.test("edit_closed : meme cle rejouee = meme reponse, une seule ligne de cout", async () => {
+  const sb = await closedAt50();
+  const body = { op: "ticket.edit_closed", ticketId: 429, cost: 80, idem: "idem-edit-replay-1" };
+  const a = await act(sb, body);
+  const b = await act(sb, body);
+  assertEquals(b, a);
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 80]]);
+});

@@ -235,3 +235,18 @@ Deno.test("S8 : mnt.photo, lecture du ticket ratee = 503 lisible, rien depose", 
     { status: 503, body: { error: "Maintenance is unavailable right now. Try again." } });
   assertEquals(sb.storage.uploads.length, 0);
 });
+
+Deno.test("ticket clos : edit_closed lu « edited the closing details », mnt.photo accepte, photo dans l'historique et les photos", async () => {
+  const sb = db();
+  sb.tables.cleaning_log.push({ id: 20, reservation_key: "ticket_12", action: "mnt_ticket.edit_closed", actor: "Ismael",
+    details: { cost: 90, fromCost: 80 }, created_at: "2026-10-04T08:00:00Z" });
+  const up = await mntPhoto(sb, ME, form({ idem: "idem-mnt-photo-closed-1", file: jpeg(), ticketId: "12" }));
+  assertEquals(up.status, 200);
+  const path = (up.body as any).path;
+  assertEquals(sb.tables.maintenance_tickets.find((t: any) => t.id === 12).status, "resolved");
+  const r = await mntGet(sb, "MNT-12", { nowMs: NOW, signUrls: sign });
+  const t = (r.body as any).ticket as MntTicketDetail;
+  assert(t.history.some((h) => h.kind === "event" && h.who === "Ismael" && h.text === "edited the closing details"));
+  assert(t.history.some((h) => h.text === "added a photo" && h.who === "Semax" && h.photoUrl === "https://signed.test/" + path));
+  assert(t.photos.some((p) => p.url === "https://signed.test/" + path));
+});
