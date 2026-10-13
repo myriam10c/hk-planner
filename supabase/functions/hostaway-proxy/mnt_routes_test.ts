@@ -142,3 +142,12 @@ Deno.test("S3 ruling C : mgr.problems, mgr.problem.get et mgr.problem.act ouvert
     assertEquals(b.includes("mgrAccess("), false, a);
   }
 });
+
+Deno.test("mnt.digest : GET, server-only, sans session, mntDigest", () => {
+  assert(src.includes('["mnt.digest", "GET"]'));
+  const debut = src.indexOf("const SERVER_ONLY_ACTIONS = new Set([");
+  assert(src.slice(debut, src.indexOf("]);", debut)).includes('"mnt.digest"'));
+  const b = bloc("mnt.digest");
+  assert(b.includes("mntDigest(sb, Date.now())"));
+  assertEquals(b.includes("currentUser"), false);
+});

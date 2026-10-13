@@ -51,7 +51,7 @@ import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
 import { buildDisputeUpdate, disputeAccess } from "./disputes.ts";
 import { healthScore, mgrApartment, mgrApartmentCleanings, mgrApartments, readHealthInputs } from "./mgr_apartment.ts";
 import { mntAccess } from "./mnt_rules.ts";
-import { mntList, parseMntQuery } from "./mnt_read.ts";
+import { mntDigest, mntList, parseMntQuery } from "./mnt_read.ts";
 import { mntAct } from "./mnt_act.ts";
 import { mntGet, mntPhoto } from "./mnt_get.ts";
 import { mntIngest } from "./mnt_ingest.ts";
@@ -69,6 +69,7 @@ const APP_SHARED_SECRET = Deno.env.get("APP_SHARED_SECRET") ?? "";
 const SERVER_SHARED_SECRET = Deno.env.get("SERVER_SHARED_SECRET") ?? "";
 const SERVER_ONLY_ACTIONS = new Set([
   "insp.recap",
+  "mnt.digest",
   "syncListings",
   "dispatchPendingEvents",
   "dispatchMaintenance",
@@ -1015,7 +1016,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["mgr.apartments", "GET"], ["mgr.apartment", "GET"],
   ["mgr.setup", "GET"], ["mgr.reports", "GET"],
   // ===== Maintenance (spec 2026-10-12, phase 1) =====
-  ["mnt.list", "GET"], ["mnt.act", "POST"], ["mnt.proposals.ingest", "POST"],
+  ["mnt.list", "GET"], ["mnt.digest", "GET"], ["mnt.act", "POST"], ["mnt.proposals.ingest", "POST"],
   ["mnt.get", "GET"], ["mnt.photo", "POST"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
@@ -1621,6 +1622,11 @@ Deno.serve(async (req: Request) => {
     // ==================== MAINTENANCE (spec 2026-10-12) ====================
     // Liste par onglet (propositions, ouverts, termines). Session email, role
     // manager ou maintenance.
+    // Recap de 8h du VPS : serveur seul (X-Server-Secret verifie plus haut), sans session.
+    if (action === "mnt.digest") {
+      const r = await mntDigest(sb, Date.now());
+      return jsonResp(r.body, r.status);
+    }
     if (action === "mnt.list") {
       const me = await currentUser(sb, req);
       const acc = mntAccess(bearerToken(req) !== null, me);

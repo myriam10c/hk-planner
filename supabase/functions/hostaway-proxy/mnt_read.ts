@@ -238,3 +238,22 @@ export async function mntList(
     return { status: 503, body: { error: MNT_UNAVAILABLE } };
   }
 }
+
+// Recap de 8h (VPS) : compteurs seuls, memes lectures que mnt.list. Erreur de lecture = 503.
+export type MntDigest = { pending: number; pendingUrgent: number; open: number; urgent: number; unassigned: number; oldestPendingAt: string | null };
+export async function mntDigest(sb: any, _nowMs: number = Date.now()): Promise<{ status: number; body: MntDigest | { error: string } }> {
+  try {
+    const [open, pending] = await Promise.all([readOpenTickets(sb), readPendingProposals(sb)]);
+    const dates = pending.map((p: any) => str(p.created_at)).filter((d): d is string => d !== null).sort(asc);
+    return {
+      status: 200,
+      body: {
+        pending: pending.length, pendingUrgent: pending.filter((p: any) => p.urgency === "urgent").length,
+        ...mntOpenCounts(open), oldestPendingAt: dates[0] ?? null,
+      },
+    };
+  } catch (e) {
+    console.error("[mnt_read] digest failed:", (e as Error)?.message ?? String(e));
+    return { status: 503, body: { error: MNT_UNAVAILABLE } };
+  }
+}

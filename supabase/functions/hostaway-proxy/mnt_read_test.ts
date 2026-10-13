@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { mntList, type MntList, type MntQuery, parseMntQuery } from "./mnt_read.ts";
+import { mntDigest, mntList, type MntList, type MntQuery, parseMntQuery } from "./mnt_read.ts";
 
 // 2026-10-12 21:30 UTC = 2026-10-13 01:30 a Dubai : le jour Dubai est le 13.
 const NOW = Date.parse("2026-10-12T21:30:00Z");
@@ -236,4 +236,31 @@ Deno.test("phase 2 : listings = tout listing_config, tries par immeuble puis app
     { id: "L1", apt: "103", bld: "Damac Reva" }, { id: "L4", apt: "905", bld: "Damac Reva" }, { id: "L3", apt: "1205", bld: "Damac Reva" },
     { id: "L2", apt: "2609", bld: "Nobles by Tiger" },
   ]);
+});
+
+Deno.test("mnt.digest : compteurs, urgents, plus ancienne proposition en attente", async () => {
+  const r = await mntDigest(db(), NOW);
+  assertEquals(r.status, 200);
+  // En attente : 1 (high), 2 (urgent), 3, 8. Ouverts : 10, 11, 12, 13, 14.
+  assertEquals(r.body, { pending: 4, pendingUrgent: 1, open: 5, urgent: 2, unassigned: 2, oldestPendingAt: "2026-10-11T10:00:00Z" });
+});
+
+Deno.test("mnt.digest : base vide, oldestPendingAt nul", async () => {
+  const r = await mntDigest(fakeDb({ maintenance_proposals: [], maintenance_tickets: [] }), NOW);
+  assertEquals(r.body, { pending: 0, pendingUrgent: 0, open: 0, urgent: 0, unassigned: 0, oldestPendingAt: null });
+});
+
+Deno.test("mnt.digest : erreur de lecture 503", async () => {
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    for (const t of ["maintenance_tickets", "maintenance_proposals"]) {
+      const sb = db();
+      sb.fail[t + ".select"] = { message: "boom" };
+      const r = await mntDigest(sb, NOW);
+      assertEquals([r.status, r.body], [503, { error: "Maintenance is unavailable right now. Try again." }]);
+    }
+  } finally {
+    console.error = orig;
+  }
 });
