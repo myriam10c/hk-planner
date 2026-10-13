@@ -77,6 +77,9 @@ export const V3_ROLES: Record<string, string[]> = {
   // Suppression depuis la miniature (tache 3) : ceux qui televersent, et
   // seulement leurs propres photos (controle dans deletePhoto).
   "v3.deletePhoto": ["cleaner", "subcontractor", "maintenance"],
+  // Maintenance phase 3 : memes roles que v3.checkTicket.
+  "v3.ticketStill": ["cleaner", "subcontractor"],
+  "v3.myReports": ["cleaner", "subcontractor"],
 };
 
 // Echoue fermee : une action inconnue de la table n'est autorisee a personne.

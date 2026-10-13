@@ -15,7 +15,7 @@ import {
 import { ownedPhoto, resolvePhotoId, sansEchec } from "./v3_photos.ts";
 import { cleanNote, cleanWhere, notifyProblem, problemTitle } from "./v3_problems.ts";
 import type { PushFn } from "./v3_problems.ts";
-import { sendPush } from "./push.ts";
+import { APP_URL, sendPush } from "./push.ts";
 
 export {
   ownedPhoto, resolvePhotoId, uploadPhoto, V3_MAX_PHOTO_BYTES, V3_MAX_UPLOAD_BODY_BYTES,
@@ -140,6 +140,20 @@ export async function reportProblem(
 
   // Le ticket existe : la cle n'est plus jamais liberee et rien ne leve.
   const ticketId = Number(result.ticketId);
+  // Maintenance phase 3 (C8) : le nom du technicien assigne a la creation, pour
+  // « sent to <name> » cote telephone. Lecture de confort, posee avant la
+  // memorisation pour que le rejeu rende le meme nom ; illisible, elle rend null
+  // (« sent to the team »).
+  result.sentTo = null;
+  if (result.technicianId) {
+    await sansEchec("nom du technicien du ticket " + String(ticketId), async () => {
+      const { data, error } = await sb.from("cleaners").select("name")
+        .eq("id", Number(result.technicianId)).maybeSingle();
+      if (error) throw error;
+      const nom = String(data?.name ?? "").trim();
+      result.sentTo = nom || null;
+    });
+  }
   await sansEchec("resultat non memorise pour " + String(idem),
     () => recordResult(sb, String(idem), result));
   // Le ticket porte deja photo_path : ce retro-lien est un confort de lecture
@@ -242,5 +256,77 @@ export async function checkTicket(sb: any, me: SessionUser, body: any): Promise<
   await sansEchec("journal du ticket " + String(ticketId), () =>
     v3Log(sb, "ticket_" + String(ticketId), "ticket_checked", me.name, { via: "v3" }));
 
+  return { status: 200, body: result };
+}
+
+// Maintenance phase 3 (C4) : « Still there ». La cleaner dit que le probleme est
+// toujours la : un commentaire sur le ticket et un push au technicien assigne,
+// sans changer le statut. Meme ossature que checkTicket : cle, rejeu, controle du
+// ticket (cle liberee sur tout refus), ecriture decisive, puis accessoires.
+export const V3_STILL_COMMENT = "Still there during the cleaning.";
+const FERMES_STILL = ["resolved", "closed", "cancelled"];
+
+export async function ticketStill(
+  sb: any, me: SessionUser, body: any,
+  deps: { push?: PushFn } = {},
+): Promise<ActionResult> {
+  const push = deps.push ?? sendPush;
+  const ticketId = Number(body?.ticketId);
+  const idem = body?.idem;
+  if (!Number.isInteger(ticketId) || ticketId <= 0) return { status: 400, body: { error: "ticketId required" } };
+  if (!validIdem(idem)) return { status: 400, body: { error: "idem required" } };
+
+  const claim = await claimEvent(sb, String(idem), "ticket_still",
+    typeof body?.jobId === "string" && body.jobId ? body.jobId : null, me.cleaner_id, { ticketId });
+  const rejeu = replayResponse(claim);
+  if (rejeu) return rejeu;
+
+  let ticket: any;
+  const result = { ok: true };
+  try {
+    const { data, error } = await sb.from("maintenance_tickets")
+      .select("id, title, status, assigned_technician_id").eq("id", ticketId).maybeSingle();
+    if (error) throw error;
+    ticket = data;
+    if (!ticket) {
+      await releaseEvent(sb, String(idem));
+      return { status: 400, body: { error: "ticket not found" } };
+    }
+    // 409 impose par le plan, avec ce message exact. Attention : la file hors
+    // ligne traite 409 comme « a rejouer » ; elle doit reconnaitre ce message
+    // pour ne pas rejouer sans fin un geste sur un ticket clos (tache 2).
+    if (FERMES_STILL.indexOf(String(ticket.status ?? "")) !== -1) {
+      await releaseEvent(sb, String(idem));
+      return { status: 409, body: { error: "This problem is already closed." } };
+    }
+    // Ecriture decisive : le commentaire est tout le geste.
+    const { error: cErr } = await sb.from("ticket_comments").insert({
+      ticket_id: ticketId, author: me.name, comment: V3_STILL_COMMENT,
+    });
+    if (cErr) throw cErr;
+  } catch (e) {
+    await releaseEvent(sb, String(idem));
+    throw e;
+  }
+
+  await sansEchec("resultat non memorise pour " + String(idem),
+    () => recordResult(sb, String(idem), result));
+  await sansEchec("journal du ticket " + String(ticketId), () =>
+    v3Log(sb, "ticket_" + String(ticketId), "ticket_still", me.name, { via: "v3" }));
+
+  // Push non urgent (heures de silence respectees), jamais bloquant.
+  const tech = ticket.assigned_technician_id ? Number(ticket.assigned_technician_id) : null;
+  if (tech) {
+    try {
+      await push(sb, tech, {
+        title: "Still broken: " + String(ticket.title ?? "Ticket"),
+        body: me.name + " checked it during the cleaning.",
+        url: APP_URL + "/?mnt=" + String(ticketId),
+        tag: "v3-ticket-" + String(ticketId),
+      }, { dedupeKey: "v3-still:" + String(idem) });
+    } catch (e) {
+      console.warn("[v3] push still rate pour " + String(tech) + ": " + String(e));
+    }
+  }
   return { status: 200, body: result };
 }

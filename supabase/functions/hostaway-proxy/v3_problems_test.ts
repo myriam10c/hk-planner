@@ -64,11 +64,11 @@ async function signale(sb: any, me: any = FAIZA, extra: Record<string, unknown> 
 // Tables et roles
 // ---------------------------------------------------------------------------
 
-Deno.test("V3_EVENT_TYPES suit la contrainte CHECK de la migration 20261012120000", () => {
+Deno.test("V3_EVENT_TYPES suit la contrainte CHECK de la migration 20261013090000", () => {
   assertEquals([...V3_EVENT_TYPES].sort(), [
     "add_problem_photo", "check_ticket", "delete_photo", "delete_problem", "finish_job",
     "mgr_problem_act", "mnt_act", "mnt_ingest", "report_problem", "set_problem_note", "set_problem_voice", "start_job", "tick",
-    "update_problem", "upload_photo", "upload_voice",
+    "ticket_still", "update_problem", "upload_photo", "upload_voice",
   ]);
 });
 
@@ -177,7 +177,7 @@ Deno.test("titre, categorie, priorite et description suivent type, urgence, piec
     assertEquals(t.description, "Under the sink");
     assertEquals(t.source, "hk_planner_v3");
     assertEquals(t.reported_by, "Faiza");
-    assertEquals(r.body, { status: "success", ticketId: t.id, technicianId: 5, priority: prio });
+    assertEquals(r.body, { status: "success", ticketId: t.id, technicianId: 5, priority: prio, sentTo: "Semax" });
   }
 });
 
@@ -425,4 +425,26 @@ Deno.test("les gestes sur un ticket rendent 409 quand la cle est posee sans resu
   assertEquals((await deleteProblem(sb, FAIZA as any, { ticketId: id, idem: "idem-409-del" })).status, 409);
   assertEquals((await setProblemNote(sb, FAIZA as any, { ticketId: id, note: "x", idem: "idem-409-note" })).status, 409);
   assertEquals(sb.tables.maintenance_tickets[0].status, "assigned");
+});
+
+// ---------------------------------------------------------------------------
+// Maintenance phase 3 : le signalement dit a qui il est parti
+// ---------------------------------------------------------------------------
+
+Deno.test("reportProblem rend sentTo, le nom du technicien assigne a la creation", async () => {
+  const sb = base();
+  const r = await reportProblem(sb, FAIZA as any, corps({ idem: "idem-sent-0001" }), { push: espionPush().push });
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).sentTo, "Semax");
+  // Le rejeu rend la meme reponse, sentTo compris.
+  const encore = await reportProblem(sb, FAIZA as any, corps({ idem: "idem-sent-0001" }), { push: espionPush().push });
+  assertEquals((encore.body as any).sentTo, "Semax");
+});
+
+Deno.test("reportProblem rend sentTo null quand personne n'est de permanence", async () => {
+  const sb = base();
+  sb.tables.cleaners = [{ id: 1, name: "Walter", role: "manager", is_active: true }];
+  const r = await reportProblem(sb, FAIZA as any, corps({ idem: "idem-sent-0002" }), { push: espionPush().push });
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).sentTo, null);
 });

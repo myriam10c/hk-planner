@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import {
-  checkTicket, reportProblem, uploadPhoto, V3_MAX_PHOTO_BYTES,
+  checkTicket, reportProblem, ticketStill, uploadPhoto, V3_MAX_PHOTO_BYTES,
 } from "./v3_tickets.ts";
 
 const FAIZA = { cleaner_id: 3, name: "Faiza", role: "cleaner", color: "#e94560" };
@@ -609,4 +609,102 @@ Deno.test("reportProblem ne laisse aucun nom de guest dans le journal d'idempote
   }, { push: espionPush().push });
   assertEquals(sb.tables.job_events[0].job_id, JOB_ID);
   assertEquals(JSON.stringify(sb.tables.job_events[0]).includes("Lefevre"), false);
+});
+
+// ===========================================================================
+// Maintenance phase 3 : v3.ticketStill (« Still there » sur un ticket ouvert)
+// ===========================================================================
+
+function baseStill(status = "assigned", tech: number | null = 5) {
+  const sb = baseTickets();
+  sb.tables.maintenance_tickets.push({
+    id: 91, listing_id: "102", title: "AC · Bedroom", status, assigned_technician_id: tech,
+    source: "hk_planner_v3", reported_by: "Pionah", created_at: "2026-09-10T08:00:00Z",
+  });
+  return sb;
+}
+
+Deno.test("ticketStill commente le ticket et previent le technicien, sans changer le statut", async () => {
+  const sb = baseStill();
+  const spy = espionPush();
+  const r = await ticketStill(sb, FAIZA as any, { ticketId: 91, jobId: JOB_ID, idem: "idem-still-0001" },
+    { push: spy.push });
+  assertEquals(r, { status: 200, body: { ok: true } });
+  assertEquals(sb.tables.maintenance_tickets[0].status, "assigned");
+  assertEquals(sb.tables.ticket_comments.map((c: any) => [c.ticket_id, c.author, c.comment]),
+    [[91, "Faiza", "Still there during the cleaning."]]);
+  assertEquals(spy.envois.length, 1);
+  assertEquals(spy.envois[0].cleanerId, 5);
+  assertEquals(spy.envois[0].payload.title, "Still broken: AC · Bedroom");
+  assertEquals(spy.envois[0].payload.body, "Faiza checked it during the cleaning.");
+  assertEquals(spy.envois[0].payload.url, "https://stunning-kleicha-f61101.netlify.app/?mnt=91");
+  // Non urgent : les heures de silence s'appliquent.
+  assertEquals(spy.envois[0].opts.priority, undefined);
+  assertEquals(sb.tables.job_events[0].event_type, "ticket_still");
+});
+
+Deno.test("ticketStill rejoue sans doubler le commentaire ni le push", async () => {
+  const sb = baseStill();
+  const spy = espionPush();
+  const corps = { ticketId: 91, jobId: JOB_ID, idem: "idem-still-0002" };
+  await ticketStill(sb, FAIZA as any, corps, { push: spy.push });
+  const deux = await ticketStill(sb, FAIZA as any, corps, { push: spy.push });
+  assertEquals(deux, { status: 200, body: { ok: true } });
+  assertEquals(sb.tables.ticket_comments.length, 1);
+  assertEquals(spy.envois.length, 1);
+});
+
+for (const statut of ["resolved", "closed", "cancelled"]) {
+  Deno.test("ticketStill refuse un ticket " + statut + " en 409 et libere sa cle", async () => {
+    const sb = baseStill(statut);
+    const spy = espionPush();
+    const r = await ticketStill(sb, FAIZA as any, { ticketId: 91, jobId: JOB_ID, idem: "idem-still-0003" },
+      { push: spy.push });
+    assertEquals(r, { status: 409, body: { error: "This problem is already closed." } });
+    assertEquals(sb.tables.ticket_comments.length, 0);
+    assertEquals(sb.tables.job_events.length, 0);
+    assertEquals(spy.envois.length, 0);
+  });
+}
+
+Deno.test("ticketStill accepte un ticket to_confirm", async () => {
+  const sb = baseStill("to_confirm");
+  const r = await ticketStill(sb, FAIZA as any, { ticketId: 91, idem: "idem-still-0004" },
+    { push: espionPush().push });
+  assertEquals(r.status, 200);
+  assertEquals(sb.tables.ticket_comments.length, 1);
+});
+
+Deno.test("ticketStill exige ticketId et cle, refuse un ticket inconnu", async () => {
+  const sb = baseStill();
+  const spy = espionPush();
+  assertEquals((await ticketStill(sb, FAIZA as any, { idem: "idem-still-0005" }, { push: spy.push })).status, 400);
+  assertEquals((await ticketStill(sb, FAIZA as any, { ticketId: 91 }, { push: spy.push })).status, 400);
+  const inconnu = await ticketStill(sb, FAIZA as any, { ticketId: 999, idem: "idem-still-0006" }, { push: spy.push });
+  assertEquals(inconnu.status, 400);
+  assertEquals(sb.tables.job_events.length, 0);
+  assertEquals(sb.tables.ticket_comments.length, 0);
+});
+
+Deno.test("ticketStill reussit meme si le push echoue ou si personne n'est assigne", async () => {
+  const sb = baseStill();
+  const rate = async () => { throw new Error("push down"); };
+  const r = await ticketStill(sb, FAIZA as any, { ticketId: 91, idem: "idem-still-0007" }, { push: rate });
+  assertEquals(r, { status: 200, body: { ok: true } });
+  const sb2 = baseStill("open", null);
+  const spy = espionPush();
+  const r2 = await ticketStill(sb2, FAIZA as any, { ticketId: 91, idem: "idem-still-0008" }, { push: spy.push });
+  assertEquals(r2.status, 200);
+  assertEquals(spy.envois.length, 0);
+});
+
+Deno.test("ticketStill libere sa cle si le commentaire ne s'ecrit pas", async () => {
+  const sb = baseStill();
+  sb.fail["ticket_comments.insert"] = { message: "boom" };
+  let leve = false;
+  try {
+    await ticketStill(sb, FAIZA as any, { ticketId: 91, idem: "idem-still-0009" }, { push: espionPush().push });
+  } catch { leve = true; }
+  assertEquals(leve, true);
+  assertEquals(sb.tables.job_events.length, 0);
 });

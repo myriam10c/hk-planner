@@ -19,6 +19,8 @@ export const V3_EVENT_TYPES = [
   "mgr_problem_act",
   // Section Maintenance, phase 1 (mnt_act.ts, mnt_ingest.ts), migration 20261012120000.
   "mnt_act", "mnt_ingest",
+  // App cleaner, maintenance phase 3 (v3.ticketStill), migration 20261013090000.
+  "ticket_still",
 ] as const;
 
 export type V3EventType = typeof V3_EVENT_TYPES[number];

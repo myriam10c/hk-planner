@@ -127,10 +127,57 @@ Deno.test("buildMyDay rend un identifiant oppose et memorise sa correspondance",
   assertEquals(encore.stops.map((s) => s.jobId), out.stops.map((s) => s.jobId));
 });
 
-Deno.test("buildMyDay attache les tickets ouverts du logement, sans les to_confirm", async () => {
-  const out = await buildMyDay(jeuDEssai() as any);
-  assertEquals(out.stops[0].openTickets.map((t) => t.id), [71]);
+// Phase 3 maintenance : un ticket to_confirm reste visible (« Waiting for check »
+// cote telephone, sans boutons), les tickets clos restent dehors.
+Deno.test("buildMyDay attache les tickets ouverts du logement, to_confirm compris", async () => {
+  const base = jeuDEssai() as any;
+  base.tickets.push(
+    { id: 74, listing_id: "102", title: "Done", category: "ac", priority: "high", status: "resolved" },
+    { id: 75, listing_id: "102", title: "Closed", category: "ac", priority: "high", status: "closed" },
+    { id: 76, listing_id: "102", title: "Cancelled", category: "ac", priority: "high", status: "cancelled" },
+  );
+  const out = await buildMyDay(base);
+  assertEquals(out.stops[0].openTickets.map((t) => t.id), [71, 72]);
   assertEquals(out.stops[1].openTickets.length, 0);
+});
+
+Deno.test("buildMyDay detaille chaque ticket : statut, nom de l'assigne, jour du signalement", async () => {
+  const base = jeuDEssai() as any;
+  base.sb = fakeDb({
+    v3_job_keys: [],
+    cleaners: [{ id: 5, name: "Semax", role: "maintenance", is_active: true }],
+    vendors: [{ id: 9, name: "Cool Air LLC", is_active: true }],
+  });
+  base.tickets = [
+    // 22:30 UTC le 9 = 02:30 a Dubai le 10 : le jour rendu est celui de Dubai.
+    { id: 81, listing_id: "102", title: "AC · Bedroom", category: "ac", priority: "high", status: "assigned",
+      assigned_technician_id: 5, assigned_vendor_id: null, created_at: "2026-09-09T22:30:00Z" },
+    { id: 82, listing_id: "102", title: "Leak · Kitchen", category: "plumbing", priority: "medium", status: "waiting_parts",
+      assigned_technician_id: null, assigned_vendor_id: 9, created_at: "2026-09-11T08:00:00Z" },
+    { id: 83, listing_id: "102", title: "Insects · Whole apartment", category: "pest", priority: "medium", status: "open",
+      assigned_technician_id: null, assigned_vendor_id: null, created_at: "2026-09-12T05:00:00Z" },
+  ];
+  const out = await buildMyDay(base);
+  assertEquals(out.stops[0].openTickets, [
+    { id: 81, title: "AC · Bedroom", category: "ac", priority: "high", status: "assigned",
+      assigneeName: "Semax", reportedOn: "2026-09-10" },
+    { id: 82, title: "Leak · Kitchen", category: "plumbing", priority: "medium", status: "waiting_parts",
+      assigneeName: "Cool Air LLC", reportedOn: "2026-09-11" },
+    // Ticket pest : meme forme, la question pest reste cote telephone.
+    { id: 83, title: "Insects · Whole apartment", category: "pest", priority: "medium", status: "open",
+      assigneeName: null, reportedOn: "2026-09-12" },
+  ]);
+});
+
+Deno.test("buildMyDay rend la journee meme si les noms des assignes sont illisibles", async () => {
+  const base = jeuDEssai() as any;
+  base.sb.fail["cleaners.select"] = { message: "boom" };
+  base.sb.fail["vendors.select"] = { message: "boom" };
+  base.tickets = [{ id: 81, listing_id: "102", title: "AC", category: "ac", priority: "high", status: "assigned",
+    assigned_technician_id: 5, created_at: null }];
+  const out = await buildMyDay(base);
+  assertEquals(out.stops[0].openTickets[0].assigneeName, null);
+  assertEquals(out.stops[0].openTickets[0].reportedOn, null);
 });
 
 Deno.test("buildMyDay respecte les reports, les annulations et l'etat du chrono", async () => {

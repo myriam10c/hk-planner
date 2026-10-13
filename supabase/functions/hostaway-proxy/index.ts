@@ -13,13 +13,14 @@ import {
   todayDubai, validMyDayDate, V3_CACHE_FRESH_MS, V3_CACHE_STALE_MS, weekKeyFor,
 } from "./v3.ts";
 import { buildMyDay } from "./v3_myday.ts";
+import { myReports } from "./v3_reports.ts";
 import { heroPhotoFromHostaway } from "./v3_day_extras.ts";
 import { fillMissingListings } from "./listing_fill.ts";
 import { loadTeam, resolveViewAs } from "./v3_viewas.ts";
 import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
 import { deletePhoto } from "./v3_photos.ts";
 import {
-  checkTicket, reportProblem, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES, V3_PROBLEM_ACTIONS,
+  checkTicket, reportProblem, ticketStill, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES, V3_PROBLEM_ACTIONS,
 } from "./v3_tickets.ts";
 
 import { inspRoleAllowed, type InspReservation } from "./insp_rules.ts";
@@ -1173,6 +1174,9 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["v3.finishJob", "POST"],
   ["v3.reportProblem", "POST"],
   ["v3.checkTicket", "POST"],
+  // Maintenance phase 3 (app cleaner) : « Still there » et « My reports »
+  ["v3.ticketStill", "POST"],
+  ["v3.myReports", "GET"],
   // Problemes de l'app conversation (branchement 2026-10-05, tache 2)
   ["v3.addProblemPhoto", "POST"],
   ["v3.setProblemNote", "POST"],
@@ -1344,9 +1348,11 @@ Deno.serve(async (req: Request) => {
           : Promise.resolve({ data: [], error: null }),
         sb.from("listing_config").select("listing_id, listing_name, bedrooms, unit_type, apt_number, internal_name, hero_photo_url"),
         sb.from("checklist_templates").select("*"),
+        // Maintenance phase 3 : to_confirm est montre (« Waiting for check »),
+        // avec l'assigne et la date du signalement.
         sb.from("maintenance_tickets")
-          .select("id, listing_id, title, category, priority, status")
-          .not("status", "in", "(resolved,cancelled,to_confirm)").limit(500),
+          .select("id, listing_id, title, category, priority, status, assigned_technician_id, assigned_vendor_id, created_at")
+          .not("status", "in", "(resolved,closed,cancelled)").limit(500),
       ]);
       // Ces quatre lectures levent maintenant au lieu d'etre consommees en
       // « X.data || [] » : une panne de listing_config rendait une journee qui
@@ -1510,6 +1516,24 @@ Deno.serve(async (req: Request) => {
       const body = await req.json().catch(() => null);
       if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
       const r = await checkTicket(sb, me, body);
+      return jsonResp(r.body, r.status);
+    }
+
+    if (action === "v3.ticketStill" && req.method === "POST") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await ticketStill(sb, me, body);
+      return jsonResp(r.body, r.status);
+    }
+
+    if (action === "v3.myReports" && req.method === "GET") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const r = await myReports(sb, me, Date.now());
       return jsonResp(r.body, r.status);
     }
 

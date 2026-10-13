@@ -14,7 +14,7 @@
 //     jamais le titre marketing OTA (voir nomDuLogement plus bas).
 import {
   ensureJobKeys, estimatedMinutes, formatHour, normalizeUnitType, shortGuest,
-  templateItems, V3_TEMPLATE_NAME,
+  templateItems, todayDubai, V3_TEMPLATE_NAME,
 } from "./v3.ts";
 import type { SessionUser } from "./v3.ts";
 import type { TeamMember } from "./v3_viewas.ts";
@@ -28,6 +28,10 @@ export interface V3Ticket {
   title: string;
   category: string;
   priority: string;
+  // Maintenance phase 3 (C4) : la carte « Still there / Fixed now » du telephone.
+  status: string;               // open | assigned | in_progress | waiting_parts | to_confirm
+  assigneeName: string | null;  // technicien, sinon prestataire, sinon personne
+  reportedOn: string | null;    // jour du signalement a Dubai, YYYY-MM-DD
 }
 
 export interface V3Stop {
@@ -137,18 +141,75 @@ export function orderStops(stops: V3Stop[]): V3Stop[] {
 // les deux premieres sources le portent deja, et `apt_number` est parfois faux en
 // base (deux lignes ou il a ete tire du titre marketing, « 15 min from Downtown »
 // donne apt_number « 15 »).
-function nomDuLogement(listing: any, hostawayTitle: unknown): string {
+export function nomDuLogement(listing: any, hostawayTitle: unknown): string {
   const propre = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim());
   return propre(listing?.internal_name) || propre(hostawayTitle) ||
     propre(listing?.listing_name) || "Apartment";
 }
 
 // Statuts d'un ticket qui merite encore d'etre regarde pendant un menage.
-// to_confirm en est exclu : il attend le technicien, pas la cleaner (ruling 3).
-const TICKETS_A_VERIFIER = new Set(["open", "assigned", "in_progress", "waiting_parts"]);
+// Maintenance phase 3 : to_confirm y entre, le telephone le montre « Waiting for
+// check » sans boutons. Clos (resolved, closed, cancelled) : jamais montre.
+const TICKETS_A_VERIFIER = new Set(["open", "assigned", "in_progress", "waiting_parts", "to_confirm"]);
+
+const idOuNull = (v: unknown): number | null => {
+  const n = Number(v);
+  return v === null || v === undefined || v === "" || !Number.isFinite(n) ? null : n;
+};
+
+// Noms des assignes (techniciens dans cleaners, prestataires dans vendors) des
+// tickets donnes. Lecture de confort : une panne rend des noms vides, jamais une
+// erreur, la journee ou la liste des signalements s'affiche quand meme.
+export async function assigneeNames(
+  sb: any, tickets: any[],
+): Promise<{ tech: Record<string, string>; vendor: Record<string, string> }> {
+  const lire = async (table: string, ids: number[]): Promise<Record<string, string>> => {
+    if (ids.length === 0) return {};
+    try {
+      const { data, error } = await sb.from(table).select("id, name").in("id", ids);
+      if (error) throw error;
+      const out: Record<string, string> = {};
+      for (const r of data ?? []) {
+        const nom = String(r?.name ?? "").trim();
+        if (nom) out[String(r.id)] = nom;
+      }
+      return out;
+    } catch (e) {
+      console.warn("[v3] noms illisibles dans " + table + ": " + String((e as any)?.message ?? e));
+      return {};
+    }
+  };
+  const ids = (col: string) =>
+    [...new Set(tickets.map((t) => idOuNull(t?.[col])).filter((n): n is number => n !== null))];
+  const [tech, vendor] = await Promise.all([
+    lire("cleaners", ids("assigned_technician_id")),
+    lire("vendors", ids("assigned_vendor_id")),
+  ]);
+  return { tech, vendor };
+}
+
+// Nom de l'assigne d'un ticket : le technicien d'abord, sinon le prestataire.
+export function assigneeOf(
+  t: any, noms: { tech: Record<string, string>; vendor: Record<string, string> },
+): string | null {
+  const tech = idOuNull(t?.assigned_technician_id);
+  if (tech !== null) return noms.tech[String(tech)] ?? null;
+  const vendor = idOuNull(t?.assigned_vendor_id);
+  if (vendor !== null) return noms.vendor[String(vendor)] ?? null;
+  return null;
+}
+
+// Jour de Dubai d'un horodatage, null s'il est illisible.
+export function dubaiDayOf(iso: unknown): string | null {
+  const ms = Date.parse(String(iso ?? ""));
+  return Number.isFinite(ms) ? todayDubai(ms) : null;
+}
 
 export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
   const mine = new Set((input.assignedKeys ?? []).map(String));
+  // Seuls les tickets montrables portent un nom a lire.
+  const ticketsMontres = (input.tickets ?? []).filter((t) => TICKETS_A_VERIFIER.has(String(t?.status ?? "")));
+  const noms = await assigneeNames(input.sb, ticketsMontres);
   const cancelled = new Set((input.cancelled ?? []).map(String));
   const done = new Set((input.done ?? []).map(String));
   const templatesByName: Record<string, any> = {};
@@ -194,14 +255,16 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
       checklist: items,
       photoRequired,
       progress: input.progress[base.reservationKey] ?? {},
-      openTickets: (input.tickets ?? [])
-        .filter((t) => String(t?.listing_id ?? "") === base.listingId &&
-          TICKETS_A_VERIFIER.has(String(t?.status ?? "")))
+      openTickets: ticketsMontres
+        .filter((t) => String(t?.listing_id ?? "") === base.listingId)
         .map((t) => ({
           id: Number(t.id),
           title: String(t.title ?? "Ticket"),
           category: String(t.category ?? "general"),
           priority: String(t.priority ?? "medium"),
+          status: String(t.status),
+          assigneeName: assigneeOf(t, noms),
+          reportedOn: dubaiDayOf(t.created_at),
         })),
       label: base.label,
       rooms: roomsFor(listing.unit_type, listing.bedrooms),

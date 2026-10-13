@@ -40,17 +40,17 @@ Deno.test("claimEvent refuse un type d'evenement absent de la contrainte CHECK",
   );
   // Rien n'a ete ecrit : la cle reste disponible pour le vrai geste.
   assertEquals(sb.tables.job_events.length, 0);
-  assertEquals(V3_EVENT_TYPES.length, 16);
+  assertEquals(V3_EVENT_TYPES.length, 17);
   assertEquals([...V3_EVENT_TYPES], [
     "start_job", "tick", "upload_photo", "finish_job", "report_problem", "check_ticket",
     "delete_photo", "add_problem_photo", "set_problem_note", "upload_voice",
     "set_problem_voice", "update_problem", "delete_problem", "mgr_problem_act",
-    "mnt_act", "mnt_ingest",
+    "mnt_act", "mnt_ingest", "ticket_still",
   ]);
 });
 
-Deno.test("la derniere migration de job_events (20261012120000) autorise exactement V3_EVENT_TYPES", async () => {
-  const sql = await Deno.readTextFile(new URL("../../migrations/20261012120000_maintenance_proposals.sql", import.meta.url));
+Deno.test("la derniere migration de job_events (20261013090000) autorise exactement V3_EVENT_TYPES", async () => {
+  const sql = await Deno.readTextFile(new URL("../../migrations/20261013090000_v3_ticket_still.sql", import.meta.url));
   // Seule la contrainte job_events compte : le reste du fichier a d'autres listes entre quotes.
   const check = sql.slice(sql.indexOf("ADD CONSTRAINT job_events_event_type_check"));
   const listed = [...check.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort();
