@@ -16,6 +16,7 @@ import {
   MGR_CLOSED_TICKET_STATUSES, MGR_INSPECTION_SOURCE, MGR_MIRROR_PREFIX, MGR_OPEN_TASK_STATUSES, MGR_TICKET_ASSIGNEE_ROLES, problemRef,
 } from "./mgr_inbox.ts";
 import { setFixSchedule } from "./insp_write.ts";
+import { dubaiDay } from "./insp_rules.ts";
 import {
   MNT_CATEGORIES, MNT_REJECT_REASONS, MNT_TEXT_MAX, MNT_TITLE_MAX, MNT_URGENCIES, type MntCategory, type MntUrgency,
   priorityFor, proposalRef,
@@ -205,6 +206,14 @@ async function readRow(sb: any, table: string, id: number): Promise<any | null> 
   return data ?? null;
 }
 
+// Jour de cloture a Dubai : resolved_at, sinon closed_at (ancien chemin), sinon aujourd'hui.
+function closingDay(tk: any, today: string): string {
+  for (const v of [tk?.resolved_at, tk?.closed_at]) {
+    if (v && Number.isFinite(Date.parse(String(v)))) return dubaiDay(String(v));
+  }
+  return today;
+}
+
 const isClosed = (t: any) => MGR_CLOSED_TICKET_STATUSES.includes(String(t?.status ?? ""));
 
 // Etat au moment du geste, lu apres la cle : un rejeu rend son resultat memorise
@@ -341,8 +350,11 @@ const updateTicket = (c: Ctx, id: number, values: Record<string, unknown>) =>
 // Cout d'un ticket remplace (ticket.done et ticket.edit_closed) : jamais compte deux
 // fois. Nouvelle ligne, puis retrait des anciennes, puis actual_cost. Si une etape
 // rate, les anciennes lignes sont remises, `restore` remet le ticket dans son etat
-// d'avant, et l'erreur remonte.
-async function replaceCost(c: Ctx, id: number, tk: any, cost: number, restore: () => Promise<unknown>): Promise<void> {
+// d'avant, et l'erreur remonte. `date` : jour de la ligne de cout (aujourd'hui pour
+// done, jour de cloture pour edit_closed : une correction ne change pas de mois).
+async function replaceCost(
+  c: Ctx, id: number, tk: any, cost: number, date: string, restore: () => Promise<unknown>,
+): Promise<void> {
   let oldRows: any[] = [];
   let newId: number | null = null;
   let oldGone = false;
@@ -350,7 +362,7 @@ async function replaceCost(c: Ctx, id: number, tk: any, cost: number, restore: (
     oldRows = await mustWrite(c.sb.from("maintenance_costs").select("*").eq("ticket_id", id));
     const ins = await mustWrite(c.sb.from("maintenance_costs").insert({
       ticket_id: id, listing_id: tk.listing_id ?? null, category: tk.category ?? null, description: tk.title ?? null,
-      amount: cost, vendor_id: tk.assigned_vendor_id ?? null, date: c.today,
+      amount: cost, vendor_id: tk.assigned_vendor_id ?? null, date,
     }).select("id"));
     newId = ins.length ? Number(ins[0].id) : null;
     if (oldRows.length) {
@@ -409,7 +421,7 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
     // nouvelle ligne, puis retrait des anciennes, puis actual_cost. Si une etape rate, les anciennes lignes
     // sont remises et le ticket reprend son etat d'avant.
     if (a.cost !== null) {
-      await replaceCost(c, id, tk, a.cost, () => mustWrite(c.sb.from("maintenance_tickets").update({
+      await replaceCost(c, id, tk, a.cost, c.today, () => mustWrite(c.sb.from("maintenance_tickets").update({
         status: tk.status ?? "open", resolved_at: tk.resolved_at ?? null, resolution_notes: tk.resolution_notes ?? null,
         resolution_photo_path: tk.resolution_photo_path ?? null, actual_cost: tk.actual_cost ?? null,
         last_update: tk.last_update ?? c.nowIso,
@@ -431,15 +443,16 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
       .eq("id", id).in("status", MGR_CLOSED_TICKET_STATUSES).select("id"));
     if (!hit.length) throw new Refused(NOT_CLOSED);
     if (a.cost !== null) {
-      await replaceCost(c, id, tk, a.cost, () => mustWrite(c.sb.from("maintenance_tickets").update({
+      await replaceCost(c, id, tk, a.cost, closingDay(tk, c.today), () => mustWrite(c.sb.from("maintenance_tickets").update({
         resolution_notes: tk.resolution_notes ?? null, actual_cost: tk.actual_cost ?? null,
         last_update: tk.last_update ?? c.nowIso,
       }).eq("id", id)));
     }
     const notes = a.note !== null ? (a.note || null) : (tk.resolution_notes ?? null);
-    const cost = a.cost !== null ? a.cost : (tk.actual_cost === null || tk.actual_cost === undefined ? null : Number(tk.actual_cost));
+    const fromCost = tk.actual_cost === null || tk.actual_cost === undefined || tk.actual_cost === "" ? null : Number(tk.actual_cost);
+    const cost = a.cost !== null ? a.cost : fromCost;
     result = { ...result, status: String(tk.status), resolutionNotes: notes, actualCost: cost };
-    details = { ...(a.note !== null ? { note: a.note || null } : {}), cost: a.cost, fromCost: tk.actual_cost ?? null };
+    details = { ...(a.note !== null ? { note: a.note || null } : {}), cost: a.cost, fromCost };
   } else if (a.op === "ticket.reopen") {
     const status = tk.assigned_technician_id != null || tk.assigned_vendor_id != null ? "assigned" : "open";
     await updateTicket(c, id, { status, resolved_at: null, closed_at: null });

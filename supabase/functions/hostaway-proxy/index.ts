@@ -38,7 +38,7 @@ import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
 import { mgrProblemGet } from "./mgr_problem_get.ts";
 import { mgrProblemAct } from "./mgr_problem_act.ts";
-import { extraReservationKey, insertExtraOnce, parseExtraTime, withExtraTime } from "./mgr_extra.ts";
+import { extraReservationKey, extraUpdateValues, insertExtraOnce, parseExtraTime, withExtraTime } from "./mgr_extra.ts";
 import { LAUNDRY_FIELDS, parsePlanningStart } from "./mgr_planning_rules.ts";
 import { mgrPlanning } from "./mgr_planning.ts";
 import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
@@ -3981,11 +3981,12 @@ Deno.serve(async (req: Request) => {
 
     if (action === "updateExtraCleaning" && req.method === "POST") {
       const body = await req.json();
-      const { id, label, guest_name, price_billed, cleaner_price, notes, status, cleaning_date, listing_id } = body;
+      const { id, cleaning_date } = body;
       if (!id) return jsonResp({ error: "id required" }, 400);
-      // Heure dediee : absente = inchangee ; vide ou null = effacee (null, jamais 00:00).
-      const updTime = body.cleaning_time === undefined ? null : parseExtraTime(body.cleaning_time);
-      if (updTime && !updTime.ok) return jsonResp({ error: "Invalid time." }, 400);
+      // Champs a ecrire (mgr_extra.ts) ; heure dediee : absente = inchangee, vide ou
+      // null = effacee (null, jamais 00:00), invalide = 400 avant toute lecture.
+      const built = extraUpdateValues(body);
+      if ("error" in built) return jsonResp({ error: built.error }, 400);
 
       // Blocage strict AVANT tout write, comme addExtraCleaning : deplacer une prestation
       // vers un jour ou son cleaner est en conge approuve doit etre refuse. Sans ce
@@ -4030,17 +4031,8 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      const upd: any = {};
-      if (label !== undefined) upd.label = label;
-      if (guest_name !== undefined) upd.guest_name = guest_name;
-      if (price_billed !== undefined) upd.price_billed = price_billed;
-      if (cleaner_price !== undefined) upd.cleaner_price = cleaner_price;
-      if (notes !== undefined) upd.notes = notes;
-      if (status !== undefined) upd.status = status;
-      if (cleaning_date !== undefined) upd.cleaning_date = cleaning_date;
-      if (listing_id !== undefined) upd.listing_id = listing_id;
-      if (updTime && updTime.ok) upd.cleaning_time = updTime.value;
-      const { error } = await sb.from("extra_cleanings").update(upd).eq("id", id);
+      const upd = built.upd;
+      const { error } = await sb.from("extra_cleanings").update(built.upd).eq("id", id);
       if (error) throw error;
       // Trace avec l'auteur de la session (spec manager, section 6).
       const { data: ecDone } = await sb.from("extra_cleanings").select("reservation_key").eq("id", id).maybeSingle();

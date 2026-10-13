@@ -682,3 +682,23 @@ Deno.test("edit_closed : meme cle rejouee = meme reponse, une seule ligne de cou
   assertEquals(b, a);
   assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount]), [[429, 80]]);
 });
+
+Deno.test("edit_closed : le cout remplace est date du jour de cloture (Dubai), done garde aujourd'hui", async () => {
+  const sb = seed();
+  // Cloture le 20/09 a 22:30 UTC = 21/09 a Dubai, cout d'origine en base numeric (texte).
+  Object.assign(ticket(sb, 300), { resolved_at: "2026-09-20T22:30:00Z", actual_cost: "50.00" });
+  sb.tables.maintenance_costs.push({ id: 900, ticket_id: 300, amount: "50.00", date: "2026-09-21" });
+  assertEquals((await act(sb, { op: "ticket.edit_closed", ticketId: 300, cost: 80 })).status, 200);
+  assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount, c.date]), [[300, 80, "2026-09-21"]]);
+  assertEquals(sb.tables.cleaning_log.at(-1).details, { cost: 80, fromCost: 50 });
+  // Ancien chemin « closed » sans resolved_at : closed_at, sinon aujourd'hui.
+  Object.assign(ticket(sb, 301), { resolved_at: null, closed_at: "2026-08-31T21:00:00Z" });
+  await act(sb, { op: "ticket.edit_closed", ticketId: 301, cost: 10 });
+  assertEquals(sb.tables.maintenance_costs.find((c: any) => c.ticket_id === 301).date, "2026-09-01");
+  Object.assign(ticket(sb, 301), { resolved_at: null, closed_at: null });
+  await act(sb, { op: "ticket.edit_closed", ticketId: 301, cost: 12 });
+  assertEquals(sb.tables.maintenance_costs.find((c: any) => c.ticket_id === 301).date, "2026-10-12");
+  // done : toujours aujourd'hui.
+  await act(sb, { op: "ticket.done", ticketId: 429, cost: 5 });
+  assertEquals(sb.tables.maintenance_costs.find((c: any) => c.ticket_id === 429).date, "2026-10-12");
+});

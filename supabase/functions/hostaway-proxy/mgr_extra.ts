@@ -26,8 +26,9 @@ export function parseExtraTime(v: unknown): { ok: true; value: string | null } |
   if (typeof v !== "string") return { ok: false };
   const s = v.trim();
   if (s === "") return { ok: true, value: null };
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s)) return { ok: false };
-  return { ok: true, value: s };
+  // HH:MM, ou HH:MM:SS (valeur brute de la base renvoyee telle quelle) ramene a HH:MM.
+  const m = s.match(/^(([01]\d|2[0-3]):[0-5]\d)(:[0-5]\d)?$/);
+  return m ? { ok: true, value: m[1] } : { ok: false };
 }
 
 // La colonne time de Postgres sort en « 14:00:00 » : on rend « 14:00 », ou null
@@ -39,4 +40,19 @@ export function extraTimeOut(v: unknown): string | null {
 
 export function withExtraTime<T extends Record<string, unknown>>(row: T): T & { cleaning_time: string | null } {
   return { ...row, cleaning_time: extraTimeOut(row?.cleaning_time) };
+}
+
+// Champs modifiables d'un extra (action updateExtraCleaning) : un champ absent
+// reste tel quel. Heure : absente = gardee, null ou vide = effacee (null), sinon
+// HH:MM ; invalide = erreur, rien a ecrire.
+const EXTRA_EDITABLE = ["label", "guest_name", "price_billed", "cleaner_price", "notes", "status", "cleaning_date", "listing_id"];
+export function extraUpdateValues(body: any): { upd: Record<string, unknown> } | { error: string } {
+  const upd: Record<string, unknown> = {};
+  for (const k of EXTRA_EDITABLE) if (body?.[k] !== undefined) upd[k] = body[k];
+  if (body?.cleaning_time !== undefined) {
+    const t = parseExtraTime(body.cleaning_time);
+    if (!t.ok) return { error: "Invalid time." };
+    upd.cleaning_time = t.value;
+  }
+  return { upd };
 }
