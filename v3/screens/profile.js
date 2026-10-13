@@ -4,6 +4,7 @@ import { api } from '/v3/api.js';
 import { CLE_VIEW_AS, leaveModeForSignOut, practicing, queueStrip, render, startPractice, startViewAs } from '/v3/app.js';
 import { clearDead, clearFiles, deadEntries, deleteState, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
+import { dayWord } from '/v3/conv/day.js';
 import { esc, icon } from '/v3/ui.js';
 
 // Actions refusees par le serveur : elles ne sont jamais jetees en silence, elles
@@ -48,6 +49,46 @@ function selecteurEquipe(state) {
   return '</div>' + h + '</div><div class="pad">';
 }
 
+// « My reports, last 7 days » (maintenance phase 3, C12) : pour la cleaner elle-meme, ou en
+// Practice (simule). Jamais en View as, ni pour un manager (le proxy ne le sert qu'aux cleaners).
+function voitSesRapports(state) {
+  const jour = state.day || {};
+  const role = jour.me ? String(jour.me.role || '') : '';
+  if (role !== 'cleaner' && role !== 'subcontractor') return false;
+  return !jour.viewAs || practicing(state);
+}
+
+function motDuStatut(r) {
+  switch (r.status) {
+    case 'with_tech': return r.techName ? 'With ' + r.techName : 'With the team';
+    case 'open': return 'Not assigned yet';
+    case 'in_progress': return 'In progress';
+    case 'waiting_parts': return 'Waiting parts';
+    case 'to_confirm': return 'Checked, waiting';
+    case 'fixed': return 'Fixed';
+    default: return '';
+  }
+}
+
+function mesRapports(state) {
+  if (!voitSesRapports(state)) return '';
+  let h = '</div><p class="sec-lab">My reports, last 7 days</p><div class="myrep">';
+  const r = state.reports;
+  if (r === 'offline') h += '<p class="muted mr-empty">Reports load when you are online.</p>';
+  else if (Array.isArray(r) && r.length === 0) h += '<p class="muted mr-empty">No report this week.</p>';
+  else if (Array.isArray(r)) {
+    const now = new Date();
+    r.forEach(function (x) {
+      const jour = dayWord(x.reportedOn, now);
+      h += '<div class="mr-row"><span class="tx"><b>' + esc(x.title) + '</b>' +
+        '<span class="mr-sub">' + esc(String(x.listingLabel || '') + (jour ? ' · ' + jour : '')) + '</span></span>' +
+        '<span class="mr-st s-' + esc(x.status) + '">' + esc(motDuStatut(x)) + '</span></div>';
+    });
+  }
+  // Comme le selecteur d'equipe : la liste prend toute la largeur, le bloc Profile reprend apres.
+  return h + '</div><div class="pad">';
+}
+
 function view(state) {
   const jour = state.day || {};
   const me = jour.me || { name: '', role: '' };
@@ -62,6 +103,7 @@ function view(state) {
     '<div class="body"><div class="pad">' +
       '<h1 style="font-family:var(--disp);font-size:26px;margin:0">' + esc(me.name) + '</h1>' +
       '<p class="muted">' + esc(me.role) + '</p>' +
+      mesRapports(state) +
       refuses(state) +
       selecteurEquipe(state) +
       '<p class="muted" style="margin-top:18px">Leave requests, linen at the store and your history are still in ' +
@@ -217,10 +259,19 @@ const actions = {
 // Le magasin mort est lu avant le rendu : `view` reste synchrone, comme les
 // autres ecrans.
 export async function prepare(state) {
+  state.reports = null;
   try {
     state.dead = await deadEntries();
   } catch (e) {
     state.dead = [];
+  }
+  // Mes signalements : relus a chaque ouverture de Profile ; hors ligne, une phrase.
+  if (!voitSesRapports(state)) return;
+  try {
+    const data = await api.get('v3.myReports');
+    state.reports = data && Array.isArray(data.reports) ? data.reports : [];
+  } catch (e) {
+    state.reports = 'offline';
   }
 }
 

@@ -129,14 +129,15 @@ test("payload sans stops, champs absents : aucune exception, valeurs prudentes",
   assert.equal(a.guest.hoursAway, null);
 });
 
-test("étape 2 : bulle « Open problems here » avec les autres tickets ouverts, avant la vérification", () => {
+test("étape 2 : « Open problems here. Is it still there? » puis une carte par ticket (hors pest), avant la vérification", () => {
   const [ox, , bl] = toApartments(DAY, ME, { now: NOW });
   const c = createConversation(ox, { me: ME, now: NOW });
   reply(c, "here", { now: NOW });
   for (let i = 0; i < 3; i++) { addPhoto(c, "a", { now: NOW }); reply(c, "next-room", { now: NOW }); }
   assert.equal(currentStep(c).id, "check");
-  const app = c.messages.filter(m => m.from === "app").map(m => m.text);
-  assert.deepEqual(app.slice(-2), ["Open problems here: Leak · Bathroom.", "Pest control was asked. Do you see insects?"]);
+  const app = c.messages.filter(m => m.from === "app").slice(-3);
+  assert.deepEqual(app.map(m => m.type === "ticket" ? "card:" + m.ticket.title : m.text),
+    ["Open problems here. Is it still there?", "card:Leak · Bathroom", "Pest control was asked. Do you see insects?"]);
   reply(c, "check-ok", { now: NOW });
   assert.equal(c.messages.filter(m => /^Open problems here/.test(m.text || "")).length, 1, "une seule fois");
   // aucun autre ticket : pas de bulle

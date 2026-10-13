@@ -62,9 +62,9 @@ test("dégâts, vérification du manager, problèmes groupés, aucune ligne 🎙
   assert.match(t, /\*Problems \(3\):\*\n_Bed_\n🟠 Broken \(HK-461\)\n_Whole apartment_\n🟠 Insects \(HK-462\)\n🟠 Stain \(HK-463\)/);
   assert.equal(t.includes("🎙"), false, "plus de note vocale");
   assert.doesNotMatch(t, /voice/i);
-  // urgent changé à la main dans la fiche : « team notified »
+  // urgent change a la main dans la fiche : « sent to the team »
   editProblem(c, 1, { urgency: "urgent" });
-  assert.match(reportText(c, { now: at(10, 0) }), /🔴 Insects \(HK-462, team notified 09:22\)/);
+  assert.match(reportText(c, { now: at(10, 0) }), /🔴 Insects \(HK-462, sent to the team 09:22\)/);
   assert.match(t, /📷 3 arrival · 0 end · 3 of problems/);
 });
 
@@ -97,7 +97,7 @@ test("ligne de problème : détail, note, nombre de photos ; toutes les photos p
   setProblemNote(c, 2, "under the sink");
   editProblem(c, 2, { urgency: "urgent" });
   const t = reportText(c, { now: at(10, 30) });
-  assert.match(t, /\n🟠 Broken, Sofa: tear on the left cushion \(HK-461, 3 photos\)\n🟠 Missing \(HK-462\)\n🔴 Leak: under the sink \(HK-463, team notified 10:03\)/);
+  assert.match(t, /\n🟠 Broken, Sofa: tear on the left cushion \(HK-461, 3 photos\)\n🟠 Missing \(HK-462\)\n🔴 Leak: under the sink \(HK-463, sent to the team 10:03\)/);
   assert.deepEqual(pickFiles(c).files.map(f => f.name), ["p1.jpg", "p2.jpg", "p3.jpg", "m1.jpg"]);
   assert.match(t, /4 of problems/);
 });

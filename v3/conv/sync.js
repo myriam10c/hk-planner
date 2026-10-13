@@ -11,6 +11,8 @@
 // problème : uploadPhoto de la première photo (problem) puis reportProblem { photoIdem } ;
 // photos suivantes : uploadPhoto + addProblemPhoto { ticketIdem } ; note : setProblemNote ;
 // urgence / endroit : updateProblem ; suppression : deleteProblem ; fin : finishJob (finishPlan).
+// Tickets ouverts du logement (maintenance phase 3) : « Still there » : ticketStill ;
+// « Fixed now » : uploadPhoto (ticketId) de chaque photo puis checkTicket { photoIdem }.
 // Note : celle déjà saisie au moment du signalement part dans reportProblem (champ note), toute
 // note saisie ou modifiée ensuite part par setProblemNote. Un problème dont la photo est
 // obligatoire attend sa première photo : sans photo, il reste dans le rapport partagé seulement.
@@ -36,7 +38,8 @@ export function writeMode({ session, viewAs, dayViewAs, practiceActive }) {
 }
 
 function ensureSync(conv) {
-  if (!conv.sync) conv.sync = { started: null, photos: {}, problems: {}, finish: null, idems: {}, acked: {} };
+  if (!conv.sync) conv.sync = { started: null, photos: {}, problems: {}, tickets: {}, finish: null, idems: {}, acked: {} };
+  if (!conv.sync.tickets) conv.sync.tickets = {};
   return conv.sync;
 }
 
@@ -55,10 +58,10 @@ export function syncPlan(conv, { newIdem, active = true } = {}) {
   const out = [];
   const jobId = conv.apt.id;
   const emit = (action, body, extra = {}) => { s.idems[body.idem] = action; out.push({ action, body, ...extra }); };
-  const upload = (photo, itemName) => {
+  const upload = (photo, itemName, extra = {}) => {
     photo.idem = photo.idem || newIdem();
     s.photos[photo.idem] = { itemName, deleted: false };
-    emit("v3.uploadPhoto", { jobId, itemName, idem: photo.idem }, { file: photo.file || null, fileName: photo.file && photo.file.name ? photo.file.name : "photo.jpg" });
+    emit("v3.uploadPhoto", { jobId, ...extra, itemName, idem: photo.idem }, { file: photo.file || null, fileName: photo.file && photo.file.name ? photo.file.name : "photo.jpg" });
     return photo.idem;
   };
 
@@ -79,7 +82,7 @@ export function syncPlan(conv, { newIdem, active = true } = {}) {
   const stores = [["arrival", conv.arrivalPhotos], ["end", conv.endPhotos]];
   for (const [, store] of stores) for (const list of Object.values(store)) for (const p of list) if (isObj(p) && p.idem) present.add(p.idem);
   for (const [idem, rec] of Object.entries(s.photos)) {
-    if (rec.itemName === "problem" || rec.deleted || present.has(idem)) continue;
+    if (rec.itemName === "problem" || rec.itemName === "ticket" || rec.deleted || present.has(idem)) continue;
     rec.deleted = true;
     const d = s.acked[idem];
     const body = { photoIdem: idem, idem: newIdem() };
@@ -130,6 +133,25 @@ export function syncPlan(conv, { newIdem, active = true } = {}) {
     rec.deleted = true;
     if (rec.reported) emit("v3.deleteProblem", { ...ticketRef(s, idem), idem: newIdem() });
   }
+
+  // 4. Tickets ouverts du logement : une reponse par ticket, une seule cle, jamais reemise.
+  for (const [id, t] of Object.entries(conv.tickets || {})) {
+    const rec = s.tickets[id] = s.tickets[id] || { sent: false };
+    if (rec.sent || !isObj(t)) continue;
+    const ticketId = Number(id);
+    if (t.answer === "still") {
+      t.idem = t.idem || newIdem();
+      emit("v3.ticketStill", { jobId, ticketId, idem: t.idem });
+      rec.sent = true;
+    } else if (t.answer === "fixed") {
+      const photos = (t.photos || []).filter(isObj);
+      if (!photos.length) continue;
+      for (const ph of photos) if (!queued(ph)) upload(ph, "ticket", { ticketId });
+      t.idem = t.idem || newIdem();
+      emit("v3.checkTicket", { jobId, ticketId, photoIdem: photos[0].idem, idem: t.idem });
+      rec.sent = true;
+    }
+  }
   return out;
 }
 
@@ -171,7 +193,8 @@ export function rollbackSync(conv, a) {
     case "v3.finishJob": if (s.finish === b.idem) s.finish = null; break;
     case "v3.uploadPhoto": {
       delete s.photos[b.idem];
-      const all = [...Object.values(conv.arrivalPhotos), ...Object.values(conv.endPhotos), ...conv.problems.map(p => p.photos)];
+      const all = [...Object.values(conv.arrivalPhotos), ...Object.values(conv.endPhotos), ...conv.problems.map(p => p.photos),
+        ...Object.values(conv.tickets || {}).map(t => (t && t.photos) || [])];
       for (const list of all) for (const ph of list) if (isObj(ph) && ph.idem === b.idem) delete ph.idem;
       for (const rec of Object.values(s.problems)) rec.photos = rec.photos.filter(x => x !== b.idem);
       break;
@@ -190,6 +213,11 @@ export function rollbackSync(conv, a) {
     }
     case "v3.deleteProblem": { const rec = recOf(b.ticketIdem); if (rec) rec.deleted = false; break; }
     case "v3.deletePhoto": { const rec = s.photos[b.photoIdem]; if (rec) rec.deleted = false; break; }
+    case "v3.ticketStill": case "v3.checkTicket": {
+      const rec = s.tickets && s.tickets[String(b.ticketId)];
+      if (rec) rec.sent = false;
+      break;
+    }
   }
 }
 
@@ -249,6 +277,14 @@ export function refreshTicks(conv) {
   if (!conv || !conv.sync) return false;
   let changed = false;
   for (const m of conv.messages) {
+    // Carte d'un ticket : la coche suit la reponse de la cleaner (ticketStill, checkTicket).
+    if (m.type === "ticket") {
+      const t = conv.tickets && conv.tickets[m.ticket.id];
+      const idem = t && t.idem;
+      const status = idem ? (conv.sync.acked[idem] ? "synced" : "saved") : undefined;
+      if (m.status !== status) { m.status = status; changed = true; }
+      continue;
+    }
     if (m.from !== "me") continue;
     const idem = idemOf(conv, m);
     const status = idem && conv.sync.acked[idem] ? "synced" : "saved";

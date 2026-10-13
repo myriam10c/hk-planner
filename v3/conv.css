@@ -215,3 +215,13 @@ body:has(#app.cv){background:#EFE7DD}
 #app.cv .avatar.ph{display:flex;align-items:center;justify-content:center;color:var(--cv-head);font-weight:700;font-size:15px;letter-spacing:-.02em}
 #app.cv .avatar.small.ph{font-size:12px}
 #app.cv .top .avatar.ph{background:rgba(255,255,255,.85)}
+/* Maintenance phase 3 (C4) : carte d'un ticket ouvert du logement, a l'etape 2. */
+#app.cv .msg.tcard{display:flex;flex-direction:column;gap:2px;width:86%;box-sizing:border-box;border-left:6px solid var(--cv-soon)}
+#app.cv .msg.tcard.waiting{border-left-color:var(--cv-line)}
+#app.cv .msg.tcard b{font-size:18px;overflow-wrap:anywhere}
+#app.cv .msg.tcard .tsub{font-size:16px;color:var(--cv-mute)}
+#app.cv .msg.tcard .tdone{margin-top:6px;font-weight:700;color:var(--cv-accent)}
+#app.cv .tbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+#app.cv .tbtn{flex:1 1 120px;min-height:52px;padding:0 12px;border-radius:26px;font-size:17px;font-weight:700}
+#app.cv .tbtn.still{border:2px solid var(--cv-urgent);background:#fff;color:var(--cv-urgent)}
+#app.cv .tbtn.fixed{border:2px solid var(--cv-accent);background:var(--cv-accent);color:#fff}

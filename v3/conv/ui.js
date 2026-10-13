@@ -5,6 +5,7 @@ import { KINDS, URGENCY } from "./problems.js";
 import { currentStep, currentFlow, elapsedMinutes, isHelper } from "./conversation.js";
 import { reportText, formatMinutes } from "./report.js";
 import { finishAcked } from "./sync.js";
+import { dayWord } from "./day.js";
 
 export const escapeHtml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const waFormat = t => escapeHtml(t).replace(/\*([^*\n]+)\*/g, "<b>$1</b>").replace(/_([^_\n]+)_/g, "<i>$1</i>").replace(/\n/g, "<br>");
@@ -68,7 +69,44 @@ export function renderList({ me, apartments, convs, activeId, now, before = "", 
     '<main class="list">' + (apartments.length ? '<p class="hint">Tap the apartment you start with.</p>' + rows : '<p class="hint">' + escapeHtml(empty) + "</p>") + "</main>";
 }
 
+// Destinataire d'un probleme signale (C8) : « sent to <nom> » quand le proxy l'a recu,
+// « sent to the team » sans technicien connu, « saved, sending… » tant qu'il attend dans la file.
+// Un probleme qui ne part pas (photo obligatoire absente) ne dit rien.
+export function sentLabel(conv, p) {
+  const s = conv.sync;
+  const rec = s && p.idem && s.problems && s.problems[p.idem];
+  if (!rec || !rec.reported) return "";
+  const d = s.acked[p.idem];
+  if (!d) return "saved, sending…";
+  return "sent to " + (d.sentTo ? String(d.sentTo) : "the team");
+}
+
+// Sous-ligne d'une carte de ticket (C4).
+export function ticketSub(t, now = new Date()) {
+  if (t.status === "to_confirm") return "Waiting for check";
+  const who = t.status === "waiting_parts" ? "waiting parts" : t.assigneeName ? t.assigneeName + " is on it" : "nobody yet";
+  const day = dayWord(t.reportedOn, now);
+  return (day ? "Reported " + day + " · " : "") + who;
+}
+
+// Carte d'un ticket ouvert : reponse donnee (✓ et coches), ou les deux boutons tant qu'elle est
+// repondable. Lecture seule, rapport parti, to_confirm : aucun bouton.
+function ticketBubble(conv, m) {
+  const t = m.ticket;
+  const a = conv.tickets && conv.tickets[t.id];
+  const ticks = m.status ? '<span class="ticks">' + (m.status === "synced" ? "✓✓" : "✓") + "</span>" : "";
+  let foot = "";
+  if (a) foot = '<p class="tdone">' + (a.answer === "fixed" ? "✓ Fixed, photo sent" : "✓ Still there") + "</p>";
+  else if (!conv.readOnly && !conv.sent && t.status !== "to_confirm") {
+    foot = '<div class="tbtns"><button class="tbtn still" data-act="ticket-still" data-ticket="' + t.id + '">Still there</button>' +
+      '<button class="tbtn fixed" data-act="ticket-fixed" data-ticket="' + t.id + '">Fixed now 📷</button></div>';
+  }
+  return '<div class="msg app tcard' + (t.status === "to_confirm" ? " waiting" : "") + '" data-ticket="' + t.id + '"><b>' + escapeHtml(t.title) + "</b>" +
+    '<span class="tsub">' + escapeHtml(ticketSub(t)) + "</span>" + foot + ticks + "</div>";
+}
+
 function bubble(conv, m) {
+  if (m.type === "ticket") return ticketBubble(conv, m);
   const ticks = m.from === "me" ? '<span class="ticks">' + (m.status === "synced" ? "✓✓" : "✓") + "</span>" : "";
   if (m.type === "report") {
     return '<div class="msg app report"><div class="report-h">Your report for ' + escapeHtml(GROUP_NAME) + "</div>" + waFormat(reportText(conv)) + "</div>";
@@ -82,7 +120,7 @@ function bubble(conv, m) {
       (p.photos[0] ? imgTag(p.photos[0], "shot") : "") +
       "<b>" + URGENCY[p.urgency].dot + " " + escapeHtml(p.kind + (p.detail ? " · " + p.detail : "")) + "</b>" +
       (p.note ? '<span class="pnote">' + escapeHtml(p.note) + "</span>" : "") +
-      "<span>" + escapeHtml(p.where) + (p.notified ? " · team notified" : "") + (n > 1 ? " · " + n + " photos" : "") + "</span>" + ticks + "</button>";
+      "<span>" + escapeHtml(p.where + (sentLabel(conv, p) ? " · " + sentLabel(conv, p) : "") + (n > 1 ? " · " + n + " photos" : "")) + "</span>" + ticks + "</button>";
   }
   const who = m.from === "lead" ? '<span class="who">' + escapeHtml(conv.apt.lead.name) + "</span>" : "";
   return '<div class="msg ' + m.from + (m.alert ? " alert" : "") + '">' + who + (m.photo ? imgTag(m.photo, "ref") : "") + "<p>" + escapeHtml(m.text) + "</p>" + ticks + "</div>";
@@ -205,6 +243,25 @@ export function renderProblemPhotos(conv, { live }) {
     '<span class="vf-row-end"><button class="reply" data-flow="photos-done"' + (done.enabled ? "" : " disabled") + ">Done</button></span></div>" +
     "</div></div>";
 }
+
+// Viseur « Fixed now » d'un ticket (C4) : « <titre> · fixed », « Take a photo of it », [Done] des une photo.
+export function renderTicketFix(conv, { live }) {
+  const f = conv.fix;
+  const t = f && ticketCardOf(conv, f.ticketId);
+  if (!t) return "";
+  const thumbs = f.photos.map(ph => '<span class="vthumb">' + imgTag(ph) + "</span>").join("");
+  return '<div class="vf flow-vf fix-vf' + (live ? " live" : "") + '">' + still(live, conv.apt.photo) + '<div class="flash"></div>' +
+    '<div class="vf-top"><button class="icon light" data-act="fix-cancel" aria-label="Back">' + I.back + "</button>" +
+    '<div class="vf-title"><b>' + escapeHtml(t.title + " · fixed") + "</b><span>Take a photo of it</span></div></div>" +
+    noCamMsg(live) +
+    '<div class="vf-bottom">' +
+    (f.photos.length ? '<div class="vthumbs">' + thumbs + countTag(f.photos.length) + "</div>" : "") +
+    '<div class="vf-row"><span class="vf-row-start"></span>' + shutterBtn(live, "fix-shutter") +
+    '<span class="vf-row-end"><button class="reply" data-act="fix-done"' + (f.photos.length ? "" : " disabled") + ">Done</button></span></div>" +
+    "</div></div>";
+}
+
+const ticketCardOf = (conv, id) => { const m = conv.messages.find(x => x.type === "ticket" && x.ticket.id === id); return m ? m.ticket : null; };
 
 const flowBtn = (r, cls = "reply") => '<button class="' + cls + '" data-flow="' + r.id + '"' + (r.enabled ? "" : " disabled") + ">" + escapeHtml(r.label) + "</button>";
 

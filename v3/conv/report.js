@@ -41,8 +41,9 @@ const roomLine = (conv, store) => {
 };
 
 // « 🟠 Broken, Sofa: tear on the left cushion (HK-461, 3 photos) » : « 1 photo » est omis.
-export function problemLine(p) {
-  const extra = (p.notified ? ", team notified " + p.at : "") + (p.photos.length > 1 ? ", " + p.photos.length + " photos" : "");
+// Urgent : « sent to <technicien> 09:22 » quand le proxy a nomme le destinataire, sinon « sent to the team ».
+export function problemLine(p, sentTo = null) {
+  const extra = (p.notified ? ", sent to " + (sentTo || "the team") + " " + p.at : "") + (p.photos.length > 1 ? ", " + p.photos.length + " photos" : "");
   return URGENCY[p.urgency].dot + " " + p.kind + (p.detail ? ", " + p.detail : "") + (p.note ? ": " + p.note : "") + " (HK-" + p.ref + extra + ")";
 }
 
@@ -51,7 +52,8 @@ export function reportText(conv, { now = new Date() } = {}) {
   const linen = LINEN_USUAL.filter(l => conv.linen[l.key] > 0).map(l => conv.linen[l.key] + " " + (conv.linen[l.key] === 1 ? l.one : l.many)).join(", ");
   const order = a.rooms.concat(WHERE_EXTRA);
   const groups = order.filter(w => conv.problems.some(p => p.where === w));
-  const probLines = groups.flatMap(w => ["_" + w + "_"].concat(conv.problems.filter(p => p.where === w).map(problemLine)));
+  const sentTo = p => { const d = conv.sync && p.idem && conv.sync.acked && conv.sync.acked[p.idem]; return d && d.sentTo ? String(d.sentTo) : null; };
+  const probLines = groups.flatMap(w => ["_" + w + "_"].concat(conv.problems.filter(p => p.where === w).map(p => problemLine(p, sentTo(p)))));
   const count = store => Object.values(store).reduce((n, list) => n + list.length, 0);
   const probPhotos = conv.problems.reduce((n, p) => n + p.photos.length, 0);
   const leave = LEAVE_CHECKS.map(c => leaveDoneLabel(conv, c) + (conv.leave[c.key] === true ? " ✓" : " ✗")).join(" · ");

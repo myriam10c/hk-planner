@@ -163,7 +163,9 @@ test('ticket pest : verification du manager, et les autres tickets ouverts en bu
   await expect(page.locator('.msg.app').first()).toContainText('122 Oxford Boulevard · guest at 3 pm');
   await page.locator('[data-reply="here"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
-  await expect(page.getByText('Open problems here: Leak · Bathroom.')).toBeVisible();
+  // Maintenance phase 3 (C4) : les autres tickets ouverts sont des cartes, sous une seule question.
+  await expect(page.getByText('Open problems here. Is it still there?')).toBeVisible();
+  await expect(page.locator('.tcard b')).toHaveText(['Leak · Bathroom']);
   await expect(page.getByText('Pest control was asked. Do you see insects?')).toBeVisible();
   await expect(page.locator('[data-reply="check-see"]')).toHaveText('I see insects');
   await page.locator('[data-reply="check-ok"]').click();

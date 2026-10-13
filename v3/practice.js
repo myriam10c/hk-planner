@@ -53,7 +53,8 @@ const PHOTO_MIME = {
   'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heic',
 };
 const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
-const TICKETS_A_VERIFIER = new Set(['open', 'assigned', 'in_progress', 'waiting_parts']);
+// Comme v3.myDay depuis la phase 3 : un ticket verifie (to_confirm) reste montre, sans bouton.
+const TICKETS_A_VERIFIER = new Set(['open', 'assigned', 'in_progress', 'waiting_parts', 'to_confirm']);
 const TICKET_CLOS = ['resolved', 'cancelled'];
 // Identifiants simules : loin des sequences reelles, pour qu'aucun ne se
 // confonde avec une vraie photo ou un vrai ticket dans un ecran.
@@ -186,12 +187,18 @@ export function practiceDay(day) {
     const restants = (s.openTickets || []).filter(function (t) {
       const sim = tickets[t.id];
       return !sim || TICKETS_A_VERIFIER.has(sim.status);
+    }).map(function (t) {
+      const sim = tickets[t.id];
+      return sim && sim.status !== t.status ? Object.assign({}, t, { status: sim.status }) : t;
     });
     Object.keys(tickets).forEach(function (id) {
       const t = tickets[id];
       if (!t.created || t.listingId !== String(s.listingId) || !TICKETS_A_VERIFIER.has(t.status)) return;
       if (restants.some(function (r) { return String(r.id) === id; })) return;
-      restants.push({ id: Number(id), title: t.title, category: t.category, priority: t.priority });
+      restants.push({
+        id: Number(id), title: t.title, category: t.category, priority: t.priority,
+        status: t.status, assigneeName: null, reportedOn: t.reportedOn || null,
+      });
     });
     s.openTickets = restants;
   });
@@ -397,10 +404,12 @@ function reportProblem(body) {
   seance.tickets[ticketId] = {
     created: true, listingId: listingId, title: kind + ' · ' + where, kind: kind,
     category: cat, priority: priority, status: 'open', note: note,
+    reportedOn: String((jour && jour.date) || ''), at: Date.now(),
   };
   if (photoId) seance.photos[photoId].ticketId = ticketId;
   seance.reports[String(body.idem)] = ticketId;
-  return memoriser(body.idem, { status: 'success', ticketId: ticketId, technicianId: null, priority: priority });
+  // sentTo : aucun technicien de permanence simule, l'app dit « sent to the team ».
+  return memoriser(body.idem, { status: 'success', ticketId: ticketId, technicianId: null, priority: priority, sentTo: null });
 }
 
 function photoVivante(id) {
@@ -532,7 +541,12 @@ function ticketConnu(id) {
     return (s.openTickets || []).some(function (t) { return Number(t.id) === id; });
   });
   if (!vrai) return null;
-  seance.tickets[id] = { created: false, status: 'open' };
+  // Le statut reel du ticket (assigned, to_confirm...) est garde : la journee recouverte le montre tel quel.
+  let reel = null;
+  ((jour && jour.stops) || []).forEach(function (s) {
+    (s.openTickets || []).forEach(function (t) { if (Number(t.id) === id && t.status) reel = String(t.status); });
+  });
+  seance.tickets[id] = { created: false, status: reel || 'open' };
   return seance.tickets[id];
 }
 
@@ -550,6 +564,44 @@ function checkTicket(body) {
   if (!photoVivante(photoId)) return refus(400, 'photo not found');
   ticket.status = 'to_confirm';
   return memoriser(body.idem, { status: 'success', ticketId: ticketId, status_value: 'to_confirm' });
+}
+
+// Comme ticketStill (v3_tickets.ts) : un commentaire, aucun changement de statut ; un
+// ticket deja clos repond 200 { ok, alreadyClosed } sans rien ecrire.
+function ticketStill(body) {
+  const ticketId = readTicketId(body.ticketId);
+  if (!ticketId || ticketId === 'invalid') return refus(400, 'ticketId required');
+  if (!validIdem(body.idem)) return refus(400, 'idem required');
+  const r = rejeu(body.idem);
+  if (r) return r;
+  const ticket = ticketConnu(ticketId);
+  if (!ticket) return refus(400, 'ticket not found');
+  if (TICKET_CLOS.indexOf(String(ticket.status || '')) !== -1) return memoriser(body.idem, { ok: true, alreadyClosed: true });
+  return memoriser(body.idem, { ok: true });
+}
+
+// Comme myReports (v3_reports.ts) : les signalements de cette seance, du plus recent au plus ancien.
+const STATUT_REPORT = {
+  assigned: 'with_tech', open: 'open', in_progress: 'in_progress', waiting_parts: 'waiting_parts',
+  to_confirm: 'to_confirm', resolved: 'fixed', closed: 'fixed',
+};
+function myReports() {
+  const reports = Object.keys(seance.tickets)
+    .map(function (id) { return { id: Number(id), t: seance.tickets[id] }; })
+    .filter(function (x) { return x.t.created && STATUT_REPORT[x.t.status]; })
+    .sort(function (a, b) { return (b.t.at || 0) - (a.t.at || 0) || b.id - a.id; })
+    .map(function (x) {
+      const title = String(x.t.title || 'Ticket');
+      const i = title.lastIndexOf(' · ');
+      const stop = ((jour && jour.stops) || []).find(function (s) { return String(s.listingId) === x.t.listingId; });
+      return {
+        id: x.id, title: title, place: i < 0 ? '' : title.slice(i + 3).trim(),
+        listingLabel: stop && stop.listingName ? String(stop.listingName) : 'Apartment',
+        reportedOn: x.t.reportedOn || String((jour && jour.date) || ''),
+        status: STATUT_REPORT[x.t.status], techName: null,
+      };
+    });
+  return ok({ reports: reports });
 }
 
 // Meme lecture que readLinen (v3.ts).
@@ -655,12 +707,13 @@ export async function simulate(action, opts) {
   const o = opts || {};
   if (!cible || !seance) return refus(400, 'Not available in practice');
   if (action === 'v3.uploadPhoto') return uploadPhoto(o.form);
+  if (action === 'v3.myReports') return myReports();
   const SIMULEES = {
     'v3.startJob': startJob, 'v3.tick': tick, 'v3.reportProblem': reportProblem,
     'v3.checkTicket': checkTicket, 'v3.finishJob': finishJob,
     'v3.addProblemPhoto': addProblemPhoto, 'v3.setProblemNote': setProblemNote,
     'v3.updateProblem': updateProblem, 'v3.deleteProblem': deleteProblem,
-    'v3.deletePhoto': deletePhoto,
+    'v3.deletePhoto': deletePhoto, 'v3.ticketStill': ticketStill,
   };
   const fn = ownKey(SIMULEES, action);
   if (!fn) return refus(400, 'Not available in practice');

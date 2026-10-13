@@ -62,18 +62,28 @@ function botMessage(conv) {
   }
 }
 
-// Tickets encore ouverts sur le logement (hors vérification du manager) : rappelés en entrant à l'étape 2.
-export function openProblemsText(apt) {
-  const others = (apt.openTickets || []).filter(t => !(apt.managerCheck && t.id === apt.managerCheck.ticketId));
-  return others.length ? "Open problems here: " + others.map(t => t.title).join(", ") + "." : null;
+// Tickets encore ouverts sur le logement, hors pest (qui garde sa question) : une carte chacun
+// en entrant a l'etape 2 (maintenance phase 3, C4).
+export function openTicketsHere(apt) {
+  return (apt.openTickets || []).filter(t => t.category !== "pest" && !(apt.managerCheck && t.id === apt.managerCheck.ticketId));
 }
+
+export const OPEN_TICKETS_TEXT = "Open problems here. Is it still there?";
 
 function advance(conv) {
   conv.i += 1;
   const st0 = conv.steps[conv.i], prev = conv.steps[conv.i - 1];
   if (st0 && st0.n === 2 && (!prev || prev.n !== 2)) {
-    const t = openProblemsText(conv.apt);
-    if (t) conv.messages.push({ from: "app", type: "text", text: t });
+    const tickets = openTicketsHere(conv.apt);
+    if (tickets.length) {
+      conv.messages.push({ from: "app", type: "text", text: OPEN_TICKETS_TEXT });
+      for (const t of tickets) {
+        conv.messages.push({ from: "app", type: "ticket", ticket: {
+          id: Number(t.id), title: String(t.title || "Ticket"), status: String(t.status || "open"),
+          assigneeName: t.assigneeName || null, reportedOn: t.reportedOn || null,
+        } });
+      }
+    }
   }
   const m = botMessage(conv);
   if (m) conv.messages.push(m);
@@ -106,6 +116,9 @@ export function createConversation(apt, { me, refStart = 461, now = new Date() }
     startedAt: null, endedAt: null, sent: false, gestures: 0, nextRef: refStart,
     // leaveProblems : problème relié à une ligne « not working » ; leaveOwn : créé par la ligne (supprimable par elle).
     flow: null, shareTextOnly: false, leaveProblems: {}, leaveOwn: {}, lastGasAt: null,
+    // tickets : reponse de la cleaner par ticket ouvert ({ answer: "still" | "fixed", photos }) ;
+    // fix : viseur « Fixed now » ouvert ({ ticketId, photos }).
+    tickets: {}, fix: null,
   };
   conv.steps = buildSteps(apt, isHelper(conv));
   if (isHelper(conv)) conv.messages.push({ from: "lead", type: "text", text: apt.lead.name + " started at " + apt.lead.startedAt + ". She sends the report. Add your photos and problems." });
@@ -199,7 +212,7 @@ export function currentStep(conv) {
 const say = (conv, text) => { const m = { from: "me", type: "text", text, status: "saved" }; conv.messages.push(m); return m; };
 
 export function reply(conv, id, { now = new Date() } = {}) {
-  if (conv.flow || conv.readOnly) return conv; // signalement en cours : ses écrans ont leurs propres réponses (flowReply)
+  if (conv.flow || conv.fix || conv.readOnly) return conv; // signalement en cours : ses écrans ont leurs propres réponses (flowReply)
   const st = currentStep(conv);
   const linenAdjust = /^linen-(inc|dec):/.test(id) && st.editor === "linen";
   const r = st.replies.find(x => x.id === id);
@@ -397,7 +410,7 @@ function openFlow(conv, f) {
 
 // Bouton ⚠ Problem (viseur ou barre) : un geste, l'écran des tuiles s'ouvre.
 export function startProblem(conv, { from = "conv" } = {}) {
-  if (conv.flow || conv.readOnly) return conv;
+  if (conv.flow || conv.fix || conv.readOnly) return conv;
   conv.gestures += 1;
   return openFlow(conv, { stage: "kind", from, where: guessWhere(conv) });
 }
@@ -543,4 +556,54 @@ export function removeProblem(conv, index) {
 export function elapsedMinutes(conv, now = new Date()) {
   if (!conv.startedAt) return 0;
   return Math.max(0, Math.round(((conv.endedAt || now) - conv.startedAt) / 60000));
+}
+
+// ---- Tickets ouverts du logement (maintenance phase 3, C4) ----
+// Carte d'un ticket : repondable tant que le rapport n'est pas parti, une seule fois.
+export function ticketCard(conv, id) {
+  const m = conv.messages.find(x => x.type === "ticket" && x.ticket.id === Number(id));
+  return m ? m.ticket : null;
+}
+
+export function ticketAnswerable(conv, id) {
+  const t = ticketCard(conv, id);
+  const tickets = conv.tickets || {};
+  return !!t && !conv.readOnly && !conv.sent && !conv.flow && !conv.fix && t.status !== "to_confirm" && !tickets[t.id];
+}
+
+// « Still there » : un geste, la carte garde la reponse.
+export function ticketStill(conv, id) {
+  if (!ticketAnswerable(conv, id)) return conv;
+  conv.gestures += 1;
+  (conv.tickets = conv.tickets || {})[Number(id)] = { answer: "still", photos: [] };
+  return conv;
+}
+
+// « Fixed now » : le viseur du ticket s'ouvre, la reponse attend la photo et Done.
+export function startTicketFix(conv, id) {
+  if (!ticketAnswerable(conv, id)) return conv;
+  conv.gestures += 1;
+  conv.fix = { ticketId: Number(id), photos: [] };
+  return conv;
+}
+
+export function addFixPhoto(conv, photo) {
+  if (!conv.fix || !photo) return conv;
+  conv.fix.photos.push(photo);
+  return conv;
+}
+
+export function fixDone(conv) {
+  const f = conv.fix;
+  if (!f || !f.photos.length) return conv;
+  conv.gestures += 1;
+  (conv.tickets = conv.tickets || {})[f.ticketId] = { answer: "fixed", photos: f.photos.slice() };
+  conv.fix = null;
+  return conv;
+}
+
+// Retour depuis le viseur du ticket : rien n'est garde, la carte reste repondable.
+export function fixCancel(conv) {
+  conv.fix = null;
+  return conv;
 }

@@ -42,6 +42,14 @@ function shortDay(iso) {
   return DAYS[d.getUTCDay()] + " " + d.getUTCDate() + " " + MONTHS[d.getUTCMonth()];
 }
 
+// Jour court d'un signalement : « today » ou « Sat 10 » (jour de Dubai YYYY-MM-DD).
+export function dayWord(iso, now = new Date()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""))) return null;
+  if (iso === dubaiDate(now)) return "today";
+  const d = new Date(iso + "T00:00:00Z");
+  return DAYS[d.getUTCDay()] + " " + d.getUTCDate();
+}
+
 // Prochain voyageur : libelle de la liste, texte du rapport, heures restantes.
 // Sans heure connue, l'arrivee compte au debut du jour (avertissement prudent).
 export function guestOf(stop, now) {
@@ -116,7 +124,8 @@ export function toApartments(payload, me, { now = new Date() } = {}) {
   return stops.map(s => {
     const { num, building } = splitName(s.listingName);
     const tickets = Array.isArray(s.openTickets) ? s.openTickets : [];
-    const pest = tickets.find(t => t.category === "pest");
+    // Un ticket pest deja verifie (to_confirm) attend le technicien : plus de question.
+    const pest = tickets.find(t => t.category === "pest" && t.status !== "to_confirm");
     return {
       id: s.jobId,
       listingId: s.listingId,

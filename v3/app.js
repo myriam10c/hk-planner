@@ -38,7 +38,7 @@ import { stampText } from '/v3/conv/stamp.js';
 import {
   createConversation, currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
   addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto, requireLinen,
-  readOnlyConversation,
+  readOnlyConversation, ticketStill, startTicketFix, addFixPhoto, fixDone, fixCancel,
 } from '/v3/conv/conversation.js';
 import {
   syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL, writeMode,
@@ -47,7 +47,7 @@ import { serializeConversation, deserializeConversation, photoIdems } from '/v3/
 import { reportText, reportFiles } from '/v3/conv/report.js';
 import {
   renderList, renderConversation, renderViewfinder, renderToast, renderFlow, renderPhotoView, renderProblemPage,
-  escapeHtml,
+  renderTicketFix, escapeHtml,
 } from '/v3/conv/ui.js';
 import { startCameraIfCurrent, stopCamera, streamLive, captureFrame, pickPhoto } from '/v3/conv/camera.js';
 import { shareReport } from '/v3/conv/share.js';
@@ -308,7 +308,7 @@ function stepKey(c) { const st = currentStep(c); return c.i + ':' + st.id; }
 
 async function maybeAutoOpen() {
   const c = conv();
-  if (!c || c.readOnly || S.screen !== 'conv' || routeName() !== 'cv' || S.camera.open || c.flow) return;
+  if (!c || c.readOnly || S.screen !== 'conv' || routeName() !== 'cv' || S.camera.open || c.flow || c.fix) return;
   const st = currentStep(c);
   const key = stepKey(c);
   if (st.camera && S.autoOpenedAt !== key) { S.autoOpenedAt = key; await openCamera(); }
@@ -515,6 +515,20 @@ onSent(function (entry, data) {
 // magasin mort.
 const ERREUR_LINGE = /must be an integer|must be >= 0|is out of range/;
 onRefused(refusLinge);
+// « Fixed now » sur un ticket que le technicien a clos entre-temps : rien a verifier, le geste
+// est tenu pour abouti (✓✓), jamais mis au magasin mort.
+onRefused(refusTicketClos);
+function refusTicketClos(entry, err) {
+  if (!entry || entry.action !== 'v3.checkTicket' || !err || err.status !== 400 || !/already closed/.test(String(err.message))) return false;
+  for (const c of Object.values(S.convs)) {
+    if (!ackSync(c, entry.body.idem, { alreadyClosed: true })) continue;
+    refreshTicks(c);
+    persist();
+    renderLater();
+    return true;
+  }
+  return false;
+}
 function refusLinge(entry, err) {
   if (!entry || entry.action !== 'v3.finishJob' || !err || err.status !== 400 || !ERREUR_LINGE.test(String(err.message))) return false;
   const c = Object.values(S.convs).find(x => x.sync && x.sync.finish === entry.body.idem);
@@ -695,7 +709,11 @@ function renderConv() {
     if (c.flow && !f) c.flow = null; // probleme supprime pendant le signalement
     const photoView = !f && S.viewPhoto !== null ? renderPhotoView(c, S.viewPhoto) : '';
     if (!photoView) S.viewPhoto = null;
-    if (f) {
+    if (c.fix && !f) {
+      // Viseur « Fixed now » d'un ticket ouvert (C4) : plein ecran, comme les photos d'un signalement.
+      html = modeBar() + renderTicketFix(c, { live: S.camera.live });
+      showVideo = true;
+    } else if (f) {
       // Une question par ecran, en plein ecran : pas de conversation dessous.
       html = renderFlow(c, { live: S.camera.live });
       showVideo = f.stage === 'photos';
@@ -764,6 +782,7 @@ window.addEventListener('popstate', async () => {
   const c = conv();
   if (S.screen !== 'conv' || !c || routeName() !== 'cv') { render(); return; }
   if (c.flow) { await flowStep(c, 'system-back'); return; }
+  if (c.fix) { fixCancel(c); await syncFlowCamera(c); render(); return; }
   if (S.viewPhoto !== null) { S.viewPhoto = null; render(); return; }
   if (S.editIndex !== null) { S.editIndex = null; S.confirmDelete = false; render(); return; }
   await toList(c);
@@ -773,7 +792,7 @@ window.addEventListener('popstate', async () => {
 // cet ecran si c'est lui qui l'a ouverte (depuis le viseur d'une piece, elle reste ouverte).
 async function syncFlowCamera(c) {
   const f = currentFlow(c);
-  const need = !!f && f.stage === 'photos';
+  const need = (!!f && f.stage === 'photos') || !!c.fix;
   if (need && !S.camera.open) { S.flowCam = true; await openCamera(); return; }
   if (!need && S.flowCam) { S.flowCam = false; closeCamera(); }
 }
@@ -782,7 +801,7 @@ async function after(c) {
   markSynced(c);
   await syncFlowCamera(c);
   const st = currentStep(c), f = currentFlow(c);
-  if (S.camera.open && !st.camera && !(f && f.stage === 'photos')) closeCamera();
+  if (S.camera.open && !st.camera && !(f && f.stage === 'photos') && !c.fix) closeCamera();
   render();
   await maybeAutoOpen();
 }
@@ -853,6 +872,26 @@ async function convClick(b) {
     render(); return;
   }
   if (d.flow) { await flowStep(c, d.flow); return; }
+  // Tickets ouverts du logement (C4) : Still there, Fixed now (viseur, photo, Done).
+  if (d.act === 'ticket-still') { if (busy) return; ticketStill(c, Number(d.ticket)); await after(c); return; }
+  if (d.act === 'ticket-fixed') {
+    if (busy) return;
+    startTicketFix(c, Number(d.ticket));
+    S.toastIndex = null; clearTimeout(toastTimer);
+    await syncFlowCamera(c);
+    render(); return;
+  }
+  if (d.act === 'fix-shutter') {
+    await capture(c, async p => {
+      if (!c.fix) return;
+      addFixPhoto(c, p);
+      render();
+      await painted();
+    });
+    return;
+  }
+  if (d.act === 'fix-done') { fixDone(c); await after(c); return; }
+  if (d.act === 'fix-cancel') { fixCancel(c); await syncFlowCamera(c); render(); return; }
   if (d.act === 'flow-shutter') {
     await capture(c, async p => {
       if (!currentFlow(c)) return;

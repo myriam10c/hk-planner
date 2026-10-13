@@ -29,6 +29,9 @@ export function serializeConversation(conv) {
     arrivalPhotos: mapStore(conv.arrivalPhotos),
     endPhotos: mapStore(conv.endPhotos),
     problems: conv.problems.map(p => ({ ...p, photos: p.photos.map(ref) })),
+    // Reponses aux tickets ouverts : leurs photos par cle ; un viseur « Fixed now » ouvert ne se reprend pas.
+    tickets: Object.fromEntries(Object.entries(conv.tickets || {}).map(([id, t]) => [id, { ...t, photos: (t.photos || []).map(ref) }])),
+    fix: null,
     leaveProblems: Object.fromEntries(Object.entries(conv.leaveProblems).map(([k, p]) => [k, idx(p)])),
     flow,
   };
@@ -55,6 +58,8 @@ export function deserializeConversation(data, photoOf) {
     arrivalPhotos: mapStore(data.arrivalPhotos),
     endPhotos: mapStore(data.endPhotos),
     problems: (data.problems || []).map(p => ({ ...p, photos: (p.photos || []).map(photo) })),
+    tickets: Object.fromEntries(Object.entries(data.tickets || {}).map(([id, t]) => [id, { ...t, photos: ((t && t.photos) || []).map(photo) }])),
+    fix: null,
   };
   conv.leaveProblems = {};
   for (const [k, i] of Object.entries(data.leaveProblems || {})) if (conv.problems[i]) conv.leaveProblems[k] = conv.problems[i];
@@ -75,6 +80,6 @@ export function photoIdems(data) {
     if (Array.isArray(x)) x.forEach(walk);
     else if (isObj(x)) { if ("$photo" in x && x.$photo) out.add(x.$photo); else Object.values(x).forEach(walk); }
   };
-  walk([data && data.messages, data && data.arrivalPhotos, data && data.endPhotos, data && data.problems]);
+  walk([data && data.messages, data && data.arrivalPhotos, data && data.endPhotos, data && data.problems, data && data.tickets]);
   return [...out];
 }
