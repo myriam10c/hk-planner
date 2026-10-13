@@ -22,6 +22,7 @@ import {
   heroPhotoFrom, loadOthersOnJob, loadReferences, loadRoles, roomsFor,
 } from "./v3_day_extras.ts";
 import type { OtherOnJob } from "./v3_day_extras.ts";
+import { extraTimeOut } from "./mgr_extra.ts";
 
 export interface V3Ticket {
   id: number;
@@ -55,6 +56,7 @@ export interface V3Stop {
   progress: Record<string, boolean>;
   openTickets: V3Ticket[];
   label: string | null;       // libelle d'un menage hors Hostaway
+  time: string | null;        // heure dediee d'un extra HH:MM (Dubai), null sinon
   // Branchement 2026-10-05 (tache 3), voir v3_day_extras.ts.
   rooms: string[];            // pieces par type, regle unique cote serveur
   heroPhotoUrl: string | null; // premiere image de l'annonce, cache seulement
@@ -109,6 +111,9 @@ export interface MyDayPayload {
 // L'arrivee est comparee AVEC sa date : sur la seule heure, une arrivee le 20 a
 // 09:00 sortait avant une arrivee le 13 a 15:00, alors qu'elle est une semaine
 // moins urgente (revue tache 3, constat 7).
+//
+// L'heure dediee d'un extra tient la place de l'heure de checkout : un extra a
+// 09:30 passe avant un depart de 11:00, un extra sans heure reste apres.
 export function orderStops(stops: V3Stop[]): V3Stop[] {
   const heure = (v: string | null) => (v && /^\d{2}:\d{2}$/.test(v) ? v : "99:99");
   const arrivee = (s: V3Stop) =>
@@ -118,7 +123,7 @@ export function orderStops(stops: V3Stop[]): V3Stop[] {
   return [...stops].sort((a, b) =>
     (a.sameDay ? 0 : 1) - (b.sameDay ? 0 : 1) ||
     arrivee(a).localeCompare(arrivee(b)) ||
-    heure(a.checkOutTime).localeCompare(heure(b.checkOutTime)) ||
+    heure(a.checkOutTime ?? a.time ?? null).localeCompare(heure(b.checkOutTime ?? b.time ?? null)) ||
     String(a.listingName).localeCompare(String(b.listingName))
   );
 }
@@ -223,6 +228,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
     reservationKey: string; listingId: string; guest: unknown; nextGuestName: unknown;
     checkOutTime: string | null; nextArrivalDate: string | null;
     nextArrivalTime: string | null; sameDay: boolean; label: string | null;
+    time: string | null;
     // Titre Hostaway porte par la reservation, repli quand le logement n'a pas
     // encore de fiche listing_config. Nul pour un menage hors Hostaway.
     hostawayTitle: unknown;
@@ -267,6 +273,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
           reportedOn: dubaiDayOf(t.created_at),
         })),
       label: base.label,
+      time: base.time,
       rooms: roomsFor(listing.unit_type, listing.bedrooms),
       heroPhotoUrl: heroPhotoFrom(listing),
       othersOnJob: [],
@@ -297,6 +304,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
       nextArrivalTime: r?.nextGuest ? formatHour(r.nextGuest.checkInTime) : null,
       sameDay: !!(r?.nextGuest && r.nextGuest.sameDay),
       label: null,
+      time: null,
       hostawayTitle: r?.listing,
     }) });
   }
@@ -321,6 +329,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
       nextArrivalTime: null,
       sameDay: false,
       label: e?.label ? String(e.label) : null,
+      time: extraTimeOut(e?.cleaning_time),
       // Un menage hors Hostaway n'a pas de reservation, donc pas de titre
       // Hostaway : seule la fiche listing_config peut le nommer.
       hostawayTitle: null,

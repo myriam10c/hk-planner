@@ -120,7 +120,7 @@ Deno.test("mgr.planning : statuts, heures, reports, linge, extras", async () => 
   assertEquals([byKey(b, "2026-10-09_Cy Doe").tone, byKey(b, "2026-10-09_Cy Doe").word], ["warn", "Not logged yet"]);
   const x = byKey(b, "extra_2026-10-09_mabc");
   assertEquals([x.kind, x.guest, x.next, x.assigned, x.tone, x.word], ["extra", null, null, [10], "idle", "Scheduled"]);
-  assertEquals(x.extra, { id: 31, label: "Deep clean", guestName: "Owner", priceBilled: 250, cleanerPrice: 120, notes: "Bring the steamer", cleaningDate: TODAY });
+  assertEquals(x.extra, { id: 31, label: "Deep clean", guestName: "Owner", priceBilled: 250, cleanerPrice: 120, notes: "Bring the steamer", cleaningDate: TODAY, cleaningTime: null });
   const fa = byKey(b, "2026-10-10_Fa Ho");
   assertEquals([fa.date, fa.postponedFrom, fa.serviceType, fa.tone, fa.word], ["2026-10-11", "2026-10-10", "CHC", "bad", "Guest arrives first"]);
   assertEquals(fa.next, { date: "2026-10-10", time: "15:00", sameDay: false, before: true });
@@ -163,5 +163,23 @@ Deno.test("mgr.planning : une table illisible leve (jamais une semaine calculee 
 Deno.test("S6 : role maintenance = prix des extras omis (null), le reste de l'extra garde", async () => {
   const b = await run(seed(), { cleaner_id: 7, name: "Semax", role: "maintenance", color: "" });
   const x = byKey(b, "extra_2026-10-09_mabc");
-  assertEquals(x.extra, { id: 31, label: "Deep clean", guestName: "Owner", priceBilled: null, cleanerPrice: null, notes: "Bring the steamer", cleaningDate: TODAY });
+  assertEquals(x.extra, { id: 31, label: "Deep clean", guestName: "Owner", priceBilled: null, cleanerPrice: null, notes: "Bring the steamer", cleaningDate: TODAY, cleaningTime: null });
+});
+
+Deno.test("extra avec heure : trie a son heure parmi les menages du jour, sans heure reste en fin de journee", async () => {
+  const db = seed();
+  db.tables.extra_cleanings.push(
+    { id: 40, reservation_key: "extra_2026-10-09_early", listing_id: "L8", cleaning_date: TODAY, label: "Touch up",
+      cleaning_time: "10:30:00", status: "pending" },
+    { id: 41, reservation_key: "extra_2026-10-09_late", listing_id: "L1", cleaning_date: TODAY, label: "Late",
+      cleaning_time: "16:00", status: "pending" },
+  );
+  const b = await run(db);
+  assertEquals(b.jobs.filter((j) => j.date === TODAY).map((j) => j.key), [
+    "extra_2026-10-09_early", "2026-10-09_Bo Ray", "2026-10-09_Cy Doe", "extra_2026-10-09_late", "extra_2026-10-09_mabc",
+  ]);
+  const early = byKey(b, "extra_2026-10-09_early");
+  assertEquals([early.extra?.cleaningTime, early.checkout], ["10:30", null]);
+  assertEquals(byKey(b, "extra_2026-10-09_late").extra?.cleaningTime, "16:00");
+  assertEquals(byKey(b, "extra_2026-10-09_mabc").extra?.cleaningTime, null);
 });

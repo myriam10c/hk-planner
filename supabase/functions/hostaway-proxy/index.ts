@@ -38,7 +38,7 @@ import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
 import { mgrProblemGet } from "./mgr_problem_get.ts";
 import { mgrProblemAct } from "./mgr_problem_act.ts";
-import { extraReservationKey, insertExtraOnce } from "./mgr_extra.ts";
+import { extraReservationKey, insertExtraOnce, parseExtraTime, withExtraTime } from "./mgr_extra.ts";
 import { LAUNDRY_FIELDS, parsePlanningStart } from "./mgr_planning_rules.ts";
 import { mgrPlanning } from "./mgr_planning.ts";
 import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
@@ -3287,7 +3287,7 @@ Deno.serve(async (req: Request) => {
         equipment: equipRes.data || [], preventiveMaintenance: prevRes.data || [],
         cancelled: cancelledMap,
         postponed: postponedMap,
-        extraCleanings: extraRes.data || [],
+        extraCleanings: (extraRes.data || []).map(withExtraTime),
         leaves: leaveRes.data || [],
         holidays: holidayRes.data || [],
       });
@@ -3926,6 +3926,9 @@ Deno.serve(async (req: Request) => {
       const { listing_id, cleaning_date, label, guest_name, price_billed, cleaner_price, notes, assigned_cleaner_id } = body;
       if (!listing_id || !cleaning_date) return jsonResp({ error: "listing_id and cleaning_date required" }, 400);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(cleaning_date))) return jsonResp({ error: "cleaning_date must be YYYY-MM-DD" }, 400);
+      // Heure dediee optionnelle : HH:MM, vide ou absente = pas d'heure.
+      const addTime = parseExtraTime(body.cleaning_time);
+      if (!addTime.ok) return jsonResp({ error: "Invalid time." }, 400);
       // Auteur pris dans la session (spec manager, section 6), body.created_by ignore.
       const created_by = sessionActor(await currentUser(sb, req), body.created_by);
 
@@ -3952,6 +3955,7 @@ Deno.serve(async (req: Request) => {
       const reservation_key = extraReservationKey(String(cleaning_date), body.idem, rand);
       const created = await insertExtraOnce(sb, {
         reservation_key, listing_id, cleaning_date,
+        cleaning_time: addTime.value,
         label: label || null,
         guest_name: guest_name || null,
         price_billed: price_billed ?? null,
@@ -3971,14 +3975,17 @@ Deno.serve(async (req: Request) => {
         }, { onConflict: "reservation_key,cleaner_id" });
         if (assignErr) throw assignErr;
       }
-      if (!created.replay) await addLog(sb, reservation_key, "extra_created", created_by, { listing_id, label, price_billed, assigned_cleaner_id });
-      return jsonResp({ status: "success", extra: data, replay: created.replay });
+      if (!created.replay) await addLog(sb, reservation_key, "extra_created", created_by, { listing_id, label, price_billed, assigned_cleaner_id, cleaning_time: addTime.value });
+      return jsonResp({ status: "success", extra: data ? withExtraTime(data) : data, replay: created.replay });
     }
 
     if (action === "updateExtraCleaning" && req.method === "POST") {
       const body = await req.json();
       const { id, label, guest_name, price_billed, cleaner_price, notes, status, cleaning_date, listing_id } = body;
       if (!id) return jsonResp({ error: "id required" }, 400);
+      // Heure dediee : absente = inchangee ; vide ou null = effacee (null, jamais 00:00).
+      const updTime = body.cleaning_time === undefined ? null : parseExtraTime(body.cleaning_time);
+      if (updTime && !updTime.ok) return jsonResp({ error: "Invalid time." }, 400);
 
       // Blocage strict AVANT tout write, comme addExtraCleaning : deplacer une prestation
       // vers un jour ou son cleaner est en conge approuve doit etre refuse. Sans ce
@@ -4032,6 +4039,7 @@ Deno.serve(async (req: Request) => {
       if (status !== undefined) upd.status = status;
       if (cleaning_date !== undefined) upd.cleaning_date = cleaning_date;
       if (listing_id !== undefined) upd.listing_id = listing_id;
+      if (updTime && updTime.ok) upd.cleaning_time = updTime.value;
       const { error } = await sb.from("extra_cleanings").update(upd).eq("id", id);
       if (error) throw error;
       // Trace avec l'auteur de la session (spec manager, section 6).
@@ -4073,7 +4081,7 @@ Deno.serve(async (req: Request) => {
       if (listing) q = q.eq("listing_id", listing);
       const { data, error } = await q;
       if (error) throw error;
-      return jsonResp({ status: "success", extras: data || [] });
+      return jsonResp({ status: "success", extras: (data || []).map(withExtraTime) });
     }
 
     // ==================== TEAM TASKS (to-do partagée multi-rôles) ====================

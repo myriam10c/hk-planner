@@ -77,6 +77,19 @@ Deno.test("menages du jour : departs, report, extra ; annule et inquiry exclus ;
   assertEquals(by["extra_2026-10-09_deep"].kind, "extra");
 });
 
+Deno.test("extra avec heure : extraTime HH:MM, trie a son heure ; sans heure, null et rang inchange", async () => {
+  const db = seed();
+  db.tables.extra_cleanings.push(
+    { reservation_key: "extra_2026-10-09_quick", listing_id: "L7", cleaning_date: DAY, label: "Touch up", cleaning_time: "11:30:00", status: "pending" },
+  );
+  const jobs = buildJobs(await loadCore(db, { day: DAY, nowMs: AT_11, riskHours: 6, reservations: RES }));
+  assertEquals(jobs.map((j) => [j.key, j.extraTime]), [
+    ["extra_2026-10-09_quick", "11:30"], ["2026-10-09_Ann Lee", null], ["2026-10-09_Lu Mo", null],
+    ["2026-10-09_Cy Doe", null], ["2026-10-07_Jo La", null], ["extra_2026-10-09_deep", null],
+  ]);
+  assertEquals(jobs[0].checkout, null);
+});
+
 Deno.test("Who does what : personnes, non assignes (arrivee du jour d'abord), techniciens", async () => {
   const c = await core(AT_11);
   const who = buildWho(c, buildJobs(c));

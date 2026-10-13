@@ -7,6 +7,7 @@
 import type { SessionUser } from "./auth.ts";
 import { plusDays } from "./v3.ts";
 import { INSP_VALID_STATUSES } from "./insp_rules.ts";
+import { extraTimeOut } from "./mgr_extra.ts";
 import {
   byRoleThenName, hhmm, MGR_USUALLY_ELITE_WINDOW_DAYS, reservationKey, splitListing, usuallyEliteListings, type Tone,
 } from "./mgr_rules.ts";
@@ -23,6 +24,7 @@ export type PlanNext = { date: string; time: string | null; sameDay: boolean; be
 export type PlanExtra = {
   id: number; label: string; guestName: string | null; priceBilled: number | null;
   cleanerPrice: number | null; notes: string | null; cleaningDate: string;
+  cleaningTime: string | null; // heure dediee HH:MM (Dubai), null = pas d'heure
 };
 export type PlanJob = {
   key: string; kind: "checkout" | "extra"; listingId: string; apt: string; bld: string;
@@ -42,7 +44,7 @@ export type MgrPlanning = {
   counts: { total: number; unassigned: number; done: number; cancelled: number };
 };
 
-const EXTRA_COLS = "id, reservation_key, listing_id, cleaning_date, label, guest_name, price_billed, cleaner_price, notes, status";
+const EXTRA_COLS = "id, reservation_key, listing_id, cleaning_date, cleaning_time, label, guest_name, price_billed, cleaner_price, notes, status";
 const num = (v: unknown) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 const txt = (v: unknown) => (v === null || v === undefined || String(v).trim() === "" ? null : String(v));
 const TEAM = (role: string) => role === "cleaner" || role === "subcontractor";
@@ -154,10 +156,14 @@ export async function mgrPlanning(sb: any, o: {
     add(String(e.reservation_key), "extra", String(e.listing_id ?? ""), String(e.cleaning_date), null, null, null, {
       id: Number(e.id), label: String(e.label ?? "Extra cleaning"), guestName: txt(e.guest_name),
       priceBilled: prices ? num(e.price_billed) : null, cleanerPrice: prices ? num(e.cleaner_price) : null, notes: txt(e.notes), cleaningDate: String(e.cleaning_date),
+      cleaningTime: extraTimeOut(e.cleaning_time),
     });
   }
+  // Un extra avec heure se range a son heure parmi les departs du jour ; sans
+  // heure il reste apres ceux qui en ont une, comme avant.
+  const at = (j: PlanJob) => j.checkout ?? j.extra?.cleaningTime ?? "99";
   jobs.sort((a, b) =>
-    a.date.localeCompare(b.date) || (a.checkout ?? "99").localeCompare(b.checkout ?? "99") ||
+    a.date.localeCompare(b.date) || at(a).localeCompare(at(b)) ||
     (a.apt + a.bld).localeCompare(b.apt + b.bld) || a.key.localeCompare(b.key));
 
   const used = new Set<number>(jobs.flatMap((j) => j.assigned));

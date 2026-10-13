@@ -18,3 +18,25 @@ export async function insertExtraOnce(sb: any, row: Record<string, unknown>): Pr
   if (e2 || !prev) throw new Error(error.message ?? "insert failed");
   return { row: prev, replay: true };
 }
+
+// Heure dediee d'un extra (optionnelle) : stockee HH:MM, heure de Dubai sans
+// fuseau. Vide ou null = pas d'heure (l'extra se comporte comme avant).
+export function parseExtraTime(v: unknown): { ok: true; value: string | null } | { ok: false } {
+  if (v === undefined || v === null) return { ok: true, value: null };
+  if (typeof v !== "string") return { ok: false };
+  const s = v.trim();
+  if (s === "") return { ok: true, value: null };
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s)) return { ok: false };
+  return { ok: true, value: s };
+}
+
+// La colonne time de Postgres sort en « 14:00:00 » : on rend « 14:00 », ou null
+// (jamais un 00:00 invente pour une ligne sans heure).
+export function extraTimeOut(v: unknown): string | null {
+  const m = typeof v === "string" ? v.match(/^(\d{2}:\d{2})(:\d{2}(\.\d+)?)?$/) : null;
+  return m ? m[1] : null;
+}
+
+export function withExtraTime<T extends Record<string, unknown>>(row: T): T & { cleaning_time: string | null } {
+  return { ...row, cleaning_time: extraTimeOut(row?.cleaning_time) };
+}

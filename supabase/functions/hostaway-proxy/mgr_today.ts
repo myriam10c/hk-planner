@@ -9,6 +9,7 @@ import {
   type MgrReservation, type PrevCleaning, type Tone,
 } from "./mgr_rules.ts";
 import { MGR_OPEN_TICKET_STATUSES } from "./mgr_inbox.ts";
+import { extraTimeOut } from "./mgr_extra.ts";
 
 // Liste unique (mgr_inbox.ts) : Today, Problems et l'ecran Maintenance actuel disent la meme chose.
 export { MGR_OPEN_TICKET_STATUSES };
@@ -28,7 +29,7 @@ export type MgrCore = {
   postponed: Record<string, string>;
   assignments: Record<string, Array<{ cleanerId: number; serviceType: string }>>;
   done: Set<string>; started: Set<string>; cancelled: Set<string>;
-  extras: Array<{ key: string; listingId: string; label: string }>;
+  extras: Array<{ key: string; listingId: string; label: string; time: string | null }>;
 };
 
 // Une lecture ratee leve : Today ne doit jamais afficher un « Ready » calcule
@@ -86,10 +87,11 @@ export async function loadCore(
   const reservations = a.reservations.filter((r) => INSP_VALID_STATUSES.includes(r.status));
   const from = plusDays(day, -MGR_LOOKBACK_DAYS);
   const extras = readOrThrow(
-    await sb.from("extra_cleanings").select("reservation_key, listing_id, label, status").eq("cleaning_date", day),
+    await sb.from("extra_cleanings").select("reservation_key, listing_id, label, cleaning_time, status").eq("cleaning_date", day),
     "extra_cleanings",
   ).filter((e: any) => e.status !== "cancelled" && e.reservation_key)
-    .map((e: any) => ({ key: String(e.reservation_key), listingId: String(e.listing_id ?? ""), label: String(e.label ?? "Extra cleaning") }));
+    .map((e: any) => ({ key: String(e.reservation_key), listingId: String(e.listing_id ?? ""), label: String(e.label ?? "Extra cleaning"),
+      time: extraTimeOut(e.cleaning_time) }));
   const keys = [...new Set([
     ...reservations.filter((r) => r.departure >= from && r.departure <= day).map(reservationKey),
     ...extras.map((e: { key: string }) => e.key),
@@ -139,6 +141,7 @@ export type MgrJob = {
   key: string; kind: "checkout" | "extra"; listingId: string; apt: string; bld: string;
   checkout: string | null; checkoutDate: string; postponedFrom: string | null;
   next: MgrNext | null;
+  extraTime: string | null; // heure dediee d'un extra (HH:MM Dubai), null sinon
   assigned: number[]; serviceType: string | null;
   state: "done" | "in_progress" | "not_started";
   tone: Tone; word: string;
@@ -157,7 +160,7 @@ function nextStay(c: MgrCore, listingId: string, fromDate: string, excludeId: st
 
 function makeJob(
   c: MgrCore, key: string, kind: "checkout" | "extra", listingId: string,
-  checkoutDate: string, checkoutHour: number | null, next: MgrNext | null,
+  checkoutDate: string, checkoutHour: number | null, next: MgrNext | null, extraTime: string | null = null,
 ): MgrJob {
   const l = place(c, listingId);
   const rows = c.assignments[key] ?? [];
@@ -181,7 +184,7 @@ function makeJob(
     key, kind, listingId, apt: l.apt, bld: l.bld,
     checkout: checkoutDate === c.day ? hhmm(checkoutHour) : null, checkoutDate,
     postponedFrom: checkoutDate !== c.day ? checkoutDate : null,
-    next, assigned, serviceType: rows[0]?.serviceType ?? null, state, tone, word,
+    next, extraTime, assigned, serviceType: rows[0]?.serviceType ?? null, state, tone, word,
   };
 }
 
@@ -199,10 +202,12 @@ export function buildJobs(c: MgrCore): MgrJob[] {
   for (const e of c.extras) {
     if (seen.has(e.key) || c.cancelled.has(e.key)) continue;
     seen.add(e.key);
-    jobs.push(makeJob(c, e.key, "extra", e.listingId, c.day, null, nextStay(c, e.listingId, c.day, "")));
+    jobs.push(makeJob(c, e.key, "extra", e.listingId, c.day, null, nextStay(c, e.listingId, c.day, ""), e.time ?? null));
   }
+  // Un extra avec heure se range a son heure ; sans heure, comme avant.
+  const at = (j: MgrJob) => j.checkout ?? j.extraTime ?? "99";
   return jobs.sort((a, b) =>
-    (a.checkout ?? "99").localeCompare(b.checkout ?? "99") || (a.apt + a.bld).localeCompare(b.apt + b.bld));
+    at(a).localeCompare(at(b)) || (a.apt + a.bld).localeCompare(b.apt + b.bld));
 }
 
 export type MgrWho = {

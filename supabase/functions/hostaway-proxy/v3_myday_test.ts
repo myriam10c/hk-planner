@@ -207,6 +207,22 @@ Deno.test("buildMyDay prend les menages hors Hostaway du jour", async () => {
   assertEquals(out.stops[0].sameDay, false);
 });
 
+Deno.test("buildMyDay : un extra porte son heure dediee (time HH:MM), sinon null ; un depart a time null", async () => {
+  const base = jeuDEssai() as any;
+  base.assignedKeys = ["extra_2026-09-12_ab12cd34", "extra_2026-09-12_notime00", "2026-09-12_Sofia Marchetti"];
+  base.extras = [
+    { reservation_key: "extra_2026-09-12_ab12cd34", listing_id: "104", cleaning_date: "2026-09-12", label: "Deep clean", cleaning_time: "09:30:00" },
+    { reservation_key: "extra_2026-09-12_notime00", listing_id: "103", cleaning_date: "2026-09-12", label: "Touch up" },
+  ];
+  const out = await buildMyDay(base);
+  const by = Object.fromEntries(out.stops.map((s) => [s.listingName, s]));
+  assertEquals(by["506 Act One"].time, "09:30");
+  assertEquals(by["122 Oxford Boulevard"].time, null);
+  assertEquals(by["704 Golf Links"].time, null);
+  // L'extra a 09:30 passe avant le depart de 11:00 ; l'extra sans heure reste en dernier.
+  assertEquals(out.stops.map((s) => s.listingName), ["506 Act One", "704 Golf Links", "122 Oxford Boulevard"]);
+});
+
 // ===========================================================================
 // Nom du logement montre a la cleaner (revue de branche, findings 1 et 2)
 // ===========================================================================
