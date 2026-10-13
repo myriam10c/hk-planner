@@ -264,3 +264,13 @@ Deno.test("mnt.digest : erreur de lecture 503", async () => {
     console.error = orig;
   }
 });
+
+Deno.test("mntPage : listing_config se trie par listing_id (pas de colonne id)", async () => {
+  const { mntPage } = await import("./mnt_read.ts");
+  const orders: string[] = [];
+  const q: any = { select: () => q, order: (c: string) => { orders.push(c); return q; }, range: () => Promise.resolve({ data: [], error: null }) };
+  const sb = { from: () => q };
+  await mntPage(sb, "listing_config", "listing_id", (x) => x);
+  await mntPage(sb, "cleaners", "id", (x) => x);
+  if (orders.join(",") !== "listing_id,id") throw new Error("orders: " + orders.join(","));
+});

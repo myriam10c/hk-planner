@@ -92,8 +92,10 @@ export function mntOpenCounts(open: any[]): { open: number; urgent: number; unas
   return { open: open.length, urgent: open.filter((t: any) => t.priority === "urgent").length, unassigned: open.filter(unassigned).length };
 }
 // Lecture paginee d'une table (toutes les pages, erreur levee).
+// listing_config n'a pas de colonne id : sa cle est listing_id (ordre stable obligatoire pour paginer).
 export function mntPage(sb: any, table: string, cols: string, f: (x: any) => any): Promise<any[]> {
-  return readAllRows((a: number, b: number) => f(sb.from(table).select(cols)).order("id").range(a, b), table);
+  const key = table === "listing_config" ? "listing_id" : "id";
+  return readAllRows((a: number, b: number) => f(sb.from(table).select(cols)).order(key).range(a, b), table);
 }
 // Tickets ouverts et propositions en attente : la base commune des compteurs.
 export const readOpenTickets = (sb: any) => mntPage(sb, "maintenance_tickets", MNT_TICKET_COLS, (x) => x.in("status", MGR_OPEN_TICKET_STATUSES));
