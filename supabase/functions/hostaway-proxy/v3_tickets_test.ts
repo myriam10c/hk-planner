@@ -655,14 +655,19 @@ Deno.test("ticketStill rejoue sans doubler le commentaire ni le push", async () 
 });
 
 for (const statut of ["resolved", "closed", "cancelled"]) {
-  Deno.test("ticketStill refuse un ticket " + statut + " en 409 et libere sa cle", async () => {
+  Deno.test("ticketStill sur un ticket " + statut + " rend 200 alreadyClosed, sans commentaire ni push", async () => {
     const sb = baseStill(statut);
     const spy = espionPush();
-    const r = await ticketStill(sb, FAIZA as any, { ticketId: 91, jobId: JOB_ID, idem: "idem-still-0003" },
-      { push: spy.push });
-    assertEquals(r, { status: 409, body: { error: "This problem is already closed." } });
+    const corps = { ticketId: 91, jobId: JOB_ID, idem: "idem-still-0003" };
+    const r = await ticketStill(sb, FAIZA as any, corps, { push: spy.push });
+    assertEquals(r, { status: 200, body: { ok: true, alreadyClosed: true } });
     assertEquals(sb.tables.ticket_comments.length, 0);
-    assertEquals(sb.tables.job_events.length, 0);
+    assertEquals(spy.envois.length, 0);
+    assertEquals(sb.tables.maintenance_tickets[0].status, statut);
+    // Le rejeu de la file hors ligne rend la meme reponse, toujours sans effet.
+    const encore = await ticketStill(sb, FAIZA as any, corps, { push: spy.push });
+    assertEquals(encore, { status: 200, body: { ok: true, alreadyClosed: true } });
+    assertEquals(sb.tables.ticket_comments.length, 0);
     assertEquals(spy.envois.length, 0);
   });
 }

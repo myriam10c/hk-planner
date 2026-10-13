@@ -292,12 +292,14 @@ export async function ticketStill(
       await releaseEvent(sb, String(idem));
       return { status: 400, body: { error: "ticket not found" } };
     }
-    // 409 impose par le plan, avec ce message exact. Attention : la file hors
-    // ligne traite 409 comme « a rejouer » ; elle doit reconnaitre ce message
-    // pour ne pas rejouer sans fin un geste sur un ticket clos (tache 2).
+    // Ticket clos : rien a faire, mais un 200 (ruling du controleur) ; un 409
+    // ferait rejouer la file hors ligne sans fin. Ni commentaire ni push. Le
+    // resultat est memorise : un rejeu rend la meme reponse.
     if (FERMES_STILL.indexOf(String(ticket.status ?? "")) !== -1) {
-      await releaseEvent(sb, String(idem));
-      return { status: 409, body: { error: "This problem is already closed." } };
+      const deja = { ok: true, alreadyClosed: true };
+      await sansEchec("resultat non memorise pour " + String(idem),
+        () => recordResult(sb, String(idem), deja));
+      return { status: 200, body: deja };
     }
     // Ecriture decisive : le commentaire est tout le geste.
     const { error: cErr } = await sb.from("ticket_comments").insert({
