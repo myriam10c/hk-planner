@@ -31,6 +31,12 @@ function twelve(hhmm) {
   return h12 + (m ? ":" + two(m) : "") + " " + suffix;
 }
 
+// Heure dediee d'un extra (stops[].time « HH:MM ») en « 2 PM » ; null sans heure,
+// heure invalide ou ancien proxy (champ absent).
+export function extraAt(time) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(time || "")) ? twelve(time) : null;
+}
+
 function dayAfter(iso) {
   const d = new Date(iso + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + 1);
@@ -134,6 +140,7 @@ export function toApartments(payload, me, { now = new Date() } = {}) {
       rooms: Array.isArray(s.rooms) && s.rooms.length ? s.rooms.slice() : ["Bed", "Bathroom", "Kitchen"],
       usualMinutes: Number(s.estimatedMinutes) || 0,
       guest: guestOf(s, now),
+      extraAt: extraAt(s.time),
       photo: s.heroPhotoUrl || null,
       roomPhotos: s.references && typeof s.references === "object" ? { ...s.references } : {},
       managerCheck: pest ? { ...PEST, ticketId: pest.id } : null,

@@ -24,7 +24,7 @@ test('Add extra : prix obligatoire, une seule creation au double clic, sans aute
   const w = await writes(page, 'addExtraCleaning');
   expect(w.length).toBe(1);
   expect(noIdem(w)).toEqual([{
-    listing_id: 'L8', cleaning_date: '2026-10-10', label: 'Mid-stay', guest_name: null,
+    listing_id: 'L8', cleaning_date: '2026-10-10', cleaning_time: null, label: 'Mid-stay', guest_name: null,
     price_billed: 200, cleaner_price: 100, notes: 'Late checkout', assigned_cleaner_id: 10,
   }]);
   expect(w[0].idem).toMatch(IDEM);
@@ -45,7 +45,7 @@ test('Edit extra puis Delete', async ({ page }, info) => {
   await sh.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('#toast')).toContainText('Extra cleaning saved for Apt 808 · Tower H');
   expect(noIdem(await writes(page, 'updateExtraCleaning'))).toEqual([{
-    id: 31, listing_id: 'L8', cleaning_date: '2026-10-09', label: 'Deep clean', guest_name: 'Owner',
+    id: 31, listing_id: 'L8', cleaning_date: '2026-10-09', cleaning_time: null, label: 'Deep clean', guest_name: 'Owner',
     price_billed: 300, cleaner_price: 120, notes: 'Bring the steamer',
   }]);
   await openJob(page, isMobile(info), 'extra_2026-10-09_mabc', '2026-10-09');
@@ -134,7 +134,7 @@ test('F4 : Semax modifie un extra sans prix : champs de prix caches, aucun prix 
   await sh.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('#toast')).toContainText('Extra cleaning saved for Apt 808 · Tower H');
   expect(noIdem(await writes(page, 'updateExtraCleaning'))).toEqual([{
-    id: 31, listing_id: 'L8', cleaning_date: '2026-10-09', label: 'Deep clean', guest_name: 'Owner', notes: 'Bring the vacuum',
+    id: 31, listing_id: 'L8', cleaning_date: '2026-10-09', cleaning_time: null, label: 'Deep clean', guest_name: 'Owner', notes: 'Bring the vacuum',
   }]);
 });
 
@@ -152,4 +152,56 @@ test('F4 : un manager voit les deux champs de prix meme si l extra n en a pas', 
   await sh.getByRole('button', { name: 'Edit extra' }).click();
   await expect(sh.locator('#xPrice')).toHaveCount(1);
   await expect(sh.locator('#xRate')).toHaveCount(1);
+});
+
+// ---------- Heure dediee d'un extra (13/10/2026) ----------
+function timedBody(time: string | null) {
+  const b = planningBody();
+  for (const j of b.jobs) if (j.extra) j.extra.cleaningTime = time;
+  return b;
+}
+const xCard = (page: any) => page.locator('.pj[data-job="extra_2026-10-09_mabc"]');
+
+test('Heure : Add extra envoie cleaning_time, champ Time (optional) a cote de Date', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), PLAN(), { match: 'action=addExtraCleaning', status: 200, body: OK }], { email: true, hash: HASH, clock: PNOW });
+  await page.getByRole('button', { name: 'Add extra' }).click();
+  const sh = page.locator('#sheet');
+  await expect(sh.getByLabel('Time (optional)')).toHaveAttribute('type', 'time');
+  await expect(sh.locator('#xTime')).toHaveValue('');
+  await sh.locator('#xListing').selectOption('L8');
+  await sh.locator('#xDate').fill('2026-10-10');
+  await sh.locator('#xTime').fill('14:30');
+  await sh.locator('#xPrice').fill('200');
+  await sh.getByRole('button', { name: 'Create extra' }).click();
+  await expect(page.locator('#toast')).toContainText('Extra cleaning added for Apt 808 · Tower H on Sat 10 at 14:30');
+  const w = noIdem(await writes(page, 'addExtraCleaning'));
+  expect(w.length).toBe(1);
+  expect(w[0].cleaning_time).toBe('14:30');
+});
+
+test('Heure : carte et fiche montrent 14:00, Edit prerempli, vider l heure envoie null', async ({ page }, info) => {
+  await bootMgr(page, [me(MANAGER), PLAN(timedBody('14:00')), { match: 'action=updateExtraCleaning', status: 200, body: OK }],
+    { email: true, hash: HASH, clock: PNOW });
+  await expect(xCard(page).locator('.pj-top .mono')).toHaveText('14:00 · Extra');
+  await openJob(page, isMobile(info), 'extra_2026-10-09_mabc', '2026-10-09');
+  const sh = page.locator('#sheet');
+  await expect(sh.locator('.kvs')).toContainText('Friday 9 October, at 14:00');
+  await sh.getByRole('button', { name: 'Edit extra' }).click();
+  await expect(sh.locator('#xTime')).toHaveValue('14:00');
+  await sh.locator('#xTime').fill('');
+  await sh.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('#toast')).toContainText('Extra cleaning saved for Apt 808 · Tower H');
+  const w = noIdem(await writes(page, 'updateExtraCleaning'));
+  expect(w.length).toBe(1);
+  expect(w[0].cleaning_time).toBeNull();
+});
+
+test('Heure : un extra sans heure (champ absent ou null) reste « Extra », fiche sans heure', async ({ page }, info) => {
+  await bootMgr(page, [me(MANAGER), PLAN(timedBody(null))], { email: true, hash: HASH, clock: PNOW });
+  await expect(xCard(page).locator('.pj-top .mono')).toHaveText('Extra');
+  await openJob(page, isMobile(info), 'extra_2026-10-09_mabc', '2026-10-09');
+  const sh = page.locator('#sheet');
+  await expect(sh.locator('.kvs dd').first()).toHaveText('Friday 9 October');
+  await sh.getByRole('button', { name: 'Edit extra' }).click();
+  await expect(sh.locator('#xTime')).toHaveValue('');
 });

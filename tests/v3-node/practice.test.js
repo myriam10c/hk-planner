@@ -146,3 +146,9 @@ test("conversations de la séance : gardées à part, liées à la cible, effac�
   assert.equal(store.has(P.CLE_PRACTICE), false);
   assert.equal(P.practiceLoadConvs(), null);
 });
+
+test("Practice : l'heure d'un extra (stops[].time) traverse practiceDay", () => {
+  const d = day();
+  d.stops[0].time = "14:00";
+  assert.equal(P.practiceDay(d).stops[0].time, "14:00");
+});

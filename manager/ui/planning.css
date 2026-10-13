@@ -53,6 +53,8 @@
 .sheet-warn{margin:0;background:var(--warn-tint);color:var(--warn-ink);border-radius:var(--r-md);padding:var(--s2) var(--s3);font-weight:500}
 .form{display:flex;flex-direction:column;gap:var(--s3)}
 .fl{display:flex;flex-direction:column;gap:4px;font-size:14px;color:var(--ink-2)}
+/* Date et heure d'un extra cote a cote, meme a 375px */
+.pl-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s2)}
 /* WebKit garde parfois hidden (herite du panneau ferme) sur un select cree pendant l'ouverture : on le force visible tant que le panneau est ouvert. */
 .sheet.on .fl,.sheet.on .fl select{visibility:visible}
 .fl input,.fl select,.fl textarea{min-height:44px;font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:10px;padding:8px 10px;width:100%;min-width:0}

@@ -56,8 +56,11 @@ function legend(s) {
     + chip('none', 'Unassigned', none, 'none') + '</div>';
 }
 
+// Heure dediee d'un extra (HH:MM ou null) ; absente chez un ancien proxy.
+export function extraTime(j) { return j && j.extra && j.extra.cleaningTime ? j.extra.cleaningTime : null; }
+
 function timeText(j) {
-  if (j.kind === 'extra') return 'Extra';
+  if (j.kind === 'extra') return extraTime(j) ? extraTime(j) + ' · Extra' : 'Extra';
   if (j.postponedFrom) return 'From ' + ddmm(j.postponedFrom);
   return j.checkout || 'Time not set';
 }
@@ -150,7 +153,8 @@ export function screenHtml(s) {
 export function jobSheet(d, j, ro, s) {
   const rows = [];
   const kv = (k, v) => rows.push('<div><dt>' + esc(k) + '</dt><dd>' + v + '</dd></div>');
-  const time = j.kind === 'checkout' && !j.postponedFrom ? (j.checkout ? ', checkout ' + j.checkout : ', checkout time not set') : '';
+  const time = j.kind === 'checkout' && !j.postponedFrom ? (j.checkout ? ', checkout ' + j.checkout : ', checkout time not set')
+    : extraTime(j) ? ', at ' + extraTime(j) : '';
   kv('When', esc(dayLong(j.date) + time));
   if (j.postponedFrom) kv('Postponed', 'from ' + esc(dayLong(j.postponedFrom)));
   kv('Assigned', j.assigned.length ? esc(namesOf(d, j.assigned)) : '<span class="st bad">Nobody</span>');
@@ -292,9 +296,9 @@ export function extraSheet(d, j, ro, s) {
   // Prix caches selon le ROLE (maintenance), jamais selon les donnees : un manager voit toujours les deux champs.
   const noPrices = !!s && s.manager === false;
   const f = x
-    ? { listing: j.listingId, date: x.cleaningDate, label: x.label || '', guest: x.guestName || '',
+    ? { listing: j.listingId, date: x.cleaningDate, time: x.cleaningTime || '', label: x.label || '', guest: x.guestName || '',
       price: x.priceBilled == null ? '' : String(x.priceBilled), rate: x.cleanerPrice == null ? '' : String(x.cleanerPrice), notes: x.notes || '' }
-    : { listing: '', date: d.today >= d.start && d.today <= d.end ? d.today : d.start, label: '', guest: '', price: '', rate: '', notes: '' };
+    : { listing: '', date: d.today >= d.start && d.today <= d.end ? d.today : d.start, time: '', label: '', guest: '', price: '', rate: '', notes: '' };
   const opt = (v, label, cur) => '<option value="' + esc(v) + '"' + (String(v) === String(cur) ? ' selected' : '') + '>' + esc(label) + '</option>';
   const listings = opt('', 'Choose an apartment', f.listing) + d.listings.map((l) => opt(l.id, placeLabel(l) || l.id, f.listing)).join('');
   const types = opt('', 'Choose a type', f.label) + EXTRA_TYPES.map((t) => opt(t, t, f.label)).join('')
@@ -303,7 +307,8 @@ export function extraSheet(d, j, ro, s) {
     + d.people.filter((p) => p.assignable).map((p) => opt(String(p.id), p.name, '')).join('') + '</select></label>';
   const body = '<div class="sheet-b"><div class="form">'
     + '<label class="fl">Apartment<select id="xListing">' + listings + '</select></label>'
-    + '<label class="fl">Date<input id="xDate" type="date" value="' + esc(f.date) + '"></label>'
+    + '<div class="pl-two"><label class="fl">Date<input id="xDate" type="date" value="' + esc(f.date) + '"></label>'
+    + '<label class="fl">Time (optional)<input id="xTime" type="time" value="' + esc(f.time) + '"></label></div>'
     + '<label class="fl">Type<select id="xLabel">' + types + '</select></label>'
     + '<label class="fl">Guest or client<input id="xGuest" type="text" maxlength="120" autocomplete="off" value="' + esc(f.guest) + '"></label>'
     + (noPrices ? '' : '<label class="fl">Price billed (AED)<input id="xPrice" type="number" inputmode="decimal" min="0" step="1" value="' + esc(f.price) + '"></label>'

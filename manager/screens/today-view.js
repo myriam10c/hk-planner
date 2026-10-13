@@ -71,8 +71,10 @@ function stripHtml(data) {
     + tile(s.notReady, 'arrivals not ready yet', s.notReady > 0) + '</div>';
 }
 
-function coTime(j) { return j.kind === 'extra' ? 'Extra' : (j.checkout || '--:--'); }
-function coSmall(j) { return j.kind === 'extra' ? 'clean' : 'out'; }
+// Heure dediee d'un extra : extraTime (mgr.today) ou extra.cleaningTime (mgr.planning), null sinon.
+function xTime(j) { return j.kind === 'extra' ? (j.extraTime || (j.extra && j.extra.cleaningTime) || null) : null; }
+function coTime(j) { return j.kind === 'extra' ? (xTime(j) || 'Extra') : (j.checkout || '--:--'); }
+function coSmall(j) { return j.kind === 'extra' ? (xTime(j) ? 'extra' : 'clean') : 'out'; }
 function nextLine(j) {
   if (!j.next) return 'No guest in the next 14 days';
   const who = j.next.owner ? 'Owner' : 'Guest';
@@ -152,7 +154,7 @@ function aheadRow(j, o) {
   const lead = j.tone === 'idle' || (o.unassigned && j.tone !== 'warn') ? '' : '<span class="st ' + esc(j.tone) + '">' + esc(j.word) + '</span> · ';
   const notes = [j.next ? plNextLine(j.next) : '', j.postponedFrom ? 'postponed from ' + ddmm(j.postponedFrom) : '',
     !extra && !j.checkout ? 'checkout time not set' : ''].filter(Boolean).join(' · ');
-  return '<div class="job static"><span class="tm">' + esc(extra ? 'Extra' : (j.checkout || '--:--')) + '<small>' + (extra ? 'clean' : 'out') + '</small></span>'
+  return '<div class="job static"><span class="tm">' + esc(coTime(j)) + '<small>' + coSmall(j) + '</small></span>'
     + '<span class="ap"><b>' + esc(placeLabel(j) || 'Apartment') + '</b><span>' + lead + esc(notes) + '</span></span>' + btn + '</div>';
 }
 function aheadHtml(a) {
@@ -298,7 +300,8 @@ export function jobSheet(data, job, nowMs, ro) {
     + (nextT ? tlItem(nextT, arr ? arr.tone : job.tone, (job.next.owner ? 'Owner' : 'Guest') + ' arrives', fmtDur(arrivalMs(data.day, nextT) - nowMs) + ' from now')
       : tlItem('', '', 'Next guest', job.next ? ddmm(job.next.date) : 'None in the next 14 days'))
     + '</ul>';
-  return sheetHead(placeLabel(job), job.kind === 'extra' ? 'Extra cleaning, today' : 'Checkout cleaning, today')
+  const xsub = 'Extra cleaning, today' + (xTime(job) ? ' at ' + xTime(job) : '');
+  return sheetHead(placeLabel(job), job.kind === 'extra' ? xsub : 'Checkout cleaning, today')
     + '<div class="sheet-b">' + box + tl
     + '<div class="blk"><h3>Cleaner</h3><div>' + (job.assigned.length ? esc(names) : '<span class="st bad">Nobody</span>') + '</div></div>'
     + ticketsBlk(data.ticketsByListing[job.listingId]) + '</div>'

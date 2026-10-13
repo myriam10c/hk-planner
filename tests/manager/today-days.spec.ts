@@ -276,3 +276,18 @@ test('semaine de plus de 60 s, relecture en echec : pas de choix, Reconnect, anc
   await expect(who(page).locator('.person.unassigned')).toContainText('Apt 707');
   expect((await writes(page, 'assignCleaner')).length).toBe(0);
 });
+
+test('Heure d un extra sur un autre jour : 09:30 extra, sans heure Extra clean', async ({ page }) => {
+  const b = weekBody();
+  b.jobs.push(
+    PJ({ key: 'extra_2026-10-10_mx1', kind: 'extra', listingId: 'L14', apt: '1401', bld: 'Timed Tower', date: '2026-10-10', checkout: null, guest: null,
+      tone: 'bad', word: 'Unassigned', extra: { id: 41, label: 'Deep clean', cleaningDate: '2026-10-10', cleaningTime: '09:30' } }),
+    PJ({ key: 'extra_2026-10-10_mx2', kind: 'extra', listingId: 'L15', apt: '1501', bld: 'Plain Tower', date: '2026-10-10', checkout: null, guest: null,
+      tone: 'bad', word: 'Unassigned', extra: { id: 42, label: 'Deep clean', cleaningDate: '2026-10-10' } }),
+  );
+  await bootMgr(page, [me(MANAGER), TODAY(), WEEK1(b)], { email: true, clock: NOW });
+  await chip(page, '2026-10-10').click();
+  const un = who(page).locator('.person.unassigned');
+  await expect(un.locator('.job', { hasText: 'Timed Tower' }).locator('.tm')).toHaveText('09:30extra');
+  await expect(un.locator('.job', { hasText: 'Plain Tower' }).locator('.tm')).toHaveText('Extraclean');
+});

@@ -153,3 +153,34 @@ test("aucun nom complet de voyageur ni tiret cadratin dans les appartements", ()
   assert.equal(all.includes("Anna"), false);
   assert.equal(all.includes("—"), false);
 });
+
+// Heure dediee d'un extra (13/10/2026) : stops[].time « HH:MM » ou null.
+test("extra avec heure : « Extra cleaning at 2 PM » dans la liste et la premiere bulle", async () => {
+  const UI = await import("../../v3/conv/ui.js");
+  const extra = { ...STOP_BLOOM, jobId: "job_0000000000000ext0001", checkOutTime: null, label: "Deep clean", time: "14:00" };
+  const half = { ...extra, jobId: "job_0000000000000ext0002", time: "14:30" };
+  const morning = { ...extra, jobId: "job_0000000000000ext0003", time: "09:05" };
+  const [a, b, m] = toApartments({ ...DAY, stops: [extra, half, morning] }, ME, { now: NOW });
+  assert.equal(a.extraAt, "2 PM");
+  assert.equal(b.extraAt, "2:30 PM");
+  assert.equal(m.extraAt, "9:05 AM");
+  const html = UI.renderList({ me: ME, apartments: [a], convs: {}, activeId: null, now: NOW });
+  assert.match(html, /<span class="row-sub">Extra cleaning at 2 PM<\/span>/);
+  const c = createConversation(a, { me: ME, now: NOW });
+  assert.equal(c.messages[0].text, "1011C Bloom Towers · extra cleaning at 2 PM");
+});
+
+test("extra sans heure, heure absente (ancien proxy) ou invalide : comme avant", async () => {
+  const UI = await import("../../v3/conv/ui.js");
+  const stops = [
+    { ...STOP_BLOOM, label: "Deep clean", checkOutTime: null, time: null },
+    { ...STOP_BLOOM, label: "Deep clean", checkOutTime: null },
+    { ...STOP_BLOOM, label: "Deep clean", checkOutTime: null, time: "25:99" },
+  ];
+  for (const a of toApartments({ ...DAY, stops }, ME, { now: NOW })) {
+    assert.equal(a.extraAt, null);
+    const html = UI.renderList({ me: ME, apartments: [a], convs: {}, activeId: null, now: NOW });
+    assert.match(html, /<span class="row-sub">No guest yet<\/span>/);
+    assert.equal(createConversation(a, { me: ME, now: NOW }).messages[0].text, "1011C Bloom Towers · no guest yet");
+  }
+});

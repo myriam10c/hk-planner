@@ -34,6 +34,15 @@ export function acInstruction(date) {
   return SUMMER_MONTHS.includes(date.getMonth()) ? "AC on, Auto mode" : "AC off";
 }
 
+// Ligne du jour : « Extra cleaning at 2 PM » pour un extra avec heure, sinon le voyageur.
+export function dayLine(a) {
+  return a.extraAt ? "Extra cleaning at " + a.extraAt : a.guest.label;
+}
+// Premiere bulle : « 1011C Bloom Towers · extra cleaning at 2 PM » ou « · guest at 3 pm ».
+export function arriveLine(a) {
+  return aptLabel(a) + " · " + (a.extraAt ? "extra cleaning at " + a.extraAt : a.guest.label.toLowerCase());
+}
+
 // Libelle d'un appartement : numero + immeuble, sans espace orphelin.
 export function aptLabel(a) {
   return [a.num, a.building].filter(Boolean).join(" ");

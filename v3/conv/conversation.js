@@ -1,6 +1,6 @@
 // Machine à étapes d'un appartement, en 5 étapes. État mutable mais sans DOM : testable sous Node.
 // Portée du prototype (hk-cleaner-proto 875ea4e) : les pièces viennent de apt.rooms (v3.myDay), plus de TEMPLATES.
-import { LINEN_USUAL, SUPPLIES, LEAVE_CHECKS, acInstruction, aptLabel } from "./rules.js";
+import { LINEN_USUAL, SUPPLIES, LEAVE_CHECKS, acInstruction, arriveLine } from "./rules.js";
 import { makeProblem, KINDS, WALL_KIND } from "./problems.js";
 
 const hhmm = d => String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
@@ -41,7 +41,7 @@ function botMessage(conv) {
   const a = conv.apt;
   const prev = conv.steps[conv.i - 1];
   switch (st.id) {
-    case "arrive": return { from: "app", type: "text", text: aptLabel(a) + " · " + a.guest.label.toLowerCase(), photo: a.photo };
+    case "arrive": return { from: "app", type: "text", text: arriveLine(a), photo: a.photo };
     case "arrival-photo":
       return { from: "app", type: "text", text: (prev && prev.id === "arrival-photo" ? "" : "Step 1: photo of each room as you find it. ") + st.room + "." };
     case "check": return { from: "app", type: "text", text: a.managerCheck.text };
@@ -156,7 +156,7 @@ export function readOnlyConversation(apt, { me, now = new Date() } = {}) {
   conv.readOnly = true;
   // Fil du manager : ni consigne d'étape ni instruction adressée à la cleaner. Seulement le
   // logement et ce que le serveur sait.
-  conv.messages = [{ from: "app", type: "text", text: aptLabel(apt) + " · " + apt.guest.label.toLowerCase(), photo: apt.photo }];
+  conv.messages = [{ from: "app", type: "text", text: arriveLine(apt), photo: apt.photo }];
   if (apt.lead) conv.messages.push({ from: "lead", type: "text", text: apt.lead.name + " started at " + apt.lead.startedAt + " and sends the report." });
   const tickets = (apt.openTickets || []).map(t => t.title).filter(Boolean);
   if (tickets.length) conv.messages.push({ from: "app", type: "text", text: "Open problems here: " + tickets.join(", ") + "." });

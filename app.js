@@ -1641,6 +1641,7 @@ function __applyPlannerData(coRes,allRes,startDate,endDate,fetchedAt){
         _extraId:e.id,
         _extraLabel:e.label,
         _extraNotes:e.notes,
+        _extraTime:e.cleaning_time||null, // heure dediee HH:MM (13/10/2026), affichage seul
         _reservationKey:e.reservation_key,
       }));
     RESERVATIONS=RESERVATIONS.concat(extrasAsRes).sort((a,b)=>a.co.localeCompare(b.co));
@@ -5158,6 +5159,7 @@ function renderPlanner(){
       h+='<div class="status-dot '+cardStatus+'"></div>';
       h+='<div class="listing-name">'+esc(formatPropLabel(r.listingId, r.listing))+(r._isExtra?' <span class="badge-extra">➕ '+esc(r._extraLabel||'EXTRA')+(r.price_billed?' · '+r.price_billed+' AED':'')+'</span>':'')+(r._postponed?' <span style="display:inline-block;margin-left:4px;padding:1px 6px;border-radius:6px;background:rgba(230,149,43,0.15);color:#c47e1a;font-size:10px;font-weight:700;vertical-align:middle" title="Postponed — originally '+esc(formatDateFull(r._origCo||r.co))+'">↪ Postponed</span>':'')+'</div>';
       if(coT) h+='<span class="tag-pill" style="margin-left:auto;flex-shrink:0">'+coT+'</span>';
+      else if(r._isExtra&&r._extraTime) h+='<span class="tag-pill" style="margin-left:auto;flex-shrink:0" title="Extra cleaning time">'+esc(r._extraTime)+'</span>';
       else if(!r._isExtra) h+='<span class="tag-pill" style="margin-left:auto;flex-shrink:0;color:var(--text3)" title="Checkout time not set in Hostaway">—:—</span>';
       h+='</div>';
 

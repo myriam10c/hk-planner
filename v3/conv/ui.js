@@ -1,6 +1,6 @@
 // Rendu HTML pur, façon WhatsApp. Aucune lecture du DOM ici : testable sous Node.
 // Porté du prototype : la liste reçoit les appartements de la journée réelle (day.js).
-import { LINEN_USUAL, GROUP_NAME, aptLabel } from "./rules.js";
+import { LINEN_USUAL, GROUP_NAME, aptLabel, dayLine } from "./rules.js";
 import { KINDS, URGENCY } from "./problems.js";
 import { currentStep, currentFlow, elapsedMinutes, isHelper, ticketCard } from "./conversation.js";
 import { reportText, formatMinutes } from "./report.js";
@@ -41,8 +41,8 @@ function rowStatus(apt, conv, now) {
   if (conv && conv.startedAt) return "Step " + currentStep(conv).n + " of 5 · " + formatMinutes(elapsedMinutes(conv, now));
   // État enregistré sur le serveur (journée réelle), sans conversation sur ce téléphone.
   if (!conv && apt.state === "done") return "Cleaning done";
-  if (!conv && apt.state === "running") return "Started · " + apt.guest.label;
-  return apt.guest.label;
+  if (!conv && apt.state === "running") return "Started · " + dayLine(apt);
+  return dayLine(apt);
 }
 
 // Liste du jour. `apartments` : la journée réelle (day.js) ; `before` : bandeau de mode (View as /

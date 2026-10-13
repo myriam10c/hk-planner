@@ -83,3 +83,30 @@ test('les classes de More ne fuient pas sur les lignes de Today (.tm sans flex n
   expect(css.display).not.toBe('flex');
   expect(['normal', '0px']).toContain(css.gap);
 });
+
+// ---------- Heure dediee d'un extra (13/10/2026) ----------
+function extraToday() {
+  const b = todayBody();
+  const X = (o: any) => ({ kind: 'extra', checkoutDate: '2026-10-09', postponedFrom: null, assigned: [10], serviceType: 'CHC',
+    state: 'not_started', next: null, checkout: null, tone: 'idle', word: 'Not started', ...o });
+  b.who.jobs.push(
+    X({ key: 'extra_2026-10-09_mabc', listingId: 'L8', apt: '808', bld: 'Tower H', extraTime: '14:00' }),
+    X({ key: 'extra_2026-10-09_mdef', listingId: 'L7', apt: '707', bld: 'Marina Gate' }),
+  );
+  b.who.people.find((p: any) => p.id === 10).keys = ['extra_2026-10-09_mabc', 'extra_2026-10-09_mdef'];
+  return b;
+}
+
+test('Heure d un extra : ligne 14:00 extra, sans heure Extra clean, fiche « Extra cleaning, today at 14:00 »', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(extraToday())], { email: true, clock: NOW });
+  const pionah = page.locator('.person', { hasText: 'Pionah' });
+  await expect(pionah.locator('.job', { hasText: 'Apt 808' }).locator('.tm')).toHaveText('14:00extra');
+  await expect(pionah.locator('.job', { hasText: 'Apt 707' }).locator('.tm')).toHaveText('Extraclean');
+  await pionah.locator('.job', { hasText: 'Apt 808' }).click();
+  await expect(page.locator('#sheet .sheet-h .sub')).toHaveText('Extra cleaning, today at 14:00');
+  await page.locator('#sheet [data-close]').first().click();
+  await pionah.locator('.job', { hasText: 'Apt 707' }).click();
+  await expect(page.locator('#sheet .sheet-h .sub')).toHaveText('Extra cleaning, today');
+  const s = await noHorizontalScroll(page);
+  expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
+});

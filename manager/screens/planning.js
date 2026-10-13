@@ -304,15 +304,17 @@ export async function renderPlanning(ctx) {
   // Tache 9 : menages en plus. Prix facture obligatoire (regle de l'ancienne fiche).
   function extraBody() {
     const v = (id) => { const el = document.getElementById(id); return el ? String(el.value).trim() : ''; };
-    const listing = v('xListing'), date = v('xDate'), price = v('xPrice'), rate = v('xRate');
+    const listing = v('xListing'), date = v('xDate'), time = v('xTime'), price = v('xPrice'), rate = v('xRate');
     // Prix caches (role maintenance) : jamais envoyes, le serveur garde les siens.
     const priced = !!document.getElementById('xPrice');
     if (!listing) return { error: 'Choose an apartment.' };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'Choose a date.' };
+    // Heure facultative : vide = pas d'heure (null, jamais 00:00).
+    if (time !== '' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { error: 'Choose a valid time or leave it empty.' };
     if (priced && (price === '' || !Number.isFinite(Number(price)) || Number(price) < 0)) return { error: 'Price billed is required.' };
     if (priced && rate !== '' && (!Number.isFinite(Number(rate)) || Number(rate) < 0)) return { error: 'Cleaner rate must be a number.' };
     const body = {
-      listing_id: listing, cleaning_date: date, label: v('xLabel') || null, guest_name: v('xGuest') || null, notes: v('xNotes') || null,
+      listing_id: listing, cleaning_date: date, cleaning_time: time || null, label: v('xLabel') || null, guest_name: v('xGuest') || null, notes: v('xNotes') || null,
     };
     if (priced) { body.price_billed = Number(price); body.cleaner_price = rate === '' ? null : Number(rate); }
     return { body };
@@ -332,7 +334,8 @@ export async function renderPlanning(ctx) {
       const who = whoEl ? whoEl.value : '';
       const l = st.data.listings.find((x) => x.id === r.body.listing_id) || {};
       write('__new', 'addExtraCleaning', { ...r.body, assigned_cleaner_id: who ? Number(who) : null },
-        'Extra cleaning added for ' + (placeLabel(l) || 'the apartment') + ' on ' + dayShort(r.body.cleaning_date));
+        'Extra cleaning added for ' + (placeLabel(l) || 'the apartment') + ' on ' + dayShort(r.body.cleaning_date)
+        + (r.body.cleaning_time ? ' at ' + r.body.cleaning_time : ''));
       return;
     }
     if (!j || !j.extra) { sheetError('This cleaning is no longer on the planning.'); return; }
