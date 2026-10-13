@@ -258,6 +258,7 @@ test('Done : compte, fait par, cout seulement s il existe, note en texte, Reopen
   expect(await d.nth(0).locator('i').count()).toBe(0);
   await expect(d.nth(1).locator('.mt-meta')).toHaveText('Done by Ismael, Wed 7');
   await expect(d.nth(1)).not.toContainText('AED');
+  await expect(d.nth(1).getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
   await d.nth(0).getByRole('button', { name: 'Reopen' }).click();
   await expect(page.locator('#toast')).toContainText('MNT-7 reopened');
   const a = await acts(page);

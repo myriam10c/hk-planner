@@ -399,6 +399,60 @@ export async function renderMaintenance(ctx) {
     write(t.ref, body, t.ref + ' done');
   }
 
+  // Photo ajoutee a un ticket ferme : reduite comme a la cloture, mnt.photo avec sa
+  // propre cle (un reessai du meme fichier reprend la meme cle), puis fiche relue.
+  async function addPhoto(t, file) {
+    if (st.busy) { toast('Saving, wait a second.'); return; }
+    if (readOnly()) { toast(V.RO_LINE); return; }
+    if (!(await freshEnough())) return;
+    const key = 'add|' + t.id + '|' + file.name + '|' + file.size + '|' + file.lastModified;
+    st.busy = true;
+    sheetBusy(true);
+    // Le bouton Add photo est un label : son champ est bloque a part pendant l'envoi.
+    const lock = (on) => { const i = $('mtAddPhoto'); if (i) i.disabled = on; };
+    lock(true);
+    const stop = (msg) => {
+      st.busy = false;
+      if (!owns(t.ref)) return;
+      sheetBusy(false);
+      lock(false);
+      if (msg) sheetError(msg);
+    };
+    let small = null;
+    try { small = await shrink(file); } catch (e) { small = file; }
+    if (!small || (small === file && !PHOTO_TYPES.includes(file.type))) { stop(BAD_PHOTO); return; }
+    const sent = small === file ? file
+      : new File([small], (file.name.replace(/\.[^.]*$/, '') || 'photo') + '.jpg', { type: 'image/jpeg' });
+    let r;
+    try {
+      r = await photoGestures.run('mnt.photo|' + key, (idem) => upload('mnt.photo', { idem, file: sent, ticketId: String(t.id) }));
+    } catch (e) {
+      if (!ctx.isCurrent()) { st.busy = false; return; }
+      if (handleAccess(e)) { stop(''); return; }
+      stop(e.message);
+      return;
+    }
+    if (!r || !r.path) { stop('The photo was not saved. Try again.'); return; }
+    stop('');
+    if (!ctx.isCurrent()) return;
+    toast('Photo added to ' + t.ref);
+    if (owns(t.ref)) openTicket(t.ref);
+  }
+
+  // Details de cloture : seul ce qui change part (note, cout). Un cout vide ou egal au
+  // cout actuel n'est jamais envoye (il remplacerait la ligne de cout sans raison).
+  function sendEditClosed(t) {
+    const note = ($('mtEditNote').value || '').trim();
+    const cost = ($('mtEditCost').value || '').trim();
+    if (cost && !COST_RE.test(cost)) { sheetError('Cost must be a number.'); return; }
+    const extra = {};
+    if (note !== String(t.resolutionNotes || '').trim()) extra.note = note;
+    const had = t.actualCost === null || t.actualCost === undefined || String(t.actualCost).trim() === '' ? null : Number(t.actualCost);
+    if (cost && (had === null || Number(cost) !== had)) extra.cost = cost;
+    if (!Object.keys(extra).length) { sheetError('Nothing changed.'); return; }
+    write(t.ref, tkBody(t, 'ticket.edit_closed', extra), 'Closing details saved for ' + t.ref);
+  }
+
   function onTicketClick(k, el, t) {
     const ref = t.ref;
     if (k === 'tk-retry') { openTicket(ref); return; }
@@ -409,6 +463,8 @@ export async function renderMaintenance(ctx) {
     if (k === 'tk-done') { tkSub(V.doneSheet(t)); return; }
     if (k === 'tk-waiting') { tkSub(V.waitingSheet(t)); return; }
     if (k === 'tk-comment') { tkSub(V.commentSheet(t)); return; }
+    if (k === 'tk-edit-closed') { tkSub(V.editClosedSheet(t)); return; }
+    if (k === 'tk-edit-send') { sendEditClosed(t); return; }
     if (k === 'tk-assign') { tkSub(V.assignSheet(t, st.meta)); return; }
     if (k === 'tk-due') { tkSub(V.dueSheet(t, Date.now(), DUE_MAX_DAYS)); return; }
     if (k === 'tk-photo-clear') { const i = $('mtPhoto'); if (i) i.value = ''; photoName(); return; }
@@ -533,7 +589,16 @@ export async function renderMaintenance(ctx) {
   }
 
   function onChange(e) {
-    if (ctx.isCurrent() && e.target && e.target.id === 'mtPhoto') photoName();
+    if (!ctx.isCurrent() || !e.target) return;
+    if (e.target.id === 'mtPhoto') { photoName(); return; }
+    if (e.target.id === 'mtAddPhoto') {
+      const input = e.target;
+      const file = input.files && input.files[0] ? input.files[0] : null;
+      const t = st.tk;
+      // Valeur videe : choisir de nouveau le meme fichier redeclenche l'envoi.
+      input.value = '';
+      if (file && t && shownRef() === t.ref) addPhoto(t, file);
+    }
   }
 
   // Retour sur l'app : l'onglet affiche est relu (un autre telephone a pu agir).

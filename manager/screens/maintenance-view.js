@@ -253,7 +253,8 @@ export function doneRow(t) {
     + (t.apt || t.bld ? '<span class="mt-where">' + esc(placeLabel(t)) + '</span>' : '')
     + '<span class="mt-meta">' + doneLine(t) + '</span>'
     + (t.resolutionNotes ? '<span class="mt-note">' + quoteText(t.resolutionNotes) + '</span>' : '') + '</button>'
-    + '<div class="mt-dfoot"><button class="btn mt-btn" type="button" data-reopen data-ref="' + esc(t.ref) + '" data-id="' + esc(t.id) + '">Reopen</button></div>'
+    + '<div class="mt-dfoot"><button class="btn mt-btn" type="button" data-ticket="' + esc(t.ref) + '">Edit</button>'
+    + '<button class="btn mt-btn" type="button" data-reopen data-ref="' + esc(t.ref) + '" data-id="' + esc(t.id) + '">Reopen</button></div>'
     + '</article>';
 }
 export function doneHtml(entry, error) {
@@ -457,7 +458,13 @@ function tkBtn(k, label, primary) {
 }
 function stageButtons(t) {
   const s = t.stage;
-  if (s === 'done') return '<div class="mt-tkmain">' + tkBtn('tk-reopen', 'Reopen', false) + '</div>';
+  // Ticket ferme : rouvrir, ou completer sans rouvrir (commentaire, details de cloture, photo).
+  if (s === 'done') {
+    return '<div class="mt-tkmain">' + tkBtn('tk-reopen', 'Reopen', false) + '</div><div class="mt-tkmore mt-tkclosed">'
+      + tkBtn('tk-comment', 'Comment') + tkBtn('tk-edit-closed', 'Edit closing details')
+      + '<label class="btn mt-btn mt-filebtn" for="mtAddPhoto" data-mact="tk-add-photo">Add photo</label>'
+      + '<input id="mtAddPhoto" class="mt-file" type="file" accept="image/*" capture="environment"></div>';
+  }
   let main;
   if (s === 'in_progress') main = tkBtn('tk-done', 'Done', true) + tkBtn('tk-waiting', 'Waiting parts');
   else if (s === 'waiting_parts') main = tkBtn('tk-start', 'Start', true) + tkBtn('tk-done', 'Done');
@@ -511,6 +518,18 @@ export function doneSheet(t) {
     + '<div class="mt-field"><label class="mt-label" for="mtCost">Cost (AED), optional</label>'
     + '<input id="mtCost" class="mt-input" type="text" inputmode="decimal" autocomplete="off" maxlength="12"></div>';
   return subHead(t, 'Mark done') + '<div class="sheet-b">' + b + '</div>' + subFoot('tk-done-send', 'Mark done');
+}
+// Details de cloture d'un ticket ferme : note et cout pre-remplis. Cout vide = cout garde.
+export function editClosedSheet(t) {
+  const cur = costText(t.actualCost);
+  const hint = cur ? 'Leave the cost empty to keep the current cost (' + cur + ').' : 'No cost recorded. Leave it empty to keep it that way.';
+  const val = cur ? String(Number(t.actualCost)) : '';
+  const b = '<div class="mt-field"><label class="mt-label" for="mtEditNote">What was done</label>'
+    + '<textarea id="mtEditNote" class="mt-input mt-text" rows="3" maxlength="2000">' + esc(t.resolutionNotes || '') + '</textarea></div>'
+    + '<div class="mt-field"><label class="mt-label" for="mtEditCost">Cost (AED), optional</label>'
+    + '<input id="mtEditCost" class="mt-input" type="text" inputmode="decimal" autocomplete="off" maxlength="12" value="' + esc(val) + '" aria-describedby="mtEditHint">'
+    + '<p class="mt-hint" id="mtEditHint">' + esc(hint) + '</p></div>';
+  return subHead(t, 'Edit closing details') + '<div class="sheet-b">' + b + '</div>' + subFoot('tk-edit-send', 'Save');
 }
 export function waitingSheet(t) {
   return subHead(t, 'Waiting parts') + '<div class="sheet-b"><div class="mt-field"><label class="mt-label" for="mtWaitNote">What is missing (optional)</label>'

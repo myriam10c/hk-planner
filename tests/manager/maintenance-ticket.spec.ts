@@ -113,7 +113,7 @@ test('boutons par etape ; Reopen as still broken envoie ticket.start', async ({ 
 
   await page.evaluate(() => { location.hash = '#/maintenance?ref=MNT-34'; });
   await expect(s.locator('[data-mref="MNT-34"]')).toBeVisible();
-  await expect(btns).toHaveText(['Reopen']);
+  await expect(btns).toHaveText(['Reopen', 'Comment', 'Edit closing details', 'Add photo']);
   await expect(s.locator('.mt-steps li[aria-current="step"]')).toHaveText('Done');
   await expect(s.locator('.mt-tkdone')).toHaveText('Done by Semax, Thu 8 · AED 0');
   await expect(s.locator('.mt-tkdone + .mt-note')).toHaveText('“Gas <i>refilled</i>”');
@@ -519,4 +519,156 @@ test('F11 : echeance passee : Due date sans date pre-remplie, minimum aujourd hu
   await expect(s.locator('#mtDue')).toHaveValue('');
   await expect(s.locator('#mtDue')).toHaveAttribute('min', '2026-10-09');
   await expect(s.locator('[data-mact="tk-due-clear"]')).toBeVisible();
+});
+
+// ---------- Ticket ferme : commentaire, details de cloture, photo (13/10/2026) ----------
+
+const CLOSED = { id: 34, ref: 'MNT-34', stage: 'done', status: 'resolved', resolvedAt: '2026-10-08T08:00:00Z', resolvedBy: 'Semax',
+  actualCost: 50, resolutionNotes: 'Gas refilled' };
+async function openClosed(page: any, extra: any[] = [], o: any = {}) {
+  await bootMgr(page, ALL(GET('MNT-34', DETAIL({ ...CLOSED, ...o })), ...extra), { email: true, clock: NOW_MNT, hash: '#/maintenance?ref=MNT-34' });
+  await expect(sheet(page).locator('[data-mref="MNT-34"]')).toBeVisible();
+}
+
+test('ticket ferme : Comment envoie ticket.comment, le ticket reste ferme', async ({ page }) => {
+  await openClosed(page, [ACT_OK({ ticketId: 34 })]);
+  const s = sheet(page);
+  await s.locator('[data-mact="tk-comment"]').click();
+  await expect(s.getByRole('heading', { name: 'Comment' })).toBeVisible();
+  await s.locator('#mtComment').fill('Owner paid the plumber');
+  await s.locator('[data-mact="tk-comment-send"]').click();
+  await expect(page.locator('#toast')).toContainText('Comment added to MNT-34');
+  expect((await acts(page)).map(({ idem, ...x }) => x)).toEqual([{ op: 'ticket.comment', ticketId: 34, text: 'Owner paid the plumber' }]);
+});
+
+test('Edit closing details : prerempli, nouveau cout 80 et note envoyes, cle de geste', async ({ page }) => {
+  await openClosed(page, [ACT_OK({ ticketId: 34 })]);
+  const s = sheet(page);
+  await s.locator('[data-mact="tk-edit-closed"]').click();
+  await expect(s.getByRole('heading', { name: 'Edit closing details' })).toBeVisible();
+  await expect(s.locator('#mtEditNote')).toHaveValue('Gas refilled');
+  await expect(s.getByLabel('Cost (AED), optional')).toHaveValue('50');
+  await expect(s.locator('.mt-hint')).toHaveText('Leave the cost empty to keep the current cost (AED 50).');
+  await s.locator('#mtEditNote').fill('Gas refilled, valve <b>changed</b>');
+  await s.locator('#mtEditCost').fill('80');
+  await s.locator('[data-mact="tk-edit-send"]').click();
+  await expect(page.locator('#toast')).toContainText('Closing details saved for MNT-34');
+  const a = await acts(page);
+  expect(a).toHaveLength(1);
+  const { idem, ...rest } = a[0];
+  expect(idem).toMatch(/^mgr-[A-Za-z0-9]{8,}/);
+  expect(rest).toEqual({ op: 'ticket.edit_closed', ticketId: 34, note: 'Gas refilled, valve <b>changed</b>', cost: '80' });
+});
+
+test('Edit closing details : cout vide ou inchange jamais envoye ; cout illisible refuse ; rien change refuse', async ({ page }) => {
+  await openClosed(page, [ACT_OK({ ticketId: 34 })]);
+  const s = sheet(page);
+  await s.locator('[data-mact="tk-edit-closed"]').click();
+  await s.locator('[data-mact="tk-edit-send"]').click();
+  await expect(s.locator('.sheet-err')).toHaveText('Nothing changed.');
+  await s.locator('#mtEditCost').fill('8O');
+  await s.locator('[data-mact="tk-edit-send"]').click();
+  await expect(s.locator('.sheet-err')).toHaveText('Cost must be a number.');
+  expect(await acts(page)).toHaveLength(0);
+  await s.locator('#mtEditCost').fill('');
+  await s.locator('#mtEditNote').fill('Gas refilled by CoolFix');
+  await s.locator('[data-mact="tk-edit-send"]').click();
+  await expect(page.locator('#toast')).toContainText('Closing details saved for MNT-34');
+  await expect(page.locator('#sheet.on')).toHaveCount(0);
+  await page.evaluate(() => { location.hash = '#/maintenance?ref=MNT-34'; });
+  await s.locator('[data-mact="tk-edit-closed"]').click();
+  await s.locator('#mtEditNote').fill('');
+  await s.locator('#mtEditCost').fill('50.00');
+  await s.locator('[data-mact="tk-edit-send"]').click();
+  await expect(page.locator('#toast')).toContainText('Closing details saved for MNT-34');
+  expect((await acts(page)).map(({ idem, ...x }) => x)).toEqual([
+    { op: 'ticket.edit_closed', ticketId: 34, note: 'Gas refilled by CoolFix' },
+    { op: 'ticket.edit_closed', ticketId: 34, note: '' },
+  ]);
+});
+
+test('Edit closing details sans cout : indice « no cost recorded », champ vide', async ({ page }) => {
+  await openClosed(page, [], { actualCost: null, resolutionNotes: null });
+  const s = sheet(page);
+  await s.locator('[data-mact="tk-edit-closed"]').click();
+  await expect(s.locator('#mtEditNote')).toHaveValue('');
+  await expect(s.locator('#mtEditCost')).toHaveValue('');
+  await expect(s.locator('.mt-hint')).toHaveText('No cost recorded. Leave it empty to keep it that way.');
+});
+
+test('Add photo sur un ticket ferme : reduite, mnt.photo avec cle, fiche relue, aucun mnt.act', async ({ page }) => {
+  await openClosed(page, [PHOTO_OK]);
+  await watchForms(page);
+  const s = sheet(page);
+  const before = (await fetchLog(page)).filter((l: any) => l.url.includes('ref=MNT-34')).length;
+  await s.locator('#mtAddPhoto').setInputFiles(PNG);
+  await expect(page.locator('#toast')).toContainText('Photo added to MNT-34');
+  await expect.poll(async () => (await fetchLog(page)).filter((l: any) => l.url.includes('ref=MNT-34')).length).toBe(before + 1);
+  await expect(s.locator('[data-mref="MNT-34"]')).toBeVisible();
+  const f = await forms(page);
+  expect(f).toHaveLength(1);
+  expect(f[0].ticketId).toBe('34');
+  expect(f[0].idem).toMatch(/^mgr-[A-Za-z0-9]{8,}/);
+  expect(String(f[0].file)).toMatch(/^file:leak\.(png|jpg):image\/(png|jpeg)$/);
+  expect(await acts(page)).toHaveLength(0);
+});
+
+test('Add photo refusee : erreur dans la fiche ; meme fichier reessaye avec la meme cle', async ({ page }) => {
+  await openClosed(page, [{ ...PHOTO_OK, fail: true, once: true }, PHOTO_OK]);
+  await watchForms(page);
+  const s = sheet(page);
+  // Meme fichier choisi deux fois (meme nom, taille et date) : setInputFiles en ferait deux dates differentes.
+  const pick = () => page.evaluate((b64: string) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], 'leak.png', { type: 'image/png', lastModified: 1760000000000 }));
+    const input = document.getElementById('mtAddPhoto') as HTMLInputElement;
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, PNG.buffer.toString('base64'));
+  await pick();
+  await expect(s.locator('.sheet-err')).toHaveText('No connection. Try again.');
+  await expect(s.locator('#mtAddPhoto')).toBeEnabled();
+  await pick();
+  await expect(page.locator('#toast')).toContainText('Photo added to MNT-34');
+  const f = await forms(page);
+  expect(f).toHaveLength(2);
+  expect(f[1].idem).toBe(f[0].idem);
+});
+
+test('Done : bouton Edit ouvre la fiche du ticket ferme', async ({ page }) => {
+  await bootMgr(page, ALL(GET('MNT-7', DETAIL({ ...CLOSED, id: 7, ref: 'MNT-7', title: 'Kitchen tap leaking' }))),
+    { email: true, clock: NOW_MNT, hash: '#/maintenance?tab=done' });
+  const row = page.locator('.mt-done').nth(0);
+  await expect(row.getByRole('button', { name: 'Reopen' })).toBeVisible();
+  await row.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(sheet(page).locator('[data-mref="MNT-7"]')).toBeVisible();
+  await expect(sheet(page).locator('[data-mact="tk-edit-closed"]')).toBeVisible();
+  expect(await hashOf(page)).toBe('#/maintenance?ref=MNT-7');
+});
+
+test('375 px : ticket ferme et Edit closing details sans defilement horizontal, cibles de 44 px', async ({ page }, info) => {
+  test.skip(info.project.name !== 'mgr-mobile', 'largeur telephone');
+  await page.setViewportSize({ width: 375, height: 760 });
+  await openClosed(page);
+  const check = async () => {
+    await page.waitForTimeout(400);
+    const sc = await noHorizontalScroll(page);
+    expect(sc.scrollWidth).toBeLessThanOrEqual(sc.clientWidth);
+    const small = await page.evaluate(() => Array.from(document.querySelectorAll('#sheet.on button, #sheet.on label.btn'))
+      .filter((b: any) => b.offsetParent !== null && b.getBoundingClientRect().height < 43.5)
+      .map((b: any) => (b.textContent.trim() || b.getAttribute('aria-label')) + ' ' + b.getBoundingClientRect().height));
+    expect(small).toEqual([]);
+    const over = await page.evaluate(() => Array.from(document.querySelectorAll('#sheet.on .btn'))
+      .filter((b: any) => b.scrollWidth > b.clientWidth + 1).map((b: any) => b.textContent.trim()));
+    expect(over).toEqual([]);
+    const wide = await page.evaluate(() => {
+      const sh = document.getElementById('sheet') as HTMLElement;
+      return sh.scrollWidth - sh.clientWidth;
+    });
+    expect(wide).toBeLessThanOrEqual(0);
+  };
+  await check();
+  await sheet(page).locator('[data-mact="tk-edit-closed"]').click();
+  await check();
 });

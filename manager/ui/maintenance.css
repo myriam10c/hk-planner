@@ -52,7 +52,7 @@
 
 .mt-done{background:var(--surface);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;min-width:0;overflow:hidden}
 .mt-dmain{display:flex;flex-direction:column;gap:4px;width:100%;padding:12px 14px 6px;border:0;background:var(--surface);text-align:left;cursor:pointer;font:inherit;color:inherit;min-width:0}
-.mt-dfoot{display:flex;justify-content:flex-end;padding:0 14px 12px}
+.mt-dfoot{display:flex;justify-content:flex-end;gap:var(--s2);padding:0 14px 12px}
 .mt-ro{gap:6px}
 
 /* Feuilles : citations, champs, choix d'urgence et d'intervenant. */
@@ -107,6 +107,9 @@ select.mt-input{height:44px}
 .mt-tkmain .btn{min-width:0}
 .mt-tkmore{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s2)}
 .mt-tkmore .btn{min-width:0;padding:0 6px}
+/* Ticket ferme : libelles longs (Edit closing details) sur deux lignes plutot que tronques */
+.mt-tkclosed .btn{white-space:normal;text-align:center;line-height:1.2;padding:4px 6px}
+.mt-hint{margin:4px 0 0;font-size:13px;color:var(--ink-3)}
 .mt-photorow{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;min-width:0}
 .mt-filebtn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
 .mt-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0)}
