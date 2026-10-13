@@ -51,6 +51,8 @@ export type IngestIssue = {
   conversationId: string; messageId: string; at: string; listingId: string | null; reservationId: string | null;
   guestName: string | null; stayFrom: string | null; stayTo: string | null; title: string;
   category: MntCategory; urgency: MntUrgency; quote: string;
+  // Citation en anglais (quote) ; original = mots du guest quand il a ecrit dans une autre langue.
+  quoteOriginal: string | null;
 };
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -89,6 +91,8 @@ export function parseIngest(body: any): { issues: IngestIssue[] } | { error: str
     if (!(MNT_URGENCIES as readonly string[]).includes(it.urgency)) return bad("urgency");
     const quote = str(it.quote).slice(0, MNT_QUOTE_MAX).trim();
     if (!quote) return bad("quote");
+    const orig = str(it.quoteOriginal).slice(0, MNT_QUOTE_MAX).trim();
+    const quoteOriginal = orig && orig !== quote ? orig : null;
     const days: Record<string, string | null> = {};
     for (const f of ["stayFrom", "stayTo"]) {
       const v = it[f];
@@ -99,13 +103,13 @@ export function parseIngest(body: any): { issues: IngestIssue[] } | { error: str
     out.push({
       conversationId, messageId, at, listingId: optStr(it.listingId), reservationId: optStr(it.reservationId),
       guestName: optStr(it.guestName), stayFrom: days.stayFrom, stayTo: days.stayTo, title,
-      category: it.category, urgency: it.urgency, quote,
+      category: it.category, urgency: it.urgency, quote, quoteOriginal,
     });
   }
   return { issues: out };
 }
 
-type Quote = { message_id: string; at: string; text: string };
+type Quote = { message_id: string; at: string; text: string; original?: string };
 
 // Pas de doublon sur message_id ; on garde les MNT_QUOTES_MAX plus recentes, tri par date croissante.
 export function appendQuote(quotes: Quote[], q: Quote): { quotes: Quote[]; added: boolean } {

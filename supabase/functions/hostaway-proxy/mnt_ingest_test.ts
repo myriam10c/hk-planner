@@ -283,3 +283,16 @@ Deno.test("F6 : citation plus ancienne que les 10 gardees, l'urgence monte quand
   assertEquals(calls.length, 1);
   assertEquals(props(sb)[0].quotes.map((q: any) => q.message_id), quotes.map((q) => q.message_id));
 });
+
+Deno.test("ingest : citation traduite en anglais, original garde a part", async () => {
+  const sb = seed();
+  await run(sb, [issue({ quote: "The AC is not working", quoteOriginal: "Le climatiseur ne marche pas" })]);
+  assertEquals(props(sb)[0].quotes[0].text, "The AC is not working");
+  assertEquals(props(sb)[0].quotes[0].original, "Le climatiseur ne marche pas");
+});
+
+Deno.test("ingest : original identique a la citation, rien en plus", async () => {
+  const sb = seed();
+  await run(sb, [issue({ quoteOriginal: "The AC is not cooling at all" })]);
+  assertEquals("original" in props(sb)[0].quotes[0], false);
+});

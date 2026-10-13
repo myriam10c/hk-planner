@@ -449,3 +449,13 @@ test('F6 : relecture ratee avant le geste (liste trop vieille) : lecture seule, 
   await expect(page.locator('#toast')).toContainText('Reconnect to make changes.');
   expect(await acts(page)).toHaveLength(0);
 });
+
+test('citation traduite : texte anglais affiche, etiquette Translated, original jamais montre', async ({ page }) => {
+  const tr = PRP({ quotes: [{ message_id: 'm9', at: '2026-10-09T06:58:00Z', text: 'The AC does not work', original: 'Le climatiseur ne marche pas' }] });
+  await bootMgr(page, [me(MANAGER), L.rejected(), L.proposals(listBody('proposals', { proposals: [tr] })), L.open(), L.done()],
+    { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  const card = page.locator('.mt-card').first();
+  await expect(card.locator('.mt-qtext')).toHaveText('“The AC does not work”');
+  await expect(card.locator('.mt-tr')).toHaveText('Translated');
+  await expect(page.getByText('Le climatiseur ne marche pas')).toHaveCount(0);
+});

@@ -28,6 +28,7 @@
 .mt-where{font-size:15px;color:var(--ink-2);overflow-wrap:anywhere}
 .mt-quote{margin:0;padding:10px 12px;background:var(--surface-2);border-radius:10px;font-size:15px;color:var(--ink-2);display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
 .mt-qtext{white-space:pre-wrap}
+.mt-tr{font-size:12px;font-weight:600;color:var(--ink-3);padding:1px 6px;border-radius:5px;background:var(--sunk)}
 .mt-qmeta{font-size:13px;color:var(--ink-3);margin:0}
 .mt-qmeta a{color:var(--accent);font-weight:600;display:inline-flex;align-items:center;min-height:44px;vertical-align:middle}
 .mt-actions{display:flex;gap:var(--s2)}

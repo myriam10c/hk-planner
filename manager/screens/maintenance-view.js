@@ -65,6 +65,8 @@ export function costText(n) {
   return 'AED ' + (Number.isInteger(v) ? String(v) : v.toFixed(2));
 }
 const quoteText = (t) => '“' + esc(t) + '”';
+// Citation traduite en anglais par la detection : on le dit, l'original reste en base.
+const trTag = (q) => (q && q.original ? ' <span class="mt-tr">Translated</span>' : '');
 function hostawayUrl(id) { return 'https://dashboard.hostaway.com/v3/messages/inbox/' + encodeURIComponent(id); }
 function placeCat(p) { return [placeLabel(p), p.categoryLabel || CATEGORY[p.category] || ''].filter(Boolean).join(' · '); }
 
@@ -146,7 +148,7 @@ export function proposalCard(p, nowMs) {
   let h = '<article class="mt-card" data-prp="' + ref + '">'
     + '<div class="mt-pills">' + pills(p) + '<span class="mt-time">' + esc(whenShort(quoteAt(p), nowMs)) + '</span></div>'
     + '<div><div class="mt-ttl">' + esc(p.title) + '</div><div class="mt-where">' + esc(placeCat(p)) + '</div></div>';
-  h += '<blockquote class="mt-quote">' + (q ? '<span class="mt-qtext">' + quoteText(q.text) + '</span>' : '')
+  h += '<blockquote class="mt-quote">' + (q ? '<span class="mt-qtext">' + quoteText(q.text) + '</span>' + trTag(q) : '')
     + '<span class="mt-qmeta">' + guestLine(p) + '</span></blockquote>';
   if (p.openTicket) {
     h += '<div class="mt-actions"><button class="btn primary mt-btn mt-grow" type="button" data-merge data-ref="' + ref + '" data-tid="'
@@ -260,7 +262,7 @@ function head(ref, title, sub) {
 }
 function quotesHtml(p) {
   if (!p.quotes || !p.quotes.length) return '';
-  return '<div class="mt-quotes">' + p.quotes.map((q) => '<blockquote class="mt-quote"><span class="mt-qtext">' + quoteText(q.text) + '</span></blockquote>').join('') + '</div>';
+  return '<div class="mt-quotes">' + p.quotes.map((q) => '<blockquote class="mt-quote"><span class="mt-qtext">' + quoteText(q.text) + '</span>' + trTag(q) + '</blockquote>').join('') + '</div>';
 }
 const roFoot = (label) => '<div class="sheet-f"><p class="ro-note" role="status">' + RO_LINE + '</p><button class="btn mt-btn" type="button" data-close>' + label + '</button></div>';
 

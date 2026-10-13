@@ -40,7 +40,7 @@ type Outcome = { kind: "skipped" } | { kind: "created" | "appended"; id: number;
 
 async function ingestOne(sb: any, it: IngestIssue, nowIso: string): Promise<Outcome> {
   const key = dedupKey(it.conversationId, it.category);
-  const quote = { message_id: it.messageId, at: it.at, text: it.quote };
+  const quote = { message_id: it.messageId, at: it.at, text: it.quote, ...(it.quoteOriginal ? { original: it.quoteOriginal } : {}) };
   const rows = rowsOrThrow(
     await sb.from("maintenance_proposals").select("id, status, urgency, quotes, title, dedup_key, updated_at")
       .eq("conversation_id", it.conversationId).eq("category", it.category),

@@ -25,7 +25,7 @@ export function parseMntQuery(p: URLSearchParams): MntQuery | { error: string } 
   return { tab: tab as MntQuery["tab"], filter: filter as MntQuery["filter"], q, rejected: r === "1" || r === "true" };
 }
 
-type Quote = { message_id: string; at: string; text: string };
+type Quote = { message_id: string; at: string; text: string; original?: string };
 export type MntProposalRow = {
   id: number; ref: string; listingId: string | null; apt: string; bld: string; title: string;
   category: string; categoryLabel: string; urgency: string; guestName: string | null; stayFrom: string | null; stayTo: string | null;
