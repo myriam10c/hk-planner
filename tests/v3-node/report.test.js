@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { APARTMENTS, ME } from "./fixtures.js";
 import { createConversation, reply, addPhoto, addProblem, editProblem, addProblemPhoto, setProblemNote, chooseKind, startProblem, addFlowPhoto, flowReply, currentStep } from "../../v3/conv/conversation.js";
-import { reportText, reportFiles, pickFiles, formatMinutes } from "../../v3/conv/report.js";
+import { reportText, reportFiles, pickFiles, formatMinutes, deliveryOf } from "../../v3/conv/report.js";
+import { syncPlan, ackSync } from "../../v3/conv/sync.js";
 
 const [oxford, , bloom] = APARTMENTS;
 const at = (h, m) => new Date(2026, 9, 2, h, m);
@@ -62,9 +63,9 @@ test("dégâts, vérification du manager, problèmes groupés, aucune ligne 🎙
   assert.match(t, /\*Problems \(3\):\*\n_Bed_\n🟠 Broken \(HK-461\)\n_Whole apartment_\n🟠 Insects \(HK-462\)\n🟠 Stain \(HK-463\)/);
   assert.equal(t.includes("🎙"), false, "plus de note vocale");
   assert.doesNotMatch(t, /voice/i);
-  // urgent change a la main dans la fiche : « sent to the team »
+  // urgent change a la main dans la fiche, sans envoi connu (pas de sync) : « team notified »
   editProblem(c, 1, { urgency: "urgent" });
-  assert.match(reportText(c, { now: at(10, 0) }), /🔴 Insects \(HK-462, sent to the team 09:22\)/);
+  assert.match(reportText(c, { now: at(10, 0) }), /🔴 Insects \(HK-462, team notified 09:22\)/);
   assert.match(t, /📷 3 arrival · 0 end · 3 of problems/);
 });
 
@@ -97,7 +98,7 @@ test("ligne de problème : détail, note, nombre de photos ; toutes les photos p
   setProblemNote(c, 2, "under the sink");
   editProblem(c, 2, { urgency: "urgent" });
   const t = reportText(c, { now: at(10, 30) });
-  assert.match(t, /\n🟠 Broken, Sofa: tear on the left cushion \(HK-461, 3 photos\)\n🟠 Missing \(HK-462\)\n🔴 Leak: under the sink \(HK-463, sent to the team 10:03\)/);
+  assert.match(t, /\n🟠 Broken, Sofa: tear on the left cushion \(HK-461, 3 photos\)\n🟠 Missing \(HK-462\)\n🔴 Leak: under the sink \(HK-463, team notified 10:03\)/);
   assert.deepEqual(pickFiles(c).files.map(f => f.name), ["p1.jpg", "p2.jpg", "p3.jpg", "m1.jpg"]);
   assert.match(t, /4 of problems/);
 });
@@ -166,4 +167,31 @@ test("ligne de problème sans 🎙 ; aucun fichier audio dans le partage", () =>
   assert.match(t, /\n🟠 Broken \(HK-461, 2 photos\)\n/);
   assert.equal(t.includes("🎙"), false);
   assert.deepEqual(pickFiles(c).files.map(f => f.name), ["p1.jpg", "p2.jpg"]);
+});
+
+// Revue finale (G7) : un probleme urgent dit ou en est son envoi. En file : « sending… » ;
+// reponse avec sentTo : « sent to <nom>|the team HH:MM » ; reponse d'avant le champ sentTo :
+// « team notified HH:MM ».
+test("rapport : un urgent en file dit sending…, puis le destinataire de la reponse", () => {
+  const ligne = () => reportText(c, { now: at(10, 30) }).split("\n").find(l => l.startsWith("🔴"));
+  let n = 0;
+  const newIdem = () => "idem" + String(++n).padStart(4, "0");
+  const c = createConversation(bloom, { me: ME, now: at(9, 0) });
+  reply(c, "here", { now: at(10, 0) });
+  addProblem(c, "Leak", ph("p1"), { now: at(10, 3) });
+  editProblem(c, 0, { urgency: "urgent" });
+  const actions = syncPlan(c, { newIdem });
+  const p = c.problems[0];
+  assert.ok(actions.some(a => a.action === "v3.reportProblem" && a.body.idem === p.idem));
+  assert.deepEqual(deliveryOf(c, p), { state: "sending" });
+  assert.equal(ligne(), "🔴 Leak (HK-461, sending…)");
+  assert.doesNotMatch(reportText(c, { now: at(10, 30) }), /sent to|team notified/);
+  ackSync(c, p.idem, { ticketId: 77, sentTo: "Semax" });
+  assert.equal(ligne(), "🔴 Leak (HK-461, sent to Semax 10:03)");
+  ackSync(c, p.idem, { ticketId: 77, sentTo: null });
+  assert.equal(ligne(), "🔴 Leak (HK-461, sent to the team 10:03)");
+  // Reponse gardee avant le deploiement : pas de champ sentTo, le libelle d'avant reste.
+  ackSync(c, p.idem, { ticketId: 77 });
+  assert.deepEqual(deliveryOf(c, p), { state: "unknown" });
+  assert.equal(ligne(), "🔴 Leak (HK-461, team notified 10:03)");
 });

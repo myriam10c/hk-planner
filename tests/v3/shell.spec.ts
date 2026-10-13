@@ -65,6 +65,41 @@ test('v3 qui ne charge pas : lien de secours vers l ancienne app (legacy=1)', as
   expect(scrollWidth).toBe(clientWidth);
 });
 
+// Revue finale (G1) : au premier chargement apres un deploiement, un ancien
+// service worker peut servir un ancien module a cote du nouvel app.js. Le liage
+// echoue (export absent) : boot.js vide les caches hk-v3- et recharge une fois.
+test('module d une autre version : boot.js vide les caches v3 et recharge une fois', async ({ page }) => {
+  await bootV3(page, []);
+  await expect(page.getByText('Sign in on HK Planner to see your day.')).toBeVisible();
+  await page.evaluate(async () => {
+    const c = await caches.open('hk-v3-ancien');
+    await c.put('/v3/conv/conversation.js', new Response('export const createConversation = 1;'));
+  });
+  let servis = 0;
+  await page.route('**/v3/conv/conversation.js', (r) => {
+    servis += 1;
+    if (servis === 1) return r.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const createConversation = 1;' });
+    return r.continue();
+  });
+  await page.reload();
+  await expect(page.getByText('Sign in on HK Planner to see your day.')).toBeVisible();
+  expect(servis).toBe(2);
+  const caches_ = await page.evaluate(() => caches.keys());
+  expect(caches_.filter((k) => k.indexOf('hk-v3-') === 0)).toEqual([]);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3BootRetry'))).toBeNull();
+});
+
+test('module d une autre version deux fois de suite : pas de boucle, le lien de secours reste', async ({ page }) => {
+  let servis = 0;
+  await page.route('**/v3/conv/conversation.js', (r) => {
+    servis += 1;
+    return r.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const createConversation = 1;' });
+  });
+  await page.goto('/v3/', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('link', { name: 'Open the old app' })).toBeVisible({ timeout: 8_000 });
+  expect(servis).toBe(2);
+});
+
 test('v3 qui charge : le lien de secours statique disparait au premier rendu', async ({ page }) => {
   await bootV3(page, []);
   await expect(page.getByText('Sign in on HK Planner to see your day.')).toBeVisible();

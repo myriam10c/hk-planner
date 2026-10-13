@@ -46,7 +46,7 @@ async function lireSession(page: any) {
 test('un seul client supabase-js, avec les options de la racine', async ({ page }) => {
   const html = await (await page.request.get('/v3/index.html')).text();
   const vendor = html.indexOf('<script src="/vendor/supabase-js-2.116.0.umd.js"></script>');
-  const module = html.indexOf('<script type="module" src="/v3/app.js"></script>');
+  const module = html.indexOf('<script type="module" src="/v3/boot.js"></script>');
   expect(vendor).toBeGreaterThan(-1);
   expect(module).toBeGreaterThan(vendor);
 

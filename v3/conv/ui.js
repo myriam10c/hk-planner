@@ -2,7 +2,7 @@
 // Porté du prototype : la liste reçoit les appartements de la journée réelle (day.js).
 import { LINEN_USUAL, GROUP_NAME, aptLabel } from "./rules.js";
 import { KINDS, URGENCY } from "./problems.js";
-import { currentStep, currentFlow, elapsedMinutes, isHelper } from "./conversation.js";
+import { currentStep, currentFlow, elapsedMinutes, isHelper, ticketCard } from "./conversation.js";
 import { reportText, formatMinutes } from "./report.js";
 import { finishAcked } from "./sync.js";
 import { dayWord } from "./day.js";
@@ -247,7 +247,7 @@ export function renderProblemPhotos(conv, { live }) {
 // Viseur « Fixed now » d'un ticket (C4) : « <titre> · fixed », « Take a photo of it », [Done] des une photo.
 export function renderTicketFix(conv, { live }) {
   const f = conv.fix;
-  const t = f && ticketCardOf(conv, f.ticketId);
+  const t = f && ticketCard(conv, f.ticketId);
   if (!t) return "";
   const thumbs = f.photos.map(ph => '<span class="vthumb">' + imgTag(ph) + "</span>").join("");
   return '<div class="vf flow-vf fix-vf' + (live ? " live" : "") + '">' + still(live, conv.apt.photo) + '<div class="flash"></div>' +
@@ -260,8 +260,6 @@ export function renderTicketFix(conv, { live }) {
     '<span class="vf-row-end"><button class="reply" data-act="fix-done"' + (f.photos.length ? "" : " disabled") + ">Done</button></span></div>" +
     "</div></div>";
 }
-
-const ticketCardOf = (conv, id) => { const m = conv.messages.find(x => x.type === "ticket" && x.ticket.id === id); return m ? m.ticket : null; };
 
 const flowBtn = (r, cls = "reply") => '<button class="' + cls + '" data-flow="' + r.id + '"' + (r.enabled ? "" : " disabled") + ">" + escapeHtml(r.label) + "</button>";
 

@@ -137,8 +137,14 @@ export function syncPlan(conv, { newIdem, active = true } = {}) {
   // 4. Tickets ouverts du logement : une reponse par ticket, une seule cle, jamais reemise.
   for (const [id, t] of Object.entries(conv.tickets || {})) {
     const rec = s.tickets[id] = s.tickets[id] || { sent: false };
-    if (rec.sent || !isObj(t)) continue;
+    if (!isObj(t)) continue;
     const ticketId = Number(id);
+    // Reponse deja partie : une photo « Fixed now » suivante qui n'est pas entree en file
+    // (rollbackSync) repart seule au prochain passage, rattachee au ticket.
+    if (rec.sent) {
+      if (t.answer === "fixed") for (const ph of (t.photos || []).filter(isObj)) if (!queued(ph)) upload(ph, "ticket", { ticketId });
+      continue;
+    }
     if (t.answer === "still") {
       t.idem = t.idem || newIdem();
       emit("v3.ticketStill", { jobId, ticketId, idem: t.idem });

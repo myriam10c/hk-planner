@@ -41,10 +41,28 @@ const roomLine = (conv, store) => {
 };
 
 // « 🟠 Broken, Sofa: tear on the left cushion (HK-461, 3 photos) » : « 1 photo » est omis.
-// Urgent : « sent to <technicien> 09:22 » quand le proxy a nomme le destinataire, sinon « sent to the team ».
-export function problemLine(p, sentTo = null) {
-  const extra = (p.notified ? ", sent to " + (sentTo || "the team") + " " + p.at : "") + (p.photos.length > 1 ? ", " + p.photos.length + " photos" : "");
+// Urgent, selon `delivery` (deliveryOf) : « sent to <technicien>|the team 09:22 » quand le proxy a
+// repondu, « sending… » tant que le signalement attend dans la file, « team notified 09:22 » sans
+// destinataire connu (reponse d'avant le champ sentTo, ou signalement que le telephone n'envoie pas).
+export function problemLine(p, delivery = null) {
+  const d = delivery || { state: "unknown" };
+  const notice = d.state === "sending" ? "sending…"
+    : d.state === "sent" ? "sent to " + (d.sentTo || "the team") + " " + p.at
+    : "team notified " + p.at;
+  const extra = (p.notified ? ", " + notice : "") + (p.photos.length > 1 ? ", " + p.photos.length + " photos" : "");
   return URGENCY[p.urgency].dot + " " + p.kind + (p.detail ? ", " + p.detail : "") + (p.note ? ": " + p.note : "") + " (HK-" + p.ref + extra + ")";
+}
+
+// Ou en est l'envoi d'un probleme : « sent » (reponse du proxy, avec sentTo si elle le porte),
+// « sending » (en file, pas encore de reponse), « unknown » (jamais emis, ou reponse d'avant sentTo).
+export function deliveryOf(conv, p) {
+  const s = conv.sync;
+  const rec = s && p.idem && s.problems && s.problems[p.idem];
+  if (!rec || !rec.reported) return { state: "unknown" };
+  const d = s.acked && s.acked[p.idem];
+  if (!d) return { state: "sending" };
+  if (!Object.prototype.hasOwnProperty.call(d, "sentTo")) return { state: "unknown" };
+  return { state: "sent", sentTo: d.sentTo ? String(d.sentTo) : null };
 }
 
 export function reportText(conv, { now = new Date() } = {}) {
@@ -52,8 +70,7 @@ export function reportText(conv, { now = new Date() } = {}) {
   const linen = LINEN_USUAL.filter(l => conv.linen[l.key] > 0).map(l => conv.linen[l.key] + " " + (conv.linen[l.key] === 1 ? l.one : l.many)).join(", ");
   const order = a.rooms.concat(WHERE_EXTRA);
   const groups = order.filter(w => conv.problems.some(p => p.where === w));
-  const sentTo = p => { const d = conv.sync && p.idem && conv.sync.acked && conv.sync.acked[p.idem]; return d && d.sentTo ? String(d.sentTo) : null; };
-  const probLines = groups.flatMap(w => ["_" + w + "_"].concat(conv.problems.filter(p => p.where === w).map(p => problemLine(p, sentTo(p)))));
+  const probLines = groups.flatMap(w => ["_" + w + "_"].concat(conv.problems.filter(p => p.where === w).map(p => problemLine(p, deliveryOf(conv, p)))));
   const count = store => Object.values(store).reduce((n, list) => n + list.length, 0);
   const probPhotos = conv.problems.reduce((n, p) => n + p.photos.length, 0);
   const leave = LEAVE_CHECKS.map(c => leaveDoneLabel(conv, c) + (conv.leave[c.key] === true ? " ✓" : " ✗")).join(" · ");

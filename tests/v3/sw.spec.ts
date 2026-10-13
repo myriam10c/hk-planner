@@ -13,7 +13,7 @@ test('le service worker v3 precache la coquille, les modules, la conversation et
   expect(r.status()).toBe(200);
   const source = await r.text();
   for (const chemin of [
-    '/v3/', '/v3/index.html', '/v3/app.js', '/v3/api.js', '/v3/offline.js', '/v3/ui.js',
+    '/v3/', '/v3/index.html', '/v3/app.js', '/v3/boot.js', '/v3/api.js', '/v3/offline.js', '/v3/ui.js',
     '/v3/practice.js', '/v3/screens/profile.js',
     // Interface conversation (branchement 2026-10-05) : modules purs, styles, police.
     '/v3/conv/camera.js', '/v3/conv/conversation.js', '/v3/conv/day.js', '/v3/conv/persist.js', '/v3/conv/problems.js',

@@ -74,7 +74,9 @@ function mesRapports(state) {
   if (!voitSesRapports(state)) return '';
   let h = '</div><p class="sec-lab">My reports, last 7 days</p><div class="myrep">';
   const r = state.reports;
-  if (r === 'offline') h += '<p class="muted mr-empty">Reports load when you are online.</p>';
+  if (r === null || r === undefined) h += '<p class="muted mr-empty">Loading…</p>';
+  else if (r === 'offline') h += '<p class="muted mr-empty">Reports load when you are online.</p>';
+  else if (r === 'error') h += '<p class="muted mr-empty">Reports are unavailable right now.</p>';
   else if (Array.isArray(r) && r.length === 0) h += '<p class="muted mr-empty">No report this week.</p>';
   else if (Array.isArray(r)) {
     const now = new Date();
@@ -257,22 +259,37 @@ const actions = {
 };
 
 // Le magasin mort est lu avant le rendu : `view` reste synchrone, comme les
-// autres ecrans.
+// autres ecrans. Mes signalements ne sont pas attendus (revue finale) : la liste
+// « Not sent » s'affiche tout de suite, « My reports » montre « Loading… » puis
+// se redessine a la reponse.
+let lecture = 0;
+
 export async function prepare(state) {
   state.reports = null;
+  const n = ++lecture;
   try {
     state.dead = await deadEntries();
   } catch (e) {
     state.dead = [];
   }
-  // Mes signalements : relus a chaque ouverture de Profile ; hors ligne, une phrase.
   if (!voitSesRapports(state)) return;
+  chargerRapports(state, n);
+}
+
+// Relus a chaque ouverture de Profile. Hors ligne : une phrase ; toute autre
+// panne (proxy, session) : une autre, pour ne pas faire chercher le reseau.
+async function chargerRapports(state, n) {
+  let r;
   try {
     const data = await api.get('v3.myReports');
-    state.reports = data && Array.isArray(data.reports) ? data.reports : [];
+    r = data && Array.isArray(data.reports) ? data.reports : [];
   } catch (e) {
-    state.reports = 'offline';
+    r = e && e.kind === 'offline' ? 'offline' : 'error';
   }
+  // Une reponse d'une ouverture precedente ne remplace jamais la plus recente.
+  if (n !== lecture) return;
+  state.reports = r;
+  if (String(location.hash || '') === '#/profile') render();
 }
 
 export default { view: view, actions: actions, prepare: prepare };

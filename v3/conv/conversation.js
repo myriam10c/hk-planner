@@ -62,18 +62,27 @@ function botMessage(conv) {
   }
 }
 
-// Tickets encore ouverts sur le logement, hors pest (qui garde sa question) : une carte chacun
-// en entrant a l'etape 2 (maintenance phase 3, C4).
+// Tickets encore ouverts sur le logement : une carte chacun en entrant a l'etape 2 (maintenance
+// phase 3, C4). Seul le ticket pest de la question du manager (managerCheck) en est exclu : un
+// pest deja verifie (to_confirm) a sa carte « Waiting for check », et un second pest ouvert sur
+// le meme logement a sa carte aussi (revue finale).
 export function openTicketsHere(apt) {
-  return (apt.openTickets || []).filter(t => t.category !== "pest" && !(apt.managerCheck && t.id === apt.managerCheck.ticketId));
+  return (apt.openTickets || []).filter(t => !(apt.managerCheck && t.id === apt.managerCheck.ticketId));
 }
 
 export const OPEN_TICKETS_TEXT = "Open problems here. Is it still there?";
 
+// Binome (revue finale) : seul le lead, ou la cleaner seule, a les cartes. L'aide lit une ligne
+// sans bouton, pour que deux telephones ne repondent pas au meme ticket.
+export function openProblemsLine(apt) {
+  const titles = openTicketsHere(apt).filter(t => t.status !== "to_confirm").map(t => t.title).filter(Boolean);
+  return titles.length ? "Open problems here: " + titles.join(", ") + "." : null;
+}
+
 function advance(conv) {
   conv.i += 1;
   const st0 = conv.steps[conv.i], prev = conv.steps[conv.i - 1];
-  if (st0 && st0.n === 2 && (!prev || prev.n !== 2)) {
+  if (st0 && st0.n === 2 && (!prev || prev.n !== 2) && !isHelper(conv)) {
     const tickets = openTicketsHere(conv.apt);
     if (tickets.length) {
       conv.messages.push({ from: "app", type: "text", text: OPEN_TICKETS_TEXT });
@@ -121,7 +130,11 @@ export function createConversation(apt, { me, refStart = 461, now = new Date() }
     tickets: {}, fix: null,
   };
   conv.steps = buildSteps(apt, isHelper(conv));
-  if (isHelper(conv)) conv.messages.push({ from: "lead", type: "text", text: apt.lead.name + " started at " + apt.lead.startedAt + ". She sends the report. Add your photos and problems." });
+  if (isHelper(conv)) {
+    conv.messages.push({ from: "lead", type: "text", text: apt.lead.name + " started at " + apt.lead.startedAt + ". She sends the report. Add your photos and problems." });
+    const line = openProblemsLine(apt);
+    if (line) conv.messages.push({ from: "app", type: "text", text: line });
+  }
   conv.messages.push(botMessage(conv));
   return conv;
 }

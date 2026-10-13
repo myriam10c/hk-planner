@@ -52,13 +52,27 @@ test('C4 : une carte par ticket ouvert, statut lisible, pas de carte pour le pes
   expect(await page.content()).not.toContain('—');
 });
 
-test('C4 : un ticket pest deja to_confirm ne repose pas la question pest', async ({ page }) => {
+// Revue finale (G4) : le pest to_confirm ne repose pas la question, mais garde une carte
+// « Waiting for check » ; un second pest ouvert sur le logement a sa carte aussi.
+test('C4 : un ticket pest deja to_confirm ne repose pas la question pest et garde sa carte', async ({ page }) => {
   const pestFait = { ...BLOOM, openTickets: [{ ...TICKETS[4], status: 'to_confirm' }] };
   await demarrer(page, routesAvec({ ...DAY, stops: [pestFait, DAY.stops[1]] }));
   await etape2(page);
   await expect(page.getByText('Walls: any marks, holes or damage?')).toBeVisible();
   await expect(page.getByText('Pest control was asked. Do you see insects?')).toHaveCount(0);
-  await expect(page.locator('.tcard')).toHaveCount(0);
+  await expect(page.locator('.tcard')).toHaveCount(1);
+  await expect(carte(page, 'Insects · Kitchen').locator('.tsub')).toHaveText('Waiting for check');
+  await expect(carte(page, 'Insects · Kitchen').locator('button')).toHaveCount(0);
+});
+
+test('C4 : un second ticket pest ouvert a sa carte, le premier garde la question', async ({ page }) => {
+  const second = { id: 306, title: 'Ants · Bed', category: 'pest', priority: 'medium', status: 'open', assigneeName: null, reportedOn: '2026-10-10' };
+  const deuxPests = { ...BLOOM, openTickets: [TICKETS[4], second] };
+  await demarrer(page, routesAvec({ ...DAY, stops: [deuxPests, DAY.stops[1]] }));
+  await etape2(page);
+  await expect(page.getByText('Pest control was asked. Do you see insects?')).toBeVisible();
+  await expect(page.locator('.tcard')).toHaveCount(1);
+  await expect(carte(page, 'Ants · Bed').getByRole('button', { name: 'Still there' })).toBeVisible();
 });
 
 test('C4 : Still there apres la question des murs, une seule ecriture meme sur un second appui', async ({ page }) => {
@@ -103,6 +117,9 @@ test('C4 : Fixed now hors ligne, photo puis checkTicket dans l ordre au retour d
   await expect(carte(page, 'AC · Bedroom').locator('.tdone')).toContainText('✓ Fixed, photo sent');
   await expect(carte(page, 'AC · Bedroom').locator('.ticks')).toHaveText('✓');
   await retablir(page);
+  // La file peut etre vide un instant entre le televersement et checkTicket (mis en file juste
+  // apres) : on attend que checkTicket soit parti, puis la file vide.
+  await expect.poll(async () => (await ecritures(page)).some((x) => x.action === 'v3.checkTicket'), { timeout: 30_000 }).toBe(true);
   await fileVideApresRetour(page);
   const e = (await ecritures(page)).filter((x) => /uploadPhoto|checkTicket/.test(x.action) && (x.body.ticketId || x.action === 'v3.checkTicket'));
   expect(e.map((x) => x.action)).toEqual(['v3.uploadPhoto', 'v3.checkTicket']);
@@ -111,6 +128,25 @@ test('C4 : Fixed now hors ligne, photo puis checkTicket dans l ordre au retour d
   const checks = (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.checkTicket') !== -1 && l.body);
   expect(new Set(checks.map((l) => JSON.parse(l.body).idem)).size).toBe(1);
   await expect(carte(page, 'AC · Bedroom').locator('.ticks')).toHaveText('✓✓');
+});
+
+// Revue finale (G10) : checkTicket refuse « ticket is already closed » (un technicien l'a clos
+// entre-temps) : la carte passe a ✓✓ et rien ne va dans « Not sent ».
+test('C4 : Fixed now sur un ticket clos entre-temps, ✓✓ et magasin mort vide', async ({ page }) => {
+  await demarrer(page, routesAvec(DAY_T, [
+    { match: 'action=v3.checkTicket', status: 400, body: { error: 'ticket is already closed' } },
+  ]));
+  await etape2(page);
+  await carte(page, 'AC · Bedroom').getByRole('button', { name: 'Fixed now 📷' }).click();
+  await photo(page, 'fix-shutter');
+  await page.locator('[data-act="fix-done"]').click();
+  await fileVide(page);
+  await expect(carte(page, 'AC · Bedroom').locator('.ticks')).toHaveText('✓✓');
+  const checks = (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.checkTicket') !== -1);
+  expect(checks.length).toBeGreaterThanOrEqual(1);
+  const morts = await page.evaluate(async () => (await (await import('/v3/offline.js')).deadEntries()).length);
+  expect(morts).toBe(0);
+  await expect(page.getByText('Not sent:', { exact: false })).toHaveCount(0);
 });
 
 async function signalerFuite(page: any, photos = 1) {
@@ -192,6 +228,41 @@ test('C12 : hors ligne, « Reports load when you are online. »', async ({ page,
   await context.setOffline(true);
   await page.evaluate(() => { location.hash = '#/profile'; });
   await expect(page.getByText('Reports load when you are online.')).toBeVisible();
+});
+
+// Revue finale (G3) : « Not sent » ne depend pas de v3.myReports ; « My reports » dit
+// « Loading… » jusqu'a la reponse.
+test('C12 : Not sent s affiche tout de suite, My reports dit Loading… jusqu a la reponse', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myReports', status: 200, body: { reports: REPORTS }, delay: 4000 },
+    { match: 'action=v3.myDay', status: 200, body: DAY },
+    { match: 'action=v3.reportProblem', status: 400, body: { error: 'unknown kind' } },
+  ], { pinToken: 'jeton-pin' });
+  await expect(page.locator('.row').first()).toBeVisible();
+  await page.evaluate(async () => {
+    localStorage.setItem('v3TestOffline', '1');
+    const m = await import('/v3/offline.js');
+    await m.sendOrQueue('v3.reportProblem', { jobId: 'job_x', kind: 'Leak', idem: m.newIdem() });
+    localStorage.removeItem('v3TestOffline');
+    window.dispatchEvent(new Event('online'));
+  });
+  await expect.poll(async () => page.evaluate(async () => (await (await import('/v3/offline.js')).deadEntries()).length)).toBe(1);
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await expect(page.getByText('Not sent', { exact: true })).toBeVisible({ timeout: 1500 });
+  await expect(page.locator('.myrep .mr-empty')).toHaveText('Loading…');
+  await expect(page.locator('.myrep .mr-row')).toHaveCount(7, { timeout: 8000 });
+  await expect(page.getByText('Not sent', { exact: true })).toBeVisible();
+  await expect(page.getByText('Loading…')).toHaveCount(0);
+});
+
+// Revue finale (G8) : une panne du proxy n'est pas une coupure reseau.
+test('C12 : erreur du proxy, « Reports are unavailable right now. »', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myReports', status: 500, body: { error: 'boom' } },
+    { match: 'action=v3.myDay', status: 200, body: DAY },
+  ], { pinToken: 'jeton-pin', hash: '#/profile' });
+  await expect(page.getByText('Reports are unavailable right now.')).toBeVisible();
+  await expect(page.getByText('Reports load when you are online.')).toHaveCount(0);
 });
 
 // ---- View as et Practice ----

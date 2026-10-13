@@ -3,10 +3,13 @@
 // enregistrements coexistent, le navigateur donne la page au plus specifique.
 //
 // Strategie :
-//  - navigations et coquille : reseau d'abord, cache en repli, pour qu'un
-//    deploiement soit pris tout de suite ;
-//  - modules, styles, polices : cache d'abord puis revalidation, pour que l'app
-//    ouvre instantanement et marche sans reseau dans un appartement ;
+//  - navigations, coquille, modules .js, styles .css et client supabase-js :
+//    reseau d'abord, cache en repli. Un deploiement est pris des le premier
+//    chargement et les modules restent de la meme version : avant, app.js venait
+//    du reseau et les autres modules de l'ancien cache, le nouvel app.js
+//    importait des exports absents et l'app restait blanche (revue finale,
+//    maintenance phase 3). Hors ligne, le cache sert toujours toute l'app ;
+//  - polices, licences, manifeste : cache d'abord puis revalidation ;
 //  - appels au proxy : jamais caches, la file hors ligne s'en charge.
 //
 // Aucun abonnement push ici, et donc aucun handler `push` : la cleaner recoit
@@ -25,6 +28,7 @@ const PRECACHE = [
   '/v3/',
   '/v3/index.html',
   '/v3/app.js',
+  '/v3/boot.js',
   '/v3/api.js',
   '/v3/offline.js',
   '/v3/ui.js',
@@ -99,7 +103,9 @@ self.addEventListener('fetch', (e) => {
   const vendor = url.pathname === '/vendor/supabase-js-2.116.0.umd.js';
   if (url.pathname.indexOf('/v3/') !== 0 && !vendor) return;
 
-  if (req.mode === 'navigate' || url.pathname === '/v3/app.js' || url.pathname === '/v3/index.html') {
+  const p = url.pathname;
+  if (req.mode === 'navigate' || vendor || p === '/v3/' || p === '/v3/index.html' ||
+      /\.(js|css)$/.test(p)) {
     e.respondWith(networkFirst(req));
   } else {
     e.respondWith(staleWhileRevalidate(req));
