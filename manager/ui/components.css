@@ -99,3 +99,8 @@ section.card{background:var(--surface);border:1px solid var(--line);border-radiu
 /* Pastille des problemes urgents dans la navigation. */
 .nbadge{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--bad);color:var(--surface);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;margin-left:auto}
 .tab .nbadge{position:absolute;top:-6px;right:-14px;margin:0}
+
+/* Bandeau d'abonnement aux notifications (push-bar.js). */
+.pushbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin:12px 16px 0;padding:10px 12px;border-radius:var(--r-md);background:var(--accent-tint);color:var(--ink);font-size:14px}
+.pushbar-b{display:flex;gap:8px}
+@media (min-width:960px){.app>.sidebar{grid-row:1 / span 2}.app>.pushbar,.app>main{grid-column:2}.app>.pushbar{margin:16px var(--s8) 0;align-self:start}}

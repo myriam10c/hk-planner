@@ -459,3 +459,14 @@ test('citation traduite : texte anglais affiche, etiquette Translated, original 
   await expect(card.locator('.mt-tr')).toHaveText('Translated');
   await expect(page.getByText('Le climatiseur ne marche pas')).toHaveCount(0);
 });
+
+test('Open in Hostaway sur Android : lien vers l app Hostaway avec le site en secours', async ({ browser }) => {
+  const ctx = await browser.newContext({ userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36', viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage();
+  await bootMgr(page, ALL(), { email: true, clock: NOW_MNT, hash: '#/maintenance' });
+  const a = page.locator('.mt-card').first().locator('[data-hostaway]');
+  await expect(a).toHaveAttribute('href', 'intent://dashboard.hostaway.com/v3/messages/inbox/987654#Intent;scheme=https;package=com.fi.hostaway;S.browser_fallback_url='
+    + encodeURIComponent('https://dashboard.hostaway.com/v3/messages/inbox/987654') + ';end');
+  await expect(a).not.toHaveAttribute('target', '_blank');
+  await ctx.close();
+});

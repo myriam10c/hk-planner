@@ -35,6 +35,8 @@ export async function bootMgr(
         localStorage.setItem('mgrTestSeeded', '1');
         if (cfg.email) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.email));
         if (cfg.pin) localStorage.setItem('cleanerToken', cfg.pin);
+        // Bandeau des notifications masque par defaut (push-bar.spec.ts le teste a part).
+        localStorage.setItem('mgrPushLater', new Date().toISOString().slice(0, 10));
         if (cfg.cache) localStorage.setItem('mgrTodayCache', JSON.stringify(cfg.cache));
         if (cfg.storage) for (const k of Object.keys(cfg.storage)) localStorage.setItem(k, cfg.storage[k]);
       }

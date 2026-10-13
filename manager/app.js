@@ -172,6 +172,8 @@ async function boot() {
   me = { id: cleaner.id, name: cleaner.name, role: cleaner.role };
   rememberRole(cleaner.id, cleaner.role);
   await startShell();
+  // Rappel d'abonnement aux notifications : seulement une session confirmee par le serveur.
+  import('/manager/push-bar.js').then((m) => m.mountPushBar()).catch(() => { /* bandeau facultatif */ });
 }
 
 boot().catch((e) => { console.error('[manager] boot failed', e); }).finally(() => { window.__mgrReady = true; });

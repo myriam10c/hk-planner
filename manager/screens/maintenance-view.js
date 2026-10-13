@@ -68,6 +68,16 @@ const quoteText = (t) => '“' + esc(t) + '”';
 // Citation traduite en anglais par la detection : on le dit, l'original reste en base.
 const trTag = (q) => (q && q.original ? ' <span class="mt-tr">Translated</span>' : '');
 function hostawayUrl(id) { return 'https://dashboard.hostaway.com/v3/messages/inbox/' + encodeURIComponent(id); }
+// Android : lien d'intention vers l'app Hostaway (paquet com.fi.hostaway), le site
+// en secours si l'app n'est pas installee. iPhone et ordinateur : le site (l'app iOS
+// ne declare aucun lien de conversation).
+export function hostawayHref(id, ua) {
+  const web = hostawayUrl(id);
+  if (!/Android/i.test(ua || '')) return web;
+  return 'intent://dashboard.hostaway.com/v3/messages/inbox/' + encodeURIComponent(id)
+    + '#Intent;scheme=https;package=com.fi.hostaway;S.browser_fallback_url=' + encodeURIComponent(web) + ';end';
+}
+const UA = typeof navigator !== 'undefined' ? navigator.userAgent : '';
 function placeCat(p) { return [placeLabel(p), p.categoryLabel || CATEGORY[p.category] || ''].filter(Boolean).join(' · '); }
 
 // Liens de sortie du role maintenance (Semax), en bas de l'ecran : ses autres apps.
@@ -134,7 +144,9 @@ function pills(p) {
 function guestLine(p) {
   const stay = stayLine(p.stayFrom, p.stayTo);
   const link = p.conversationId
-    ? '<a href="' + esc(hostawayUrl(p.conversationId)) + '" target="_blank" rel="noopener" data-hostaway>Open in Hostaway</a>' : '';
+    ? (/Android/i.test(UA)
+      ? '<a href="' + esc(hostawayHref(p.conversationId, UA)) + '" data-hostaway>Open in Hostaway</a>'
+      : '<a href="' + esc(hostawayUrl(p.conversationId)) + '" target="_blank" rel="noopener" data-hostaway>Open in Hostaway</a>') : '';
   // Prenom du guest s'il est connu, sinon « Guest ».
   const first = String(p.guestName || '').trim().split(/\s+/)[0] || 'Guest';
   return [esc(first) + (stay ? ', ' + esc(stay) : ''), link].filter(Boolean).join(' · ');
