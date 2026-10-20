@@ -13,3 +13,8 @@ verify_jwt = false
 # d'atteindre la fonction.
 [functions.auth-mailer]
 verify_jwt = false
+
+# API en lecture seule pour un assistant IA externe : sa propre cle (X-API-Key),
+# pas de JWT Supabase. Meme raison que le proxy : verify_jwt doit rester OFF.
+[functions.readonly-api]
+verify_jwt = false
