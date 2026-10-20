@@ -290,7 +290,7 @@ export async function deleteProblem(sb: any, me: SessionUser, body: any): Promis
       if (String(t.status) === "cancelled") return fait;
       if (estFerme(t)) return { refus: FERME };
       const { error } = await sb.from("maintenance_tickets")
-        .update({ status: "cancelled" }).eq("id", e.ticketId);
+        .update({ status: "cancelled", actor_hint: me.name }).eq("id", e.ticketId);
       if (error) throw error;
       return fait;
     });

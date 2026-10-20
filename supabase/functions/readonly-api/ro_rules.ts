@@ -279,3 +279,22 @@ export function scrub(v: unknown): unknown {
   }
   return v;
 }
+
+// Qui a ouvert et qui a ferme : meme regle que ticketActors du proxy (premier
+// « opened », derniere cloture, une reouverture efface la cloture).
+export const RO_TICKET_EVENTS = ["opened", "closed", "cancelled", "reopened", "status"];
+export function actorsFrom(rows: any[]): { openedBy: Record<string, string>; closedBy: Record<string, { by: string; at: string }> } {
+  const openedBy: Record<string, string> = {}, closedBy: Record<string, { by: string; at: string }> = {};
+  const sorted = rows.slice().sort((a, b) => String(a.at).localeCompare(String(b.at)) || Number(a.id) - Number(b.id));
+  for (const e of sorted) {
+    const k = String(e.ticket_id);
+    if (e.event === "opened" && !(k in openedBy)) openedBy[k] = String(e.actor);
+    else if (e.event === "reopened") delete closedBy[k];
+    else if (e.event === "closed" || e.event === "cancelled") closedBy[k] = { by: String(e.actor), at: String(e.at) };
+  }
+  return { openedBy, closedBy };
+}
+export function eventOut(e: any) {
+  return { id: Number(e.id), ticketId: Number(e.ticket_id), ref: "MNT-" + e.ticket_id, event: e.event,
+    fromStatus: e.from_status ?? null, toStatus: e.to_status ?? null, by: e.actor, at: e.at };
+}

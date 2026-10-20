@@ -146,7 +146,7 @@ async function ensureTicket(sb: any, me: SessionUser, insp: any, zone: string, n
     title: txt.title,
     description: txt.description,
     category: "general", priority: "medium", status: "open",
-    reported_by: me.name, source: "inspection", source_ref: ref,
+    reported_by: me.name, actor_hint: me.name, source: "inspection", source_ref: ref,
     sla_deadline: new Date(now + hours * 3600_000).toISOString(),
     ...(first?.storage_path ? { photo_path: first.storage_path } : {}),
   }).select("id").single();

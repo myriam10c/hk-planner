@@ -239,7 +239,8 @@ export function openHtml(entry, error, filtered, nowMs) {
 }
 
 function doneLine(t) {
-  const who = t.resolvedBy || (t.assignee ? t.assignee.name : '');
+  // Seulement l'auteur reel de la cloture (ticket_events) : jamais l'assigne par defaut.
+  const who = t.resolvedBy || '';
   const day = weekdayDay(t.resolvedAt);
   let s = 'Done' + (who ? ' by ' + esc(who) : '') + (day ? (who ? ', ' : ' ') + esc(day) : '');
   const cost = costText(t.actualCost);
@@ -417,6 +418,8 @@ function factsHtml(t, nowMs) {
   const g = guestFact(t.proposal);
   if (g) h += row('Guest', esc(g));
   if (t.stage !== 'done') h += row('Due', dueFact(t.dueOn, nowMs));
+  if (t.openedBy) h += row('Opened by', esc(t.openedBy));
+  if (t.stage === 'done') h += row('Closed by', t.resolvedBy ? esc(t.resolvedBy) : 'Unknown');
   return '<dl class="mt-facts">' + h + '</dl>';
 }
 const safeUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u) ? u : '');

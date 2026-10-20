@@ -11,7 +11,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   scrub, cleaningOut, cleaningRange, type CheckoutIn, type CleaningCtx, dateParam, hourOrNull, intParam, isBad, keyOk,
   listingOut, listParam, placeMap, plusDays, RO_CATEGORIES, RO_CLEANING_STATUSES, RO_LIMIT_DEFAULT, RO_LIMIT_MAX,
-  proposalOut, reservationKey, RO_OPEN, RO_TECH_ROLES, TICKET_COLS, ticketOut, ticketStatuses,
+  actorsFrom, eventOut, proposalOut, RO_TICKET_EVENTS, reservationKey, RO_OPEN, RO_TECH_ROLES, TICKET_COLS, ticketOut, ticketStatuses,
 } from "./ro_rules.ts";
 
 const KEY_SHA = Deno.env.get("READONLY_API_KEY_SHA256") ?? "";
@@ -160,8 +160,38 @@ async function maintenance(q: URLSearchParams) {
   const place = placeMap(lst);
   const vend = Object.fromEntries(vendors.map((v: any) => [String(v.id), String(v.name)]));
   const rows = (data ?? []);
-  const page = rows.slice(0, lim).map((t: any) => ticketOut(t, place, people, vend));
+  const ids = rows.slice(0, lim).map((t: any) => Number(t.id));
+  const ev = ids.length ? await all((a, b) => ro("ticket_events", "id, ticket_id, event, actor, at").in("ticket_id", ids)
+    .in("event", ["opened", "closed", "cancelled", "reopened"]).order("id").range(a, b), "ticket_events") : [];
+  const who = actorsFrom(ev);
+  const page = rows.slice(0, lim).map((t: any) => ({
+    ...ticketOut(t, place, people, vend),
+    openedBy: who.openedBy[String(t.id)] ?? null,
+    closedBy: who.closedBy[String(t.id)]?.by ?? null,
+  }));
   return json({ count: page.length, offset: off, limit: lim, hasMore: rows.length > lim, data: page });
+}
+
+// ---------- /maintenance/events ----------
+// Journal ticket_events : qui a ouvert, ferme, rouvert ou change le statut d'un ticket.
+async function maintenanceEvents(q: URLSearchParams) {
+  const event = listParam(q, "event", RO_TICKET_EVENTS);
+  const from = dateParam(q, "from");
+  const to = dateParam(q, "to");
+  const limit = intParam(q, "limit", RO_LIMIT_DEFAULT, RO_LIMIT_MAX);
+  const ticket = intParam(q, "ticket_id", null, 1_000_000_000);
+  for (const p of [event, from, to, limit, ticket]) if (isBad(p)) return json(p, 400);
+  const actor = (q.get("actor") ?? "").trim();
+  let x = ro("ticket_events", "id, ticket_id, event, from_status, to_status, actor, at");
+  if (event) x = x.in("event", event as string[]);
+  if (ticket !== null) x = x.eq("ticket_id", ticket as number);
+  if (actor) x = x.ilike("actor", actor.replace(/[%_]/g, "") + "%");
+  if (from) x = x.gte("at", from + "T00:00:00+04:00");
+  if (to) x = x.lt("at", plusDays(to as string, 1) + "T00:00:00+04:00");
+  const { data, error } = await x.order("at", { ascending: false }).order("id", { ascending: false }).limit(limit as number);
+  if (error) throw new Error("ticket_events: " + error.message);
+  const out = (data ?? []).map(eventOut);
+  return json({ count: out.length, data: out });
 }
 
 // ---------- /cleanings ----------
@@ -354,6 +384,7 @@ const INDEX = {
     "GET /listings": "apartments (id, apartment, building, area, bedrooms, unit type)",
     "GET /technicians": "people and vendors who can take a maintenance ticket, with open ticket counts",
     "GET /maintenance": "tickets. Filters: listing_id, status (open | closed | comma list), category, technician_id, from, to, date_field (created|resolved|closed), limit (max 500), offset",
+    "GET /maintenance/events": "who opened, closed, reopened or changed the status of a ticket. Filters: ticket_id, event (opened|closed|cancelled|reopened|status), actor (name prefix), from, to, limit",
     "GET /proposals": "ticket proposals detected in guest messages. Filters: status (pending by default, accepted, rejected, merged), limit",
     "GET /cleanings": "cleanings (checkouts and extras). Filters: from (required), to (max 31 days), listing_id, status, cleaner_id",
   },
@@ -390,7 +421,7 @@ const INDEX = {
 
 const GETS: Record<string, (q: URLSearchParams) => Promise<Response>> = {
   "": async () => json(INDEX), "/listings": () => listings(), "/technicians": () => technicians(),
-  "/maintenance": maintenance, "/proposals": proposals, "/cleanings": cleanings,
+  "/maintenance": maintenance, "/maintenance/events": maintenanceEvents, "/proposals": proposals, "/cleanings": cleanings,
 };
 const POSTS: Record<string, (req: Request) => Promise<Response>> = {
   "/maintenance/act": writeMaintenance,

@@ -83,3 +83,15 @@ Deno.test("scrub: retire cle interne et champs guest des reponses du proxy", () 
   assertEquals(scrub({ status: "success", key: "2026-10-18_Jane", done: true, extra: { id: 3, guest_name: "Jane", reservation_key: "x" } }),
     { status: "success", done: true, extra: { id: 3 } });
 });
+
+Deno.test("actorsFrom : ouvreur, fermeur, reouverture", async () => {
+  const { actorsFrom } = await import("./ro_rules.ts");
+  const r = actorsFrom([
+    { id: 2, ticket_id: 5, event: "closed", actor: "Walter", at: "2026-10-02" },
+    { id: 1, ticket_id: 5, event: "opened", actor: "Ismaël", at: "2026-10-01" },
+    { id: 3, ticket_id: 6, event: "closed", actor: "Walter", at: "2026-10-02" },
+    { id: 4, ticket_id: 6, event: "reopened", actor: "Hillal", at: "2026-10-03" },
+  ]);
+  assertEquals(r.openedBy, { "5": "Ismaël" });
+  assertEquals(r.closedBy, { "5": { by: "Walter", at: "2026-10-02" } });
+});

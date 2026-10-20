@@ -122,6 +122,7 @@ export async function reportProblem(
       priority,
       assigned_technician_id: technicianId,
       reported_by: me.name,
+      actor_hint: me.name,
       source: "hk_planner_v3",
       source_ref: reservationKey,
       photo_path: photoPath,
@@ -230,6 +231,7 @@ export async function checkTicket(sb: any, me: SessionUser, body: any): Promise<
     const { error: tErr } = await sb.from("maintenance_tickets").update({
       status: "to_confirm",
       resolution_photo_path: photo.storage_path,
+      actor_hint: me.name,
     }).eq("id", ticketId);
     if (tErr) throw tErr;
     result = { status: "success", ticketId, status_value: "to_confirm" };

@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { mntDigest, mntList, type MntList, type MntQuery, parseMntQuery } from "./mnt_read.ts";
+import { mntDigest, mntList, type MntList, type MntQuery, parseMntQuery, ticketActors } from "./mnt_read.ts";
 
 // 2026-10-12 21:30 UTC = 2026-10-13 01:30 a Dubai : le jour Dubai est le 13.
 const NOW = Date.parse("2026-10-12T21:30:00Z");
@@ -138,7 +138,7 @@ Deno.test("tickets ouverts : tri priorite puis anciennete, etapes, origines, int
     id: 11, ref: "MNT-11", listingId: "L1", apt: "103", bld: "Damac Reva", title: "Ticket 11", category: null,
     priority: "urgent", status: "open", stage: "todo", origin: "cleaner_report", assignee: null, dueOn: "2026-10-14",
     createdAt: "2026-10-05T08:00:00Z", startedAt: null, resolvedAt: null, resolvedBy: null, resolutionNotes: null,
-    actualCost: null, proposalId: 7,
+    actualCost: null, proposalId: 7, openedBy: null,
   });
   assertEquals([b.tickets[3].listingId, b.tickets[3].apt, b.tickets[3].bld], [null, "", ""]);
 });
@@ -273,4 +273,23 @@ Deno.test("mntPage : listing_config se trie par listing_id (pas de colonne id)",
   await mntPage(sb, "listing_config", "listing_id", (x) => x);
   await mntPage(sb, "cleaners", "id", (x) => x);
   if (orders.join(",") !== "listing_id,id") throw new Error("orders: " + orders.join(","));
+});
+
+Deno.test("ticketActors : premier ouvreur, dernier fermeur, une reouverture efface la cloture", async () => {
+  const rows = [
+    { id: 1, ticket_id: 5, event: "opened", actor: "Ismaël", at: "2026-10-01T08:00:00Z" },
+    { id: 2, ticket_id: 5, event: "closed", actor: "Walter", at: "2026-10-02T08:00:00Z" },
+    { id: 3, ticket_id: 6, event: "opened", actor: "Faiza", at: "2026-10-01T09:00:00Z" },
+    { id: 4, ticket_id: 6, event: "closed", actor: "Walter", at: "2026-10-02T09:00:00Z" },
+    { id: 5, ticket_id: 6, event: "reopened", actor: "Hillal", at: "2026-10-03T09:00:00Z" },
+    { id: 6, ticket_id: 7, event: "opened", actor: "Ismaël", at: "2026-10-01T10:00:00Z" },
+    { id: 7, ticket_id: 7, event: "cancelled", actor: "Semax", at: "2026-10-04T10:00:00Z" },
+  ];
+  const q: any = { select: () => q, in: () => q, order: () => q, range: () => Promise.resolve({ data: rows, error: null }) };
+  const r = await ticketActors({ from: () => q }, [5, 6, 7]);
+  assertEquals(r.openedBy, { ticket_5: "Ismaël", ticket_6: "Faiza", ticket_7: "Ismaël" });
+  assertEquals(r.closedBy, { ticket_5: "Walter", ticket_7: "Semax" });
+  // Lecture en echec : tables vides, jamais d'erreur.
+  const bad: any = { select: () => bad, in: () => bad, order: () => bad, range: () => Promise.resolve({ data: null, error: { message: "x" } }) };
+  assertEquals(await ticketActors({ from: () => bad }, [5]), { openedBy: {}, closedBy: {} });
 });

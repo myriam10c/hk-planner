@@ -251,7 +251,7 @@ async function insertTicket(c: Ctx, t: NewTicket, source: "guest_message" | "man
     listing_id: t.listingId, title: t.title, description: t.note || null, category: t.category, priority: priorityFor(t.urgency),
     status: taken ? "assigned" : "open", source, source_ref: proposalId ? "proposal:" + proposalId : null,
     proposal_id: proposalId, reported_by: c.me.name, assigned_technician_id: t.memberId, assigned_vendor_id: t.vendorId,
-    last_update: c.nowIso,
+    last_update: c.nowIso, actor_hint: c.me.name,
   }).select("id"));
   if (!rows.length) throw new Error("[mnt_act] ticket insert: no row");
   return Number(rows[0].id);
@@ -345,7 +345,7 @@ async function doCreate(c: Ctx, a: Extract<Op, { op: "ticket.create" }>): Promis
 }
 
 const updateTicket = (c: Ctx, id: number, values: Record<string, unknown>) =>
-  mustWrite(c.sb.from("maintenance_tickets").update({ ...values, last_update: c.nowIso }).eq("id", id));
+  mustWrite(c.sb.from("maintenance_tickets").update({ ...values, last_update: c.nowIso, actor_hint: c.me.name }).eq("id", id));
 
 // Cout d'un ticket remplace (ticket.done et ticket.edit_closed) : jamais compte deux
 // fois. Nouvelle ligne, puis retrait des anciennes, puis actual_cost. Si une etape
@@ -414,7 +414,7 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
     // sans cout, le cout precedent reste (lignes et actual_cost).
     const hit = await mustWrite(c.sb.from("maintenance_tickets").update({
       status: "resolved", resolved_at: c.nowIso, resolution_notes: a.note || null,
-      resolution_photo_path: a.photoPath, last_update: c.nowIso,
+      resolution_photo_path: a.photoPath, last_update: c.nowIso, actor_hint: c.me.name,
     }).eq("id", id).or("status.is.null,status.not.in.(" + MGR_CLOSED_TICKET_STATUSES.join(",") + ")").select("id"));
     if (!hit.length) throw new Refused(CLOSED);
     // Avec un cout, il remplace celui du ticket (Reopen puis Done corrige un cout sans le compter deux fois) :
@@ -424,7 +424,7 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
       await replaceCost(c, id, tk, a.cost, c.today, () => mustWrite(c.sb.from("maintenance_tickets").update({
         status: tk.status ?? "open", resolved_at: tk.resolved_at ?? null, resolution_notes: tk.resolution_notes ?? null,
         resolution_photo_path: tk.resolution_photo_path ?? null, actual_cost: tk.actual_cost ?? null,
-        last_update: tk.last_update ?? c.nowIso,
+        last_update: tk.last_update ?? c.nowIso, actor_hint: c.me.name + " (undo)",
       }).eq("id", id)));
     }
     result.status = "resolved";

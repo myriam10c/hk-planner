@@ -47,7 +47,7 @@ Deno.test("bloc Maintenance : 5 tickets ouverts, urgent puis high puis le plus a
     id: 6, ref: "MNT-6", listingId: "L1", apt: "308", bld: "Binghatti Lavender", title: "T6", category: null,
     priority: "urgent", status: "to_confirm", stage: "to_confirm", origin: "manual",
     assignee: { kind: "member", id: 7, name: "Semax" }, dueOn: null, createdAt: "2026-10-01T08:00:00Z", startedAt: null,
-    resolvedAt: null, resolvedBy: null, resolutionNotes: null, actualCost: null, proposalId: null,
+    resolvedAt: null, resolvedBy: null, resolutionNotes: null, actualCost: null, proposalId: null, openedBy: null,
   });
   assertEquals([m!.top[1].origin, m!.top[1].stage, m!.top[1].assignee], ["inspection", "todo", null]);
   assertEquals([m!.top[2].origin, m!.top[2].stage], ["cleaner_report", "waiting_parts"]);

@@ -8,7 +8,7 @@ import { MGR_CLOSED_TICKET_STATUSES, MGR_OPEN_TICKET_STATUSES, problemRef } from
 import { readAllRows } from "./mgr_today.ts";
 import {
   MNT_PROPOSAL_COLS, MNT_TICKET_COLS, MNT_UNAVAILABLE, mntCtx, type MntProposalRow, mntProposalRow, type MntTicketRow,
-  mntTicketRow,
+  mntTicketRow, ticketActors,
 } from "./mnt_read.ts";
 import { type ActionResult, todayDubai, V3_PHOTO_BUCKET } from "./v3.ts";
 import { uploadPhoto } from "./v3_photos.ts";
@@ -143,7 +143,9 @@ async function ticketDetail(sb: any, t: any, today: string, signer: MntSigner): 
     const ot = Number(prop.open_ticket_id) === id ? t : await one(sb, "maintenance_tickets", "id, title, status", Number(prop.open_ticket_id));
     if (isOpen(ot)) openById[String(ot.id)] = ot;
   }
-  const ctx = mntCtx(r.listingRows, r.people, r.vendorRows, { today, openById, resolvedBy });
+  const actors = await ticketActors(sb, [id]);
+  Object.assign(resolvedBy, actors.closedBy);
+  const ctx = mntCtx(r.listingRows, r.people, r.vendorRows, { today, openById, resolvedBy, openedBy: actors.openedBy });
   const isDone = (MGR_CLOSED_TICKET_STATUSES as readonly string[]).includes(String(t.status));
   const row = mntTicketRow(t, ctx, isDone);
 

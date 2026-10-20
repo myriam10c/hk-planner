@@ -2930,6 +2930,8 @@ Deno.serve(async (req: Request) => {
         title, description: description || null, category: cat, priority: pri,
         assigned_vendor_id: assigned_vendor_id || null, assigned_technician_id: assigned_technician_id || null,
         reported_by: reported_by || null,
+        // Suivi ticket_events : la session d'abord, sinon l'auteur declare.
+        actor_hint: (await currentUser(sb, req))?.name || reported_by || null,
         ...(source ? { source } : {}), source_ref: source_ref || null,
         estimated_cost: estimated_cost || null, sla_deadline: slaDeadline,
         status: assigned_technician_id ? 'assigned' : 'open',
@@ -2949,7 +2951,7 @@ Deno.serve(async (req: Request) => {
       // Auteur pris dans la session (spec manager, section 6), body.actor ignore
       // sauf pour les jobs serveur Hermes sans session.
       const actor = sessionActor(await currentUser(sb, req), body.actor);
-      const upd: any = {};
+      const upd: any = { actor_hint: actor };
       if (newStatus) {
         upd.status = newStatus;
         if (newStatus === 'in_progress' && !upd.started_at) upd.started_at = new Date().toISOString();

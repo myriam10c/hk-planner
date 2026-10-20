@@ -41,6 +41,7 @@ export type MntTicketRow = {
   priority: string; status: string; stage: MntStage; origin: MntOrigin;
   assignee: { kind: "member" | "vendor"; id: number; name: string } | null; dueOn: string | null; createdAt: string; startedAt: string | null;
   resolvedAt: string | null; resolvedBy: string | null; resolutionNotes: string | null; actualCost: number | null; proposalId: number | null;
+  openedBy: string | null;
 };
 export type MntList = {
   tab: MntQuery["tab"]; counts: { proposals: number; open: number; urgent: number; unassigned: number; mine: number };
@@ -104,19 +105,47 @@ export const readPendingProposals = (sb: any) => mntPage(sb, "maintenance_propos
 // Contexte commun aux lignes (liste et fiche) : libelles, noms, tickets ouverts, auteurs de cloture.
 export type MntCtx = {
   listings: Record<string, Label>; names: Record<string, string>; vendorNames: Record<string, string>;
-  openById: Record<string, any>; resolvedBy: Record<string, string>; today: string;
+  openById: Record<string, any>; resolvedBy: Record<string, string>; openedBy: Record<string, string>; today: string;
 };
 export function mntCtx(
   listingRows: any[], people: any[], vendorRows: any[],
-  o: { today: string; openById?: Record<string, any>; resolvedBy?: Record<string, string>; listings?: Record<string, Label> },
+  o: {
+    today: string; openById?: Record<string, any>; resolvedBy?: Record<string, string>; openedBy?: Record<string, string>;
+    listings?: Record<string, Label>;
+  },
 ): MntCtx {
   return {
     // Libelles deja calcules (coeur de Today) : pris tels quels, listingRows ignore.
     listings: o.listings ?? listingMap(listingRows),
     names: Object.fromEntries(people.map((p: any) => [String(p.id), String(p.name ?? "").trim() || "Member " + p.id])),
     vendorNames: Object.fromEntries(vendorRows.map((v: any) => [String(v.id), String(v.name ?? "").trim() || "Vendor " + v.id])),
-    openById: o.openById ?? {}, resolvedBy: o.resolvedBy ?? {}, today: o.today,
+    openById: o.openById ?? {}, resolvedBy: o.resolvedBy ?? {}, openedBy: o.openedBy ?? {}, today: o.today,
   };
+}
+
+// Qui a ouvert et qui a ferme chaque ticket, d'apres ticket_events (trigger en
+// base, tous chemins d'ecriture confondus). Cles « ticket_<id> » comme resolvedBy.
+// Une lecture en echec rend des tables vides : le suivi n'empeche jamais la liste.
+export async function ticketActors(sb: any, ids: number[]): Promise<{ openedBy: Record<string, string>; closedBy: Record<string, string> }> {
+  const openedBy: Record<string, string> = {}, closedBy: Record<string, string> = {};
+  const uniq = [...new Set(ids.filter((n) => Number.isFinite(n)))];
+  try {
+    for (let i = 0; i < uniq.length; i += 100) {
+      const part = uniq.slice(i, i + 100);
+      const rows = await readAllRows((a: number, b: number) => sb.from("ticket_events").select("id, ticket_id, event, actor, at")
+        .in("ticket_id", part).in("event", ["opened", "closed", "cancelled", "reopened"]).order("id").range(a, b), "ticket_events");
+      rows.sort((x: any, y: any) => asc(x.at, y.at) || Number(x.id) - Number(y.id));
+      for (const e of rows) {
+        const k = "ticket_" + e.ticket_id, who = str(e.actor);
+        if (e.event === "opened" && who && !(k in openedBy)) openedBy[k] = who;
+        else if (e.event === "reopened") delete closedBy[k];
+        else if ((e.event === "closed" || e.event === "cancelled") && who) closedBy[k] = who;
+      }
+    }
+  } catch (e) {
+    console.warn("[mnt] ticket_events read failed:", (e as any)?.message ?? e);
+  }
+  return { openedBy, closedBy };
 }
 
 export function mntTicketRow(t: any, ctx: MntCtx, isDone: boolean): MntTicketRow {
@@ -133,6 +162,7 @@ export function mntTicketRow(t: any, ctx: MntCtx, isDone: boolean): MntTicketRow
     dueOn: str(t.due_on), createdAt: String(t.created_at ?? ""), startedAt: str(t.started_at), resolvedAt: closedAt(t),
     resolvedBy: isDone ? ctx.resolvedBy["ticket_" + t.id] ?? null : null, resolutionNotes: str(t.resolution_notes),
     actualCost: cost === null || Number.isNaN(cost) ? null : cost, proposalId: idOrNull(t.proposal_id),
+    openedBy: ctx.openedBy["ticket_" + t.id] ?? null,
   };
 }
 
@@ -197,7 +227,12 @@ export async function mntList(
       for (const l of logs) if (str(l.actor)) resolvedBy[String(l.reservation_key)] = String(l.actor);
     }
 
-    const ctx = mntCtx(listingRows, people, vendorRows, { today, openById: Object.fromEntries(open.map((t: any) => [String(t.id), t])), resolvedBy });
+    // ticket_events l'emporte : il couvre aussi les clotures hors ecran Maintenance.
+    const actors = await ticketActors(sb, [...open, ...done].map((t: any) => Number(t.id)));
+    Object.assign(resolvedBy, actors.closedBy);
+    const ctx = mntCtx(listingRows, people, vendorRows, {
+      today, openById: Object.fromEntries(open.map((t: any) => [String(t.id), t])), resolvedBy, openedBy: actors.openedBy,
+    });
     const ticketRow = (t: any, isDone: boolean) => mntTicketRow(t, ctx, isDone);
     const proposalRow = (p: any) => mntProposalRow(p, ctx);
 
