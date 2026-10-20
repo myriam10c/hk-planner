@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { cleaningOut, cleaningRange, type CleaningCtx, isBad, keyOk, listParam, redact, sha256Hex, ticketOut, ticketStatuses } from "./ro_rules.ts";
+import { cleaningOut, cleaningRange, type CleaningCtx, isBad, keyOk, listParam, proposalOut, redact, scrub, sha256Hex, ticketOut, ticketStatuses } from "./ro_rules.ts";
 
 const qs = (s: string) => new URLSearchParams(s);
 
@@ -66,4 +66,20 @@ Deno.test("cleaningOut: statut, report, pas de nom de guest", () => {
   // Annule l'emporte sur fait.
   c.done.add("k2"); c.canc["k2"] = "owner stay";
   assertEquals(cleaningOut("k2", "checkout", "2", "1", "2026-10-22", 11, null, null, c)!.status, "cancelled");
+});
+
+Deno.test("proposalOut: citations masquees, ni nom de guest ni identifiant de message", () => {
+  const p = proposalOut({
+    id: 57, listing_id: "1", guest_name: "John Smith", conversation_id: "c9", title: "Ants",
+    quotes: [{ at: "x", text: "call me +971 50 123 4567", message_id: "511319821" }], status: "pending",
+  }, { "1": { apartment: "305", building: "Neva" } });
+  assertEquals(p.ref, "PRP-57");
+  assertEquals(p.quotes, ["call me [phone hidden]"]);
+  const s = JSON.stringify(p);
+  for (const banned of ["John", "c9", "511319821"]) assert(!s.includes(banned), banned);
+});
+
+Deno.test("scrub: retire cle interne et champs guest des reponses du proxy", () => {
+  assertEquals(scrub({ status: "success", key: "2026-10-18_Jane", done: true, extra: { id: 3, guest_name: "Jane", reservation_key: "x" } }),
+    { status: "success", done: true, extra: { id: 3 } });
 });

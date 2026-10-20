@@ -241,3 +241,41 @@ export function cleaningOut(
     cancelReason: cancelled ? redact(c.canc[key]) : null,
   };
 }
+
+// Proposition : citations des guests en texte masque, jamais leur nom.
+export function proposalOut(p: any, place: Record<string, Place>) {
+  const lid = String(p.listing_id ?? "");
+  const pl = place[lid] ?? { apartment: "", building: lid ? "Listing " + lid : "" };
+  const quotes = Array.isArray(p.quotes) ? p.quotes : [];
+  return {
+    id: Number(p.id),
+    ref: "PRP-" + p.id,
+    listingId: lid || null,
+    apartment: pl.apartment || null,
+    building: pl.building || null,
+    stayFrom: p.stay_from ?? null,
+    stayTo: p.stay_to ?? null,
+    title: redact(p.title),
+    category: p.category ?? null,
+    urgency: p.urgency ?? null,
+    quotes: quotes.map((q: any) => redact(typeof q === "string" ? q : q?.text ?? q?.body ?? "")).filter(Boolean),
+    status: p.status ?? null,
+    ticketId: p.ticket_id ?? null,
+    openTicketId: p.open_ticket_id ?? null,
+    decidedBy: p.decided_by ?? null,
+    decidedAt: p.decided_at ?? null,
+    rejectReason: p.reject_reason ?? null,
+    createdAt: p.created_at ?? null,
+  };
+}
+
+// Reponses du proxy rendues a l'assistant : la cle interne d'un menage contient
+// le nom du guest, on la retire partout avec les autres champs guest.
+const SCRUBBED = new Set(["key", "reservation_key", "guest_name", "guestName", "guest", "phone"]);
+export function scrub(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(scrub);
+  if (v && typeof v === "object") {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => !SCRUBBED.has(k)).map(([k, x]) => [k, scrub(x)]));
+  }
+  return v;
+}
