@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hillal ETF — Investment Projection</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419;
+    --card: #1a2027;
+    --line: #2a323c;
+    --ink: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #2ea043;
+    --accent2: #58a6ff;
+    --growth: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 32px 20px 64px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 24px;
+  }
+  .controls label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .controls input, .controls select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-size: 15px;
+  }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 28px; }
+  .stat {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px;
+  }
+  .stat .horizon { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  .stat .value { font-size: 26px; font-weight: 700; margin: 6px 0 2px; color: var(--accent); }
+  .stat .meta { font-size: 13px; color: var(--muted); }
+  .stat .meta b { color: var(--growth); font-weight: 600; }
+  .chart-card, .table-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 24px;
+  }
+  canvas { width: 100% !important; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  tbody tr.milestone { background: rgba(46,160,67,.08); }
+  tbody tr.milestone td:first-child { font-weight: 700; color: var(--accent); }
+  .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .toggle { margin-bottom: 12px; }
+  .toggle button {
+    background: var(--bg); border: 1px solid var(--line); color: var(--muted);
+    padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; margin-right: 6px;
+  }
+  .toggle button.active { color: var(--ink); border-color: var(--accent2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Hillal ETF — Investment Projection</h1>
+  <p class="sub">Initial lump sum + recurring monthly contributions, compounded monthly.</p>
+
+  <div class="controls">
+    <div>
+      <label for="initial">Initial investment ($)</label>
+      <input id="initial" type="number" value="15000" min="0" step="500" />
+    </div>
+    <div>
+      <label for="monthly">Monthly contribution ($)</label>
+      <input id="monthly" type="number" value="1000" min="0" step="100" />
+    </div>
+    <div>
+      <label for="rate">Annual yield (%)</label>
+      <input id="rate" type="number" value="8" min="0" step="0.5" />
+    </div>
+    <div>
+      <label for="timing">Contribution timing</label>
+      <select id="timing">
+        <option value="begin" selected>Start of month</option>
+        <option value="end">End of month</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="chart-card">
+    <div class="toggle" id="rangeToggle">
+      <button data-months="12">1 year</button>
+      <button data-months="60" class="active">5 years</button>
+      <button data-months="120">10 years</button>
+    </div>
+    <canvas id="chart" height="160"></canvas>
+  </div>
+
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr><th>End of year</th><th>Contributed</th><th>Growth</th><th>Portfolio value</th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <p class="note">Assumes the annual yield is earned evenly and compounded monthly (rate ÷ 12 each month). Real ETF returns vary year to year; this is a smooth estimate, not a guarantee.</p>
+  </div>
+</div>
+
+<script>
+const fmt = n => '$' + Math.round(n).toLocaleString('en-US');
+const fmt2 = n => '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+function buildSeries(P0, PM, annualPct, months, timing) {
+  const i = (annualPct / 100) / 12;
+  let bal = P0;
+  const series = [{ month: 0, value: P0, contributed: P0 }];
+  for (let m = 1; m <= months; m++) {
+    if (timing === 'begin') { bal += PM; bal *= (1 + i); }
+    else { bal *= (1 + i); bal += PM; }
+    series.push({ month: m, value: bal, contributed: P0 + PM * m });
+  }
+  return series;
+}
+
+let chart;
+let currentMonths = 60;
+
+function render() {
+  const P0 = +document.getElementById('initial').value || 0;
+  const PM = +document.getElementById('monthly').value || 0;
+  const rate = +document.getElementById('rate').value || 0;
+  const timing = document.getElementById('timing').value;
+
+  // milestone cards: 1y, 5y, 10y
+  const horizons = [['1 year', 12], ['5 years', 60], ['10 years', 120]];
+  const cards = document.getElementById('cards');
+  cards.innerHTML = '';
+  for (const [label, n] of horizons) {
+    const s = buildSeries(P0, PM, rate, n, timing);
+    const last = s[s.length - 1];
+    const growth = last.value - last.contributed;
+    cards.insertAdjacentHTML('beforeend', `
+      <div class="stat">
+        <div class="horizon">${label}</div>
+        <div class="value">${fmt(last.value)}</div>
+        <div class="meta">in: ${fmt(last.contributed)} &middot; growth: <b>${fmt(growth)}</b></div>
+      </div>`);
+  }
+
+  // yearly table (up to 10 years)
+  const full = buildSeries(P0, PM, rate, 120, timing);
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  for (let y = 1; y <= 10; y++) {
+    const row = full[y * 12];
+    const growth = row.value - row.contributed;
+    const milestone = [1, 5, 10].includes(y) ? ' class="milestone"' : '';
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr${milestone}>
+        <td>Year ${y}</td>
+        <td>${fmt(row.contributed)}</td>
+        <td>${fmt(growth)}</td>
+        <td>${fmt2(row.value)}</td>
+      </tr>`);
+  }
+
+  // chart for selected range
+  const s = buildSeries(P0, PM, rate, currentMonths, timing);
+  const labels = s.map(p => (p.month % 12 === 0) ? 'Y' + (p.month / 12) : '');
+  const valueData = s.map(p => Math.round(p.value));
+  const contribData = s.map(p => Math.round(p.contributed));
+
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('chart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Portfolio value', data: valueData, borderColor: '#2ea043',
+          backgroundColor: 'rgba(46,160,67,.15)', fill: true, tension: .25, pointRadius: 0, borderWidth: 2 },
+        { label: 'Total contributed', data: contribData, borderColor: '#58a6ff',
+          backgroundColor: 'transparent', borderDash: [6, 4], tension: 0, pointRadius: 0, borderWidth: 1.5 }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#e6edf3' } },
+        tooltip: {
+          callbacks: {
+            title: items => 'Month ' + s[items[0].dataIndex].month,
+            label: ctx => ctx.dataset.label + ': ' + fmt(ctx.parsed.y)
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#8b98a5' }, grid: { color: '#2a323c' } },
+        y: { ticks: { color: '#8b98a5', callback: v => '$' + (v / 1000) + 'k' }, grid: { color: '#2a323c' } }
+      }
+    }
+  });
+}
+
+document.querySelectorAll('#rangeToggle button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#rangeToggle button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    currentMonths = +b.dataset.months;
+    render();
+  });
+});
+['initial', 'monthly', 'rate', 'timing'].forEach(id =>
+  document.getElementById(id).addEventListener('input', render));
+
+render();
+</script>
+</body>
+</html>
