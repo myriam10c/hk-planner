@@ -55,6 +55,7 @@ import { mntDigest, mntList, parseMntQuery } from "./mnt_read.ts";
 import { mntAct } from "./mnt_act.ts";
 import { mntGet, mntPhoto } from "./mnt_get.ts";
 import { mntIngest } from "./mnt_ingest.ts";
+import { parseRemLogQuery, remConfigGet, remConfigSet, remLog, remRead, remRun, remTest } from "./reminders.ts";
 
 // Shim type-only pour tsc hors Deno (erased au runtime, Deno fournit le vrai global).
 declare const Deno: any;
@@ -88,6 +89,8 @@ const SERVER_ONLY_ACTIONS = new Set([
   // Propositions maintenance poussees par le job VPS (messages guests).
   "mnt.proposals.ingest",
   "setSecurityContacts",
+  // Relances automatiques : job pg_cron toutes les 5 min.
+  "rem.run",
 ]);
 const TOKEN_URL = "https://api.hostaway.com/v1/accessTokens";
 const API_BASE = "https://api.hostaway.com/v1";
@@ -1018,6 +1021,9 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   // ===== Maintenance (spec 2026-10-12, phase 1) =====
   ["mnt.list", "GET"], ["mnt.digest", "GET"], ["mnt.act", "POST"], ["mnt.proposals.ingest", "POST"],
   ["mnt.get", "GET"], ["mnt.photo", "POST"],
+  // ===== Relances automatiques par push (plan 2026-10-20) =====
+  ["rem.run", "POST"], ["rem.read", "POST"], ["rem.config", "GET"], ["rem.config.set", "POST"],
+  ["rem.log", "GET"], ["rem.test", "POST"],
   // ===== Checkouts / sync =====
   ["checkouts", "GET"],
   ["syncListings", "GET"],
@@ -1690,6 +1696,62 @@ Deno.serve(async (req: Request) => {
         notifyUrgent: (p) => keepAlive(Promise.resolve().then(() => notifyMntUrgent(sb, p))
           .catch((e) => console.warn("[mnt] urgent push", e))),
       });
+      return jsonResp(r.body, r.status);
+    }
+
+    // ==================== RELANCES (plan 2026-10-20-hk-reminders) ====================
+    // Le service worker appelle rem.read au clic avec l'URL et le secret d'app portes
+    // par la notification (secret deja public dans le bundle JS).
+    const remAck = {
+      ackUrl: (Deno.env.get("SUPABASE_URL") ?? "") + "/functions/v1/hostaway-proxy?action=rem.read",
+      appSecret: APP_SHARED_SECRET,
+    };
+    // Moteur : secret serveur deja verifie (SERVER_ONLY_ACTIONS). Planning des menages
+    // par le meme chemin que mgr.planning ; reservations du jour via le cache d'Inspections.
+    if (action === "rem.run") {
+      const runBody = await req.json().catch(() => null);
+      const r = await remRun(sb, {
+        ...remAck,
+        dryRun: runBody?.dryRun === true,
+        loadCheckouts: async (s, e) => {
+          const p = await loadCheckoutsCached(sb, s, e, false);
+          return { reservations: Array.isArray(p?.reservations) ? p.reservations : [], cachedAt: p?.cachedAt ?? null };
+        },
+        loadReservations: async (d) => (await loadInspReservations(sb, d)).reservations,
+      });
+      return jsonResp(r, r.ok ? 200 : 503);
+    }
+    // Clic sur une notification : X-App-Secret seul (verifie a l'entree), jeton par ligne.
+    if (action === "rem.read") {
+      const body = await req.json().catch(() => null);
+      const r = await remRead(sb, body);
+      return jsonResp(r.body, r.status);
+    }
+    if (action === "rem.config" || action === "rem.config.set" || action === "rem.log") {
+      const me = await currentUser(sb, req);
+      const acc = mgrAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      if (action === "rem.config") {
+        const r = await remConfigGet(sb);
+        return jsonResp(r.body, r.status);
+      }
+      if (action === "rem.log") {
+        const q = parseRemLogQuery(url.searchParams);
+        if ("error" in q) return jsonResp({ error: q.error }, 400);
+        const r = await remLog(sb, q);
+        return jsonResp(r.body, r.status);
+      }
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await remConfigSet(sb, body, me!);
+      return jsonResp(r.body, r.status);
+    }
+    // Test URGENT a soi-meme : managers et maintenance (les techniciens recoivent aussi des relances).
+    if (action === "rem.test") {
+      const me = await currentUser(sb, req);
+      const acc = mntAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const r = await remTest(sb, me!, remAck);
       return jsonResp(r.body, r.status);
     }
 

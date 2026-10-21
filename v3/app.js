@@ -1168,6 +1168,20 @@ export async function boot() {
       .catch(function (e) { console.warn('[v3] service worker non enregistre', e); });
   }
   window.__v3ready = true;
+  proposerNotifications();
+}
+
+// Ecran « Turn on notifications » (rappels automatiques) : apres une journee
+// chargee du reseau, pour la personne elle-meme (ni View as, ni Practice, dont
+// les appels partiraient au simulateur). Import dynamique : /v3/push.js n'est
+// pas dans le precache, et un echec (hors ligne) ne touche jamais l'app.
+function proposerNotifications() {
+  if (!state.session || state.session.kind === 'stale') return;
+  if (state.viewAs || practiceActive() || state.error || !state.day || state.jourGarde) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  import('/v3/push.js')
+    .then(function (m) { return m.mountPushPrompt(); })
+    .catch(function (e) { console.warn('[v3] ecran notifications indisponible', e); });
 }
 
 boot();

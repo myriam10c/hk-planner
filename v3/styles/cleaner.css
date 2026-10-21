@@ -37,6 +37,17 @@
 .gate a { display: block; min-height: 58px; line-height: 58px; margin: 20px 0 0; border-radius: 15px; background: var(--terra); color: #FFF; font-size: 17px; font-weight: 800; text-decoration: none; }
 /* Lien de secours vers l'ancienne app (bascule du 09/10) : discret, sous le bouton principal. */
 .gate a.gate-alt { background: transparent; color: var(--ink); border: 2px solid currentColor; }
+/* Ecran « Turn on notifications » (v3/push.js) : couche plein ecran par-dessus
+   l'app, sous les toasts, toujours fermable. */
+.pushgate { position: fixed; inset: 0; z-index: 38; display: flex; align-items: center; justify-content: center; overflow-y: auto; background: var(--bone); padding: calc(24px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px)); }
+.pushgate-in { width: 100%; max-width: 420px; text-align: center; }
+.pushgate-in svg { margin: 0 auto 14px; color: var(--terra); }
+.pushgate-in h1 { font-family: var(--disp); font-size: 28px; font-weight: 800; line-height: 1.15; margin: 0 0 12px; }
+.pushgate-in p { font-size: 17px; line-height: 1.45; margin: 0 0 8px; }
+.pushgate-in .btn-primary { margin-top: 24px; min-height: 64px; font-size: 19px; }
+.pushgate-err { color: var(--ember-ink); font-weight: 700; }
+.pushgate-later { display: block; margin: 18px auto 0; min-height: 44px; padding: 0 16px; border: 0; background: transparent; color: var(--mute); font-size: 15px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+
 /* Coquille statique : le lien n'apparait que si /v3/app.js n'a pas pris la main en 4 s. */
 .boot-fallback a { visibility: hidden; animation: boot-fallback-show 0s linear 4s forwards; }
 @keyframes boot-fallback-show { to { visibility: visible; } }

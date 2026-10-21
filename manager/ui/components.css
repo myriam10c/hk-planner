@@ -100,7 +100,14 @@ section.card{background:var(--surface);border:1px solid var(--line);border-radiu
 .nbadge{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--bad);color:var(--surface);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;margin-left:auto}
 .tab .nbadge{position:absolute;top:-6px;right:-14px;margin:0}
 
-/* Bandeau d'abonnement aux notifications (push-bar.js). */
-.pushbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin:12px 16px 0;padding:10px 12px;border-radius:var(--r-md);background:var(--accent-tint);color:var(--ink);font-size:14px}
-.pushbar-b{display:flex;gap:8px}
-@media (min-width:960px){.app>.sidebar{grid-row:1 / span 2}.app>.pushbar,.app>main{grid-column:2}.app>.pushbar{margin:16px var(--s8) 0;align-self:start}}
+/* Ecran plein d'abonnement aux notifications (push-bar.js). */
+.pushprompt{position:fixed;inset:0;z-index:70;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:calc(var(--s6) + env(safe-area-inset-top)) var(--s4) calc(var(--s6) + env(safe-area-inset-bottom));overflow-y:auto}
+.pushprompt-in{display:flex;flex-direction:column;align-items:center;gap:var(--s4);width:100%;max-width:420px;text-align:center}
+.pushprompt-ic{display:grid;place-items:center;width:88px;height:88px;border-radius:50%;background:var(--accent-tint);color:var(--accent)}
+.pushprompt-ic svg{width:44px;height:44px}
+.pushprompt h2{margin:0;font-size:26px;line-height:1.2;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+.pushprompt p{margin:0;font-size:17px;line-height:1.45;color:var(--ink);overflow-wrap:anywhere}
+.pushprompt .pushprompt-sub{color:var(--ink-2);font-size:16px}
+.pushprompt-b{display:flex;flex-direction:column;gap:var(--s2);width:100%;margin-top:var(--s2)}
+.pushprompt-b .btn{min-height:56px;font-size:18px;justify-content:center;width:100%}
+.pushprompt .pushprompt-err{color:var(--bad-ink);font-size:16px}

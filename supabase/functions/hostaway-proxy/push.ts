@@ -17,6 +17,14 @@ export interface PushPayload {
   body: string;
   url: string;
   tag: string;
+  // Relances automatiques (reminders.ts) : le service worker racine lit ces champs.
+  // urgent = icone rouge, requireInteraction, vibration longue ; ack = appel rem.read
+  // au clic (le secret d'app est deja dans le bundle public, accepte).
+  urgent?: boolean;
+  icon?: string;
+  requireInteraction?: boolean;
+  vibrate?: number[];
+  ack?: { url: string; id: number; token: string; secret: string };
 }
 
 // Construit le contenu de la notification d'une team_task.
@@ -187,14 +195,16 @@ export async function sendPush(
   sb: any,
   cleanerId: number,
   payload: PushPayload,
-  opts: { dedupeKey?: string; priority?: string; nowMs?: number } = {},
+  opts: { dedupeKey?: string; priority?: string; nowMs?: number; quietHandled?: boolean } = {},
 ): Promise<{ sent: number; pruned: number; skipped: string | null }> {
   try {
     const nowMs = opts.nowMs ?? Date.now();
+    // quietHandled : l'appelant (moteur des relances) applique sa propre fenetre de
+    // silence configurable ; la fenetre fixe 22:00-08:30 ne doit pas s'y ajouter.
     // Heures de silence (ruling Q3) : entre 22:00 et 08:30 Dubai, seul l'urgent
     // réveille quelqu'un. Le reste n'est PAS mis en file : la tâche reste visible
     // dans l'app, elle sera vue au réveil. Journalisé, jamais levé.
-    if (opts.priority !== "urgent" && isQuietHoursDubai(nowMs)) {
+    if (!opts.quietHandled && opts.priority !== "urgent" && isQuietHoursDubai(nowMs)) {
       console.log("[push] quiet hours, skipped for cleaner " + String(cleanerId) + ": " + payload.tag);
       return { sent: 0, pruned: 0, skipped: "quiet_hours" };
     }

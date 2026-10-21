@@ -264,3 +264,41 @@ a.hr-row:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .rp-ptxt{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;overflow-wrap:anywhere}
 .rp-chev{display:inline-flex;width:20px;height:20px;color:var(--ink-2);flex:none}
 .rp-chev svg{width:100%;height:100%}
+
+/* Reminders : interrupteur general, regles, champs, textes, journal (tableau -> cartes sur mobile). */
+.rem .rem-tabs{margin-bottom:var(--s1)}
+.rem-master{padding-top:var(--s4)}
+.rem-big{font-size:18px}
+.rem-rules{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;width:100%}
+.rem-rule{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3) 0;border-top:1px solid var(--line);min-width:0}
+.rem-rule:first-child{border-top:0;padding-top:0}
+.rem-rule .set-switch>span{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
+.rem-desc{color:var(--ink-2);font-size:15px}
+.rem-fields{display:flex;flex-wrap:wrap;gap:var(--s3);width:100%}
+.rem-field{min-width:0}
+.rem-field input[type=time]{width:120px}
+.rem-check{display:flex;align-items:center;gap:var(--s2);min-height:44px;cursor:pointer}
+.rem-check input{width:20px;height:20px}
+.rem-text{width:100%}
+.rem-text label{font-weight:600}
+.rem-text textarea{width:100%;min-width:0;box-sizing:border-box;font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:10px;padding:8px 10px;resize:vertical}
+.rem-details>summary{display:flex;align-items:center;min-height:56px;padding:0 var(--s4);cursor:pointer;list-style:none}
+.rem-details>summary::-webkit-details-marker{display:none}
+.rem-details>summary h2{margin:0;font-size:20px;font-weight:600}
+.rem-details>summary:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.pill.bad{background:var(--bad-tint);color:var(--bad-ink)}
+.rem-log{width:100%;border-collapse:collapse;font-size:15px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.rem-log th,.rem-log td{padding:var(--s2) var(--s3);text-align:left;vertical-align:top;border-top:1px solid var(--line);overflow-wrap:anywhere}
+.rem-log th{font-weight:600;color:var(--ink-2);border-top:0}
+.rem-msg{min-width:200px}
+.rem-body{display:block;color:var(--ink-2);font-size:14px;margin-top:2px}
+@media (max-width:899px){
+  .rem-log,.rem-log tbody,.rem-log tr,.rem-log td{display:block;width:100%;box-sizing:border-box}
+  .rem-log{background:none;border:0}
+  .rem-log thead{display:none}
+  .rem-log tr{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s2) var(--s3);margin-bottom:var(--s2)}
+  .rem-log td{display:flex;gap:var(--s3);border:0;padding:4px 0;min-width:0}
+  .rem-log td::before{content:attr(data-l);flex:none;width:72px;color:var(--ink-3);font-size:14px}
+  .rem-log td:empty{display:none}
+  .rem-msg{min-width:0;flex:1}
+}

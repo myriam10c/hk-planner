@@ -404,3 +404,21 @@ Deno.test("sendPush ignore un cleaner desactive", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+Deno.test("sendPush quietHandled ignore la fenetre fixe et transporte les champs urgents", async () => {
+  await setVapidEnv();
+  const keys = await fakeSubscriptionKeys();
+  const sb = fakeSb([{ id: 1, endpoint: "https://push.example/a", ...keys }]);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 201 });
+  try {
+    const r = await sendPush(sb, 6, {
+      title: "T", body: "B", url: "/", tag: "t", urgent: true, icon: "/icons/alert-192.png",
+      ack: { url: "https://x/ack", id: 1, token: "tok", secret: "s" },
+    }, { priority: "normal", nowMs: NIGHT, quietHandled: true });
+    assertEquals(r.sent, 1);
+    assertEquals(r.skipped, null);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

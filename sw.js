@@ -67,7 +67,8 @@ self.addEventListener('fetch', (e) => {
 });
 
 // ===== Web Push =====
-// Expected payload (built by the edge function): {title, body, url, tag}.
+// Expected payload (built by the edge function): {title, body, url, tag}, plus
+// optional {urgent, icon, ack: {url, id, token, secret}} for reminders.
 // The subscription uses userVisibleOnly = true, so we MUST show a notification.
 self.addEventListener('push', (e) => {
   let data = {};
@@ -77,33 +78,69 @@ self.addEventListener('push', (e) => {
     data = { body: e.data ? e.data.text() : '' };
   }
   const title = data.title || 'HK Planner';
-  const options = {
-    body: data.body || '',
-    icon: '/icons/icon-192.png',
-    badge: '/icons/badge-96.png',
-    tag: data.tag || 'hk-planner',
-    renotify: true,
-    data: { url: data.url || '/' },
-  };
+  const notifData = { url: data.url || '/' };
+  if (data.ack) notifData.ack = data.ack;
+  let options;
+  if (data.urgent) {
+    // Title is kept as sent: the server already prefixes "URGENT ...".
+    options = {
+      body: data.body || '',
+      icon: data.icon || '/icons/alert-192.png',
+      badge: '/icons/badge-96.png',
+      tag: data.tag || 'hk-planner-urgent',
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [500, 200, 500, 200, 800],
+      silent: false,
+      data: notifData,
+    };
+  } else {
+    options = {
+      body: data.body || '',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/badge-96.png',
+      tag: data.tag || 'hk-planner',
+      renotify: true,
+      data: notifData,
+    };
+  }
   e.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const target = (e.notification.data && e.notification.data.url) || '/';
-  e.waitUntil((async () => {
+  const nd = e.notification.data || {};
+  const target = nd.url || '/';
+  const ack = nd.ack;
+  // Ack the reminder in parallel: a failure must never block the navigation.
+  const ackPromise = (async () => {
+    if (!ack || !ack.url) return;
+    try {
+      await fetch(ack.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-App-Secret': ack.secret || '' },
+        body: JSON.stringify({ id: ack.id, token: ack.token }),
+      });
+    } catch (err) { /* offline or server error: the reminder will simply come back */ }
+  })();
+  const navPromise = (async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of all) {
       if (new URL(client.url).origin === self.location.origin) {
-        await client.focus();
+        try { await client.focus(); } catch (err) { /* focus refused, the fallback below still opens the target */ }
+        // navigate() throws or resolves to null when this worker does not control the
+        // tab (e.g. a /v3/ tab): open the target in a new window instead.
+        let navigated = null;
         if ('navigate' in client) {
-          try { await client.navigate(target); } catch (err) { /* tab cannot navigate, keep the focus */ }
+          try { navigated = await client.navigate(target); } catch (err) { navigated = null; }
         }
+        if (!navigated) await self.clients.openWindow(target);
         return;
       }
     }
     await self.clients.openWindow(target);
-  })());
+  })();
+  e.waitUntil(Promise.all([ackPromise, navPromise]));
 });
 
 async function networkFirst(req) {

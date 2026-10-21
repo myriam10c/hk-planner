@@ -11,6 +11,7 @@ const SECTIONS = {
   people: ['/manager/screens/more-people.js', 'renderPeople'],
   setup: ['/manager/screens/more-setup.js', 'renderSetup'],
   reports: ['/manager/screens/more-reports.js', 'renderReports'],
+  reminders: ['/manager/screens/more-reminders.js', 'renderReminders'],
 };
 // Sections dont la sous-route porte un identifiant (logement, employe, onglet).
 const WITH_ID = new Set(['apartment', 'hr', 'setup']);
@@ -21,6 +22,7 @@ const ROWS = [
   { title: 'Apartment', desc: 'One sheet per apartment: cleanings, linen, tickets, inspections, security contacts', href: '#/more/apartment' },
   { title: 'Reviews', desc: 'Review disputes', href: '#/more/reviews' },
   { title: 'Settings', desc: 'Autopilot, notifications, inspection target, checklists', href: '#/more/settings' },
+  { title: 'Reminders', desc: 'Automatic push reminders: rules, delays, quiet hours, log', href: '#/more/reminders' },
   { title: 'HR and leave', desc: 'Leave requests, balances, documents, public holidays', href: '#/more/hr' },
   { title: 'Ratings and stats', desc: 'Cleanliness ratings, cleanings and times per person', href: '#/more/people' },
   { title: 'Maintenance setup', desc: 'Vendors, equipment, preventive maintenance and costs', href: '#/more/setup' },
