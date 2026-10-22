@@ -6,7 +6,7 @@
 //  - API calls (Supabase functions, Hostaway, etc.) bypass the cache entirely.
 //  - Bump VERSION to force all clients to drop the old cache.
 
-const VERSION = 'v-20260912-0038-3865e7c';
+const VERSION = 'v-20261022-2232-6a87c69';
 const CACHE = 'hk-planner-' + VERSION;
 // /vendor/supabase-js-*.umd.js est une dependance dure : app.js appelle
 // createClient() en tete de fichier, si le vendor manque toute l'app est morte.
@@ -58,7 +58,9 @@ self.addEventListener('fetch', (e) => {
   if (url.origin === location.origin) {
     // Navigations + core app shell: network-first so a fresh deploy is picked up
     // immediately; cached copy is only a fallback when offline.
-    if (req.mode === 'navigate' || url.pathname === '/app.js' || url.pathname === '/hr.js' || url.pathname === '/styles.css') {
+    // security-contacts.json too: the VPS job republishes it as soon as the
+    // Drive sheet changes (business/scheduled/hk_security_contacts.py).
+    if (req.mode === 'navigate' || url.pathname === '/app.js' || url.pathname === '/hr.js' || url.pathname === '/styles.css' || url.pathname === '/security-contacts.json') {
       e.respondWith(networkFirst(req));
     } else {
       e.respondWith(staleWhileRevalidate(req));
