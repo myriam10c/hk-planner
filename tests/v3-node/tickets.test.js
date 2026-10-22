@@ -34,9 +34,10 @@ function setup(apt = BLOOM_T) {
   return { c, newIdem, photo, sync: () => syncPlan(c, { newIdem }) };
 }
 
-// Jusqu'a l'etape 2 (premiere question apres les photos d'arrivee).
+// Jusqu'a l'etape 2 (premiere question apres la carte d'acces et les photos d'arrivee).
 function toStep2(c) {
   reply(c, "here", { now: NOW });
+  addPhoto(c, "card", { now: NOW }); reply(c, "next-room", { now: NOW });
   for (const room of c.apt.rooms) { addPhoto(c, "a-" + room, { now: NOW }); reply(c, "next-room", { now: NOW }); }
 }
 const cards = c => c.messages.filter(m => m.type === "ticket").map(m => m.ticket.id);

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { bootV3, fetchLog } from './helpers';
-import { BLOOM, demarrer, ecritures, fileVide, fileVideApresRetour, photo, piece } from './conv-helpers';
+import { BLOOM, carteAcces, demarrer, ecritures, fileVide, fileVideApresRetour, photo, piece } from './conv-helpers';
 
 // File hors ligne de la v3. Les premiers tests passent par sendOrQueue (chemin
 // direct, garde pour les actions hors conversation) et lisent le bandeau « Saved
@@ -185,6 +185,7 @@ test('reseau coupe au milieu d un signalement puis retabli : un seul ticket, ses
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="some-damage"]').click();
@@ -228,6 +229,7 @@ test('rechargement au milieu de l etape 4 : meme etape, photos retrouvees, aucun
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
@@ -235,7 +237,7 @@ test('rechargement au milieu de l etape 4 : meme etape, photos retrouvees, aucun
   await piece(page, 4, 'Bed');
   await fileVide(page);
   const avant = await ecritures(page);
-  expect(avant.length).toBe(5);
+  expect(avant.length).toBe(6);
   // Une photo encore en file au moment du rechargement.
   await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
   await photo(page);
@@ -254,23 +256,24 @@ test('rechargement au milieu de l etape 4 : meme etape, photos retrouvees, aucun
   await expect.poll(jours).toBeGreaterThan(joursAvant);
   await expect(page.locator('.vf-top b')).toHaveText(/^Step 4 · Bathroom /);
   const apres = await ecritures(page);
-  expect(apres.length).toBe(6);
+  expect(apres.length).toBe(7);
   const anciens = new Set(avant.map((x) => x.body.idem));
   expect(apres.filter((x) => anciens.has(x.body.idem)).every((x) => x.essais === 1)).toBe(true);
-  expect(apres[5]).toMatchObject({ action: 'v3.uploadPhoto', body: { itemName: 'end:Bathroom', jobId: BLOOM.jobId } });
+  expect(apres[6]).toMatchObject({ action: 'v3.uploadPhoto', body: { itemName: 'end:Bathroom', jobId: BLOOM.jobId } });
   // La conversation continue la ou elle en etait.
   await page.locator('.vf [data-reply="next-room"]').click();
   await piece(page, 4, 'Kitchen');
   await fileVide(page);
   const fin = await ecritures(page);
-  expect(fin.length).toBe(7);
-  expect(fin[6].body.itemName).toBe('end:Kitchen');
+  expect(fin.length).toBe(8);
+  expect(fin[7].body.itemName).toBe('end:Kitchen');
 });
 
 test('fermeture forcee de l app (sessionStorage vide) : reprise depuis IndexedDB, rien n est repris apres la fin', async ({ page }) => {
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   await piece(page, 1, 'Bed');
   await fileVide(page);
   // iOS ferme l'app installee : sessionStorage est perdu, IndexedDB reste.
@@ -278,7 +281,7 @@ test('fermeture forcee de l app (sessionStorage vide) : reprise depuis IndexedDB
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true);
   await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Bathroom /);
-  expect((await ecritures(page)).length).toBe(2);
+  expect((await ecritures(page)).length).toBe(3);
   for (const r of ['Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();

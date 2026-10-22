@@ -10,6 +10,8 @@ const at = (h, m) => new Date(2026, 9, 2, h, m);
 const ph = n => ({ url: "u" + n, file: { name: n + ".jpg" } });
 const NB = " ";
 const shoot = (c, p, t) => { addPhoto(c, p, { now: t }); reply(c, "next-room", { now: t }); };
+// Étape de la carte d'accès (22/10), juste après I'm here.
+const card = (c, t) => shoot(c, ph("card"), t);
 const leaveAll = (c, t) => ["gas", "ac", "wifi", "lights", "windows", "trash", "door"].forEach(k => reply(c, "leave:" + k, { now: t }));
 
 test("formatage des durées, espaces insécables", () => {
@@ -20,6 +22,7 @@ test("formatage des durées, espaces insécables", () => {
 test("rapport exact d'un studio sans problème", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   reply(c, "here", { now: at(10, 0) });
+  card(c, at(10, 0));
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("a-" + r), at(10, 1));
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) });
   reply(c, "linen-yes", { now: at(10, 3) });
@@ -32,6 +35,7 @@ test("rapport exact d'un studio sans problème", () => {
     "Studio · Next guest: none booked yet",
     "👤 Faiza · 10:00 → 11:40 (1" + NB + "h" + NB + "40, usual 1" + NB + "h" + NB + "40)",
     "",
+    "*Access card:* 📷 1",
     "*1 Arrival:* Bed 📷 1 · Bathroom 📷 1 · Kitchen 📷 1",
     "*2 Damage:* none",
     "*Walls:* OK",
@@ -40,14 +44,15 @@ test("rapport exact d'un studio sans problème", () => {
     "*5 Leave:* Gas works, now off ✓ · AC on, Auto mode ✓ · Wi-Fi works ✓ · Lights off ✓ · Windows & balcony closed ✓ · Trash taken out ✓ · Door locked, keys & card left inside ✓",
     "*Running low:* nothing",
     "*Problems:* none",
-    "📷 3 arrival · 3 end · 0 of problems",
+    "📷 4 arrival · 3 end · 0 of problems",
   ].join("\n"));
-  assert.deepEqual(reportFiles(c).map(f => f.name), ["a-Bed.jpg", "a-Bathroom.jpg", "a-Kitchen.jpg", "e-Bed.jpg", "e-Bathroom.jpg", "e-Kitchen.jpg"]);
+  assert.deepEqual(reportFiles(c).map(f => f.name), ["card.jpg", "a-Bed.jpg", "a-Bathroom.jpg", "a-Kitchen.jpg", "e-Bed.jpg", "e-Bathroom.jpg", "e-Kitchen.jpg"]);
 });
 
 test("dégâts, vérification du manager, problèmes groupés, aucune ligne 🎙", () => {
   const c = createConversation(oxford, { me: ME, now: at(9, 0) });
   reply(c, "here", { now: at(9, 18) });
+  card(c, at(9, 18));
   addProblem(c, "Broken", ph("p-broken"), { now: at(9, 19) }); // signalé dans Bed, avant la photo qui fait avancer
   shoot(c, ph("a-Bed"), at(9, 19));
   shoot(c, ph("a-Bathroom"), at(9, 20));
@@ -66,12 +71,14 @@ test("dégâts, vérification du manager, problèmes groupés, aucune ligne 🎙
   // urgent change a la main dans la fiche, sans envoi connu (pas de sync) : « team notified »
   editProblem(c, 1, { urgency: "urgent" });
   assert.match(reportText(c, { now: at(10, 0) }), /🔴 Insects \(HK-462, team notified 09:22\)/);
-  assert.match(t, /📷 3 arrival · 0 end · 3 of problems/);
+  assert.match(t, /\n\*Access card:\* 📷 1\n\*1 Arrival:\* Bed 📷 1 · Bathroom 📷 1 · Kitchen 📷 1\n/);
+  assert.match(t, /📷 4 arrival · 0 end · 3 of problems/);
 });
 
-test("plafond de 10 fichiers : problèmes, puis fin, puis arrivée", () => {
+test("plafond de 10 fichiers : carte d'accès, problèmes, puis fin, puis arrivée", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   reply(c, "here", { now: at(10, 0) });
+  card(c, at(10, 0));
   for (let i = 0; i < 6; i++) addPhoto(c, ph("a" + i), { now: at(10, 1) });
   reply(c, "next-room", { now: at(10, 1) });
   shoot(c, ph("aB"), at(10, 1)); shoot(c, ph("aK"), at(10, 1));
@@ -80,10 +87,12 @@ test("plafond de 10 fichiers : problèmes, puis fin, puis arrivée", () => {
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("e-" + r), at(11, 0));
   const pick = pickFiles(c);
   assert.equal(pick.files.length, 10);
+  assert.equal(pick.files[0].name, "card.jpg", "la carte d'accès passe en premier");
+  assert.deepEqual(pick.files.map(f => f.name).slice(1, 6), ["a0.jpg", "a1.jpg", "a2.jpg", "a3.jpg", "a4.jpg"], "il reste 5 places pour l'arrivée");
   assert.deepEqual(pick.files.map(f => f.name).slice(-4), ["e-Bed.jpg", "e-Bathroom.jpg", "e-Kitchen.jpg", "p1.jpg"]);
   assert.equal(pick.cutPhotos, true);
   assert.equal("cutVoices" in pick, false);
-  assert.match(reportText(c, { now: at(11, 30) }), /📷 8 arrival · 3 end · 1 of problems \(10 attached\)/);
+  assert.match(reportText(c, { now: at(11, 30) }), /📷 9 arrival · 3 end · 1 of problems \(10 attached\)/);
 });
 
 test("ligne de problème : détail, note, nombre de photos ; toutes les photos partent", () => {
@@ -106,6 +115,7 @@ test("ligne de problème : détail, note, nombre de photos ; toutes les photos p
 test("gaz not working : ✗ dans la ligne 5, problème Soon dans la liste", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   reply(c, "here", { now: at(10, 0) });
+  card(c, at(10, 0));
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("a-" + r), at(10, 1));
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("e-" + r), at(11, 0));
@@ -119,6 +129,7 @@ test("gaz not working : ✗ dans la ligne 5, problème Soon dans la liste", () =
 test("murs abîmés : « Walls: see problems » et la ligne du problème", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   reply(c, "here", { now: at(10, 0) });
+  card(c, at(10, 0));
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("a-" + r), at(10, 1));
   reply(c, "walls-ko", { now: at(10, 2) });
   addFlowPhoto(c, ph("w1")); addFlowPhoto(c, ph("w2"));
@@ -133,6 +144,7 @@ test("murs abîmés : « Walls: see problems » et la ligne du problème", () =>
 test("AC not working : « AC not working ✗ » dans la ligne 5, problème Soon dans la liste", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   reply(c, "here", { now: at(10, 0) });
+  card(c, at(10, 0));
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("a-" + r), at(10, 1));
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("e-" + r), at(11, 0));
@@ -146,6 +158,7 @@ test("AC not working : « AC not working ✗ » dans la ligne 5, problème Soon 
 test("tuile AC signalée pendant le ménage : ligne 5 « AC not working ✗ », un seul problème", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   reply(c, "here", { now: at(10, 0) });
+  card(c, at(10, 0));
   startProblem(c); chooseKind(c, "AC", { now: at(10, 1) }); flowReply(c, "no-photo"); flowReply(c, "save-text", { text: "not cooling" });
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("a-" + r), at(10, 1));
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
@@ -194,4 +207,27 @@ test("rapport : un urgent en file dit sending…, puis le destinataire de la rep
   ackSync(c, p.idem, { ticketId: 77 });
   assert.deepEqual(deliveryOf(c, p), { state: "unknown" });
   assert.equal(ligne(), "🔴 Leak (HK-461, team notified 10:03)");
+});
+
+// ---- Carte d'accès (22/10) ----
+
+test("rapport : ligne « Access card » avant l'arrivée ; MISSING, no photo ; la photo de la carte jointe en premier", () => {
+  const c = createConversation(bloom, { me: ME, now: at(9, 0) });
+  reply(c, "here", { now: at(10, 0) });
+  assert.match(reportText(c, { now: at(10, 0) }), /\n\*Access card:\* no photo\n\*1 Arrival:\* none\n/);
+  reply(c, "card-missing", { now: at(10, 1) });
+  const t = reportText(c, { now: at(10, 5) });
+  assert.match(t, /\n\n\*Access card:\* MISSING\n\*1 Arrival:\* none\n/);
+  assert.match(t, /\*Problems \(1\):\*\n_Entrance & building_\n🟠 Access card missing \(HK-461\)/);
+  // Carte photographiée : nombre de photos, et elle passe devant tout dans les fichiers joints.
+  const d = createConversation(bloom, { me: ME, now: at(9, 0) });
+  reply(d, "here", { now: at(10, 0) });
+  addPhoto(d, ph("card1"), { now: at(10, 0) }); addPhoto(d, ph("card2"), { now: at(10, 0) }); reply(d, "next-room", { now: at(10, 0) });
+  shoot(d, ph("a-Bed"), at(10, 1));
+  addProblem(d, "Leak", ph("p1"), { now: at(10, 2) });
+  assert.match(reportText(d, { now: at(10, 5) }), /\n\*Access card:\* 📷 2\n\*1 Arrival:\* Bed 📷 1\n/);
+  assert.deepEqual(pickFiles(d).files.map(f => f.name), ["card1.jpg", "card2.jpg", "a-Bed.jpg", "p1.jpg"]);
+  const cut = pickFiles(d, 2);
+  assert.deepEqual(cut.files.map(f => f.name), ["card1.jpg", "card2.jpg"], "priorité à la carte, même devant les problèmes");
+  assert.equal(cut.cutPhotos, true);
 });

@@ -133,6 +133,7 @@ test("étape 2 : « Open problems here. Is it still there? » puis une carte par
   const [ox, , bl] = toApartments(DAY, ME, { now: NOW });
   const c = createConversation(ox, { me: ME, now: NOW });
   reply(c, "here", { now: NOW });
+  addPhoto(c, "card", { now: NOW }); reply(c, "next-room", { now: NOW }); // carte d'accès (22/10)
   for (let i = 0; i < 3; i++) { addPhoto(c, "a", { now: NOW }); reply(c, "next-room", { now: NOW }); }
   assert.equal(currentStep(c).id, "check");
   const app = c.messages.filter(m => m.from === "app").slice(-3);
@@ -143,6 +144,7 @@ test("étape 2 : « Open problems here. Is it still there? » puis une carte par
   // aucun autre ticket : pas de bulle
   const d = createConversation(bl, { me: ME, now: NOW });
   reply(d, "here", { now: NOW });
+  addPhoto(d, "card", { now: NOW }); reply(d, "next-room", { now: NOW });
   for (let i = 0; i < 3; i++) { addPhoto(d, "a", { now: NOW }); reply(d, "next-room", { now: NOW }); }
   assert.equal(d.messages.some(m => /Open problems/.test(m.text || "")), false);
 });

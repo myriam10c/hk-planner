@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { bootV3, fetchLog, noHorizontalScroll } from './helpers';
+import { carteAcces } from './conv-helpers';
 
 // Mode Practice (plan 2026-10-02, tache 2) : un manager prend la vraie journee
 // d'une cleaner et fait tous ses gestes, rien n'est enregistre. Le simulateur
@@ -271,6 +272,7 @@ test('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part', 
   await practiceFaiza(page);
   await page.getByRole('button', { name: /704 Golf Links/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   // Un probleme avec photo et note : signale, photo rattachee, note.
@@ -330,7 +332,7 @@ test('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part', 
   ]);
   const [idFuite] = Object.keys(s.tickets).filter((id) => s.tickets[id].created);
   expect((s.tickets[idFuite] as any).note).toBe('under the sink');
-  expect(Object.keys(s.photos).length).toBe(9);
+  expect(Object.keys(s.photos).length, 'carte d acces + 3 arrivee + 2 fuite + 1 tache + 3 fin').toBe(10);
   // Les deux photos de la fuite sont rattachees a son ticket (la seconde par addProblemPhoto).
   expect(Object.values(s.photos).filter((p: any) => String(p.ticketId) === idFuite).length).toBe(2);
   expect(s.jobs['job_bbbbbbbbbbbbbbbbbbbb']).toMatchObject({ state: 'done', report: true });
@@ -404,6 +406,7 @@ test('5. l avancement survit a la navigation et au rechargement, Exit et Re-entr
   await practiceFaiza(page);
   await page.getByRole('button', { name: /704 Golf Links/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   await piece(page, 1, 'Bed');
   await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Bathroom /);
 
@@ -481,6 +484,7 @@ test('6. hors ligne, les gestes marchent et aucun bandeau Saved on device', asyn
   await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
   await page.getByRole('button', { name: /704 Golf Links/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
@@ -546,7 +550,8 @@ for (const horsLigne of [false, true]) {
     await practiceFaiza(page);
     await page.getByRole('button', { name: /704 Golf Links/ }).click();
     await page.locator('[data-reply="here"]').click();
-    await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Bed /);
+    // Premiere photo de l'arrivee : la carte d'acces (22/10).
+    await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Access card & keys /);
     if (horsLigne) await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
     // Le selecteur de fichier est ouvert : la photo n'est pas encore choisie.
     const chooser = page.waitForEvent('filechooser');
@@ -749,6 +754,7 @@ test('constat 1 de la revue : Practice puis View as, Exit rend la vraie conversa
   await bootV3(page, ROUTES_HILLAL, { pinToken: 'jeton-manager' });
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="some-damage"]').click();
@@ -772,6 +778,7 @@ test('constat 1 de la revue : Practice puis View as, Exit rend la vraie conversa
     if (entree.startsWith('Practice')) {
       await page.getByRole('button', { name: /704 Golf Links/ }).click();
       await page.locator('[data-reply="here"]').click();
+      await carteAcces(page);
       await piece(page, 1, 'Bed');
     } else {
       await page.getByRole('button', { name: /623 Samana Park View/ }).click();

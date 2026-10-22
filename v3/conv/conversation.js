@@ -1,6 +1,6 @@
 // Machine à étapes d'un appartement, en 5 étapes. État mutable mais sans DOM : testable sous Node.
 // Portée du prototype (hk-cleaner-proto 875ea4e) : les pièces viennent de apt.rooms (v3.myDay), plus de TEMPLATES.
-import { LINEN_USUAL, SUPPLIES, LEAVE_CHECKS, acInstruction, arriveLine } from "./rules.js";
+import { LINEN_USUAL, SUPPLIES, LEAVE_CHECKS, CARD_ROOM, CARD_MISSING, acInstruction, arriveLine } from "./rules.js";
 import { makeProblem, KINDS, WALL_KIND } from "./problems.js";
 
 const hhmm = d => String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
@@ -18,7 +18,8 @@ function buildSteps(apt, helper) {
     const mine = all.filter(r => !apt.lead.roomsDone.includes(r));
     return [{ id: "arrive", n: 1 }].concat(mine.map(room => ({ id: "end-photo", n: 4, room })), [{ id: "helper", n: 5 }]);
   }
-  const steps = [{ id: "arrive", n: 1 }];
+  // La carte d'acces d'abord : photographiee telle que le voyageur l'a laissee, avant de toucher a rien.
+  const steps = [{ id: "arrive", n: 1 }, { id: "arrival-photo", n: 1, room: CARD_ROOM }];
   all.forEach(room => steps.push({ id: "arrival-photo", n: 1, room }));
   if (apt.managerCheck) steps.push({ id: "check", n: 2 });
   steps.push({ id: "walls", n: 2 }, { id: "damage", n: 2 }, { id: "linen", n: 3 });
@@ -43,7 +44,8 @@ function botMessage(conv) {
   switch (st.id) {
     case "arrive": return { from: "app", type: "text", text: arriveLine(a), photo: a.photo };
     case "arrival-photo":
-      return { from: "app", type: "text", text: (prev && prev.id === "arrival-photo" ? "" : "Step 1: photo of each room as you find it. ") + st.room + "." };
+      if (st.room === CARD_ROOM) return { from: "app", type: "text", text: "Step 1: photo of the access card and keys, where the guest left them." };
+      return { from: "app", type: "text", text: (prev && prev.id === "arrival-photo" && prev.room !== CARD_ROOM ? "" : "Photo of each room as you find it. ") + st.room + "." };
     case "check": return { from: "app", type: "text", text: a.managerCheck.text };
     case "walls": return { from: "app", type: "text", text: "Walls: any marks, holes or damage?" };
     case "damage": return { from: "app", type: "text", text: "Anything damaged or wrong?" };
@@ -196,7 +198,12 @@ export function currentStep(conv) {
   switch (st.id) {
     case "arrive":
       return { ...st, ...base, camera: false, replies: conv.cantGetIn ? [R("in-now", "I'm in now")] : [R("here", "I'm here"), R("cant-get-in", "I can't get in")] };
-    case "arrival-photo": return { ...photoStep(conv, st, conv.arrivalPhotos), ...base };
+    case "arrival-photo":
+      if (st.room === CARD_ROOM) {
+        const has = (conv.arrivalPhotos[CARD_ROOM] || []).length > 0;
+        return { ...st, ...base, camera: true, ref: null, replies: [R("next-room", "Next", has), R("card-missing", "Card is missing")] };
+      }
+      return { ...photoStep(conv, st, conv.arrivalPhotos), ...base };
     case "end-photo": return { ...photoStep(conv, st, conv.endPhotos), ...base };
     case "check":
       return { ...st, ...base, camera: false, replies: [R("check-ok", a.managerCheck.ok), R("check-see", a.managerCheck.see)] };
@@ -270,7 +277,10 @@ export function reply(conv, id, { now = new Date() } = {}) {
     case "cant-get-in":
       conv.cantGetIn = true; say(conv, r.label);
       pushProblem(conv, "Can't get in", "Entrance & building", [], now); break;
-    case "next-room": say(conv, st.room + " done"); advance(conv); break;
+    case "next-room": say(conv, st.room === CARD_ROOM ? "Access card photo taken" : st.room + " done"); advance(conv); break;
+    case "card-missing":
+      conv.cardMissing = true; say(conv, r.label);
+      pushProblem(conv, CARD_MISSING, "Entrance & building", [], now); advance(conv); break;
     case "check-ok": conv.checkAnswer = "no"; say(conv, r.label); advance(conv); break;
     // Types imposés (vérification du manager, murs) : l'écran des tuiles est sauté, le problème existe dès l'écran des photos.
     case "check-see":
@@ -323,7 +333,7 @@ function unlinkLeave(conv, key) {
 
 export function guessWhere(conv) {
   const st = conv.steps[conv.i];
-  if (!st || st.id === "arrive") return "Entrance & building";
+  if (!st || st.id === "arrive" || st.room === CARD_ROOM) return "Entrance & building";
   if (st.id === "arrival-photo" || st.id === "end-photo") return st.room;
   return "Whole apartment";
 }

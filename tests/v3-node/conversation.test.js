@@ -8,10 +8,14 @@ const [oxford, creek, bloom] = APARTMENTS;
 const at = (h, m, d = 2) => new Date(2026, 9, d, h, m);
 const leaveAll = (c, t) => ["gas", "ac", "wifi", "lights", "windows", "trash", "door"].forEach(k => reply(c, "leave:" + k, { now: t }));
 // Une photo puis Next room, pour chaque pièce restante de l'étape photo en cours.
+// Étape de la carte d'accès (22/10), juste après I'm here : une photo puis Next.
+const card = (c, t = at(10, 0)) => { addPhoto(c, "card", { now: t }); reply(c, "next-room", { now: t }); };
+// I'm here puis la carte : la cleaner arrive sur la première vraie pièce.
+const here = (c, t = at(10, 0)) => { reply(c, "here", { now: t }); card(c, t); };
 const rooms = (c, n, photo, t = at(10, 1)) => { for (let i = 0; i < n; i++) { addPhoto(c, photo, { now: t }); reply(c, "next-room", { now: t }); } };
 
 function studioToReport(c) {
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   for (const room of ["Bed", "Bathroom", "Kitchen"]) { assert.equal(currentStep(c).room, room); addPhoto(c, "a-" + room, { now: at(10, 2) }); reply(c, "next-room", { now: at(10, 2) }); }
   assert.equal(currentStep(c).id, "walls");
   reply(c, "walls-ok", { now: at(10, 5) }); reply(c, "no-damage", { now: at(10, 5) });
@@ -29,22 +33,22 @@ test("titres et numéros d'étape", () => {
   assert.equal(currentStep(c).title, "Arrival");
 });
 
-test("studio sans problème : exactement 25 gestes jusqu'à l'envoi", () => {
+test("studio sans problème : exactement 27 gestes jusqu'à l'envoi", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   studioToReport(c);
   assert.equal(currentStep(c).id, "report");
   assert.equal(currentStep(c).n, 5);
   reply(c, "send", { now: at(11, 40) });
-  assert.equal(c.gestures, 25, "here 1 + 3 × (photo + Next room) + Walls OK + No, all good + linge + 3 × (photo + Next room) + 7 lignes + Nothing + Send");
+  assert.equal(c.gestures, 27, "here 1 + carte (photo + Next) + 3 × (photo + Next room) + Walls OK + No, all good + linge + 3 × (photo + Next room) + 7 lignes + Nothing + Send");
   assert.equal(c.sent, true);
   assert.equal(elapsedMinutes(c, at(12, 0)), 100);
-  assert.deepEqual(Object.keys(c.arrivalPhotos), ["Bed", "Bathroom", "Kitchen"]);
+  assert.deepEqual(Object.keys(c.arrivalPhotos), ["Access card", "Bed", "Bathroom", "Kitchen"]);
   assert.deepEqual(Object.keys(c.endPhotos), ["Bed", "Bathroom", "Kitchen"]);
 });
 
 test("étape 1 : photo de référence = dernière photo de fin du ménage précédent, caméra ouverte", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   const st = currentStep(c);
   assert.equal(st.id, "arrival-photo");
   assert.equal(st.camera, true);
@@ -54,14 +58,14 @@ test("étape 1 : photo de référence = dernière photo de fin du ménage préc�
 
 test("plusieurs photos dans une pièce, puis Next room", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   assert.deepEqual(currentStep(c).replies.map(r => [r.id, r.label]), [["next-room", "Next room"]]);
   addPhoto(c, "p1", { now: at(10, 1) });
   addPhoto(c, "p2", { now: at(10, 1) });
   addPhoto(c, "p3", { now: at(10, 1) });
   assert.equal(currentStep(c).room, "Bed", "le déclencheur ne change jamais de pièce");
   assert.equal(c.arrivalPhotos.Bed.length, 3);
-  assert.equal(c.messages.filter(m => m.type === "photo").length, 3);
+  assert.equal(c.messages.filter(m => m.type === "photo").length, 4, "carte d'accès + 3 photos de Bed");
   const g = c.gestures;
   reply(c, "next-room", { now: at(10, 2) });
   assert.equal(c.gestures, g + 1);
@@ -72,7 +76,7 @@ test("plusieurs photos dans une pièce, puis Next room", () => {
 
 test("Next room désactivé tant que la pièce n'a pas de photo (étapes 1 et 4)", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   assert.equal(currentStep(c).replies[0].enabled, false);
   const g = c.gestures;
   reply(c, "next-room", { now: at(10, 1) });
@@ -102,7 +106,7 @@ test("une réponse étrangère à l'étape ne compte rien", () => {
 
 test("problème pendant l'étape 1 : endroit = pièce en cours, l'étape n'avance pas", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   addProblem(c, "Broken", "b", { now: at(10, 1) });
   assert.equal(c.problems[0].where, "Bed");
   assert.equal(currentStep(c).room, "Bed");
@@ -110,7 +114,7 @@ test("problème pendant l'étape 1 : endroit = pièce en cours, l'étape n'avanc
 
 test("étape 2 : Yes, report it ouvre l'écran des tuiles ; après le problème, Another problem / No more", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) });
   const g = c.gestures;
@@ -140,7 +144,7 @@ test("étape 2 : Yes, report it ouvre l'écran des tuiles ; après le problème,
 
 test("étape 2 : Yes, report it puis Cancel sans problème : la question de départ revient", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) });
   reply(c, "some-damage", { now: at(10, 2) });
@@ -152,7 +156,7 @@ test("étape 2 : Yes, report it puis Cancel sans problème : la question de dép
 
 test("vérification du manager : I see insects, type imposé Insects, écran des photos, puis la suite", () => {
   const c = createConversation(oxford, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   assert.equal(currentStep(c).id, "check");
   assert.equal(currentStep(c).n, 2);
@@ -172,7 +176,7 @@ test("vérification du manager : I see insects, type imposé Insects, écran des
 
 test("odeur de gaz : urgent, consigne de sécurité dans le fil", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   addProblem(c, "Gas smell", null, { now: at(10, 1) });
   assert.equal(c.problems[0].urgency, "urgent");
   assert.equal(c.messages.at(-1).from, "app");
@@ -181,7 +185,7 @@ test("odeur de gaz : urgent, consigne de sécurité dans le fil", () => {
 
 test("étape 4 : photo de fin, référence = ménage précédent, une photo par pièce", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) });
   reply(c, "linen-yes", { now: at(10, 3) });
@@ -195,7 +199,7 @@ test("étape 4 : photo de fin, référence = ménage précédent, une photo par 
 
 test("étape 5 : les sept coches, bascule, avance seule quand tout est coché", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
@@ -225,6 +229,7 @@ test("I can't get in : problème urgent à l'entrée, puis I'm in now", () => {
   assert.equal(c.problems[0].where, "Entrance & building");
   reply(c, "in-now", { now: at(10, 20) });
   assert.equal(currentStep(c).id, "arrival-photo");
+  assert.equal(currentStep(c).room, "Access card", "I'm in now mène aussi à la carte d'accès");
   assert.deepEqual(c.startedAt, at(10, 20));
 });
 
@@ -243,7 +248,7 @@ test("appartement à deux : I'm here, toutes les pièces en étape 4 (pièces fa
 
 test("linge, fournitures, modification et suppression d'un problème", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) });
   reply(c, "linen-change", { now: at(10, 3) });
@@ -278,7 +283,7 @@ test("Share again après l'envoi : ni geste ni bulle", () => {
 
 test("étape 5 : encore à l'étape leave à 6 lignes sur 7", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
@@ -292,7 +297,7 @@ test("étape 5 : encore à l'étape leave à 6 lignes sur 7", () => {
 
 test("All checked : libellés joints par « · », la consigne AC reste d'un seul tenant", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
@@ -304,7 +309,7 @@ test("All checked : libellés joints par « · », la consigne AC reste d'un seu
 
 test("étape 4, pièce sans photo d'annonce : « clean it, then take a photo », sans image", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 1, "e", at(11, 0)); // Bed (avec photo) → Bathroom (sans)
@@ -322,7 +327,7 @@ test("étape 4, pièce sans photo d'annonce : « clean it, then take a photo »,
 
 test("photo jointe après coup à un problème (Gas smell) ; problème supprimé entre-temps : ignorée", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   addProblem(c, "Gas smell", null, { now: at(10, 1) });
   const p = c.problems[0], g = c.gestures;
   assert.equal(p.photos.length, 0);
@@ -338,7 +343,7 @@ test("photo jointe après coup à un problème (Gas smell) ; problème supprimé
 
 test("plusieurs photos et une note par problème", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   addProblem(c, "Broken", "b1", { now: at(10, 1) });
   const g = c.gestures;
   addProblemPhoto(c, 0, "b2");
@@ -361,7 +366,7 @@ test("plusieurs photos et une note par problème", () => {
 });
 
 const toLeaveStep = c => {
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
@@ -411,7 +416,7 @@ test("Wi-Fi not working, puis l'étape avance à 7 lignes traitées (true ou ko)
 
 test("étape 2 : question des murs avant celle des dégâts ; Walls OK", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   const st = currentStep(c);
   assert.equal(st.id, "walls");
@@ -426,7 +431,7 @@ test("étape 2 : question des murs avant celle des dégâts ; Walls OK", () => {
 
 test("murs abîmés : Wall damage imposé, écran des photos (2 photos), note, puis la question des dégâts", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   const g = c.gestures;
   reply(c, "walls-ko", { now: at(10, 2) });
@@ -455,7 +460,7 @@ test("murs abîmés : Wall damage imposé, écran des photos (2 photos), note, p
 
 test("Marks or damage touché par erreur : retour sans photo = problème retiré, la question des murs revient", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ko", { now: at(10, 2) });
   assert.equal(currentFlow(c).back, true);
@@ -470,7 +475,7 @@ test("Marks or damage touché par erreur : retour sans photo = problème retiré
   assert.equal(currentStep(c).id, "damage");
   // une photo prise : plus de retour arrière, seulement Done ou No photo
   const d = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(d, "here", { now: at(10, 0) });
+  here(d);
   rooms(d, 3, "a");
   reply(d, "walls-ko", { now: at(10, 2) });
   addFlowPhoto(d, "w1");
@@ -485,7 +490,7 @@ test("Marks or damage touché par erreur : retour sans photo = problème retiré
 
 test("double appui rapide sur Gas smell : pas de doublon à moins de 2 s", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   const t0 = new Date(2026, 9, 2, 10, 1, 0, 0);
   const plus = ms => new Date(t0.getTime() + ms);
   addProblem(c, "Gas smell", null, { now: t0 });
@@ -504,7 +509,7 @@ test("double appui rapide sur Gas smell : pas de doublon à moins de 2 s", () =>
 
 test("Gas smell idempotent : retouché plus tard depuis les tuiles, la consigne revient sans second problème ; supprimé, il peut être resignalé", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   const t0 = new Date(2026, 9, 2, 10, 1, 0, 0);
   startProblem(c); chooseKind(c, "Gas smell", { now: t0 }); flowReply(c, "gas-ok");
   const gas = c.problems[0];
@@ -526,7 +531,7 @@ test("Gas smell idempotent : retouché plus tard depuis les tuiles, la consigne 
 
 test("un problème non gaz depuis le viseur : Problem + tuile + photo + Done + No note = 5 gestes", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   const g = c.gestures;
   startProblem(c);
   let f = currentFlow(c);
@@ -550,7 +555,7 @@ test("un problème non gaz depuis le viseur : Problem + tuile + photo + Done + N
 
 test("écran des tuiles : Cancel ne crée rien ; retour depuis les photos = autre type", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   startProblem(c);
   flowReply(c, "cancel");
   assert.equal(c.flow, null);
@@ -575,7 +580,7 @@ test("écran des tuiles : Cancel ne crée rien ; retour depuis les photos = autr
 
 test("Gas smell depuis les tuiles : enregistré tout de suite (urgent), écran rouge, OK = fin ; double appui ignoré", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   const t0 = new Date(2026, 9, 2, 10, 1, 0, 0);
   startProblem(c);
   chooseKind(c, "Gas smell", { now: t0 });
@@ -598,7 +603,7 @@ test("Gas smell depuis les tuiles : enregistré tout de suite (urgent), écran r
 
 test("écran de note : texte seulement, Save (un geste) ou No note ; aucune API vocale", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   startProblem(c);
   chooseKind(c, "Broken", { now: at(10, 1) });
   addFlowPhoto(c, "b1");
@@ -629,7 +634,7 @@ test("le module conversation n'exporte plus de fonction vocale", async () => {
 
 test("page d'édition : ajouter une photo, modifier la note (Edit note), retour sans rien perdre", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   addProblem(c, "Broken", "b1", { now: at(10, 1) });
   setProblemNote(c, 0, "small crack");
   reopenProblem(c, 0, "photos");
@@ -662,14 +667,14 @@ test("page d'édition : ajouter une photo, modifier la note (Edit note), retour 
 
 test("suppression d'une photo de pièce (arrivée ou fin) : sans geste, Next room se désactive", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   addPhoto(c, "p1", { now: at(10, 1) });
   addPhoto(c, "p2", { now: at(10, 1) });
   const g = c.gestures;
   removeArrivalOrEndPhoto(c, "arrival", "Bed", 0);
   assert.deepEqual(c.arrivalPhotos.Bed, ["p2"]);
   assert.equal(c.gestures, g);
-  assert.deepEqual(c.messages.filter(m => m.type === "photo").map(m => m.photo), ["p2"], "bulle retirée du fil");
+  assert.deepEqual(c.messages.filter(m => m.type === "photo").map(m => m.photo), ["card", "p2"], "bulle retirée du fil");
   removeArrivalOrEndPhoto(c, "arrival", "Bed", 0);
   assert.equal(c.arrivalPhotos.Bed, undefined);
   assert.equal(currentStep(c).replies[0].enabled, false, "plus de photo : Next room inactif");
@@ -687,7 +692,7 @@ test("suppression d'une photo de pièce (arrivée ou fin) : sans geste, Next roo
 
 test("écran de note : Save enregistre directement le texte", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   startProblem(c); chooseKind(c, "Leak", { now: at(10, 1) }); flowReply(c, "no-photo");
   const g = c.gestures;
   flowReply(c, "save-text", { text: "under the sink" });
@@ -698,7 +703,7 @@ test("écran de note : Save enregistre directement le texte", () => {
 
 test("I see insects annulé (retour sans photo) : bulle retirée, la question revient", () => {
   const c = createConversation(oxford, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "check-see", { now: at(10, 2) });
   flowReply(c, "back");
@@ -709,7 +714,7 @@ test("I see insects annulé (retour sans photo) : bulle retirée, la question re
 
 test("retour système (flowBack) : tuiles → annuler, photos → type retiré, note → photos, gaz → OK", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   startProblem(c);
   const g = c.gestures;
   flowBack(c);
@@ -738,7 +743,7 @@ test("retour système (flowBack) : tuiles → annuler, photos → type retiré, 
 
 test("depuis la page du problème : retour de l'écran de note = la page directement", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   addProblem(c, "Broken", "b1", { now: at(10, 1) });
   reopenProblem(c, 0, "note");
   flowReply(c, "no-note");
@@ -782,7 +787,7 @@ test("ligne AC l'hiver : AC off / AC not working", () => {
 
 test("gaz pré-réglé : Gas smell signalé pendant le ménage, ligne du gaz sur « ko » et reliée, sans second problème", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   startProblem(c); chooseKind(c, "Gas smell", { now: at(10, 1) }); flowReply(c, "gas-ok");
   const gas = c.problems[0];
   rooms(c, 3, "a");
@@ -802,7 +807,7 @@ test("gaz pré-réglé : Gas smell signalé pendant le ménage, ligne du gaz sur
 
 test("gaz pré-réglé : works ne fait que délier (le Gas smell signalé reste), not working le relie sans doublon", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   rooms(c, 3, "a");
   reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) });
   addProblem(c, "Gas not working", null, { now: at(10, 2) });
@@ -824,7 +829,7 @@ test("gaz pré-réglé : works ne fait que délier (le Gas smell signalé reste)
 
 test("AC pré-réglée : tuile AC signalée pendant le ménage, ligne « ko », rapport AC not working ✗", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
-  reply(c, "here", { now: at(10, 0) });
+  here(c);
   startProblem(c); chooseKind(c, "AC", { now: at(10, 1) }); addFlowPhoto(c, "ac1"); flowReply(c, "photos-done"); flowReply(c, "no-note");
   const ac = c.problems[0];
   rooms(c, 3, "a");
@@ -857,4 +862,64 @@ test("problème d'AC signalé seulement pendant l'étape 5 : not working le reli
   reply(c, "leave:ac-ko", { now: at(11, 2) });
   assert.equal(c.leave.ac, "ko");
   assert.deepEqual(c.problems.map(p => p.kind), ["AC"]);
+});
+
+// ---- Carte d'accès et clés (22/10) : première photo de l'arrivée, cleaner seule ou lead ; jamais pour l'aide. ----
+
+test("carte d'accès : première étape après I'm here pour la cleaner seule, absente pour l'aide", () => {
+  const c = createConversation(bloom, { me: ME, now: at(9, 0) });
+  assert.deepEqual(c.steps[1], { id: "arrival-photo", n: 1, room: "Access card" });
+  reply(c, "here", { now: at(10, 0) });
+  const st = currentStep(c);
+  assert.equal(st.id, "arrival-photo");
+  assert.equal(st.room, "Access card");
+  assert.equal(st.n, 1);
+  assert.equal(st.camera, true);
+  assert.equal(st.ref, null, "pas de photo de référence pour la carte");
+  assert.equal(c.messages.at(-1).text, "Step 1: photo of the access card and keys, where the guest left them.");
+  addPhoto(c, "card", { now: at(10, 0) });
+  reply(c, "next-room", { now: at(10, 0) });
+  assert.equal(c.messages.filter(m => m.from === "me").at(-1).text, "Access card photo taken");
+  assert.deepEqual(c.arrivalPhotos["Access card"], ["card"]);
+  assert.equal(currentStep(c).room, "Bed");
+  assert.equal(c.messages.at(-1).text, "Photo of each room as you find it. Bed.", "plus de préfixe « Step 1: » sur la première pièce");
+  reply(c, "next-room", { now: at(10, 1) });
+  addPhoto(c, "a", { now: at(10, 1) }); reply(c, "next-room", { now: at(10, 1) });
+  assert.equal(c.messages.at(-1).text, "Bathroom.", "pièces suivantes : le nom seul");
+  // L'aide (binôme) : I'm here mène directement à l'étape 4.
+  const h = createConversation(creek, { me: ME, now: at(9, 0) });
+  assert.equal(isHelper(h), true);
+  assert.equal(h.steps.some(s => s.room === "Access card"), false);
+  reply(h, "here", { now: at(10, 30) });
+  assert.equal(currentStep(h).id, "end-photo");
+  assert.equal(h.arrivalPhotos["Access card"], undefined);
+});
+
+test("carte d'accès : Next inactif sans photo ; Card is missing crée « Access card missing » sans photo, à l'entrée, et avance", () => {
+  const c = createConversation(bloom, { me: ME, now: at(9, 0) });
+  reply(c, "here", { now: at(10, 0) });
+  assert.deepEqual(currentStep(c).replies.map(r => [r.id, r.label, r.enabled]), [["next-room", "Next", false], ["card-missing", "Card is missing", true]]);
+  const g = c.gestures;
+  reply(c, "next-room", { now: at(10, 0) });
+  assert.equal(currentStep(c).room, "Access card", "Next sans photo : rien");
+  assert.equal(c.gestures, g);
+  // Un problème signalé pendant l'étape de la carte se range à l'entrée.
+  addProblem(c, "Broken", "b", { now: at(10, 0) });
+  assert.equal(c.problems[0].where, "Entrance & building");
+  removeProblem(c, 0);
+  reply(c, "card-missing", { now: at(10, 1) });
+  assert.equal(c.gestures, g + 2, "Broken + Card is missing");
+  assert.deepEqual(c.problems.map(p => [p.kind, p.where, p.urgency, p.photos.length]), [["Access card missing", "Entrance & building", "soon", 0]]);
+  assert.equal(c.flow, null, "aucun écran de photos");
+  assert.equal(c.cardMissing, true);
+  assert.equal(c.messages.filter(m => m.from === "me" && m.type === "text").at(-1).text, "Card is missing");
+  assert.equal(currentStep(c).room, "Bed", "la carte manquante fait avancer");
+  assert.equal(c.arrivalPhotos["Access card"], undefined);
+  // Une photo prise puis supprimée : Next redevient inactif.
+  const d = createConversation(bloom, { me: ME, now: at(9, 0) });
+  reply(d, "here", { now: at(10, 0) });
+  addPhoto(d, "card", { now: at(10, 0) });
+  assert.equal(currentStep(d).replies[0].enabled, true);
+  removeArrivalOrEndPhoto(d, "arrival", "Access card", 0);
+  assert.equal(currentStep(d).replies[0].enabled, false);
 });

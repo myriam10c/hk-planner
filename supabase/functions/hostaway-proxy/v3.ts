@@ -113,6 +113,7 @@ export const V3_PROBLEM_KINDS: Record<string, string> = {
   "Can't get in": "general",
   "Gas not working": "appliance",
   "Wi-Fi not working": "general",
+  "Access card missing": "general",
 };
 
 // Types qui se signalent sans photo : on ne photographie pas une odeur, une porte
@@ -120,6 +121,8 @@ export const V3_PROBLEM_KINDS: Record<string, string> = {
 // viennent d'une ligne de verification de sortie (decision du 2026-10-05).
 export const V3_PHOTO_OPTIONAL_KINDS = [
   "Gas smell", "Can't get in", "AC not working", "Gas not working", "Wi-Fi not working",
+  // Carte absente a l'arrivee (22/10) : on ne photographie pas ce qui n'est pas la.
+  "Access card missing",
 ];
 
 // Urgence choisie par la cleaner -> priorite du ticket. Seul `urgent` traverse

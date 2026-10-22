@@ -10,7 +10,9 @@ const [oxford, creek, bloom] = APARTMENTS;
 const now = new Date(2026, 9, 2, 10, 0);
 // Une photo puis Next room, n fois.
 const rooms = (c, n, p = "a") => { for (let i = 0; i < n; i++) { addPhoto(c, p, { now }); reply(c, "next-room", { now }); } };
-const toLeave = c => { reply(c, "here", { now }); rooms(c, 3); reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "linen-yes", { now }); rooms(c, 3, "e"); };
+// I'm here, puis l'étape de la carte d'accès (22/10) : photo et Next.
+const here = c => { reply(c, "here", { now }); addPhoto(c, "card", { now }); reply(c, "next-room", { now }); };
+const toLeave = c => { here(c); rooms(c, 3); reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "linen-yes", { now }); rooms(c, 3, "e"); };
 
 test("liste : trois appartements de la journée réelle, Profile en haut", () => {
   const html = renderList({ me: ME, apartments: APARTMENTS, convs: {}, activeId: null, now });
@@ -36,7 +38,7 @@ test("liste : journée vide, bandeaux avant et après l'en-tête, ménage fini s
 test("en-tête : étape et titre, puis chrono", () => {
   const c = createConversation(bloom, { me: ME, now });
   assert.match(renderConversation(c, { now }), /Step 1 of 5 · Arrival/);
-  reply(c, "here", { now });
+  here(c);
   rooms(c, 3);
   const html = renderConversation(c, { now: new Date(2026, 9, 2, 10, 12) });
   assert.match(html, /Step 2 of 5 · Damage &amp; problems · ⏱ 12 min/);
@@ -50,7 +52,7 @@ test("en-tête : étape et titre, puis chrono", () => {
 
 test("viseur épuré étape 1 : libellé, miniatures et nombre, déclencheur, Next room, un seul bouton Problem, aucune tuile", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   let html = renderViewfinder(c, { live: true });
   assert.doesNotMatch(html, /vf-guide|guide-btn|data-act="guide"|guide/i);
   assert.match(html, /Step 1 · Bed · as you find it/);
@@ -73,7 +75,7 @@ test("viseur épuré étape 1 : libellé, miniatures et nombre, déclencheur, Ne
 
 test("miniature agrandie : écran plein, Delete photo et Back", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   addPhoto(c, { url: "blob:a" }, { now }); addPhoto(c, { url: "blob:b" }, { now });
   const html = renderPhotoView(c, 1);
   assert.match(html, /^<section class="page photo-view">/);
@@ -85,14 +87,14 @@ test("miniature agrandie : écran plein, Delete photo et Back", () => {
 
 test("viseur étape 4 : « when clean »", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now }); rooms(c, 3);
+  here(c); rooms(c, 3);
   reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "linen-yes", { now });
   assert.match(renderViewfinder(c, { live: true }), /Step 4 · Bed · when clean/);
 });
 
 test("pièce sans photo de référence : pas d'image cassée", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now }); rooms(c, 1); // Bathroom : pas de photo d'annonce
+  here(c); rooms(c, 1); // Bathroom : pas de photo d'annonce
   assert.equal(currentStep(c).room, "Bathroom");
   const html = renderViewfinder(c, { live: true }) + renderConversation(c, { now });
   assert.doesNotMatch(html, /src=""|src="null"|src="undefined"/);
@@ -127,7 +129,7 @@ test("étape 5 : sept lignes, gaz, AC et Wi-Fi à deux boutons, le gaz en rouge 
 
 test("étape 5 pré-réglée : AC signalée pendant le ménage, la ligne s'affiche déjà sur AC not working", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   addProblem(c, "AC", null, { now });
   rooms(c, 3); reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "linen-yes", { now }); rooms(c, 3, "e");
   const html = renderConversation(c, { now });
@@ -136,7 +138,7 @@ test("étape 5 pré-réglée : AC signalée pendant le ménage, la ligne s'affic
 
 test("odeur de gaz : bulle d'alerte dans le fil ; bandeau « Saved » sans bouton", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   addProblem(c, "Gas smell", null, { now });
   assert.match(renderConversation(c, { now }), /class="msg app alert"[\s\S]*Open the windows\. Do not touch switches\. Leave and call your manager on duty\./);
   addProblem(c, "Leak", null, { now });
@@ -147,7 +149,7 @@ test("odeur de gaz : bulle d'alerte dans le fil ; bandeau « Saved » sans bouto
 
 test("appartement à deux : jamais de Send, puis Add to Pionah's report", () => {
   const c = createConversation(creek, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   while (currentStep(c).id === "end-photo") { assert.doesNotMatch(renderConversation(c, { now }), /data-reply="send"/); rooms(c, 1, "r"); }
   const html = renderConversation(c, { now });
   assert.doesNotMatch(html, /data-reply="send"/);
@@ -171,7 +173,7 @@ test("échappement et aucun tiret cadratin", () => {
 
 test("sans caméra : image fixe de l'annonce assombrie, jamais de bouton guide", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now }); // Bed : photo de l'annonce
+  here(c); // Bed : photo de l'annonce
   const html = renderViewfinder(c, { live: false });
   assert.equal(html.includes('<img class="vf-still" alt="" src="' + REF("bl-Bed") + '">'), true);
   assert.doesNotMatch(html, /data-act="guide"/);
@@ -182,7 +184,7 @@ test("liste : ni pastille du nombre d'étapes internes, « Step N of 5 » quand 
   let html = renderList({ me: ME, apartments: APARTMENTS, convs: { [bloom.id]: c }, activeId: bloom.id, now });
   assert.doesNotMatch(html, /class="badge"/);
   assert.doesNotMatch(html, /Step \d of 5/, "rien avant « I'm here »");
-  reply(c, "here", { now });
+  here(c);
   rooms(c, 3);
   html = renderList({ me: ME, apartments: APARTMENTS, convs: { [bloom.id]: c }, activeId: bloom.id, now: new Date(2026, 9, 2, 10, 12) });
   assert.match(html, /Step 2 of 5 · 12\u00a0min/);
@@ -195,14 +197,14 @@ test("liste : ni pastille du nombre d'étapes internes, « Step N of 5 » quand 
 
 test("linge : pas de rangée caméra/micro pendant l'édition (inchangé)", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now }); rooms(c, 3);
+  here(c); rooms(c, 3);
   reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "linen-change", { now });
   assert.doesNotMatch(renderConversation(c, { now }), /data-act="problem"|data-act="camera"/);
 });
 
 test("étape photo, viseur fermé : bouton pour rouvrir la caméra dans la barre", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   assert.match(renderConversation(c, { now }), /<button class="reply" data-act="camera">📷 Camera<\/button>/);
   rooms(c, 3);
   assert.doesNotMatch(renderConversation(c, { now }), /data-act="camera"/);
@@ -210,7 +212,7 @@ test("étape photo, viseur fermé : bouton pour rouvrir la caméra dans la barre
 
 test("écran « What is the problem? » : 10 grandes tuiles sur 2 colonnes et Cancel", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   startProblem(c);
   const html = renderKindScreen(c);
   assert.match(html, /^<section class="page kinds-page">/);
@@ -224,7 +226,7 @@ test("écran « What is the problem? » : 10 grandes tuiles sur 2 colonnes et Ca
 
 test("écran « Take photos of it » : titre Type · endroit, déclencheur, miniatures, Done actif dès une photo, lien No photo", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   startProblem(c);
   chooseKind(c, "Leak", { now });
   let html = renderProblemPhotos(c, { live: true });
@@ -247,7 +249,7 @@ test("écran « Take photos of it » : titre Type · endroit, déclencheur, mini
 
 test("écran « What happened? » : texte seulement, conseil du micro du clavier, Save sous la zone, No note dessous", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   startProblem(c); chooseKind(c, "Broken", { now }); flowReply(c, "no-photo");
   const html = renderNoteScreen(c);
   assert.match(html, /^<section class="page note-page">/);
@@ -263,7 +265,7 @@ test("écran « What happened? » : texte seulement, conseil du micro du clavier
 
 test("écran de note depuis la page du problème : note existante échappée, Back au lieu de No note", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   addProblem(c, "Broken", null, { now });
   setProblemNote(c, 0, 'big <b>crack</b> & "hole"');
   reopenProblem(c, 0, "note");
@@ -274,7 +276,7 @@ test("écran de note depuis la page du problème : note existante échappée, Ba
 
 test("écran rouge du gaz : consigne en très grand et OK", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   startProblem(c); chooseKind(c, "Gas smell", { now });
   const html = renderGasScreen(c);
   assert.match(html, /^<section class="page gas-page" role="alert">/);
@@ -285,7 +287,7 @@ test("écran rouge du gaz : consigne en très grand et OK", () => {
 
 test("page d'un problème : photos et Add photo, note et Edit note, Place, Urgency, Delete confirmé sur la page", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   addProblem(c, "Broken", { url: "img/b1.jpg" }, { now });
   addProblemPhoto(c, 0, { url: "img/b2.jpg" });
   setProblemNote(c, 0, "tear <here>");
@@ -315,7 +317,7 @@ test("page d'un problème : photos et Add photo, note et Edit note, Place, Urgen
 
 test("aucune fiche (sheet) ni tiret cadratin dans tous les écrans", () => {
   const c = createConversation(oxford, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   addPhoto(c, { url: "a" }, { now });
   startProblem(c);
   const all = [renderConversation(c, { now }), renderViewfinder(c, { live: true }), renderPhotoView(c, 0), renderKindScreen(c)];
@@ -335,10 +337,38 @@ test("aucune fiche (sheet) ni tiret cadratin dans tous les écrans", () => {
 
 test("bulle d'un problème : jamais de « 🎙 », la note tapée s'affiche", () => {
   const c = createConversation(bloom, { me: ME, now });
-  reply(c, "here", { now });
+  here(c);
   addProblem(c, "AC", null, { now });
   setProblemNote(c, 0, "not cooling");
   const html = renderConversation(c, { now });
   assert.match(html, /<span class="pnote">not cooling<\/span><span>Bed<\/span>/);
   assert.equal(html.includes("🎙"), false);
+});
+
+// ---- Carte d'accès (22/10) et liste sans verrou ----
+
+test("viseur de la carte d'accès : libellé, Next inactif sans photo, Card is missing", () => {
+  const c = createConversation(bloom, { me: ME, now });
+  reply(c, "here", { now });
+  let html = renderViewfinder(c, { live: true });
+  assert.match(html, /<b>Step 1 · Access card &amp; keys · as you find them<\/b>/);
+  assert.match(html, /<div class="vf-extra"><button class="reply" data-reply="card-missing">Card is missing<\/button><\/div>/, "sur sa propre ligne, au-dessus du déclencheur");
+  assert.match(html, /<span class="vf-row-end"><button class="reply" data-reply="next-room" disabled>Next<\/button><\/span>/, "Next seul dans la rangée du bas");
+  addPhoto(c, { url: "blob:card" }, { now });
+  html = renderViewfinder(c, { live: true });
+  assert.match(html, /data-reply="next-room">Next</);
+  assert.match(html, /<span class="count">1 photo<\/span>/);
+  reply(c, "next-room", { now });
+  assert.match(renderViewfinder(c, { live: true }), /Step 1 · Bed · as you find it/);
+});
+
+test("liste : un ménage commencé et pas envoyé ne verrouille aucune autre ligne", () => {
+  const c = createConversation(bloom, { me: ME, now });
+  here(c);
+  assert.ok(c.startedAt && !c.sent);
+  const html = renderList({ me: ME, apartments: APARTMENTS, convs: { [bloom.id]: c }, activeId: bloom.id, now });
+  const rows = html.match(/<button class="row[^"]*"[^>]*>/g);
+  assert.equal(rows.length, 3);
+  for (const r of rows) assert.doesNotMatch(r, /disabled/);
+  assert.doesNotMatch(html, /disabled/);
 });

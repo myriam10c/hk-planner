@@ -20,10 +20,10 @@
 // cleaner quitte son écran de photos : une tuile touchée puis Back n'envoie rien.
 import { isHelper } from "./conversation.js";
 import { reportText } from "./report.js";
-import { LINEN_USUAL } from "./rules.js";
+import { LINEN_USUAL, CARD_ROOM } from "./rules.js";
 
 // Types que le proxy accepte sans photo (V3_PHOTO_OPTIONAL_KINDS côté serveur).
-export const PHOTO_OPTIONAL = ["Gas smell", "Can't get in", "AC not working", "Gas not working", "Wi-Fi not working"];
+export const PHOTO_OPTIONAL = ["Gas smell", "Can't get in", "AC not working", "Gas not working", "Wi-Fi not working", "Access card missing"];
 
 // Qui écrit (tâche 6 du branchement), seule garde de app.js : « real » = la personne connectée,
 // sur sa propre journée, par la file hors ligne ; « practice » = le simulateur local de
@@ -91,7 +91,8 @@ export function syncPlan(conv, { newIdem, active = true } = {}) {
     emit("v3.deletePhoto", body, { unqueue: idem });
   }
   for (const [step, store] of stores) {
-    for (const room of conv.apt.rooms) for (const p of store[room] || []) if (isObj(p) && !p.idem) upload(p, step + ":" + room);
+    const rooms = step === "arrival" ? [CARD_ROOM].concat(conv.apt.rooms) : conv.apt.rooms;
+    for (const room of rooms) for (const p of store[room] || []) if (isObj(p) && !p.idem) upload(p, step + ":" + room);
   }
 
   // 3. Problèmes.

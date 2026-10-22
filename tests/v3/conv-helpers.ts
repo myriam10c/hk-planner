@@ -68,6 +68,16 @@ export async function piece(page: Page, step: number, nom: string) {
   await page.locator('.vf [data-reply="next-room"]').click();
 }
 
+// Carte d'acces et cles (22/10) : premiere photo de l'arrivee, juste apres I'm here (jamais
+// pour l'aide). Next reste inactif tant qu'aucune photo n'est prise.
+export async function carteAcces(page: Page) {
+  await expect(page.locator('.vf-top b')).toHaveText('Step 1 · Access card & keys · as you find them');
+  await expect(page.locator('.vf [data-reply="next-room"]')).toBeDisabled();
+  await photo(page);
+  await expect(page.locator('.vf .count')).toHaveText('1 photo');
+  await page.locator('.vf [data-reply="next-room"]').click();
+}
+
 // Ecritures au proxy (hors lecture de la journee), une entree par cle d'idempotence : la
 // derniere tentative de chaque cle, dans l'ordre de la premiere. Les essais hors ligne
 // (rejetes avant le reseau) comptent dans le journal, pas comme des ecritures distinctes.

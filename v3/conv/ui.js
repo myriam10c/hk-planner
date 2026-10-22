@@ -1,6 +1,6 @@
 // Rendu HTML pur, façon WhatsApp. Aucune lecture du DOM ici : testable sous Node.
 // Porté du prototype : la liste reçoit les appartements de la journée réelle (day.js).
-import { LINEN_USUAL, GROUP_NAME, aptLabel, dayLine } from "./rules.js";
+import { LINEN_USUAL, GROUP_NAME, CARD_ROOM, aptLabel, dayLine } from "./rules.js";
 import { KINDS, URGENCY } from "./problems.js";
 import { currentStep, currentFlow, elapsedMinutes, isHelper, ticketCard } from "./conversation.js";
 import { reportText, formatMinutes } from "./report.js";
@@ -49,14 +49,12 @@ function rowStatus(apt, conv, now) {
 // Practice) au-dessus de l'en-tête ; `after` : bandeau des gestes en attente, sous l'en-tête ;
 // `empty` : texte d'une journée vide.
 export function renderList({ me, apartments, convs, activeId, now, before = "", after = "", empty = "Nothing assigned to you today." }) {
-  const busy = activeId && convs[activeId] && !convs[activeId].readOnly && convs[activeId].startedAt && !convs[activeId].sent;
   const rows = apartments.map(a => {
     // Conversation en lecture seule (View as) : la ligne garde l'état du serveur.
     const c = convs[a.id] && !convs[a.id].readOnly ? convs[a.id] : null;
-    const locked = busy && a.id !== activeId;
     const done = (c && c.sent) || (!c && a.state === "done");
     const warn = !c && !done && a.guest.hoursAway !== null && a.guest.hoursAway <= 24;
-    return '<button class="row' + (done ? " done" : "") + '" data-act="open" data-id="' + escapeHtml(a.id) + '"' + (locked ? " disabled" : "") + ">" +
+    return '<button class="row' + (done ? " done" : "") + '" data-act="open" data-id="' + escapeHtml(a.id) + '">' +
       avatar(a, "avatar") +
       '<span class="row-main"><span class="row-name">' + escapeHtml(aptLabel(a)) + "</span>" +
       '<span class="row-sub' + (warn ? " warn" : "") + '">' + escapeHtml(rowStatus(a, c, now)) + "</span></span>" +
@@ -196,15 +194,20 @@ export function renderViewfinder(conv, { live }) {
   if (step.id !== "arrival-photo" && step.id !== "end-photo") return "";
   const room = step.room;
   const list = (step.id === "arrival-photo" ? conv.arrivalPhotos : conv.endPhotos)[room] || [];
-  const label = step.id === "arrival-photo" ? "Step 1 · " + room + " · as you find it" : "Step 4 · " + room + " · when clean";
+  const label = room === CARD_ROOM ? "Step 1 · Access card & keys · as you find them"
+    : step.id === "arrival-photo" ? "Step 1 · " + room + " · as you find it" : "Step 4 · " + room + " · when clean";
+  // « Card is missing » sur sa propre ligne : dans la rangee du bas, il pousse Next sous le declencheur.
+  const rowReplies = step.replies.filter(r => r.id !== "card-missing");
+  const extra = step.replies.filter(r => r.id === "card-missing");
   const thumbs = list.map((p, i) => '<button class="vthumb" data-act="thumb" data-i="' + i + '" aria-label="Photo ' + (i + 1) + '">' + imgTag(p) + "</button>").join("");
   return '<div class="vf' + (live ? " live" : "") + '">' + still(live, step.ref || conv.apt.photo) + '<div class="flash"></div>' +
     '<div class="vf-top"><button class="icon light" data-act="close-camera" aria-label="Close">' + I.close + "</button><b>" + escapeHtml(label) + "</b></div>" +
     noCamMsg(live) +
     '<div class="vf-bottom">' +
     (list.length ? '<div class="vthumbs">' + thumbs + countTag(list.length) + "</div>" : "") +
+    (extra.length ? '<div class="vf-extra">' + replyButtons({ replies: extra }) + "</div>" : "") +
     '<div class="vf-row"><button class="vf-problem" data-act="problem">⚠ Problem</button>' + shutterBtn(live, "shutter") +
-    '<span class="vf-row-end">' + replyButtons({ replies: step.replies }) + "</span></div>" +
+    '<span class="vf-row-end">' + replyButtons({ replies: rowReplies }) + "</span></div>" +
     "</div></div>";
 }
 

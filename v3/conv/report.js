@@ -1,5 +1,5 @@
 // Texte du rapport partagé au groupe (mise en forme WhatsApp : *gras*, _italique_) et fichiers joints.
-import { LINEN_USUAL, LEAVE_CHECKS, aptLabel } from "./rules.js";
+import { LINEN_USUAL, LEAVE_CHECKS, CARD_ROOM, CARD_MISSING, aptLabel } from "./rules.js";
 import { URGENCY } from "./problems.js";
 import { elapsedMinutes, leaveDoneLabel } from "./conversation.js";
 
@@ -18,23 +18,32 @@ export const hasFile = x => !!(x && typeof x === "object" && x.file);
 
 const roomsOf = (conv, store) => conv.apt.rooms.flatMap(r => store[r] || []);
 
-// Sélection des fichiers (photos seulement) : priorité problèmes, puis fin, puis arrivée ; rendus dans l'ordre naturel (arrivée, fin, problèmes).
+// Sélection des fichiers (photos seulement) : priorité carte d'accès (preuve), problèmes, fin, puis arrivée ;
+// rendus dans l'ordre naturel (carte, arrivée, fin, problèmes).
 export function pickFiles(conv, max = MAX_FILES) {
   const groups = {
+    card: (conv.arrivalPhotos[CARD_ROOM] || []).filter(hasFile),
     arrival: roomsOf(conv, conv.arrivalPhotos).filter(hasFile),
     end: roomsOf(conv, conv.endPhotos).filter(hasFile),
     problems: conv.problems.flatMap(p => p.photos.filter(hasFile)),
   };
   let left = max;
   const kept = {};
-  for (const k of ["problems", "end", "arrival"]) { kept[k] = groups[k].slice(0, Math.max(0, left)); left -= kept[k].length; }
-  const order = ["arrival", "end", "problems"];
+  for (const k of ["card", "problems", "end", "arrival"]) { kept[k] = groups[k].slice(0, Math.max(0, left)); left -= kept[k].length; }
+  const order = ["card", "arrival", "end", "problems"];
   const files = order.flatMap(k => kept[k].map(x => x.file));
   const total = order.reduce((n, k) => n + groups[k].length, 0);
   return { files, photos: files.length, cutPhotos: files.length < total };
 }
 
 const WHERE_EXTRA = ["Entrance & building", "Whole apartment"];
+
+// Carte d'accès : photo prise, signalée absente, ou rien (aide, ou ménage commencé avant l'étape).
+function cardLine(conv) {
+  const n = (conv.arrivalPhotos[CARD_ROOM] || []).length;
+  if (conv.problems.some(p => p.kind === CARD_MISSING)) return "MISSING";
+  return n ? "📷 " + n : "no photo";
+}
 const roomLine = (conv, store) => {
   const rooms = conv.apt.rooms.filter(r => (store[r] || []).length);
   return rooms.length ? rooms.map(r => r + " 📷 " + store[r].length).join(" · ") : "none";
@@ -80,6 +89,7 @@ export function reportText(conv, { now = new Date() } = {}) {
     a.type + " · Next guest: " + a.guest.next,
     "👤 " + conv.me.name + " · " + (conv.startedAt ? hhmm(conv.startedAt) : "--:--") + " → " + hhmm(end) + " (" + formatMinutes(elapsedMinutes(conv, end)) + ", usual " + formatMinutes(a.usualMinutes) + ")",
     "",
+    "*Access card:* " + cardLine(conv),
     "*1 Arrival:* " + roomLine(conv, conv.arrivalPhotos),
     "*2 Damage:* " + (conv.damage === "none" ? "none" : conv.damage === "some" ? "see problems" : "not answered"),
   ];

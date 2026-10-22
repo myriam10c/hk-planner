@@ -36,9 +36,9 @@ const KINDS = {
   'Power': 'electrical', 'Insects': 'pest', 'Missing': 'general', 'Broken': 'general',
   'Stain': 'general', 'Very dirty': 'general', 'Guest forgot': 'general',
   'Wall damage': 'general', "Can't get in": 'general', 'Gas not working': 'appliance',
-  'Wi-Fi not working': 'general',
+  'Wi-Fi not working': 'general', 'Access card missing': 'general',
 };
-const PHOTO_OPTIONAL = ['Gas smell', "Can't get in", 'AC not working', 'Gas not working', 'Wi-Fi not working'];
+const PHOTO_OPTIONAL = ['Gas smell', "Can't get in", 'AC not working', 'Gas not working', 'Wi-Fi not working', 'Access card missing'];
 const URGENCY_PRIORITY = { urgent: 'urgent', soon: 'medium', later: 'low' };
 const NOTE_MAX = 300;
 const WHERE_MAX = 60;

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { bootV3, fetchLog, noHorizontalScroll } from './helpers';
-import { BLOOM, DAY, WRITE_ROUTES, demarrer, ecritures, fileVide, fileVideApresRetour, photo, piece } from './conv-helpers';
+import { BLOOM, DAY, WRITE_ROUTES, carteAcces, demarrer, ecritures, fileVide, fileVideApresRetour, photo, piece } from './conv-helpers';
 
 // Maintenance phase 3, app cleaner : (C4) a l'etape 2, chaque ticket ouvert du
 // logement est une carte « Still there » / « Fixed now » ; (C8) la carte d'un
@@ -27,6 +27,7 @@ const routesAvec = (day: any, extra: any[] = []) => [
 async function etape2(page: any) {
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
 }
 

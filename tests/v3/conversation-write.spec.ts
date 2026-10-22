@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { BLOOM, CREEK, PNG_1x1, WRITE_ROUTES, demarrer, ecritures, fileVide, photo, piece } from './conv-helpers';
+import { BLOOM, CREEK, PNG_1x1, WRITE_ROUTES, carteAcces, demarrer, ecritures, fileVide, photo, piece } from './conv-helpers';
 
 // Ecritures de la conversation (tache 5 du branchement 2026-10-05), observees sur le proxy
 // simule : chaque geste part dans la file (offline.js) puis au proxy, dans l'ordre, une seule
@@ -16,6 +16,7 @@ test('studio : startJob, photos de pieces dans l ordre, finishJob avec linge et 
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
@@ -30,13 +31,14 @@ test('studio : startJob, photos de pieces dans l ordre, finishJob avec linge et 
   const e = await ecritures(page);
   expect(e.map(court)).toEqual([
     'startJob',
+    'uploadPhoto arrival:Access card',
     'uploadPhoto arrival:Bed', 'uploadPhoto arrival:Bathroom', 'uploadPhoto arrival:Kitchen',
     'uploadPhoto end:Bed', 'uploadPhoto end:Bathroom', 'uploadPhoto end:Kitchen',
     'finishJob',
   ]);
   expect(e.every((x) => x.essais === 1)).toBe(true);
   expect(e.every((x) => x.body.jobId === BLOOM.jobId)).toBe(true);
-  const fin = e[7].body;
+  const fin = e[8].body;
   expect(fin.linen).toEqual({ pillowcases: 4, bed_sheets: 1, duvet_covers: 1, large_towels: 3, small_towels: 0, face_towels: 0, bath_mats: 1 });
   expect(fin.report.text).toContain('READY · 1011C Bloom Towers');
   expect(fin.report.text).toContain('Door locked, keys & card left inside ✓');
@@ -47,7 +49,8 @@ test('studio : startJob, photos de pieces dans l ordre, finishJob avec linge et 
   expect(await page.locator('.msg.me .ticks').count()).toBeGreaterThan(10);
   const partage = await page.evaluate(() => (window as any).__shared);
   expect(partage.length).toBe(1);
-  expect(partage[0].files).toBe(6);
+  expect(partage[0].files).toBe(7);
+  expect(fin.report.text).toContain('*Access card:* 📷 1');
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.locator('.row').first().locator('.row-sub')).toHaveText('Report sent ✓✓');
 });
@@ -56,6 +59,7 @@ test('un probleme avec 2 photos et une note : photo, signalement, photo + rattac
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="some-damage"]').click();
@@ -66,7 +70,7 @@ test('un probleme avec 2 photos et une note : photo, signalement, photo + rattac
   await page.locator('#problem-note').fill('under the sink');
   await page.locator('[data-flow="save-text"]').click();
   await fileVide(page);
-  const e = (await ecritures(page)).slice(4);
+  const e = (await ecritures(page)).slice(5);
   expect(e.map(court)).toEqual(['uploadPhoto problem', 'reportProblem Leak', 'uploadPhoto problem', 'addProblemPhoto', 'setProblemNote']);
   const [p1, rep, p2, add, note] = e.map((x) => x.body);
   expect(rep).toMatchObject({ jobId: BLOOM.jobId, listingId: '203', kind: 'Leak', urgency: 'soon', where: 'Whole apartment', photoIdem: p1.idem });
@@ -117,6 +121,7 @@ test('mise en file ratee une fois (stockage plein) : la photo et son signalement
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="some-damage"]').click();
@@ -145,7 +150,7 @@ test('mise en file ratee une fois (stockage plein) : la photo et son signalement
   await page.locator('[data-flow="photos-done"]').click();
   await page.locator('[data-flow="no-note"]').click();
   await fileVide(page);
-  const e = (await ecritures(page)).slice(4);
+  const e = (await ecritures(page)).slice(5);
   expect(e.map(court)).toEqual(['uploadPhoto problem', 'reportProblem Leak', 'uploadPhoto problem', 'addProblemPhoto']);
   expect(e[1].body.photoIdem).toBe(e[0].body.idem);
   expect(e[3].body).toMatchObject({ ticketIdem: e[1].body.idem, photoIdem: e[2].body.idem });

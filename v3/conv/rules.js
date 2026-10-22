@@ -2,6 +2,11 @@
 // de demo : la journee reelle vient de v3.myDay, voir day.js).
 export const GROUP_NAME = "Medini Homes Housekeeping";
 
+// Photo de la carte d'acces et des cles en arrivant (demande Hillal du 22/10) : preuve quand un
+// voyageur part avec la carte. Rangee dans arrivalPhotos sous cette cle, comme une piece.
+export const CARD_ROOM = "Access card";
+export const CARD_MISSING = "Access card missing";
+
 export const SUPPLIES = ["Toilet paper", "Shampoo & soap", "Coffee & tea", "Water bottles", "Trash bags", "Dish soap"];
 
 // Valeurs les plus frequentes de laundry_counts (60 derniers jours) ; cles = colonnes de la base.

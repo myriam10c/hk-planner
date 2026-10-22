@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { bootV3, fetchLog, noHorizontalScroll } from './helpers';
-import { WRITE_ROUTES, fileVide } from './conv-helpers';
+import { WRITE_ROUTES, carteAcces, fileVide } from './conv-helpers';
 
 // Interface conversation portee du prototype, sur la journee reelle (tache 4 du
 // plan 2026-10-05) : la liste vient de v3.myDay, ouvrir un appartement cree la
@@ -123,12 +123,13 @@ test('ouvrir un appartement cree la conversation locale ; Back et le retour syst
   expect(page.url()).toContain('/v3/');
 });
 
-test('parcours du studio jusqu au rapport en 25 gestes, ✓✓ une fois la file partie', async ({ page }) => {
+test('parcours du studio jusqu au rapport en 27 gestes, ✓✓ une fois la file partie', async ({ page }) => {
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
   // Sans camera : viseur en image fixe, le cercle ouvre l'appareil photo du telephone.
   await expect(page.locator('.vf-msg')).toHaveText('Tap the circle to open your camera');
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
@@ -140,17 +141,18 @@ test('parcours du studio jusqu au rapport en 25 gestes, ✓✓ une fois la file 
   await expect(rapport).toContainText('READY · 1011C Bloom Towers');
   await expect(rapport).toContainText('Studio · Next guest: none booked yet');
   await expect(rapport).toContainText('👤 Faiza');
+  await expect(rapport).toContainText('Access card: 📷 1');
   await page.locator('[data-reply="send"]').click();
   await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
   const partage = await page.evaluate(() => (window as any).__shared);
   expect(partage.length).toBe(1);
   expect(partage[0].text).toContain('*READY · 1011C Bloom Towers*');
-  expect(partage[0].files).toBe(6);
+  expect(partage[0].files).toBe(7);
   const etat = await page.evaluate(() => {
     const c = (window as any).__hk.convs['job_0000000000000blm1011'];
     return { gestes: c.gestures, envoye: c.sent };
   });
-  expect(etat).toEqual({ gestes: 25, envoye: true });
+  expect(etat).toEqual({ gestes: 27, envoye: true });
   await fileVide(page);
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.locator('.row').nth(2).locator('.row-sub')).toHaveText('Report sent ✓✓');
@@ -162,6 +164,7 @@ test('ticket pest : verification du manager, et les autres tickets ouverts en bu
   await page.getByRole('button', { name: /122 Oxford Boulevard/ }).click();
   await expect(page.locator('.msg.app').first()).toContainText('122 Oxford Boulevard · guest at 3 pm');
   await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   // Maintenance phase 3 (C4) : les autres tickets ouverts sont des cartes, sous une seule question.
   await expect(page.getByText('Open problems here. Is it still there?')).toBeVisible();
@@ -212,6 +215,9 @@ for (const largeur of [360, 390, 430]) {
     await shot('02-arrivee');
     await page.locator('[data-reply="here"]').click();
     await expect(page.locator('.vf')).toBeVisible();
+    await expect(page.locator('.vf-top b')).toHaveText('Step 1 · Access card & keys · as you find them');
+    await shot('03a-carte');
+    await carteAcces(page);
     await photo(page);
     await expect(page.locator('.vf .count')).toHaveText('1 photo');
     await shot('03-viseur');

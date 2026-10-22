@@ -57,6 +57,9 @@ export async function bootV3(
           if (cfg.emailSession) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.emailSession));
           if (cfg.offline) localStorage.setItem('v3TestOffline', '1');
         }
+        // Ecran « Turn on notifications » / « Add to Home Screen » (relances push du 21/10) :
+        // ecarte comme apres « Not now », sinon il couvre l'app dans chaque test.
+        localStorage.setItem('v3PushLater', new Date().toLocaleDateString('en-CA'));
       } catch (e) { /* stockage indisponible : le test le verra a l'ecran */ }
       (window as any).__unhandled = [];
       window.addEventListener('unhandledrejection', (ev: any) => {

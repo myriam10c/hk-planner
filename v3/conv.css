@@ -142,6 +142,8 @@
 #app.cv .vf-row-start{justify-self:start;display:flex}
 #app.cv .vf-row-end{justify-self:end;display:flex;min-width:0}
 #app.cv .vf-row .reply{min-height:64px;padding:0 14px;background:#fff;white-space:nowrap}
+#app.cv .vf-extra{display:flex;justify-content:center;width:100%}
+#app.cv .vf-extra .reply{min-height:56px;padding:0 20px;background:#fff;white-space:nowrap}
 #app.cv .vf-problem{justify-self:start;min-height:56px;padding:0 14px;border-radius:28px;border:2px solid #fff;background:var(--cv-urgent);color:#fff;font-size:18px;font-weight:700;white-space:nowrap}
 #app.cv .vf-title{flex:1;display:flex;flex-direction:column;min-width:0}
 #app.cv .vf-title b{font-size:20px}

@@ -39,9 +39,15 @@ const brief = a => {
   return short + " " + b.idem;
 };
 
+// Étape de la carte d'accès (22/10), juste après I'm here : une photo puis Next, avec un sync à chaque geste.
+function card({ c, sync, photo }) {
+  addPhoto(c, photo()); sync(); reply(c, "next-room"); sync();
+}
+
 function studio(h) {
   const { c, sync, photo } = h;
   reply(c, "here", { now: at(10, 0) }); sync();
+  card(h);
   for (let i = 0; i < 3; i++) { addPhoto(c, photo()); sync(); reply(c, "next-room"); sync(); }
   reply(c, "walls-ok"); sync(); reply(c, "no-damage"); sync(); reply(c, "linen-yes"); sync();
   for (let i = 0; i < 3; i++) { addPhoto(c, photo()); sync(); reply(c, "next-room"); sync(); }
@@ -56,17 +62,19 @@ test("studio sans problème : startJob, 6 photos dans l'ordre, puis finishJob av
   // finishJob part au moment de Send, avant le partage (app.js appelle finishPlan puis shareReport).
   h.finish();
   reply(h.c, "send", { now: at(11, 40) });
-  assert.equal(h.c.gestures, 25);
+  assert.equal(h.c.gestures, 27);
   assert.deepEqual(h.sent.map(brief), [
     "startJob idem0001",
-    "uploadPhoto arrival:Bed idem0002", "uploadPhoto arrival:Bathroom idem0003", "uploadPhoto arrival:Kitchen idem0004",
-    "uploadPhoto end:Bed idem0005", "uploadPhoto end:Bathroom idem0006", "uploadPhoto end:Kitchen idem0007",
-    "finishJob idem0008",
+    "uploadPhoto arrival:Access card idem0002",
+    "uploadPhoto arrival:Bed idem0003", "uploadPhoto arrival:Bathroom idem0004", "uploadPhoto arrival:Kitchen idem0005",
+    "uploadPhoto end:Bed idem0006", "uploadPhoto end:Bathroom idem0007", "uploadPhoto end:Kitchen idem0008",
+    "finishJob idem0009",
   ]);
-  const up = h.sent[1];
+  assert.equal(h.sent[1].file, h.c.arrivalPhotos["Access card"][0].file);
+  const up = h.sent[2];
   assert.equal(up.body.jobId, bloom.id);
   assert.equal(up.file, h.c.arrivalPhotos.Bed[0].file);
-  const fin = h.sent[7].body;
+  const fin = h.sent[8].body;
   assert.equal(fin.jobId, bloom.id);
   assert.deepEqual(fin.checklist, {});
   assert.deepEqual(fin.photos, []);
@@ -82,6 +90,7 @@ test("un problème avec 2 photos et une note : photo, signalement, photo + ratta
   const h = harness(bloom);
   const { c, sync, photo } = h;
   reply(c, "here", { now: at(10, 0) }); sync();
+  card(h);
   startProblem(c); sync();
   chooseKind(c, "Leak", { now: at(10, 1) });
   assert.deepEqual(sync(), [], "Leak : photo obligatoire, le signalement attend la première photo");
@@ -91,19 +100,20 @@ test("un problème avec 2 photos et une note : photo, signalement, photo + ratta
   flowReply(c, "save-text", { text: "under the sink" }); sync();
   assert.deepEqual(h.sent.map(brief), [
     "startJob idem0001",
-    "uploadPhoto problem idem0003",
-    "reportProblem Leak idem0003 idem0002",
+    "uploadPhoto arrival:Access card idem0002",
     "uploadPhoto problem idem0004",
-    "addProblemPhoto idem0002 idem0004",
-    "setProblemNote idem0002 \"under the sink\"",
+    "reportProblem Leak idem0004 idem0003",
+    "uploadPhoto problem idem0005",
+    "addProblemPhoto idem0003 idem0005",
+    "setProblemNote idem0003 \"under the sink\"",
   ]);
-  const rep = h.sent[2].body;
-  assert.deepEqual(rep, { jobId: bloom.id, listingId: bloom.listingId, kind: "Leak", urgency: "soon", where: "Bed", note: null, photoIdem: "idem0003", idem: "idem0002" });
-  assert.equal(h.sent[3].body.jobId, bloom.id, "photo de problème rattachée au ménage");
+  const rep = h.sent[3].body;
+  assert.deepEqual(rep, { jobId: bloom.id, listingId: bloom.listingId, kind: "Leak", urgency: "soon", where: "Bed", note: null, photoIdem: "idem0004", idem: "idem0003" });
+  assert.equal(h.sent[4].body.jobId, bloom.id, "photo de problème rattachée au ménage");
   // Une fois l'id du ticket connu, il part avec ticketIdem.
-  ackSync(c, "idem0002", { status: "success", ticketId: 812 });
+  ackSync(c, "idem0003", { status: "success", ticketId: 812 });
   editProblem(c, 0, { urgency: "urgent" }); sync();
-  assert.deepEqual(h.sent.at(-1).body, { ticketIdem: "idem0002", ticketId: 812, urgency: "urgent", idem: "idem0007" });
+  assert.deepEqual(h.sent.at(-1).body, { ticketIdem: "idem0003", ticketId: 812, urgency: "urgent", idem: "idem0008" });
 });
 
 test("problème sans photo obligatoire : rien ne part ; la note et l'endroit attendent la photo et partent avec le signalement", () => {
@@ -122,7 +132,7 @@ test("problème sans photo obligatoire : rien ne part ; la note et l'endroit att
 });
 
 test("types à photo facultative : signalés tout de suite (Gas smell, I can't get in avant startJob)", () => {
-  assert.deepEqual(PHOTO_OPTIONAL, ["Gas smell", "Can't get in", "AC not working", "Gas not working", "Wi-Fi not working"]);
+  assert.deepEqual(PHOTO_OPTIONAL, ["Gas smell", "Can't get in", "AC not working", "Gas not working", "Wi-Fi not working", "Access card missing"]);
   const h = harness(bloom);
   const { c, sync, photo } = h;
   reply(c, "cant-get-in", { now: at(10, 0) }); sync();
@@ -157,14 +167,15 @@ test("suppression d'une photo de pièce : retrait de la file tant qu'elle n'est 
   const h = harness(bloom);
   const { c, sync, photo } = h;
   reply(c, "here"); sync();
+  card(h);
   addPhoto(c, photo()); addPhoto(c, photo()); sync();
-  ackSync(c, "idem0002", { status: "success", photoId: 77 });
+  ackSync(c, "idem0003", { status: "success", photoId: 77 });
   removeArrivalOrEndPhoto(c, "arrival-photo", "Bed", 0);
   removeArrivalOrEndPhoto(c, "arrival-photo", "Bed", 0);
   const a = sync();
   assert.deepEqual(a.map(x => [x.action, x.body.photoIdem, x.body.photoId, x.unqueue]), [
-    ["v3.deletePhoto", "idem0002", 77, "idem0002"],
-    ["v3.deletePhoto", "idem0003", undefined, "idem0003"],
+    ["v3.deletePhoto", "idem0003", 77, "idem0003"],
+    ["v3.deletePhoto", "idem0004", undefined, "idem0004"],
   ]);
 });
 
@@ -317,4 +328,26 @@ test("type à photo facultative choisi sur une tuile (hors Gas smell) : rien tan
   assert.deepEqual(sync(), []);
   flowReply(c, "no-photo");
   assert.deepEqual(sync().map(brief), ["reportProblem Wi-Fi not working - idem0003"]);
+});
+
+// ---- Carte d'accès (22/10) ----
+
+test("carte d'accès : téléversée en arrival:Access card avant les pièces ; Card is missing signalé tout de suite, sans photo", () => {
+  const h = harness(bloom);
+  const { c, sync, photo } = h;
+  reply(c, "here", { now: at(10, 0) });
+  addPhoto(c, photo()); reply(c, "next-room");
+  addPhoto(c, photo());
+  // Un seul passage : la carte part avant la photo de la pièce, quel que soit l'ordre des magasins.
+  assert.deepEqual(sync().map(brief), ["startJob idem0001", "uploadPhoto arrival:Access card idem0002", "uploadPhoto arrival:Bed idem0003"]);
+  assert.equal(h.sent[1].body.jobId, bloom.id);
+  assert.equal(h.sent[1].file, c.arrivalPhotos["Access card"][0].file);
+  const m = harness(bloom);
+  reply(m.c, "here", { now: at(10, 0) }); m.sync();
+  reply(m.c, "card-missing", { now: at(10, 1) });
+  const a = m.sync();
+  assert.deepEqual(a.map(brief), ["reportProblem Access card missing - idem0002"]);
+  assert.equal(a[0].body.where, "Entrance & building");
+  assert.equal(a[0].body.urgency, "soon");
+  assert.equal("photoIdem" in a[0].body, false);
 });

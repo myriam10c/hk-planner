@@ -29,22 +29,25 @@ const roundTrip = (c, files = {}) => {
 test("au milieu de l'étape 4 : même étape, mêmes photos, même ordre, rien de réémis", () => {
   const { c, photo, sync } = setup(bloom);
   reply(c, "here", { now: at(10, 0) }); sync();
+  addPhoto(c, photo()); sync(); reply(c, "next-room"); // carte d'accès (22/10)
   for (let i = 0; i < 3; i++) { addPhoto(c, photo()); sync(); reply(c, "next-room"); }
   reply(c, "walls-ok"); reply(c, "no-damage"); reply(c, "linen-yes");
   addPhoto(c, photo()); sync(); reply(c, "next-room"); sync();
   assert.equal(currentStep(c).id, "end-photo");
   assert.equal(currentStep(c).room, "Bathroom");
-  const { json, back } = roundTrip(c, { idem0002: { name: "p1" } });
-  assert.deepEqual(photoIdems(json).sort(), ["idem0002", "idem0003", "idem0004", "idem0005"]);
+  const { json, back } = roundTrip(c, { idem0002: { name: "p1" }, idem0003: { name: "p2" } });
+  assert.deepEqual(photoIdems(json).sort(), ["idem0002", "idem0003", "idem0004", "idem0005", "idem0006"]);
   assert.equal(currentStep(back).id, "end-photo");
   assert.equal(currentStep(back).room, "Bathroom");
   assert.equal(currentStep(back).n, 4);
   assert.equal(back.gestures, c.gestures);
   assert.equal(back.startedAt.getTime(), at(10, 0).getTime());
   // Une seule photo, partagée entre la bulle et le magasin de la pièce.
-  const bulle = back.messages.find(m => m.type === "photo");
+  const [carte, bulle] = back.messages.filter(m => m.type === "photo");
+  assert.equal(carte.photo, back.arrivalPhotos["Access card"][0]);
+  assert.equal(carte.photo.url, "blob:new-idem0002");
   assert.equal(bulle.photo, back.arrivalPhotos.Bed[0]);
-  assert.equal(bulle.photo.url, "blob:new-idem0002");
+  assert.equal(bulle.photo.url, "blob:new-idem0003");
   assert.equal(back.arrivalPhotos.Bathroom[0].url, null, "octets absents : photo sans image, clé gardée");
   assert.deepEqual(syncPlan(back, { newIdem: () => "nouvelle" }), []);
 });
