@@ -1,7 +1,7 @@
 // More > Apartment : recherche d'un logement (mgr.apartments) et sa fiche (mgr.apartment).
 // Lecture seule. La fiche reprend menages, linge, tickets, inspections, contacts securite
 // et le score de sante calcules par le proxy (mgr_apartment.ts) ; rien n'est recalcule ici.
-// Les mots de passe de portail ne sortent pas du proxy : lien vers l'onglet Security actuel.
+// Les mots de passe de portail ne sortent pas de mgr.apartment : lien vers More > Security.
 // Les references de tickets ouvrent Maintenance sur la fiche du ticket (#/maintenance?ref=).
 import { get } from '/manager/api.js';
 import { ddmm, esc, I, placeLabel } from '/manager/ui/dom.js';
@@ -188,8 +188,7 @@ function securityHtml(d) {
     }).join('');
   }
   return section('security', 'Security contacts', '', body
-    + '<p class="ap-sub">Portal passwords stay in the current app.</p>'
-    + '<a class="ap-link" href="/?legacy=1">Open Security in the current app</a>');
+    + '<a class="ap-link" href="#/more/security' + (s ? '?q=' + encodeURIComponent(s.building) : '') + '">Portal passwords and all buildings</a>');
 }
 
 async function renderSheet(ctx, id) {

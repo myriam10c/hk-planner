@@ -122,7 +122,7 @@ test('fiche : en-tete, sante et ses parts, menages, tickets, inspections, contac
   await expect(sec.getByRole('link', { name: 'sec@bl.test' })).toHaveAttribute('href', 'mailto:sec@bl.test');
   await expect(sec.getByRole('link', { name: /Call/ })).toHaveAttribute('href', 'tel:+971501112222');
   await expect(sec).toContainText('Gate code at desk');
-  await expect(sec.getByRole('link', { name: 'Open Security in the current app' })).toHaveAttribute('href', '/?legacy=1');
+  await expect(sec.getByRole('link', { name: 'Portal passwords and all buildings' })).toHaveAttribute('href', '#/more/security?q=Binghatti%20Lavender');
 });
 
 test('logement sans donnees : les quatre etats vides', async ({ page }) => {

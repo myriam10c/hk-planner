@@ -302,3 +302,9 @@ a.hr-row:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
   .rem-log td:empty{display:none}
   .rem-msg{min-width:0;flex:1}
 }
+/* More > Security */
+.sc-cred{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2);font-size:16px;min-width:0}
+.sc-lbl{color:var(--ink-2);font-weight:600}
+.sc-val{font-family:ui-monospace,Menlo,monospace;overflow-wrap:anywhere;min-width:0}
+.sc-cred .btn{min-height:44px;font-size:16px}
+.sc-docs{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2)}
