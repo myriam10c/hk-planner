@@ -15,7 +15,7 @@
 // Aucun abonnement push ici, et donc aucun handler `push` : la cleaner recoit
 // deja ses notifications par l'app actuelle (service worker de la racine). Un
 // second abonnement lui en ferait deux pour chaque affectation (spec, phase A).
-const VERSION = 'v-20261026-1229-d84fbbd';
+const VERSION = 'v-20261026-2350-865d91e';
 const CACHE = 'hk-v3-' + VERSION;
 // Tout ce que /v3/ sert : la coquille, les modules, l'ecran Profile, les
 // modules de la conversation (/v3/conv/), les trois feuilles de style, les trois
