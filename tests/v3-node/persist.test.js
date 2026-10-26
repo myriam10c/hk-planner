@@ -31,7 +31,7 @@ test("au milieu de l'étape 4 : même étape, mêmes photos, même ordre, rien d
   reply(c, "here", { now: at(10, 0) }); sync();
   addPhoto(c, photo()); sync(); reply(c, "next-room"); // carte d'accès (22/10)
   for (let i = 0; i < 3; i++) { addPhoto(c, photo()); sync(); reply(c, "next-room"); }
-  reply(c, "walls-ok"); reply(c, "no-damage"); reply(c, "linen-yes");
+  reply(c, "walls-ok"); reply(c, "no-damage"); reply(c, "send-arrival"); reply(c, "linen-yes");
   addPhoto(c, photo()); sync(); reply(c, "next-room"); sync();
   assert.equal(currentStep(c).id, "end-photo");
   assert.equal(currentStep(c).room, "Bathroom");

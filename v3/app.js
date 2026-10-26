@@ -44,7 +44,7 @@ import {
   syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL, writeMode,
 } from '/v3/conv/sync.js';
 import { serializeConversation, deserializeConversation, photoIdems } from '/v3/conv/persist.js';
-import { reportText, reportFiles } from '/v3/conv/report.js';
+import { reportText, reportFiles, arrivalText, arrivalFiles } from '/v3/conv/report.js';
 import {
   renderList, renderConversation, renderViewfinder, renderToast, renderFlow, renderPhotoView, renderProblemPage,
   renderTicketFix, escapeHtml,
@@ -839,6 +839,26 @@ async function flowStep(c, id) {
   render();
 }
 
+// Partage natif vers le groupe WhatsApp (rapport final ou envoi d'arrivee). Rend true si parti.
+// Echec du partage avec photos : le prochain appui partage le texte seul (c.shareTextOnly).
+async function shareToGroup(c, text, files) {
+  busy = true;
+  const textOnly = c.shareTextOnly === true;
+  let r;
+  try { r = await shareReport({ text, files, textOnly }); } finally { busy = false; }
+  if (r.mode === 'none') { note('This browser cannot share. Open the page in Chrome (Android) or Safari (iPhone).'); render(); return false; }
+  if (!r.ok) {
+    if (r.error && r.mode === 'files') { c.shareTextOnly = true; note('Photos could not be shared. Tap again to share the text only.'); }
+    else if (r.error) note('Share failed: ' + r.error);
+    render(); return false;
+  }
+  c.shareTextOnly = false;
+  if (textOnly) note('Text shared without photos.');
+  else if (r.mode === 'text') note('Text shared without photos (this browser cannot share files).');
+  else note('Shared. If the text is missing in WhatsApp, long-press and Paste: it is copied.');
+  return true;
+}
+
 async function convClick(b) {
   const d = b.dataset;
   const c = conv();
@@ -931,6 +951,19 @@ async function convClick(b) {
   if (d.act === 'delete') { removeProblem(c, Number(d.index)); S.editIndex = null; S.confirmDelete = false; S.toastIndex = null; render(); return; }
   if (d.where && S.editIndex !== null) { editProblem(c, S.editIndex, { where: d.where }); render(); return; }
   if (d.urgency && S.editIndex !== null) { editProblem(c, S.editIndex, { urgency: d.urgency }); render(); return; }
+  if (d.reply === 'send-arrival') {
+    if (busy || !currentStep(c).replies.some(r => r.id === 'send-arrival')) return;
+    // Premier envoi (etat a l'arrivee) : partage au groupe, puis le menage continue. Le texte
+    // envoye est fige dans sa bulle (les problemes signales ensuite vont au rapport final).
+    const frozen = arrivalText(c);
+    if (mode() === 'practice') note('Practice: nothing is shared. The cleaner shares this arrival check to WhatsApp.');
+    else if (!(await shareToGroup(c, frozen, arrivalFiles(c)))) return;
+    const m = c.messages.slice().reverse().find(x => x.type === 'arrival');
+    if (m) m.text = frozen;
+    reply(c, 'send-arrival');
+    await after(c);
+    return;
+  }
   if (d.reply) {
     if (busy) return;
     // Fin du menage : en file AVANT l'ouverture du partage (rien n'est attendu ici).
@@ -948,20 +981,7 @@ async function convClick(b) {
         await after(c);
         return;
       }
-      busy = true;
-      const textOnly = c.shareTextOnly === true; // le partage avec fichiers a echoue au dernier appui
-      let r;
-      try { r = await shareReport({ text: reportText(c), files: reportFiles(c), textOnly }); } finally { busy = false; }
-      if (r.mode === 'none') { note('This browser cannot share. Open the page in Chrome (Android) or Safari (iPhone).'); render(); return; }
-      if (!r.ok) {
-        if (r.error && r.mode === 'files') { c.shareTextOnly = true; note('Photos could not be shared. Tap again to share the text only.'); }
-        else if (r.error) note('Share failed: ' + r.error);
-        render(); return;
-      }
-      c.shareTextOnly = false;
-      if (textOnly) note('Text shared without photos.');
-      else if (r.mode === 'text') note('Text shared without photos (this browser cannot share files).');
-      else note('Shared. If the text is missing in WhatsApp, long-press and Paste: it is copied.');
+      if (!(await shareToGroup(c, reportText(c), reportFiles(c)))) return;
       if (d.reply === 'share-again') { render(); return; } // ni geste ni bulle
     }
     const prev = c.problems.length;

@@ -22,7 +22,10 @@ function buildSteps(apt, helper) {
   const steps = [{ id: "arrive", n: 1 }, { id: "arrival-photo", n: 1, room: CARD_ROOM }];
   all.forEach(room => steps.push({ id: "arrival-photo", n: 1, room }));
   if (apt.managerCheck) steps.push({ id: "check", n: 2 });
-  steps.push({ id: "walls", n: 2 }, { id: "damage", n: 2 }, { id: "linen", n: 3 });
+  steps.push({ id: "walls", n: 2 }, { id: "damage", n: 2 });
+  // Premier envoi au groupe (demande Hillal du 26/10) : l'etat trouve en arrivant (carte, pieces,
+  // degats) part tout de suite, avant le menage, pour reagir vite. Le rapport final suit a l'etape 5.
+  steps.push({ id: "arrival-send", n: 2 }, { id: "linen", n: 3 });
   all.forEach(room => steps.push({ id: "end-photo", n: 4, room }));
   steps.push({ id: "leave", n: 5 }, { id: "low", n: 5 }, { id: "report", n: 5 });
   return steps;
@@ -49,6 +52,7 @@ function botMessage(conv) {
     case "check": return { from: "app", type: "text", text: a.managerCheck.text };
     case "walls": return { from: "app", type: "text", text: "Walls: any marks, holes or damage?" };
     case "damage": return { from: "app", type: "text", text: "Anything damaged or wrong?" };
+    case "arrival-send": return { from: "app", type: "arrival" };
     case "linen": return { from: "app", type: "text", text: "Dirty linen: " + linenSummary(conv.linen) + ". As usual?" };
     case "end-photo":
       // Pièce sans photo d'annonce : pas de « like this » qui pointerait vers une image absente.
@@ -224,6 +228,8 @@ export function currentStep(conv) {
       return { ...st, ...base, camera: false, replies: SUPPLIES.map(x => R("low:" + x, (conv.low.includes(x) ? "✓ " : "") + x)).concat([R("low-done", conv.low.length ? "That's it" : "Nothing")]) };
     case "helper": return { ...st, ...base, camera: false, replies: [R("add-to-lead", "Add to " + a.lead.name + "'s report")] };
     case "linen-send": return { ...st, ...base, camera: false, replies: [R("linen-send", "Send linen count")] };
+    case "arrival-send":
+      return { ...st, title: "Send arrival check", camera: false, replies: [R("send-arrival", "Send arrival check")] };
     case "report": return { ...st, ...base, camera: false, replies: conv.sent ? [R("share-again", "Share again")] : [R("send", "Send to Housekeeping")] };
     default: return { ...st, ...base, camera: false, replies: [] };
   }
@@ -297,6 +303,11 @@ export function reply(conv, id, { now = new Date() } = {}) {
       openFlow(conv, { stage: "kind", from: "damage" });
       break;
     case "damage-done": say(conv, "Damage reported"); advance(conv); break;
+    case "send-arrival":
+      // Ce qui est parti : le rapport final ne joint plus ces photos (p.sentPhotos), seulement les nouvelles.
+      conv.arrivalSentAt = now;
+      for (const p of conv.problems) p.sentPhotos = p.photos.length;
+      say(conv, "Arrival check sent to the group"); advance(conv); break;
     case "linen-yes": say(conv, "Linen as usual"); advance(conv); break;
     case "linen-change": conv.linenEditing = true; break;
     case "linen-ok": conv.linenEditing = false; say(conv, "Linen: " + linenSummary(conv.linen)); advance(conv); break;

@@ -20,12 +20,15 @@ const roomsOf = (conv, store) => conv.apt.rooms.flatMap(r => store[r] || []);
 
 // Sélection des fichiers (photos seulement) : priorité carte d'accès (preuve), problèmes, fin, puis arrivée ;
 // rendus dans l'ordre naturel (carte, arrivée, fin, problèmes).
-export function pickFiles(conv, max = MAX_FILES) {
+// Après l'envoi de l'arrivée (arrivalSentAt), le rapport final ne rejoint ni la carte, ni l'arrivée, ni les
+// photos de problèmes déjà parties : seulement la fin et ce qui est nouveau. `arrival` : l'envoi d'arrivée.
+export function pickFiles(conv, max = MAX_FILES, { arrival = false } = {}) {
+  const skipSent = !arrival && !!conv.arrivalSentAt;
   const groups = {
-    card: (conv.arrivalPhotos[CARD_ROOM] || []).filter(hasFile),
-    arrival: roomsOf(conv, conv.arrivalPhotos).filter(hasFile),
-    end: roomsOf(conv, conv.endPhotos).filter(hasFile),
-    problems: conv.problems.flatMap(p => p.photos.filter(hasFile)),
+    card: skipSent ? [] : (conv.arrivalPhotos[CARD_ROOM] || []).filter(hasFile),
+    arrival: skipSent ? [] : roomsOf(conv, conv.arrivalPhotos).filter(hasFile),
+    end: arrival ? [] : roomsOf(conv, conv.endPhotos).filter(hasFile),
+    problems: conv.problems.flatMap(p => p.photos.slice(skipSent ? p.sentPhotos || 0 : 0).filter(hasFile)),
   };
   let left = max;
   const kept = {};
@@ -90,7 +93,7 @@ export function reportText(conv, { now = new Date() } = {}) {
     "👤 " + conv.me.name + " · " + (conv.startedAt ? hhmm(conv.startedAt) : "--:--") + " → " + hhmm(end) + " (" + formatMinutes(elapsedMinutes(conv, end)) + ", usual " + formatMinutes(a.usualMinutes) + ")",
     "",
     "*Access card:* " + cardLine(conv),
-    "*1 Arrival:* " + roomLine(conv, conv.arrivalPhotos),
+    "*1 Arrival:* " + roomLine(conv, conv.arrivalPhotos) + (conv.arrivalSentAt ? " (sent " + hhmm(conv.arrivalSentAt) + ")" : ""),
     "*2 Damage:* " + (conv.damage === "none" ? "none" : conv.damage === "some" ? "see problems" : "not answered"),
   ];
   if (conv.steps.some(s => s.id === "walls")) lines.push("*Walls:* " + (conv.walls === "ok" ? "OK" : conv.walls === "some" ? "see problems" : "not answered"));
@@ -109,4 +112,35 @@ export function reportText(conv, { now = new Date() } = {}) {
 
 export function reportFiles(conv) {
   return pickFiles(conv).files;
+}
+
+// Premier envoi, avant le ménage : l'état trouvé en arrivant (carte, pièces, murs, dégâts, problèmes).
+export function arrivalText(conv, { now = new Date() } = {}) {
+  const a = conv.apt;
+  const order = a.rooms.concat(WHERE_EXTRA);
+  const groups = order.filter(w => conv.problems.some(p => p.where === w));
+  const probLines = groups.flatMap(w => ["_" + w + "_"].concat(conv.problems.filter(p => p.where === w).map(p => problemLine(p, deliveryOf(conv, p)))));
+  const count = store => Object.values(store).reduce((n, list) => n + list.length, 0);
+  const probPhotos = conv.problems.reduce((n, p) => n + p.photos.length, 0);
+  const lines = [
+    "🔎 *ARRIVAL CHECK · " + aptLabel(a) + "*" + (a.area ? ", " + a.area : ""),
+    a.type + " · Next guest: " + a.guest.next,
+    "👤 " + conv.me.name + " · arrived " + (conv.startedAt ? hhmm(conv.startedAt) : "--:--") + " · sent " + hhmm(conv.arrivalSentAt || now),
+    "",
+    "*Access card:* " + cardLine(conv),
+    "*Rooms as found:* " + roomLine(conv, conv.arrivalPhotos),
+  ];
+  if (conv.steps.some(s => s.id === "walls")) lines.push("*Walls:* " + (conv.walls === "ok" ? "OK" : conv.walls === "some" ? "see problems" : "not answered"));
+  if (a.managerCheck) lines.push("*" + a.managerCheck.reportLabel + ":* " + (conv.checkAnswer === null ? "not answered" : conv.problems.some(p => p.kind === a.managerCheck.kind) ? "Yes" : "No"));
+  lines.push("*Damage:* " + (conv.damage === "none" ? "none" : conv.damage === "some" ? "see problems" : "not answered"));
+  if (conv.problems.length) lines.push("*Problems (" + conv.problems.length + "):*", ...probLines);
+  else lines.push("*Problems:* none");
+  const pick = pickFiles(conv, MAX_FILES, { arrival: true });
+  lines.push("📷 " + count(conv.arrivalPhotos) + " arrival · " + probPhotos + " of problems" + (pick.cutPhotos ? " (" + pick.photos + " attached)" : ""));
+  lines.push("Cleaning starts now. Final report after cleaning.");
+  return lines.join("\n");
+}
+
+export function arrivalFiles(conv) {
+  return pickFiles(conv, MAX_FILES, { arrival: true }).files;
 }

@@ -20,6 +20,7 @@ test('studio : startJob, photos de pieces dans l ordre, finishJob avec linge et 
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
+  await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
   await expect(page.locator('[data-reply="leave:door"]')).toHaveText(/Door locked, keys & card left inside/);
@@ -48,8 +49,12 @@ test('studio : startJob, photos de pieces dans l ordre, finishJob avec linge et 
   await expect(page.locator('.msg.me .ticks').filter({ hasText: /^✓$/ })).toHaveCount(0);
   expect(await page.locator('.msg.me .ticks').count()).toBeGreaterThan(10);
   const partage = await page.evaluate(() => (window as any).__shared);
-  expect(partage.length).toBe(1);
-  expect(partage[0].files).toBe(7);
+  // Deux envois au groupe : l'arrivee (carte + 3 pieces) avant le menage, puis le rapport final (3 pieces propres).
+  expect(partage.length).toBe(2);
+  expect(partage[0].text).toContain('ARRIVAL CHECK · 1011C Bloom Towers');
+  expect(partage[0].files).toBe(4);
+  expect(partage[1].text).toContain('READY · 1011C Bloom Towers');
+  expect(partage[1].files).toBe(3);
   expect(fin.report.text).toContain('*Access card:* 📷 1');
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.locator('.row').first().locator('.row-sub')).toHaveText('Report sent ✓✓');

@@ -3,7 +3,7 @@
 import { LINEN_USUAL, GROUP_NAME, CARD_ROOM, aptLabel, dayLine } from "./rules.js";
 import { KINDS, URGENCY } from "./problems.js";
 import { currentStep, currentFlow, elapsedMinutes, isHelper, ticketCard } from "./conversation.js";
-import { reportText, formatMinutes } from "./report.js";
+import { reportText, arrivalText, formatMinutes } from "./report.js";
 import { finishAcked } from "./sync.js";
 import { dayWord } from "./day.js";
 
@@ -109,6 +109,9 @@ function bubble(conv, m) {
   if (m.type === "report") {
     return '<div class="msg app report"><div class="report-h">Your report for ' + escapeHtml(GROUP_NAME) + "</div>" + waFormat(reportText(conv)) + "</div>";
   }
+  if (m.type === "arrival") {
+    return '<div class="msg app report arrival"><div class="report-h">Arrival check for ' + escapeHtml(GROUP_NAME) + "</div>" + waFormat(m.text || arrivalText(conv)) + "</div>";
+  }
   if (m.type === "photo") return '<div class="msg me photo">' + imgTag(m.photo, "shot") + ticks + "</div>";
   if (m.type === "problem") {
     const p = conv.problems[m.problemIndex];
@@ -172,7 +175,8 @@ export function renderConversation(conv, { now = new Date(), before = "" } = {})
   // Étape photo, viseur fermé (croix du viseur) : un bouton pour le rouvrir.
   const camBtn = step.camera ? '<button class="reply" data-act="camera">📷 Camera</button>' : "";
   const endHelper = step.id === "done" && isHelper(conv) ? '<button class="reply" data-act="back">Back to my apartments</button>' : "";
-  const help = step.id === "report" ? '<p class="help">Choose WhatsApp, then ' + escapeHtml(GROUP_NAME) + "</p>" : "";
+  const help = step.id === "report" ? '<p class="help">Choose WhatsApp, then ' + escapeHtml(GROUP_NAME) + "</p>"
+    : step.id === "arrival-send" ? '<p class="help">Send it now, before you clean. Choose WhatsApp, then ' + escapeHtml(GROUP_NAME) + "</p>" : "";
   const bar = '<footer class="bar">' + (step.editor === "linen" ? linenEditor(conv) : "") +
     (step.editor === "leave" ? leaveList(conv, step) : '<div class="replies' + (step.id === "low" ? " grid" : "") + '">' + camBtn + replyButtons(step) + endHelper + "</div>") + help +
     // ⚠ Problem (rouge) remplace l'ancien bouton caméra. Plus de micro : un vocal ne part pas avec le message WhatsApp (05/10).

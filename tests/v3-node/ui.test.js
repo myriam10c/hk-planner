@@ -12,7 +12,7 @@ const now = new Date(2026, 9, 2, 10, 0);
 const rooms = (c, n, p = "a") => { for (let i = 0; i < n; i++) { addPhoto(c, p, { now }); reply(c, "next-room", { now }); } };
 // I'm here, puis l'étape de la carte d'accès (22/10) : photo et Next.
 const here = c => { reply(c, "here", { now }); addPhoto(c, "card", { now }); reply(c, "next-room", { now }); };
-const toLeave = c => { here(c); rooms(c, 3); reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "linen-yes", { now }); rooms(c, 3, "e"); };
+const toLeave = c => { here(c); rooms(c, 3); reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "send-arrival", { now }); reply(c, "linen-yes", { now }); rooms(c, 3, "e"); };
 
 test("liste : trois appartements de la journée réelle, Profile en haut", () => {
   const html = renderList({ me: ME, apartments: APARTMENTS, convs: {}, activeId: null, now });
@@ -88,7 +88,7 @@ test("miniature agrandie : écran plein, Delete photo et Back", () => {
 test("viseur étape 4 : « when clean »", () => {
   const c = createConversation(bloom, { me: ME, now });
   here(c); rooms(c, 3);
-  reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "linen-yes", { now });
+  reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "send-arrival", { now }); reply(c, "linen-yes", { now });
   assert.match(renderViewfinder(c, { live: true }), /Step 4 · Bed · when clean/);
 });
 
@@ -131,7 +131,7 @@ test("étape 5 pré-réglée : AC signalée pendant le ménage, la ligne s'affic
   const c = createConversation(bloom, { me: ME, now });
   here(c);
   addProblem(c, "AC", null, { now });
-  rooms(c, 3); reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "linen-yes", { now }); rooms(c, 3, "e");
+  rooms(c, 3); reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "send-arrival", { now }); reply(c, "linen-yes", { now }); rooms(c, 3, "e");
   const html = renderConversation(c, { now });
   assert.match(html, /<button class="check" data-reply="leave:ac"><span class="box"><\/span>AC on, Auto mode<\/button><button class="ko on" data-reply="leave:ac-ko">✗ AC not working<\/button>/);
 });
@@ -198,7 +198,7 @@ test("liste : ni pastille du nombre d'étapes internes, « Step N of 5 » quand 
 test("linge : pas de rangée caméra/micro pendant l'édition (inchangé)", () => {
   const c = createConversation(bloom, { me: ME, now });
   here(c); rooms(c, 3);
-  reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "linen-change", { now });
+  reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "send-arrival", { now }); reply(c, "linen-change", { now });
   assert.doesNotMatch(renderConversation(c, { now }), /data-act="problem"|data-act="camera"/);
 });
 

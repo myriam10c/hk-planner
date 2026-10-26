@@ -123,7 +123,7 @@ test('ouvrir un appartement cree la conversation locale ; Back et le retour syst
   expect(page.url()).toContain('/v3/');
 });
 
-test('parcours du studio jusqu au rapport en 27 gestes, ✓✓ une fois la file partie', async ({ page }) => {
+test('parcours du studio jusqu au rapport en 28 gestes, ✓✓ une fois la file partie', async ({ page }) => {
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
@@ -133,11 +133,12 @@ test('parcours du studio jusqu au rapport en 27 gestes, ✓✓ une fois la file 
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
+  await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
   for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
   await page.locator('[data-reply="low-done"]').click();
-  const rapport = page.locator('.msg.report');
+  const rapport = page.locator('.msg.report:not(.arrival)');
   await expect(rapport).toContainText('READY · 1011C Bloom Towers');
   await expect(rapport).toContainText('Studio · Next guest: none booked yet');
   await expect(rapport).toContainText('👤 Faiza');
@@ -145,14 +146,17 @@ test('parcours du studio jusqu au rapport en 27 gestes, ✓✓ une fois la file 
   await page.locator('[data-reply="send"]').click();
   await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
   const partage = await page.evaluate(() => (window as any).__shared);
-  expect(partage.length).toBe(1);
-  expect(partage[0].text).toContain('*READY · 1011C Bloom Towers*');
-  expect(partage[0].files).toBe(7);
+  // Arrivee (carte + 3 pieces) partagee avant le menage, puis le rapport final (3 pieces propres).
+  expect(partage.length).toBe(2);
+  expect(partage[0].text).toContain('*ARRIVAL CHECK · 1011C Bloom Towers*');
+  expect(partage[0].files).toBe(4);
+  expect(partage[1].text).toContain('*READY · 1011C Bloom Towers*');
+  expect(partage[1].files).toBe(3);
   const etat = await page.evaluate(() => {
     const c = (window as any).__hk.convs['job_0000000000000blm1011'];
     return { gestes: c.gestures, envoye: c.sent };
   });
-  expect(etat).toEqual({ gestes: 27, envoye: true });
+  expect(etat).toEqual({ gestes: 28, envoye: true });
   await fileVide(page);
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.locator('.row').nth(2).locator('.row-sub')).toHaveText('Report sent ✓✓');
@@ -236,6 +240,7 @@ for (const largeur of [360, 390, 430]) {
     await page.locator('[data-reply="check-ok"]').click();
     await page.locator('[data-reply="walls-ok"]').click();
     await page.locator('[data-reply="no-damage"]').click();
+    await page.locator('[data-reply="send-arrival"]').click();
     await page.locator('[data-reply="linen-change"]').click();
     await shot('06-linge');
     await page.locator('[data-reply="linen-ok"]').click();
@@ -243,7 +248,7 @@ for (const largeur of [360, 390, 430]) {
     await shot('07-sortie');
     for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
     await page.locator('[data-reply="low-done"]').click();
-    await expect(page.locator('.msg.report')).toContainText('Leak: under the sink');
+    await expect(page.locator('.msg.report:not(.arrival)')).toContainText('Leak: under the sink');
     await shot('08-rapport');
   });
 }

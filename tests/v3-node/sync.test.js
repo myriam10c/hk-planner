@@ -49,7 +49,7 @@ function studio(h) {
   reply(c, "here", { now: at(10, 0) }); sync();
   card(h);
   for (let i = 0; i < 3; i++) { addPhoto(c, photo()); sync(); reply(c, "next-room"); sync(); }
-  reply(c, "walls-ok"); sync(); reply(c, "no-damage"); sync(); reply(c, "linen-yes"); sync();
+  reply(c, "walls-ok"); sync(); reply(c, "no-damage"); sync(); reply(c, "send-arrival"); sync(); reply(c, "linen-yes"); sync();
   for (let i = 0; i < 3; i++) { addPhoto(c, photo()); sync(); reply(c, "next-room"); sync(); }
   for (const k of ["gas", "ac", "wifi", "lights", "windows", "trash", "door"]) { reply(c, "leave:" + k); sync(); }
   reply(c, "low-done"); sync();
@@ -62,7 +62,7 @@ test("studio sans problème : startJob, 6 photos dans l'ordre, puis finishJob av
   // finishJob part au moment de Send, avant le partage (app.js appelle finishPlan puis shareReport).
   h.finish();
   reply(h.c, "send", { now: at(11, 40) });
-  assert.equal(h.c.gestures, 27);
+  assert.equal(h.c.gestures, 28);
   assert.deepEqual(h.sent.map(brief), [
     "startJob idem0001",
     "uploadPhoto arrival:Access card idem0002",
