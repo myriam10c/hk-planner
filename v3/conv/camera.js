@@ -142,3 +142,32 @@ export function pickPhoto(input, { max = 1600, quality = 0.82, doc = document, s
     input.click();
   });
 }
+
+// Copie de chaque photo dans le téléphone (demande Hillal du 26/10) : rien ne se perd, et la
+// cleaner peut la renvoyer par WhatsApp autrement. Une page web ne peut pas écrire dans la
+// galerie : sur Android, un téléchargement range le fichier dans Download, que la Galerie et
+// Google Photos affichent. Sur iPhone, un téléchargement ouvre une fenêtre et va dans Fichiers :
+// on n'y fait rien.
+export function canSaveCopy(nav = globalThis.navigator) {
+  return !!nav && /Android/i.test(String(nav.userAgent || ""));
+}
+
+// « HK_1011C-Bloom-Towers_Bed_2026-10-26_10-12-05.jpg » : appartement et pièce lisibles dans la galerie.
+export function copyName(parts, d = new Date()) {
+  const clean = x => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const n = x => String(x).padStart(2, "0");
+  const when = d.getFullYear() + "-" + n(d.getMonth() + 1) + "-" + n(d.getDate()) + "_" + n(d.getHours()) + "-" + n(d.getMinutes()) + "-" + n(d.getSeconds());
+  return ["HK"].concat(parts.map(clean).filter(Boolean), [when]).join("_") + ".jpg";
+}
+
+export function saveCopy(file, name, doc = globalThis.document) {
+  if (!file || !doc) return false;
+  try {
+    const url = URL.createObjectURL(file);
+    const a = doc.createElement("a");
+    a.href = url; a.download = name; a.rel = "noopener"; a.style.display = "none";
+    doc.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    return true;
+  } catch (e) { return false; }
+}

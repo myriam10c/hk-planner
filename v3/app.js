@@ -49,7 +49,7 @@ import {
   renderList, renderConversation, renderViewfinder, renderToast, renderFlow, renderPhotoView, renderProblemPage,
   renderTicketFix, escapeHtml,
 } from '/v3/conv/ui.js';
-import { startCameraIfCurrent, stopCamera, streamLive, captureFrame, pickPhoto } from '/v3/conv/camera.js';
+import { startCameraIfCurrent, stopCamera, streamLive, captureFrame, pickPhoto, canSaveCopy, copyName, saveCopy } from '/v3/conv/camera.js';
 import { shareReport } from '/v3/conv/share.js';
 
 export const state = {
@@ -377,12 +377,25 @@ function applyFlash() {
 
 // Toute photo porte l'horodatage incruste (appartement, date, heure, prenom) : la preuve survit a WhatsApp.
 async function takePhoto(c) {
+  let p;
   if (S.camera.live) {
     flash();
-    return captureFrame(vfVideo, { stamp: stampText(c.apt, me(), new Date()) });
+    p = await captureFrame(vfVideo, { stamp: stampText(c.apt, me(), new Date()) });
+  } else {
+    // Repli : l'heure est celle du retour de la photo, pas celle de l'ouverture du selecteur.
+    p = await pickPhoto(fallbackInput, { stamp: () => stampText(c.apt, me(), new Date()) });
   }
-  // Repli : l'heure est celle du retour de la photo, pas celle de l'ouverture du selecteur.
-  return pickPhoto(fallbackInput, { stamp: () => stampText(c.apt, me(), new Date()) });
+  keepCopy(c, p);
+  return p;
+}
+
+// Copie dans le telephone (Android : dossier Download, visible dans la Galerie). Seulement sur
+// la vraie journee de la cleaner : ni Practice, ni View as.
+function keepCopy(c, p) {
+  if (!p || !p.file || mode() !== 'real' || !canSaveCopy()) return;
+  const st = c.steps[c.i];
+  const where = c.fix ? 'Fixed' : c.flow ? 'Problem' : st && st.room ? (st.id === 'end-photo' ? st.room + ' clean' : st.room) : '';
+  saveCopy(p.file, copyName([[c.apt.num, c.apt.building].filter(Boolean).join(' '), where]));
 }
 
 // Attend que le navigateur ait peint le dernier rendu (nouvelle piece affichee) avant de relacher `busy`.
