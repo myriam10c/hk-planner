@@ -3,7 +3,8 @@ import { LINEN_USUAL, LEAVE_CHECKS, CARD_ROOM, CARD_MISSING, aptLabel } from "./
 import { URGENCY } from "./problems.js";
 import { elapsedMinutes, leaveDoneLabel } from "./conversation.js";
 
-const hhmm = d => String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+// Accepte une Date ou son texte ISO (conversation relue d'une sauvegarde d'avant arrivalSentAt dans persist.js).
+const hhmm = d => { d = d instanceof Date ? d : new Date(d); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
 
 // Espaces insécables : « 1 h 40 » ne se coupe jamais en fin de ligne (rendu HTML comme texte WhatsApp).
 const NB = "\u00a0";

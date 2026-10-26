@@ -78,3 +78,22 @@ test("version inconnue ou donnée illisible : pas de reprise", () => {
   assert.equal(deserializeConversation(null, () => null), null);
   assert.equal(deserializeConversation({ v: 99 }, () => null), null);
 });
+
+test("envoi d'arrivée relu après rechargement : l'heure reste une Date, le rapport s'affiche", async () => {
+  const { createConversation: cc, reply: rp, addPhoto: ap } = await import("../../v3/conv/conversation.js");
+  const { reportText: rt } = await import("../../v3/conv/report.js");
+  const { serializeConversation: ser, deserializeConversation: des } = await import("../../v3/conv/persist.js");
+  const { APARTMENTS: A, ME: M } = await import("./fixtures.js");
+  const bloom = A[2];
+  const t = new Date(2026, 9, 26, 10, 0);
+  const c = cc(bloom, { me: M, now: t });
+  rp(c, "here", { now: t });
+  for (let i = 0; i < 4; i++) { ap(c, { url: "u" + i, file: null, idem: "p" + i }); rp(c, "next-room", { now: t }); }
+  rp(c, "walls-ok", { now: t }); rp(c, "no-damage", { now: t }); rp(c, "send-arrival", { now: new Date(2026, 9, 26, 10, 7) });
+  const back = des(JSON.parse(JSON.stringify(ser(c))), k => ({ url: "x", file: null, idem: k }));
+  assert.ok(back.arrivalSentAt instanceof Date);
+  assert.match(rt(back, { now: t }), /\(sent 10:07\)/);
+  // Ancienne sauvegarde : l'heure en texte ne casse plus le rapport.
+  back.arrivalSentAt = new Date(2026, 9, 26, 10, 7).toISOString();
+  assert.match(rt(back, { now: t }), /\(sent 10:07\)/);
+});
