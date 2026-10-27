@@ -229,8 +229,10 @@ export function currentStep(conv) {
     case "helper": return { ...st, ...base, camera: false, replies: [R("add-to-lead", "Add to " + a.lead.name + "'s report")] };
     case "linen-send": return { ...st, ...base, camera: false, replies: [R("linen-send", "Send linen count")] };
     case "arrival-send":
-      return { ...st, title: "Send arrival check", camera: false, replies: [R("send-arrival", "Send arrival check")] };
-    case "report": return { ...st, ...base, camera: false, replies: conv.sent ? [R("share-again", "Share again")] : [R("send", "Send to Housekeeping")] };
+      // Deux partages (27/10) : WhatsApp recopie le texte sous chaque photo quand ils partent ensemble.
+      // Les photos d'abord, sans texte, puis le texte seul : un seul message de texte dans le groupe.
+      return { ...st, title: "Send arrival check", camera: false, replies: conv.arrivalPhotosShared ? [R("send-arrival", "Send text (2/2)")] : [R("send-arrival-photos", "Send photos (1/2)")] };
+    case "report": return { ...st, ...base, camera: false, replies: conv.sent ? [R("share-again", "Share again")] : conv.reportPhotosShared ? [R("send", "Send report text (2/2)")] : [R("send-photos", "Send photos (1/2)")] };
     default: return { ...st, ...base, camera: false, replies: [] };
   }
 }
@@ -303,6 +305,11 @@ export function reply(conv, id, { now = new Date() } = {}) {
       openFlow(conv, { stage: "kind", from: "damage" });
       break;
     case "damage-done": say(conv, "Damage reported"); advance(conv); break;
+    case "send-arrival-photos": case "send-photos":
+      if (id === "send-arrival-photos") conv.arrivalPhotosShared = true; else conv.reportPhotosShared = true;
+      say(conv, "Photos sent");
+      conv.messages.push({ from: "app", type: "text", text: "Now send the text to the same group." });
+      break;
     case "send-arrival":
       // Ce qui est parti : le rapport final ne joint plus ces photos (p.sentPhotos), seulement les nouvelles.
       conv.arrivalSentAt = now;

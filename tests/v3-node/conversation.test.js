@@ -18,7 +18,7 @@ function studioToReport(c) {
   here(c);
   for (const room of ["Bed", "Bathroom", "Kitchen"]) { assert.equal(currentStep(c).room, room); addPhoto(c, "a-" + room, { now: at(10, 2) }); reply(c, "next-room", { now: at(10, 2) }); }
   assert.equal(currentStep(c).id, "walls");
-  reply(c, "walls-ok", { now: at(10, 5) }); reply(c, "no-damage", { now: at(10, 5) }); reply(c, "send-arrival", { now: at(10, 5) });
+  reply(c, "walls-ok", { now: at(10, 5) }); reply(c, "no-damage", { now: at(10, 5) }); reply(c, "send-arrival-photos", { now: at(10, 5) }); reply(c, "send-arrival", { now: at(10, 5) });
   reply(c, "linen-yes", { now: at(10, 6) });
   for (const room of ["Bed", "Bathroom", "Kitchen"]) { assert.equal(currentStep(c).room, room); addPhoto(c, "e-" + room, { now: at(11, 20) }); reply(c, "next-room", { now: at(11, 20) }); }
   assert.equal(currentStep(c).id, "leave");
@@ -33,13 +33,13 @@ test("titres et numéros d'étape", () => {
   assert.equal(currentStep(c).title, "Arrival");
 });
 
-test("studio sans problème : exactement 28 gestes jusqu'à l'envoi", () => {
+test("studio sans problème : exactement 30 gestes jusqu'à l'envoi", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   studioToReport(c);
   assert.equal(currentStep(c).id, "report");
   assert.equal(currentStep(c).n, 5);
-  reply(c, "send", { now: at(11, 40) });
-  assert.equal(c.gestures, 28, "here 1 + carte (photo + Next) + 3 × (photo + Next room) + Walls OK + No, all good + Send arrival check + linge + 3 × (photo + Next room) + 7 lignes + Nothing + Send");
+  reply(c, "send-photos", { now: at(11, 40) }); reply(c, "send", { now: at(11, 40) });
+  assert.equal(c.gestures, 30, "here 1 + carte (photo + Next) + 3 × (photo + Next room) + Walls OK + No, all good + photos et texte d'arrivée + linge + 3 × (photo + Next room) + 7 lignes + Nothing + photos et texte du rapport");
   assert.equal(c.sent, true);
   assert.equal(elapsedMinutes(c, at(12, 0)), 100);
   assert.deepEqual(Object.keys(c.arrivalPhotos), ["Access card", "Bed", "Bathroom", "Kitchen"]);
@@ -87,7 +87,7 @@ test("Next room désactivé tant que la pièce n'a pas de photo (étapes 1 et 4)
   reply(c, "next-room", { now: at(10, 1) });
   assert.equal(currentStep(c).replies[0].enabled, false, "pièce suivante : de nouveau désactivé");
   rooms(c, 2, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   assert.equal(currentStep(c).id, "end-photo");
   assert.equal(currentStep(c).replies[0].enabled, false);
   addPhoto(c, "e1", { now: at(11, 0) }); addPhoto(c, "e2", { now: at(11, 0) });
@@ -100,7 +100,7 @@ test("une réponse étrangère à l'étape ne compte rien", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   reply(c, "here", { now: at(10, 0) });
   reply(c, "here", { now: at(10, 0) });
-  reply(c, "no-damage", { now: at(10, 0) }); reply(c, "send-arrival", { now: at(10, 0) });
+  reply(c, "no-damage", { now: at(10, 0) }); reply(c, "send-arrival-photos", { now: at(10, 0) }); reply(c, "send-arrival", { now: at(10, 0) });
   assert.equal(c.gestures, 1);
 });
 
@@ -136,7 +136,7 @@ test("étape 2 : Yes, report it ouvre l'écran des tuiles ; après le problème,
   flowReply(c, "cancel");
   assert.equal(c.flow, null);
   assert.deepEqual(currentStep(c).replies.map(r => r.id), ["another-problem", "damage-done"], "annuler le second : la question reste");
-  reply(c, "damage-done", { now: at(10, 4) }); reply(c, "send-arrival", { now: at(10, 4) });
+  reply(c, "damage-done", { now: at(10, 4) }); reply(c, "send-arrival-photos", { now: at(10, 4) }); reply(c, "send-arrival", { now: at(10, 4) });
   assert.equal(c.damage, "some");
   assert.equal(currentStep(c).id, "linen");
   assert.equal(currentStep(c).n, 3);
@@ -150,7 +150,7 @@ test("étape 2 : Yes, report it puis Cancel sans problème : la question de dép
   reply(c, "some-damage", { now: at(10, 2) });
   flowReply(c, "cancel");
   assert.deepEqual(currentStep(c).replies.map(r => r.id), ["no-damage", "some-damage"]);
-  reply(c, "no-damage", { now: at(10, 3) }); reply(c, "send-arrival", { now: at(10, 3) });
+  reply(c, "no-damage", { now: at(10, 3) }); reply(c, "send-arrival-photos", { now: at(10, 3) }); reply(c, "send-arrival", { now: at(10, 3) });
   assert.equal(c.damage, "none");
 });
 
@@ -187,7 +187,7 @@ test("étape 4 : photo de fin, référence = ménage précédent, une photo par 
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   here(c);
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) });
   reply(c, "linen-yes", { now: at(10, 3) });
   const st = currentStep(c);
   assert.equal(st.id, "end-photo");
@@ -201,7 +201,7 @@ test("étape 5 : les sept coches, bascule, avance seule quand tout est coché", 
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   here(c);
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
   const st = currentStep(c);
   assert.equal(st.id, "leave");
@@ -250,7 +250,7 @@ test("linge, fournitures, modification et suppression d'un problème", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   here(c);
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) });
   reply(c, "linen-change", { now: at(10, 3) });
   assert.equal(currentStep(c).editor, "linen");
   reply(c, "linen-dec:pillowcases", { now: at(10, 3) });
@@ -273,7 +273,7 @@ test("linge, fournitures, modification et suppression d'un problème", () => {
 test("Share again après l'envoi : ni geste ni bulle", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   studioToReport(c);
-  reply(c, "send", { now: at(11, 40) });
+  reply(c, "send-photos", { now: at(11, 40) }); reply(c, "send", { now: at(11, 40) });
   const g = c.gestures, n = c.messages.length;
   assert.deepEqual(currentStep(c).replies.map(r => r.id), ["share-again"]);
   reply(c, "share-again", { now: at(11, 41) });
@@ -285,7 +285,7 @@ test("étape 5 : encore à l'étape leave à 6 lignes sur 7", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   here(c);
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
   const n = c.messages.length;
   ["gas", "ac", "wifi", "lights", "windows", "trash"].forEach(k => reply(c, "leave:" + k, { now: at(11, 1) }));
@@ -299,7 +299,7 @@ test("All checked : libellés joints par « · », la consigne AC reste d'un seu
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   here(c);
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
   leaveAll(c, at(11, 2));
   const said = c.messages.filter(m => m.from === "me" && /^All checked/.test(m.text || ""));
@@ -311,7 +311,7 @@ test("étape 4, pièce sans photo d'annonce : « clean it, then take a photo »,
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   here(c);
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 1, "e", at(11, 0)); // Bed (avec photo) → Bathroom (sans)
   assert.equal(currentStep(c).room, "Bathroom");
   const m = c.messages.at(-1);
@@ -368,7 +368,7 @@ test("plusieurs photos et une note par problème", () => {
 const toLeaveStep = c => {
   here(c);
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
   assert.equal(currentStep(c).id, "leave");
 };
@@ -683,7 +683,7 @@ test("suppression d'une photo de pièce (arrivée ou fin) : sans geste, Next roo
   addPhoto(c, "p3", { now: at(10, 2) });
   reply(c, "next-room", { now: at(10, 2) });
   rooms(c, 2, "a");
-  reply(c, "walls-ok", { now: at(10, 3) }); reply(c, "no-damage", { now: at(10, 3) }); reply(c, "send-arrival", { now: at(10, 3) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 3) }); reply(c, "no-damage", { now: at(10, 3) }); reply(c, "send-arrival-photos", { now: at(10, 3) }); reply(c, "send-arrival", { now: at(10, 3) }); reply(c, "linen-yes", { now: at(10, 3) });
   addPhoto(c, "e1", { now: at(11, 0) });
   removeArrivalOrEndPhoto(c, "end", "Bed", 0);
   assert.equal(c.endPhotos.Bed, undefined);
@@ -791,7 +791,7 @@ test("gaz pré-réglé : Gas smell signalé pendant le ménage, ligne du gaz sur
   startProblem(c); chooseKind(c, "Gas smell", { now: at(10, 1) }); flowReply(c, "gas-ok");
   const gas = c.problems[0];
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
   assert.equal(currentStep(c).id, "leave");
   assert.equal(c.leave.gas, "ko", "pré-réglé");
@@ -809,7 +809,7 @@ test("gaz pré-réglé : works ne fait que délier (le Gas smell signalé reste)
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   here(c);
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) });
   addProblem(c, "Gas not working", null, { now: at(10, 2) });
   reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
@@ -833,7 +833,7 @@ test("AC pré-réglée : tuile AC signalée pendant le ménage, ligne « ko », 
   startProblem(c); chooseKind(c, "AC", { now: at(10, 1) }); addFlowPhoto(c, "ac1"); flowReply(c, "photos-done"); flowReply(c, "no-note");
   const ac = c.problems[0];
   rooms(c, 3, "a");
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   rooms(c, 3, "e", at(11, 0));
   assert.equal(c.leave.ac, "ko");
   assert.equal(c.leaveProblems.ac, ac);

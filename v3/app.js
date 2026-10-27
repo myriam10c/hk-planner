@@ -852,6 +852,20 @@ async function flowStep(c, id) {
   render();
 }
 
+// Photos seules vers le groupe (sans legende : WhatsApp la recopierait sous chaque photo).
+// Rend true pour passer au texte : parti, aucune photo a joindre, ou partage des photos impossible
+// (le texte part quand meme, les photos restent dans la galerie et sur le serveur). Annule : false.
+async function sharePhotos(c, files) {
+  if (!files.length) return true;
+  busy = true;
+  let r;
+  try { r = await shareReport({ text: '', files }); } finally { busy = false; }
+  if (r.mode === 'none') { note('This browser cannot share. Open the page in Chrome (Android) or Safari (iPhone).'); render(); return false; }
+  if (r.aborted) { render(); return false; }
+  if (!r.ok) { note('Photos could not be shared. Send the text now: the photos are in your gallery.'); return true; }
+  return true;
+}
+
 // Partage natif vers le groupe WhatsApp (rapport final ou envoi d'arrivee). Rend true si parti.
 // Echec du partage avec photos : le prochain appui partage le texte seul (c.shareTextOnly).
 async function shareToGroup(c, text, files) {
@@ -866,7 +880,8 @@ async function shareToGroup(c, text, files) {
     render(); return false;
   }
   c.shareTextOnly = false;
-  if (textOnly) note('Text shared without photos.');
+  if (!files.length) note('Shared.');
+  else if (textOnly) note('Text shared without photos.');
   else if (r.mode === 'text') note('Text shared without photos (this browser cannot share files).');
   else note('Shared. If the text is missing in WhatsApp, long-press and Paste: it is copied.');
   return true;
@@ -964,13 +979,23 @@ async function convClick(b) {
   if (d.act === 'delete') { removeProblem(c, Number(d.index)); S.editIndex = null; S.confirmDelete = false; S.toastIndex = null; render(); return; }
   if (d.where && S.editIndex !== null) { editProblem(c, S.editIndex, { where: d.where }); render(); return; }
   if (d.urgency && S.editIndex !== null) { editProblem(c, S.editIndex, { urgency: d.urgency }); render(); return; }
+  if (d.reply === 'send-arrival-photos' || d.reply === 'send-photos') {
+    if (busy || !currentStep(c).replies.some(r => r.id === d.reply)) return;
+    // Rapport final : la fin du menage part en file des le premier appui (photos), jamais attendue.
+    if (d.reply === 'send-photos' && !c.sent) finishNow(c);
+    if (mode() === 'practice') note('Practice: nothing is shared. The cleaner shares the photos to WhatsApp.');
+    else if (!(await sharePhotos(c, d.reply === 'send-photos' ? reportFiles(c) : arrivalFiles(c)))) return;
+    reply(c, d.reply);
+    await after(c);
+    return;
+  }
   if (d.reply === 'send-arrival') {
     if (busy || !currentStep(c).replies.some(r => r.id === 'send-arrival')) return;
-    // Premier envoi (etat a l'arrivee) : partage au groupe, puis le menage continue. Le texte
-    // envoye est fige dans sa bulle (les problemes signales ensuite vont au rapport final).
+    // Premier envoi (etat a l'arrivee), texte seul apres les photos, puis le menage continue. Le
+    // texte envoye est fige dans sa bulle (les problemes signales ensuite vont au rapport final).
     const frozen = arrivalText(c);
     if (mode() === 'practice') note('Practice: nothing is shared. The cleaner shares this arrival check to WhatsApp.');
-    else if (!(await shareToGroup(c, frozen, arrivalFiles(c)))) return;
+    else if (!(await shareToGroup(c, frozen, []))) return;
     const m = c.messages.slice().reverse().find(x => x.type === 'arrival');
     if (m) m.text = frozen;
     reply(c, 'send-arrival');
@@ -994,7 +1019,8 @@ async function convClick(b) {
         await after(c);
         return;
       }
-      if (!(await shareToGroup(c, reportText(c), reportFiles(c)))) return;
+      // Texte seul : les photos sont parties juste avant (Send photos), sans legende.
+      if (!(await shareToGroup(c, reportText(c), []))) return;
       if (d.reply === 'share-again') { render(); return; } // ni geste ni bulle
     }
     const prev = c.problems.length;

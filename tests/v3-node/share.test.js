@@ -57,3 +57,14 @@ test("canShare qui lance une exception : texte seul, sans planter", async () => 
   assert.deepEqual(await shareReport({ text: "t", files, nav }), { ok: true, mode: "text" });
   assert.deepEqual(got, { text: "t" });
 });
+
+test("photos seules (texte vide) : aucune légende, rien de copié ; sans fichier partageable, rien ne part", async () => {
+  let got;
+  navWith.copied = undefined;
+  const nav = navWith({ canShare: d => !!d.files, share: async d => { got = d; } });
+  assert.deepEqual(await shareReport({ text: "", files, nav }), { ok: true, mode: "files", count: 1 });
+  assert.deepEqual(got, { files });
+  assert.equal(navWith.copied, undefined);
+  const nav2 = navWith({ canShare: () => false, share: async () => { throw new Error("ne doit pas partir"); } });
+  assert.deepEqual(await shareReport({ text: "", files, nav: nav2 }), { ok: false, mode: "nofiles" });
+});
