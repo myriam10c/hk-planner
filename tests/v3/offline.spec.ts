@@ -233,7 +233,6 @@ test('rechargement au milieu de l etape 4 : meme etape, photos retrouvees, aucun
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
-  await page.locator('[data-reply="send-arrival-photos"]').click();
   await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   await piece(page, 4, 'Bed');
@@ -287,13 +286,11 @@ test('fermeture forcee de l app (sessionStorage vide) : reprise depuis IndexedDB
   for (const r of ['Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
-  await page.locator('[data-reply="send-arrival-photos"]').click();
   await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
   for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
   await page.locator('[data-reply="low-done"]').click();
-  await page.locator('[data-reply="send-photos"]').click();
   await page.locator('[data-reply="send"]').click();
   await fileVide(page);
   // Fin confirmee par le proxy : plus rien a reprendre, les deux copies sont effacees.

@@ -56,7 +56,7 @@ async function demarrer(page: Page, opts: { hash?: string } = {}) {
       navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('denied', 'NotAllowedError'); };
     }
     (window as any).__shared = [];
-    (navigator as any).share = async (d: any) => { (window as any).__shared.push({ text: d.text, files: (d.files || []).length }); };
+    (navigator as any).share = async (d: any) => { (window as any).__shared.push({ text: d.text, files: (d.files || []).length, first: d.files && d.files[0] ? d.files[0].name : null }); };
     (navigator as any).canShare = () => true;
   });
   await bootV3(page, ROUTES, { pinToken: 'jeton-pin', hash: opts.hash });
@@ -123,7 +123,7 @@ test('ouvrir un appartement cree la conversation locale ; Back et le retour syst
   expect(page.url()).toContain('/v3/');
 });
 
-test('parcours du studio jusqu au rapport en 30 gestes, ✓✓ une fois la file partie', async ({ page }) => {
+test('parcours du studio jusqu au rapport en 28 gestes, ✓✓ une fois la file partie', async ({ page }) => {
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await page.locator('[data-reply="here"]').click();
@@ -133,7 +133,6 @@ test('parcours du studio jusqu au rapport en 30 gestes, ✓✓ une fois la file 
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
-  await page.locator('[data-reply="send-arrival-photos"]').click();
   await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
@@ -144,21 +143,21 @@ test('parcours du studio jusqu au rapport en 30 gestes, ✓✓ une fois la file 
   await expect(rapport).toContainText('Studio · Next guest: none booked yet');
   await expect(rapport).toContainText('👤 Faiza');
   await expect(rapport).toContainText('Access card: 📷 1');
-  await page.locator('[data-reply="send-photos"]').click();
   await page.locator('[data-reply="send"]').click();
   await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
   const partage = await page.evaluate(() => (window as any).__shared);
   // Arrivee (carte + 3 pieces) partagee avant le menage, puis le rapport final (3 pieces propres).
-  // Quatre partages : photos d'arrivee sans legende, texte d'arrivee seul, photos de fin, texte final seul
-  // (un texte partage avec des photos serait recopie par WhatsApp sous chaque photo).
-  expect(partage.map((x: any) => [x.text ? 'text' : null, x.files])).toEqual([[null, 4], ['text', 0], [null, 3], ['text', 0]]);
-  expect(partage[1].text).toContain('*ARRIVAL CHECK · 1011C Bloom Towers*');
-  expect(partage[3].text).toContain('*READY · 1011C Bloom Towers*');
+  // Un partage par envoi, sans legende (WhatsApp la recopierait sous chaque photo) : le texte part
+  // en premiere image (card.js). Arrivee : carte du texte + carte d'acces + 3 pieces ; fin : carte + 3 pieces.
+  expect(partage.length).toBe(2);
+  expect(partage.map((x: any) => [x.text ?? null, x.files])).toEqual([[null, 5], [null, 4]]);
+  expect(partage[0].first).toMatch(/^HK_1011C-Bloom-Towers_report_.*\.jpg$/);
+  expect(partage[1].first).toMatch(/^HK_1011C-Bloom-Towers_report_.*\.jpg$/);
   const etat = await page.evaluate(() => {
     const c = (window as any).__hk.convs['job_0000000000000blm1011'];
     return { gestes: c.gestures, envoye: c.sent };
   });
-  expect(etat).toEqual({ gestes: 30, envoye: true });
+  expect(etat).toEqual({ gestes: 28, envoye: true });
   await fileVide(page);
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.locator('.row').nth(2).locator('.row-sub')).toHaveText('Report sent ✓✓');
@@ -242,7 +241,6 @@ for (const largeur of [360, 390, 430]) {
     await page.locator('[data-reply="check-ok"]').click();
     await page.locator('[data-reply="walls-ok"]').click();
     await page.locator('[data-reply="no-damage"]').click();
-    await page.locator('[data-reply="send-arrival-photos"]').click();
     await page.locator('[data-reply="send-arrival"]').click();
     await page.locator('[data-reply="linen-change"]').click();
     await shot('06-linge');

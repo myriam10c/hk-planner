@@ -20,14 +20,12 @@ test('studio : startJob, photos de pieces dans l ordre, finishJob avec linge et 
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
-  await page.locator('[data-reply="send-arrival-photos"]').click();
   await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
   await expect(page.locator('[data-reply="leave:door"]')).toHaveText(/Door locked, keys & card left inside/);
   for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
   await page.locator('[data-reply="low-done"]').click();
-  await page.locator('[data-reply="send-photos"]').click();
   await page.locator('[data-reply="send"]').click();
   await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
   await fileVide(page);
@@ -52,11 +50,12 @@ test('studio : startJob, photos de pieces dans l ordre, finishJob avec linge et 
   expect(await page.locator('.msg.me .ticks').count()).toBeGreaterThan(10);
   const partage = await page.evaluate(() => (window as any).__shared);
   // Deux envois au groupe : l'arrivee (carte + 3 pieces) avant le menage, puis le rapport final (3 pieces propres).
-  // Quatre partages : photos d'arrivee sans legende, texte d'arrivee seul, photos de fin, texte final seul
-  // (un texte partage avec des photos serait recopie par WhatsApp sous chaque photo).
-  expect(partage.map((x: any) => [x.text ? 'text' : null, x.files])).toEqual([[null, 4], ['text', 0], [null, 3], ['text', 0]]);
-  expect(partage[1].text).toContain('ARRIVAL CHECK · 1011C Bloom Towers');
-  expect(partage[3].text).toContain('READY · 1011C Bloom Towers');
+  // Un partage par envoi, sans legende (WhatsApp la recopierait sous chaque photo) : le texte part
+  // en premiere image (card.js). Arrivee : carte du texte + carte d'acces + 3 pieces ; fin : carte + 3 pieces.
+  expect(partage.length).toBe(2);
+  expect(partage.map((x: any) => [x.text ?? null, x.files])).toEqual([[null, 5], [null, 4]]);
+  expect(partage[0].first).toMatch(/^HK_1011C-Bloom-Towers_report_.*\.jpg$/);
+  expect(partage[1].first).toMatch(/^HK_1011C-Bloom-Towers_report_.*\.jpg$/);
   expect(fin.report.text).toContain('*Access card:* 📷 1');
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.locator('.row').first().locator('.row-sub')).toHaveText('Report sent ✓✓');

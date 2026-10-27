@@ -24,12 +24,12 @@ test("rapport exact d'un studio sans problème", () => {
   reply(c, "here", { now: at(10, 0) });
   card(c, at(10, 0));
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("a-" + r), at(10, 1));
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) });
   reply(c, "linen-yes", { now: at(10, 3) });
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("e-" + r), at(11, 30));
   leaveAll(c, at(11, 35));
   reply(c, "low-done", { now: at(11, 36) });
-  reply(c, "send-photos", { now: at(11, 40) }); reply(c, "send", { now: at(11, 40) });
+  reply(c, "send", { now: at(11, 40) });
   assert.equal(reportText(c, { now: at(11, 40) }), [
     "✅ *READY · 1011C Bloom Towers*",
     "Studio · Next guest: none booked yet",
@@ -62,7 +62,7 @@ test("dégâts, vérification du manager, problèmes groupés, aucune ligne 🎙
   addFlowPhoto(c, ph("p-bug")); flowReply(c, "photos-done"); flowReply(c, "no-note");
   reply(c, "walls-ok", { now: at(9, 23) }); reply(c, "some-damage", { now: at(9, 23) });
   chooseKind(c, "Stain", { now: at(9, 24) }); addFlowPhoto(c, ph("p-stain")); flowReply(c, "photos-done"); flowReply(c, "no-note");
-  reply(c, "damage-done", { now: at(9, 25) }); reply(c, "send-arrival-photos", { now: at(9, 25) }); reply(c, "send-arrival", { now: at(9, 25) });
+  reply(c, "damage-done", { now: at(9, 25) }); reply(c, "send-arrival", { now: at(9, 25) });
   reply(c, "linen-yes", { now: at(9, 26) });
   const t = reportText(c, { now: at(10, 0) });
   assert.match(t, /\n\*2 Damage:\* see problems\n\*Walls:\* OK\n\*Insects seen:\* Yes\n/);
@@ -120,7 +120,7 @@ test("gaz not working : ✗ dans la ligne 5, problème Soon dans la liste", () =
   reply(c, "here", { now: at(10, 0) });
   card(c, at(10, 0));
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("a-" + r), at(10, 1));
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("e-" + r), at(11, 0));
   reply(c, "leave:gas-ko", { now: at(11, 1) });
   ["ac", "wifi", "lights", "windows", "trash", "door"].forEach(k => reply(c, "leave:" + k, { now: at(11, 2) }));
@@ -138,7 +138,7 @@ test("murs abîmés : « Walls: see problems » et la ligne du problème", () =>
   addFlowPhoto(c, ph("w1")); addFlowPhoto(c, ph("w2"));
   flowReply(c, "photos-done");
   flowReply(c, "save-text", { text: "hole behind the door" });
-  reply(c, "no-damage", { now: at(10, 5) }); reply(c, "send-arrival-photos", { now: at(10, 5) }); reply(c, "send-arrival", { now: at(10, 5) });
+  reply(c, "no-damage", { now: at(10, 5) }); reply(c, "send-arrival", { now: at(10, 5) });
   const t = reportText(c, { now: at(10, 30) });
   assert.match(t, /\n\*2 Damage:\* none\n\*Walls:\* see problems\n\*3 Dirty linen/);
   assert.match(t, /_Whole apartment_\n🟠 Wall damage: hole behind the door \(HK-461, 2 photos\)/);
@@ -149,7 +149,7 @@ test("AC not working : « AC not working ✗ » dans la ligne 5, problème Soon 
   reply(c, "here", { now: at(10, 0) });
   card(c, at(10, 0));
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("a-" + r), at(10, 1));
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("e-" + r), at(11, 0));
   reply(c, "leave:ac-ko", { now: at(11, 1) });
   ["gas", "wifi", "lights", "windows", "trash", "door"].forEach(k => reply(c, "leave:" + k, { now: at(11, 2) }));
@@ -164,7 +164,7 @@ test("tuile AC signalée pendant le ménage : ligne 5 « AC not working ✗ », 
   card(c, at(10, 0));
   startProblem(c); chooseKind(c, "AC", { now: at(10, 1) }); flowReply(c, "no-photo"); flowReply(c, "save-text", { text: "not cooling" });
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("a-" + r), at(10, 1));
-  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival-photos", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
+  reply(c, "walls-ok", { now: at(10, 2) }); reply(c, "no-damage", { now: at(10, 2) }); reply(c, "send-arrival", { now: at(10, 2) }); reply(c, "linen-yes", { now: at(10, 3) });
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("e-" + r), at(11, 0));
   ["gas", "wifi", "lights", "windows", "trash", "door"].forEach(k => reply(c, "leave:" + k, { now: at(11, 2) }));
   assert.equal(currentStep(c).id, "low");
@@ -247,7 +247,7 @@ test("envoi d'arrivée : texte, photos de la carte, des pièces et des problème
   reply(c, "walls-ok", { now: at(9, 21) }); reply(c, "no-damage", { now: at(9, 21) });
   assert.equal(currentStep(c).id, "arrival-send");
   assert.equal(currentStep(c).n, 2);
-  assert.deepEqual(currentStep(c).replies.map(r => [r.id, r.label]), [["send-arrival-photos", "Send photos (1/2)"]]);
+  assert.deepEqual(currentStep(c).replies.map(r => r.id), ["send-arrival"]);
   const t = arrivalText(c, { now: at(9, 22) });
   assert.match(t, /^🔎 \*ARRIVAL CHECK · /);
   assert.match(t, /👤 Faiza · arrived 09:18 · sent 09:22\n/);
@@ -255,7 +255,7 @@ test("envoi d'arrivée : texte, photos de la carte, des pièces et des problème
   assert.match(t, /\*Damage:\* none\n\*Problems \(1\):\*\n_Bed_\n🟠 Broken \(HK-461\)/);
   assert.match(t, /Cleaning starts now\. Final report after cleaning\.$/);
   assert.deepEqual(arrivalFiles(c).map(f => f.name), ["card.jpg", "a-Bed.jpg", "a-Bathroom.jpg", "a-Kitchen.jpg", "p-broken.jpg"]);
-  reply(c, "send-arrival-photos", { now: at(9, 22) }); reply(c, "send-arrival", { now: at(9, 22) });
+  reply(c, "send-arrival", { now: at(9, 22) });
   assert.equal(currentStep(c).id, "linen");
   assert.equal(c.messages.filter(m => m.from === "me").pop().text, "Arrival check sent to the group");
   // Après l'envoi : une photo de plus sur le problème parti et un nouveau problème vont au rapport final.

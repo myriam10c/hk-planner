@@ -49,7 +49,7 @@ function studio(h) {
   reply(c, "here", { now: at(10, 0) }); sync();
   card(h);
   for (let i = 0; i < 3; i++) { addPhoto(c, photo()); sync(); reply(c, "next-room"); sync(); }
-  reply(c, "walls-ok"); sync(); reply(c, "no-damage"); sync(); reply(c, "send-arrival-photos"); reply(c, "send-arrival-photos"); sync(); reply(c, "send-arrival"); sync(); reply(c, "linen-yes"); sync();
+  reply(c, "walls-ok"); sync(); reply(c, "no-damage"); sync(); reply(c, "send-arrival"); sync(); reply(c, "linen-yes"); sync();
   for (let i = 0; i < 3; i++) { addPhoto(c, photo()); sync(); reply(c, "next-room"); sync(); }
   for (const k of ["gas", "ac", "wifi", "lights", "windows", "trash", "door"]) { reply(c, "leave:" + k); sync(); }
   reply(c, "low-done"); sync();
@@ -61,8 +61,8 @@ test("studio sans problème : startJob, 6 photos dans l'ordre, puis finishJob av
   assert.equal(currentStep(h.c).id, "report");
   // finishJob part au moment de Send, avant le partage (app.js appelle finishPlan puis shareReport).
   h.finish();
-  reply(h.c, "send-photos", { now: at(11, 40) }); reply(h.c, "send", { now: at(11, 40) });
-  assert.equal(h.c.gestures, 30);
+  reply(h.c, "send", { now: at(11, 40) });
+  assert.equal(h.c.gestures, 28);
   assert.deepEqual(h.sent.map(brief), [
     "startJob idem0001",
     "uploadPhoto arrival:Access card idem0002",
@@ -250,7 +250,7 @@ test("✓ puis ✓✓ : une bulle passe à ✓✓ quand la réponse 2xx de son i
   ackSync(c, "idem0002", { status: "success", photoId: 5 }); refreshTicks(c);
   assert.deepEqual(mine(), ["synced", "synced", "saved"]);
   c.i = c.steps.findIndex(s => s.id === "report");
-  h.finish(); reply(c, "send-photos"); reply(c, "send");
+  h.finish(); reply(c, "send");
   assert.equal(finishAcked(c), false);
   ackSync(c, "idem0003", { status: "success" }); refreshTicks(c);
   assert.equal(finishAcked(c), true);
@@ -263,7 +263,7 @@ test("un problème en attente de photo garde ✓ même après finishJob", () => 
   reply(c, "here"); sync();
   startProblem(c); chooseKind(c, "Stain"); flowReply(c, "no-photo"); flowReply(c, "no-note"); sync();
   c.i = c.steps.findIndex(s => s.id === "report");
-  h.finish(); reply(c, "send-photos"); reply(c, "send");
+  h.finish(); reply(c, "send");
   ackSync(c, "idem0001", {}); ackSync(c, h.sent.at(-1).body.idem, {}); refreshTicks(c);
   const prob = c.messages.find(m => m.type === "problem");
   assert.equal(prob.status, "saved");

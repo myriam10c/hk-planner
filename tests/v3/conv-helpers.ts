@@ -49,7 +49,7 @@ export async function demarrer(page: Page, routes = WRITE_ROUTES) {
       navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('denied', 'NotAllowedError'); };
     }
     (window as any).__shared = [];
-    (navigator as any).share = async (d: any) => { (window as any).__shared.push({ text: d.text, files: (d.files || []).length }); };
+    (navigator as any).share = async (d: any) => { (window as any).__shared.push({ text: d.text, files: (d.files || []).length, first: d.files && d.files[0] ? d.files[0].name : null }); };
     (navigator as any).canShare = () => true;
   });
   await bootV3(page, routes, { pinToken: 'jeton-pin' });
