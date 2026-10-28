@@ -28,6 +28,8 @@ export type PlanExtra = {
 };
 export type PlanJob = {
   key: string; kind: "checkout" | "extra"; listingId: string; apt: string; bld: string;
+  // Adresse courte avec le quartier (listings_map), pour le planning du chauffeur ; null si inconnue.
+  addr: string | null;
   date: string; postponedFrom: string | null; checkout: string | null; guest: string | null;
   next: PlanNext | null; assigned: number[]; serviceType: string | null; state: PlanState;
   cancelled: { reason: string; by: string } | null; laundry: LaundryRow | null; extra: PlanExtra | null;
@@ -82,7 +84,7 @@ export async function mgrPlanning(sb: any, o: {
     ...extras.map((e: any) => String(e.reservation_key)),
   ])];
   const all = (p: any, what: string) => p.then((r: any) => readOrThrow(r, what));
-  const [post, asg, done, timers, canc, linen, listings, people, leaves, hols, acc] = await Promise.all([
+  const [post, asg, done, timers, canc, linen, listings, people, leaves, hols, acc, addrs] = await Promise.all([
     byKeys(sb, "cleaning_postponed", "reservation_key, original_date, new_date", keys),
     byKeys(sb, "cleaning_assignments", "reservation_key, cleaner_id, service_type", keys),
     byKeys(sb, "menage_done", "reservation_key, done", keys),
@@ -97,6 +99,8 @@ export async function mgrPlanning(sb: any, o: {
     all(sb.from("public_holidays").select("holiday_date, name").gte("holiday_date", o.start).lte("holiday_date", end), "public_holidays"),
     all(sb.from("cleaning_accounting_cache").select("month, payload_json")
       .in("month", monthsBack(o.today, MGR_USUALLY_ELITE_WINDOW_DAYS)), "cleaning_accounting_cache"),
+    // Adresses : une panne ne coupe pas le planning, le chauffeur aura l'immeuble seul.
+    sb.from("listings_map").select("listing_id, address").then((r: any) => r?.error ? [] : (r?.data ?? []), () => []),
   ]);
 
   const postMap: Record<string, { from: string | null; to: string }> = {};
@@ -113,6 +117,8 @@ export async function mgrPlanning(sb: any, o: {
   for (const l of linen) linenMap[String(l.reservation_key)] = laundryRow(l);
   const place: Record<string, { apt: string; bld: string }> = {};
   for (const l of listings) place[String(l.listing_id)] = splitListing(l);
+  const addrOf: Record<string, string> = {};
+  for (const a of addrs) { const s = shortAddress(a.address); if (s) addrOf[String(a.listing_id)] = s; }
   const ppl = peopleMap(people);
   const elite = usuallyEliteListings(
     acc.flatMap((r: any) => Array.isArray(r?.payload_json?.rows) ? r.payload_json.rows : []), o.today);
@@ -138,7 +144,7 @@ export async function mgrPlanning(sb: any, o: {
     });
     const l = place[listingId] ?? { apt: "", bld: "Listing " + listingId };
     jobs.push({
-      key, kind, listingId, apt: l.apt, bld: l.bld, date,
+      key, kind, listingId, apt: l.apt, bld: l.bld, addr: addrOf[listingId] ?? null, date,
       postponedFrom: pm ? (pm.from ?? baseDate) : null,
       checkout: pm ? null : hhmm(hour), guest, next,
       assigned: rows.map((r) => r.id), serviceType: rows[0]?.st ?? null, state, cancelled,
@@ -200,4 +206,9 @@ export async function mgrPlanning(sb: any, o: {
       },
     },
   };
+}
+
+// « Bloom Heights (Tower A) - JVC, Dubai » -> « Bloom Heights (Tower A) - JVC » : Dubai ne dit rien au chauffeur.
+export function shortAddress(a: unknown): string {
+  return String(a ?? "").trim().replace(/(?:\s*[,-]\s*)?\bDubai\s*$/i, "").replace(/\s*[,-]\s*$/, "").trim();
 }

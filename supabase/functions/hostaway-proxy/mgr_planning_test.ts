@@ -183,3 +183,19 @@ Deno.test("extra avec heure : trie a son heure parmi les menages du jour, sans h
   assertEquals(byKey(b, "extra_2026-10-09_late").extra?.cleaningTime, "16:00");
   assertEquals(byKey(b, "extra_2026-10-09_mabc").extra?.cleaningTime, null);
 });
+
+Deno.test("mgr.planning : adresse courte (listings_map) pour le chauffeur, null si inconnue", async () => {
+  const db = seed();
+  db.tables.listings_map = [{ listing_id: "L2", address: "Damac Reva - Business Bay, Dubai" }];
+  const d = await run(db);
+  assertEquals(d.jobs.find((j) => j.listingId === "L2")?.addr, "Damac Reva - Business Bay");
+  assertEquals(d.jobs.find((j) => j.listingId === "L1")?.addr, null);
+});
+
+Deno.test("shortAddress : retire Dubai seul, garde Dubai South", async () => {
+  const { shortAddress } = await import("./mgr_planning.ts");
+  assertEquals(shortAddress("Bloom Heights (Tower A) - JVC, Dubai"), "Bloom Heights (Tower A) - JVC");
+  assertEquals(shortAddress("Azizi Riviera 20 - Dubai"), "Azizi Riviera 20");
+  assertEquals(shortAddress("Pulse Residence - Dubai South"), "Pulse Residence - Dubai South");
+  assertEquals(shortAddress(null), "");
+});

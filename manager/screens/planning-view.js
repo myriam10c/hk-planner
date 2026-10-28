@@ -29,12 +29,14 @@ function header(s) {
   const sel = s.data && !s.ro
     ? '<button class="btn sm" type="button" data-select>' + (s.sel ? 'Done selecting' : 'Select') + '</button>'
     : '';
+  // Planning du chauffeur (driver.js) : managers seulement, jamais le role maintenance.
+  const drv = s.data && s.manager !== false ? '<button class="btn sm" type="button" data-driver>Driver</button>' : '';
   return '<header class="top pl-top"><div><h1>Planning</h1><div class="date">' + esc(weekLabel(s.start)) + '</div>' + asof + '</div>'
     + '<div class="pl-tools"><div class="pl-nav" role="group" aria-label="Week">'
     + '<button class="iconbtn" type="button" data-week="-1" aria-label="Previous week" title="Previous week">' + I.prev + '</button>'
     + '<button class="btn sm" type="button" data-week="0">This week</button>'
     + '<button class="iconbtn" type="button" data-week="1" aria-label="Next week" title="Next week">' + I.next + '</button></div>'
-    + sel + add
+    + sel + drv + add
     + '<button class="iconbtn" type="button" data-theme-toggle aria-label="Switch light or dark theme" title="Theme">' + I.theme + '</button></div></header>';
 }
 

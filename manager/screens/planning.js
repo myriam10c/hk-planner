@@ -12,6 +12,7 @@ import {
 import { dayShort, defaultDay, filterJobs, LAUNDRY_ITEMS, laundryParse, namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
 import { fillPhotos } from '/manager/ui/job-photos.js';
 import * as V from '/manager/screens/planning-view.js';
+import { driverDefaultDay, driverSheet, driverText } from '/manager/screens/driver.js';
 
 const KEY = 'mgrPlanningCache';
 const RO_LINE = 'Reconnect to make changes.';
@@ -82,7 +83,7 @@ export async function renderPlanning(ctx) {
     main.innerHTML = V.screenHtml({
       data: st.data, start: st.start, today: st.today, day: st.day, wide: mq.matches, filter: st.filter,
       loading: st.loading, error: st.error, banner: banner(), stale: !st.fresh, ro: readOnly(),
-      sel: st.sel && !readOnly(), picked: st.picked,
+      sel: st.sel && !readOnly(), picked: st.picked, manager: st.manager,
     });
     focusBack(main, mark);
     updateLive();
@@ -444,6 +445,31 @@ export async function renderPlanning(ctx) {
     st.sheet = { key: '__bulk', view: 'bulk' };
     openSheet(V.bulkSheet(st.data, jobs, readOnly()));
   }
+  // Planning du chauffeur : relu s'il date, puis le message du jour propose (demain).
+  async function openDriver() {
+    if (!st.manager || !(await freshEnough())) return;
+    st.driverDay = driverDefaultDay(st.data, st.today, st.day);
+    st.sheet = { key: '__driver', view: 'driver' };
+    openSheet(driverSheet(st.data, st.driverDay));
+  }
+  ACT['driver-day'] = (j, el) => {
+    st.driverDay = el.getAttribute('data-date');
+    openSheet(driverSheet(st.data, st.driverDay));
+  };
+  async function copyDriver(text) {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('no clipboard');
+      await navigator.clipboard.writeText(text);
+      toast('Copied. Paste it in WhatsApp to the driver.');
+    } catch (e) { toast('Could not copy. Select the text instead.'); }
+  }
+  ACT['driver-copy'] = () => copyDriver(driverText(st.data, st.driverDay));
+  ACT['driver-share'] = async () => {
+    const text = driverText(st.data, st.driverDay);
+    if (!navigator.share) { copyDriver(text); return; }
+    try { await navigator.share({ text }); } catch (e) { if (!e || e.name !== 'AbortError') copyDriver(text); }
+  };
+
   function onSelectClick(el) {
     if (el.hasAttribute('data-select')) {
       if (st.sel) endSelect(); else if (!readOnly()) st.sel = true;
@@ -468,7 +494,7 @@ export async function renderPlanning(ctx) {
 
   function onClick(e) {
     const t = e.target && e.target.closest ? e.target : null;
-    const el = t ? t.closest('[data-retry],[data-week],[data-day],[data-filter],[data-job],[data-add-extra],[data-select],[data-select-all],[data-bulk],#sheet [data-pa]') : null;
+    const el = t ? t.closest('[data-retry],[data-week],[data-day],[data-filter],[data-job],[data-add-extra],[data-select],[data-select-all],[data-bulk],[data-driver],#sheet [data-pa]') : null;
     if (!el) return;
     if (el.hasAttribute('data-retry')) { refresh(); return; }
     if (el.hasAttribute('data-week')) { goWeek(Number(el.getAttribute('data-week'))); return; }
@@ -499,6 +525,7 @@ export async function renderPlanning(ctx) {
       return;
     }
     if (el.hasAttribute('data-add-extra')) { if (ACT.addExtra) ACT.addExtra(); return; }
+    if (el.hasAttribute('data-driver')) { openDriver(); return; }
     const k = el.getAttribute('data-pa');
     if (k === 'back') {
       if (st.sheet && st.sheet.key !== '__new') show(st.sheet.key, 'detail'); else closeSheet();
