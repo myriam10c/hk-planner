@@ -2154,7 +2154,8 @@ function toggleExpand(key,e){e.stopPropagation();expandedKey=expandedKey===key?n
 async function loadDetail(key){
   if(!checklistCache[key]){const res=await api('getChecklistProgress',{params:{key}});checklistCache[key]=res.progress||{};}
   if(!notesCache[key]){const res=await api('getNotes',{params:{key}});notesCache[key]=res.notes||[];}
-  if(!photosCache[key]){const res=await api('getPhotos',{params:{key}});photosCache[key]=res.photos||[];}
+  // Les photos v3 arrivent avec une URL signee 1 h : on relit la liste au-dela de 50 min.
+  if(!photosCache[key]||Date.now()-(photosCache[key]._at||0)>50*60000){const res=await api('getPhotos',{params:{key}});photosCache[key]=res.photos||[];photosCache[key]._at=Date.now();}
   render();
 }
 
@@ -2177,6 +2178,11 @@ document.getElementById('photoInput').addEventListener('change',async function()
     photosCache[rkey]=null;await loadDetail(rkey);toast('Photo saved ✓','success');
   };reader.readAsDataURL(file);this.value='';
 });
+// Miniature : l'image elle-meme quand le serveur rend une URL (photos de l'app cleaner v3).
+function photoThumbInner(p,fallback){
+  if(!p.url)return fallback;
+  return '<img src="'+esc(p.url)+'" alt="'+esc(p.label||'')+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:9px">';
+}
 async function viewPhoto(id){
   const res=await api('getPhoto',{params:{id:String(id)}});
   if(res.photo&&res.photo.photo_data) document.getElementById('modal').innerHTML='<div class="modal-overlay" data-action="closeModal"><span class="modal-close">&times;</span><img src="'+res.photo.photo_data+'"/></div>';
@@ -5560,15 +5566,15 @@ function renderCardDetail(key,r){
   const afterP=photos.find(p=>p.photo_type==='after');
   h+='<div class="detail-title" style="margin-top:10px">📷 '+t('comparison')+'</div>';
   h+='<div class="photo-compare"><div class="compare-col"><div class="compare-label">'+t('before')+'</div>';
-  if(beforeP) h+='<div class="photo-thumb" style="width:100%;height:auto" data-action="viewPhoto" data-arg0="'+beforeP.id+'">📸 '+t('before')+'</div>';
+  if(beforeP) h+='<div class="photo-thumb" style="width:100%;height:'+(beforeP.url?'140px':'auto')+'" data-action="viewPhoto" data-arg0="'+esc(String(beforeP.id))+'">'+photoThumbInner(beforeP,'📸 '+t('before'))+'</div>';
   else h+='<div class="compare-empty" data-action="uploadBeforePhoto" data-arg0="'+sk+'">+</div>';
   h+='</div><div class="compare-col"><div class="compare-label">'+t('after')+'</div>';
-  if(afterP) h+='<div class="photo-thumb" style="width:100%;height:auto" data-action="viewPhoto" data-arg0="'+afterP.id+'">📸 '+t('after')+'</div>';
+  if(afterP) h+='<div class="photo-thumb" style="width:100%;height:'+(afterP.url?'140px':'auto')+'" data-action="viewPhoto" data-arg0="'+esc(String(afterP.id))+'">'+photoThumbInner(afterP,'📸 '+t('after'))+'</div>';
   else h+='<div class="compare-empty" data-action="uploadAfterPhoto" data-arg0="'+sk+'">+</div>';
   h+='</div></div>';
   // All photos
   h+='<div class="detail-title" style="margin-top:10px">📷 '+t('photos')+' ('+photos.length+')</div><div class="photo-grid">';
-  photos.forEach(p=>{h+='<div class="photo-thumb" data-action="viewPhoto" data-arg0="'+p.id+'">'+(p.photo_type==='before'?'🅱':'📸')+'</div>';});
+  photos.forEach(p=>{h+='<div class="photo-thumb" title="'+esc((p.label?p.label+' · ':'')+(p.author||''))+'" data-action="viewPhoto" data-arg0="'+esc(String(p.id))+'">'+photoThumbInner(p,p.photo_type==='before'?'🅱':'📸')+'</div>';});
   h+='<div class="photo-upload-btn" data-action="startPhotoUpload" data-arg0="'+sk+'">+</div></div>';
   // #8 WhatsApp for this cleaning — one button per assigned cleaner
   if(!cleanerMode){

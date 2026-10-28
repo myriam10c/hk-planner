@@ -146,3 +146,16 @@ test('localYMD() uses local date components (not UTC)', async ({ page }) => {
   expect(r.fixed).toBe('2026-01-15');
   expect(r.today).toBe(r.expectedToday);
 });
+
+test('photoThumbInner() shows the v3 image when a URL is given, the fallback otherwise', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const f = (window as any).photoThumbInner;
+    return {
+      legacy: f({ id: 3, photo_type: 'after' }, 'X'),
+      v3: f({ id: 'v3-9', url: 'https://a.supabase.co/s.jpg?t="1"', label: 'Arrival · Bed' }, 'X'),
+    };
+  });
+  expect(r.legacy).toBe('X');
+  expect(r.v3).toContain('<img src="https://a.supabase.co/s.jpg?t=&quot;1&quot;"');
+  expect(r.v3).toContain('alt="Arrival · Bed"');
+});
