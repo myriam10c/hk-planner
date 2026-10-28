@@ -6,7 +6,7 @@
 //  - API calls (Supabase functions, Hostaway, etc.) bypass the cache entirely.
 //  - Bump VERSION to force all clients to drop the old cache.
 
-const VERSION = 'v-20261028-1605-5b29358';
+const VERSION = 'v-20261028-1656-2c1898a';
 const CACHE = 'hk-planner-' + VERSION;
 // /vendor/supabase-js-*.umd.js est une dependance dure : app.js appelle
 // createClient() en tete de fichier, si le vendor manque toute l'app est morte.
