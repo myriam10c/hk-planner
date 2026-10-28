@@ -13,8 +13,9 @@ export function formatMinutes(n) {
   return Math.floor(n / 60) + NB + "h" + NB + String(n % 60).padStart(2, "0");
 }
 
-// Plafond de fichiers d'un partage (WhatsApp refuse au-delà sur certains téléphones).
-export const MAX_FILES = 10;
+// Plafond de photos d'un partage : Chrome Android refuse un partage de plus de 10 fichiers, et
+// l'image du rapport (card.js) en prend un (28/10 : 10 photos + la carte faisaient échouer le partage).
+export const MAX_FILES = 9;
 export const hasFile = x => !!(x && typeof x === "object" && x.file);
 
 const roomsOf = (conv, store) => conv.apt.rooms.flatMap(r => store[r] || []);

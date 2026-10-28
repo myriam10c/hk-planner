@@ -76,7 +76,7 @@ test("dégâts, vérification du manager, problèmes groupés, aucune ligne 🎙
   assert.match(t, /📷 4 arrival · 0 end · 3 of problems/);
 });
 
-test("plafond de 10 fichiers : carte d'accès, problèmes, puis fin, puis arrivée", () => {
+test("plafond de 9 photos (10 fichiers avec l'image du rapport) : carte d'accès, problèmes, puis fin, puis arrivée", () => {
   const c = createConversation(bloom, { me: ME, now: at(9, 0) });
   reply(c, "here", { now: at(10, 0) });
   card(c, at(10, 0));
@@ -89,13 +89,13 @@ test("plafond de 10 fichiers : carte d'accès, problèmes, puis fin, puis arriv�
   addProblem(c, "Leak", ph("p1"), { now: at(10, 4) });
   for (const r of ["Bed", "Bathroom", "Kitchen"]) shoot(c, ph("e-" + r), at(11, 0));
   const pick = pickFiles(c);
-  assert.equal(pick.files.length, 10);
+  assert.equal(pick.files.length, 9);
   assert.equal(pick.files[0].name, "card.jpg", "la carte d'accès passe en premier");
-  assert.deepEqual(pick.files.map(f => f.name).slice(1, 6), ["a0.jpg", "a1.jpg", "a2.jpg", "a3.jpg", "a4.jpg"], "il reste 5 places pour l'arrivée");
+  assert.deepEqual(pick.files.map(f => f.name).slice(1, 5), ["a0.jpg", "a1.jpg", "a2.jpg", "a3.jpg"], "il reste 4 places pour l'arrivée");
   assert.deepEqual(pick.files.map(f => f.name).slice(-4), ["e-Bed.jpg", "e-Bathroom.jpg", "e-Kitchen.jpg", "p1.jpg"]);
   assert.equal(pick.cutPhotos, true);
   assert.equal("cutVoices" in pick, false);
-  assert.match(reportText(c, { now: at(11, 30) }), /📷 9 arrival · 3 end · 1 of problems \(10 attached\)/);
+  assert.match(reportText(c, { now: at(11, 30) }), /📷 9 arrival · 3 end · 1 of problems \(9 attached\)/);
 });
 
 test("ligne de problème : détail, note, nombre de photos ; toutes les photos partent", () => {
