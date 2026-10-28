@@ -1,6 +1,7 @@
 // Ecran Today : HTML pur construit a partir de la reponse mgr.today. Aucun appel
 // reseau ici, aucun calcul de statut : le proxy les rend deja faits.
 import { addDays, aptLabel, dubaiTime, esc, I, placeLabel } from '/manager/ui/dom.js';
+import { photosBlk } from '/manager/ui/job-photos.js';
 import { dayShort, jobsOn, namesOf as plNamesOf, nextLine as plNextLine } from '/manager/screens/planning-rules.js';
 
 const ROLE = { cleaner: 'Cleaner', subcontractor: 'Subcontractor', manager: 'Manager', maintenance: 'Maintenance' };
@@ -304,6 +305,7 @@ export function jobSheet(data, job, nowMs, ro) {
   return sheetHead(placeLabel(job), job.kind === 'extra' ? xsub : 'Checkout cleaning, today')
     + '<div class="sheet-b">' + box + tl
     + '<div class="blk"><h3>Cleaner</h3><div>' + (job.assigned.length ? esc(names) : '<span class="st bad">Nobody</span>') + '</div></div>'
+    + photosBlk(job.key)
     + ticketsBlk(data.ticketsByListing[job.listingId]) + '</div>'
     + actionsFoot(job.key, job.assigned, job.state === 'done', ro);
 }
@@ -320,6 +322,7 @@ export function arrivalSheet(data, a, nowMs, ro) {
   return sheetHead(placeLabel(a), a.kind + ' arriving today at ' + a.time + (a.timeSet ? '' : ' (time not set)'))
     + '<div class="sheet-b">' + statusBox(a.tone, a.word, a.cause) + tl
     + '<div class="blk"><h3>Cleaner</h3><div>' + (a.cleaners.length ? esc(a.cleaners.join(' and ')) : '<span class="st bad">Nobody</span>') + '</div></div>'
+    + (a.prevKey ? photosBlk(a.prevKey) : '')
     + ticketsBlk(data.ticketsByListing[a.listingId]) + '</div>'
     + (a.prevKey ? actionsFoot(a.prevKey, a.assigned, a.done, ro) : '<div class="sheet-f"><button class="btn" type="button" data-close>Close</button></div>');
 }

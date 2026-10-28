@@ -2,6 +2,7 @@
 // appel reseau, aucun calcul de statut : le proxy les rend faits. Chaque panneau
 // a la signature (d, j, ro, s) et s'appelle <vue>Sheet (planning.js les trouve
 // par leur nom).
+import { photosBlk } from '/manager/ui/job-photos.js';
 import { addDays, ddmm, dubaiTime, esc, I, placeLabel } from '/manager/ui/dom.js';
 import {
   dayLong, dayShort, filterJobs, initials, jobsOn, LAUNDRY_ITEMS, laundryLine, namesOf, nextLine, slotOf, weekLabel,
@@ -190,7 +191,7 @@ export function jobSheet(d, j, ro, s) {
       + CLOSE + '</div>';
   }
   return head(placeLabel(j) || 'Cleaning', (j.kind === 'extra' ? 'Extra cleaning' : 'Checkout cleaning') + ' · ' + dayShort(j.date))
-    + '<div class="sheet-b">' + status + '<dl class="kvs">' + rows.join('') + '</dl></div>' + foot;
+    + '<div class="sheet-b">' + status + '<dl class="kvs">' + rows.join('') + '</dl>' + (j.cancelled ? '' : photosBlk(j.key)) + '</div>' + foot;
 }
 
 // Choix des personnes (plusieurs possibles) : Save remplace la liste.

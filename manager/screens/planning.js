@@ -10,6 +10,7 @@ import {
   addDays, closeSheet, dubaiTime, dubaiToday, esc, focusBack, focusMark, openSheet, placeLabel, sheetBusy, sheetError, sheetIsOpen, toast,
 } from '/manager/ui/dom.js';
 import { dayShort, defaultDay, filterJobs, LAUNDRY_ITEMS, laundryParse, namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
+import { fillPhotos } from '/manager/ui/job-photos.js';
 import * as V from '/manager/screens/planning-view.js';
 
 const KEY = 'mgrPlanningCache';
@@ -153,6 +154,7 @@ export async function renderPlanning(ctx) {
     if (typeof fn !== 'function') return;
     st.sheet = { key, view };
     openSheet(fn(st.data, j, readOnly(), st));
+    if (view === 'detail' && j && !j.cancelled) fillPhotos(key);
   }
 
   // Boutons du panneau rendus apres une ecriture : ceux d'une personne en conge restent bloques.

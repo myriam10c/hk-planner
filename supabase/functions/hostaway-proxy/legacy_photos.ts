@@ -54,6 +54,19 @@ export async function v3PhotosForKey(sb: any, key: string): Promise<any[]> {
   }));
 }
 
+// Anciennes photos (cleaning_photos) : URL signee en un lot, photo_path retire de la reponse.
+// Signature en panne : les lignes restent, sans url (le planning garde son icone).
+export async function signLegacyPhotos(sb: any, bucket: string, rows: any[]): Promise<any[]> {
+  const chemins = [...new Set(rows.map((r) => r.photo_path).filter(Boolean).map(String))];
+  const urls: Record<string, string> = {};
+  if (chemins.length) {
+    const { data, error } = await sb.storage.from(bucket).createSignedUrls(chemins, V3_LEGACY_URL_SECONDS);
+    if (error) console.warn("[getPhotos] signature impossible: " + String(error?.message ?? error));
+    for (const s of data ?? []) if (s && !s.error && s.path && s.signedUrl) urls[String(s.path)] = String(s.signedUrl);
+  }
+  return rows.map(({ photo_path, ...r }) => ({ ...r, url: (photo_path && urls[String(photo_path)]) || null }));
+}
+
 // getPhoto pour un id « v3-<id> » : une URL signee fraiche.
 export async function v3PhotoUrl(sb: any, id: number): Promise<string | null> {
   const { data, error } = await sb.from("photos").select("storage_path").eq("id", id).maybeSingle();

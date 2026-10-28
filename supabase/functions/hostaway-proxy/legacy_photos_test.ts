@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { v3PhotoLabel, v3PhotosForKey, v3PhotoType, v3PhotoUrl } from "./legacy_photos.ts";
+import { signLegacyPhotos, v3PhotoLabel, v3PhotosForKey, v3PhotoType, v3PhotoUrl } from "./legacy_photos.ts";
 
 const K = "2026-10-27_Hayden Murray";
 const base = () => fakeDb({
@@ -52,4 +52,17 @@ Deno.test("v3PhotoUrl signe une photo, null si inconnue", async () => {
   const db = base();
   assertEquals(await v3PhotoUrl(db, 2), "https://signed.test/v3/2026-10-27/2.jpg?exp=3600");
   assertEquals(await v3PhotoUrl(db, 99), null);
+});
+
+Deno.test("signLegacyPhotos signe en un lot et retire photo_path", async () => {
+  const db = base();
+  const out = await signLegacyPhotos(db, "b", [
+    { id: 7, photo_type: "after", photo_path: "cleaning_photos/7.jpg" },
+    { id: 8, photo_type: "before", photo_path: null },
+  ]);
+  assertEquals(out, [
+    { id: 7, photo_type: "after", url: "https://signed.test/cleaning_photos/7.jpg?exp=3600" },
+    { id: 8, photo_type: "before", url: null },
+  ]);
+  assertEquals(db.storage.signBatches.length, 1);
 });

@@ -4,6 +4,7 @@ import { get, post } from '/manager/api.js';
 import { clearToday, loadToday, saveToday } from '/manager/today-cache.js';
 import { createGestures } from '/manager/gesture.js';
 import { addDays, announceMntBadge, closeSheet, dubaiTime, esc, focusBack, focusMark, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
+import { fillPhotos } from '/manager/ui/job-photos.js';
 import { aheadPickerSheet, arrivalSheet, boardHtml, jobSheet, pickerSheet } from '/manager/screens/today-view.js';
 import { namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
 
@@ -333,10 +334,10 @@ export async function renderToday(ctx) {
     const now = Date.now();
     if (op === 'job') {
       const j = st.data.who.jobs.find((x) => x.key === el.getAttribute('data-key'));
-      if (j) { st.sheetKey = j.key; openSheet(jobSheet(st.data, j, now, readOnly())); }
+      if (j) { st.sheetKey = j.key; openSheet(jobSheet(st.data, j, now, readOnly())); fillPhotos(j.key); }
     } else if (op === 'arr') {
       const a = st.data.arrivals.rows.find((x) => x.id === el.getAttribute('data-id'));
-      if (a) { st.sheetKey = a.prevKey || null; openSheet(arrivalSheet(st.data, a, now, readOnly())); }
+      if (a) { st.sheetKey = a.prevKey || null; openSheet(arrivalSheet(st.data, a, now, readOnly())); fillPhotos(a.prevKey); }
     }
   }
 

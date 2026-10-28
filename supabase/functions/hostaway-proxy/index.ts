@@ -19,7 +19,7 @@ import { fillMissingListings } from "./listing_fill.ts";
 import { loadTeam, resolveViewAs } from "./v3_viewas.ts";
 import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
 import { deletePhoto } from "./v3_photos.ts";
-import { v3PhotosForKey, v3PhotoUrl } from "./legacy_photos.ts";
+import { signLegacyPhotos, v3PhotosForKey, v3PhotoUrl } from "./legacy_photos.ts";
 import {
   checkTicket, reportProblem, ticketStill, uploadPhoto, V3_MAX_UPLOAD_BODY_BYTES, V3_PROBLEM_ACTIONS,
 } from "./v3_tickets.ts";
@@ -2768,12 +2768,14 @@ Deno.serve(async (req: Request) => {
     if (action === "getPhotos") {
       const key = url.searchParams.get("key");
       if (!key) return jsonResp({ error: "key required" }, 400);
-      const { data, error } = await sb.from("cleaning_photos").select("id, reservation_key, photo_type, author, created_at").eq("reservation_key", key).order("created_at", { ascending: false });
+      const { data, error } = await sb.from("cleaning_photos").select("id, reservation_key, photo_type, author, created_at, photo_path").eq("reservation_key", key).order("created_at", { ascending: false });
       if (error) throw error;
+      // URL signees 1 h aussi pour les anciennes photos : miniatures dans le planning et l'app manager.
+      const legacy = await signLegacyPhotos(sb, PHOTO_BUCKET, data ?? []);
       // Photos de l'app cleaner v3 (table photos) : une panne ne cache pas les anciennes.
       let v3: any[] = [];
       try { v3 = await v3PhotosForKey(sb, key); } catch (e) { console.warn("[getPhotos] v3: " + String((e as any)?.message ?? e)); }
-      const photos = [...(data ?? []), ...v3].sort((a: any, b: any) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+      const photos = [...legacy, ...v3].sort((a: any, b: any) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
       return jsonResp({ status: "success", photos });
     }
     if (action === "getPhoto") {
