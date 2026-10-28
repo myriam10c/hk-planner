@@ -665,6 +665,23 @@ function mgrCutoverTarget(){
   return MGR_CUTOVER_PATH+MGR_BOOT_HASH;
 }
 let leavingForMgr=false;
+// Manager deja vu sur /manager/ (mgrRole) avec une session email gardee : au
+// demarrage, ecran d'attente au lieu de l'ancien planning le temps que le serveur
+// confirme le role (28/10/2026, l'ancienne version apparaissait une seconde).
+// Le renvoi reste decide par maybeGoManager sur le role confirme ; sinon on repeint.
+function mgrBootHoldDue(cached,hasSession,dubaiDate,legacy,online,lastRedirect,nowMs){
+  const role=cached&&cached.role;
+  if(!mgrCutoverDue(role,hasSession,dubaiDate,legacy)||!online) return false;
+  return !(lastRedirect&&nowMs-lastRedirect>=0&&nowMs-lastRedirect<V3_LOOP_MS);
+}
+let mgrBootHold=(function(){
+  try{
+    return mgrBootHoldDue(JSON.parse(localStorage.getItem('mgrRole')||'null'),!!localStorage.getItem('hkAuthSession'),
+      dubaiDateOf(Date.now()),v3LegacyChosen(),!v3Offline(),Number(sessionStorage.getItem(MGR_REDIRECT_KEY))||0,Date.now());
+  }catch(e){ return false; }
+}());
+function releaseMgrBootHold(){ if(!mgrBootHold) return; mgrBootHold=false; render(); }
+if(mgrBootHold) setTimeout(releaseMgrBootHold,8000); // filet : jamais bloque sur l'attente
 // Vrai quand la garde anti-boucle a retenu un renvoi : le manager reste dans
 // l'ancienne app, le bandeau lui dit et lui offre « Open the new app ».
 let mgrLoopBlocked=false;
@@ -4914,6 +4931,7 @@ function render(){
   if(authScreen==='createAccount'){renderAuthCreateAccount();return;}
   if(authScreen==='setPassword'){renderAuthSetPassword();return;}
   if(authScreen==='login'){renderAuthLogin();return;}
+  if(mgrBootHold){const a=document.getElementById('app');if(a)a.innerHTML='<div class="loading" role="status" style="padding:48px 16px;text-align:center;color:var(--text3)">Opening HK Planner...</div>';return;}
   // #6 PIN screen
   if(!cleanerMode&&window.location.hash==='#cleaner'){renderPinScreen();return;}
   if(cleanerMode&&window.location.hash!=='#cleaner')window.location.hash='#cleaner';
@@ -8169,11 +8187,12 @@ window.addEventListener('popstate', () => {
 });
 initSwipe();
 hkAuthBoot().then(async function(ok){
-  if(!ok) return;
+  if(!ok){ releaseMgrBootHold(); return; }
   // Session email : cleanerMe vient de confirmer le role (adoptEmailSession).
   // Session PIN : on le demande au serveur avant le premier fetchAll.
   if(authAccessToken){ if(maybeGoV3()||maybeGoManager()) return; }
   else if(cleanerToken&&await v3BootCheck(bootSetupCheck)) return;
+  mgrBootHold=false;
   fetchAll();
 });
 // Rafraichissement auto : jamais pendant que l'onglet RH est ouvert. fetchAll finit par

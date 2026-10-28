@@ -159,3 +159,22 @@ test('photoThumbInner() shows the v3 image when a URL is given, the fallback oth
   expect(r.v3).toContain('<img src="https://a.supabase.co/s.jpg?t=&quot;1&quot;"');
   expect(r.v3).toContain('alt="Arrival · Bed"');
 });
+
+test('mgrBootHoldDue() holds the old board only for a cached manager with an email session', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const f = (window as any).mgrBootHoldDue;
+    const now = Date.parse('2026-10-28T10:00:00Z');
+    const mgr = { id: 8, role: 'manager' };
+    return {
+      manager: f(mgr, true, '2026-10-28', false, true, 0, now),
+      maintenance: f({ id: 9, role: 'maintenance' }, true, '2026-10-28', false, true, 0, now),
+      cleaner: f({ id: 4, role: 'cleaner' }, true, '2026-10-28', false, true, 0, now),
+      noSession: f(mgr, false, '2026-10-28', false, true, 0, now),
+      legacy: f(mgr, true, '2026-10-28', true, true, 0, now),
+      offline: f(mgr, true, '2026-10-28', false, false, 0, now),
+      justBounced: f(mgr, true, '2026-10-28', false, true, now - 5000, now),
+      nothingCached: f(null, true, '2026-10-28', false, true, 0, now),
+    };
+  });
+  expect(r).toEqual({ manager: true, maintenance: true, cleaner: false, noSession: false, legacy: false, offline: false, justBounced: false, nothingCached: false });
+});

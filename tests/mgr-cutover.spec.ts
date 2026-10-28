@@ -323,3 +323,33 @@ test('More garde le lien New manager app vers /manager/ (ancienne app en legacy)
   await page.locator('.bottom-nav [data-arg0="__more"]').click();
   await expect(page.locator('#moreMenu a[data-mgr-app]')).toHaveAttribute('href', '/manager/');
 });
+
+// 28/10/2026 : un manager deja passe par /manager/ (mgrRole) ne voit plus
+// l'ancien planning le temps que le serveur confirme son role.
+async function watchBoard(page: any) {
+  await page.addInitScript(() => {
+    try { localStorage.setItem('mgrRole', JSON.stringify({ id: 8, role: 'manager' })); } catch (e) { /* ignore */ }
+    const mark = () => { if (document.querySelector('.bottom-nav')) { try { sessionStorage.setItem('sawBoard', '1'); } catch (e) { /* ignore */ } } };
+    new MutationObserver(mark).observe(document, { childList: true, subtree: true });
+  });
+}
+
+test('manager deja vu sur /manager/ : ecran d attente, jamais l ancien planning avant le renvoi', async ({ page }) => {
+  await watchBoard(page);
+  await boot(page, {
+    at: APRES, email: true,
+    routes: [{ match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: WALTER }, delay: 0 }, ...routesFor(WALTER, 'walter@example.com')],
+  });
+  await versManager(page);
+  expect(await page.evaluate(() => sessionStorage.getItem('sawBoard'))).toBeNull();
+});
+
+test('manager deja vu, cleanerMe en panne : l attente se leve et l ancien planning s affiche', async ({ page }) => {
+  await watchBoard(page);
+  await boot(page, {
+    at: APRES, email: true,
+    routes: [{ match: 'action=cleanerMe', status: 0, body: null, fail: true }, ...routesFor(WALTER, 'walter@example.com')],
+  });
+  await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 12_000 });
+  await reste(page, 500);
+});
