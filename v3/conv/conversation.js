@@ -228,9 +228,11 @@ export function currentStep(conv) {
       return { ...st, ...base, camera: false, replies: SUPPLIES.map(x => R("low:" + x, (conv.low.includes(x) ? "✓ " : "") + x)).concat([R("low-done", conv.low.length ? "That's it" : "Nothing")]) };
     case "helper": return { ...st, ...base, camera: false, replies: [R("add-to-lead", "Add to " + a.lead.name + "'s report")] };
     case "linen-send": return { ...st, ...base, camera: false, replies: [R("linen-send", "Send linen count")] };
+    // Deux partages (28/10, demande de Hillal) : WhatsApp recopie le texte sous chaque photo quand
+    // ils partent ensemble. Le texte seul d'abord, puis les photos sans legende.
     case "arrival-send":
-      return { ...st, title: "Send arrival check", camera: false, replies: [R("send-arrival", "Send arrival check")] };
-    case "report": return { ...st, ...base, camera: false, replies: conv.sent ? [R("share-again", "Share again")] : [R("send", "Send to Housekeeping")] };
+      return { ...st, title: "Send arrival check", camera: false, replies: conv.arrivalTextShared ? [R("send-arrival", "Send photos (2/2)")] : [R("send-arrival-text", "Send text (1/2)")] };
+    case "report": return { ...st, ...base, camera: false, replies: conv.sent ? [R("share-again", "Share again")] : conv.reportTextShared ? [R("send", "Send photos (2/2)")] : [R("send-text", "Send report text (1/2)")] };
     default: return { ...st, ...base, camera: false, replies: [] };
   }
 }
@@ -303,6 +305,11 @@ export function reply(conv, id, { now = new Date() } = {}) {
       openFlow(conv, { stage: "kind", from: "damage" });
       break;
     case "damage-done": say(conv, "Damage reported"); advance(conv); break;
+    case "send-arrival-text": case "send-text":
+      if (id === "send-arrival-text") conv.arrivalTextShared = true; else conv.reportTextShared = true;
+      say(conv, "Text sent");
+      conv.messages.push({ from: "app", type: "text", text: "Now send the photos to the same group." });
+      break;
     case "send-arrival":
       // Ce qui est parti : le rapport final ne joint plus ces photos (p.sentPhotos), seulement les nouvelles.
       conv.arrivalSentAt = now;

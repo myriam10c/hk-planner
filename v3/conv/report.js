@@ -13,9 +13,9 @@ export function formatMinutes(n) {
   return Math.floor(n / 60) + NB + "h" + NB + String(n % 60).padStart(2, "0");
 }
 
-// Plafond de photos d'un partage : Chrome Android refuse un partage de plus de 10 fichiers, et
-// l'image du rapport (card.js) en prend un (28/10 : 10 photos + la carte faisaient échouer le partage).
-export const MAX_FILES = 9;
+// Plafond de photos d'un partage : Chrome Android refuse un partage de plus de 10 fichiers.
+// Le texte part dans un partage a part (28/10), les 10 places vont aux photos.
+export const MAX_FILES = 10;
 export const hasFile = x => !!(x && typeof x === "object" && x.file);
 
 const roomsOf = (conv, store) => conv.apt.rooms.flatMap(r => store[r] || []);

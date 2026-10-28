@@ -31,7 +31,7 @@ test("au milieu de l'étape 4 : même étape, mêmes photos, même ordre, rien d
   reply(c, "here", { now: at(10, 0) }); sync();
   addPhoto(c, photo()); sync(); reply(c, "next-room"); // carte d'accès (22/10)
   for (let i = 0; i < 3; i++) { addPhoto(c, photo()); sync(); reply(c, "next-room"); }
-  reply(c, "walls-ok"); reply(c, "no-damage"); reply(c, "send-arrival"); reply(c, "linen-yes");
+  reply(c, "walls-ok"); reply(c, "no-damage"); reply(c, "send-arrival-text"); reply(c, "send-arrival"); reply(c, "linen-yes");
   addPhoto(c, photo()); sync(); reply(c, "next-room"); sync();
   assert.equal(currentStep(c).id, "end-photo");
   assert.equal(currentStep(c).room, "Bathroom");
@@ -89,7 +89,7 @@ test("envoi d'arrivée relu après rechargement : l'heure reste une Date, le rap
   const c = cc(bloom, { me: M, now: t });
   rp(c, "here", { now: t });
   for (let i = 0; i < 4; i++) { ap(c, { url: "u" + i, file: null, idem: "p" + i }); rp(c, "next-room", { now: t }); }
-  rp(c, "walls-ok", { now: t }); rp(c, "no-damage", { now: t }); rp(c, "send-arrival", { now: new Date(2026, 9, 26, 10, 7) });
+  rp(c, "walls-ok", { now: t }); rp(c, "no-damage", { now: t }); rp(c, "send-arrival-text", { now: new Date(2026, 9, 26, 10, 7) }); rp(c, "send-arrival", { now: new Date(2026, 9, 26, 10, 7) });
   const back = des(JSON.parse(JSON.stringify(ser(c))), k => ({ url: "x", file: null, idem: k }));
   assert.ok(back.arrivalSentAt instanceof Date);
   assert.match(rt(back, { now: t }), /\(sent 10:07\)/);

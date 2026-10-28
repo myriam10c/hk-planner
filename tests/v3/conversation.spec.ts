@@ -133,6 +133,7 @@ test('parcours du studio jusqu au rapport en 28 gestes, ✓✓ une fois la file 
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
+  await page.locator('[data-reply="send-arrival-text"]').click();
   await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
@@ -143,21 +144,21 @@ test('parcours du studio jusqu au rapport en 28 gestes, ✓✓ une fois la file 
   await expect(rapport).toContainText('Studio · Next guest: none booked yet');
   await expect(rapport).toContainText('👤 Faiza');
   await expect(rapport).toContainText('Access card: 📷 1');
+  await page.locator('[data-reply="send-text"]').click();
   await page.locator('[data-reply="send"]').click();
   await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
   const partage = await page.evaluate(() => (window as any).__shared);
-  // Arrivee (carte + 3 pieces) partagee avant le menage, puis le rapport final (3 pieces propres).
-  // Un partage par envoi, sans legende (WhatsApp la recopierait sous chaque photo) : le texte part
-  // en premiere image (card.js). Arrivee : carte du texte + carte d'acces + 3 pieces ; fin : carte + 3 pieces.
-  expect(partage.length).toBe(2);
-  expect(partage.map((x: any) => [x.text ?? null, x.files])).toEqual([[null, 5], [null, 4]]);
-  expect(partage[0].first).toMatch(/^HK_1011C-Bloom-Towers_report_.*\.jpg$/);
-  expect(partage[1].first).toMatch(/^HK_1011C-Bloom-Towers_report_.*\.jpg$/);
+  // Deux envois au groupe (arrivee, puis rapport final), chacun en deux partages (28/10) :
+  // le texte seul, puis les photos sans legende (WhatsApp la recopierait sous chaque photo).
+  // Arrivee : carte d'acces + 3 pieces ; fin : 3 pieces propres.
+  expect(partage.map((x: any) => [!!x.text, x.files])).toEqual([[true, 0], [false, 4], [true, 0], [false, 3]]);
+  expect(partage[0].text).toContain('ARRIVAL CHECK · 1011C Bloom Towers');
+  expect(partage[2].text).toContain('READY · 1011C Bloom Towers');
   const etat = await page.evaluate(() => {
     const c = (window as any).__hk.convs['job_0000000000000blm1011'];
     return { gestes: c.gestures, envoye: c.sent };
   });
-  expect(etat).toEqual({ gestes: 28, envoye: true });
+  expect(etat).toEqual({ gestes: 30, envoye: true });
   await fileVide(page);
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.locator('.row').nth(2).locator('.row-sub')).toHaveText('Report sent ✓✓');
@@ -241,6 +242,7 @@ for (const largeur of [360, 390, 430]) {
     await page.locator('[data-reply="check-ok"]').click();
     await page.locator('[data-reply="walls-ok"]').click();
     await page.locator('[data-reply="no-damage"]').click();
+    await page.locator('[data-reply="send-arrival-text"]').click();
     await page.locator('[data-reply="send-arrival"]').click();
     await page.locator('[data-reply="linen-change"]').click();
     await shot('06-linge');

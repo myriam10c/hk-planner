@@ -51,7 +51,6 @@ import {
 } from '/v3/conv/ui.js';
 import { startCameraIfCurrent, stopCamera, streamLive, captureFrame, pickPhoto, canSaveCopy, copyName, saveCopy } from '/v3/conv/camera.js';
 import { shareReport } from '/v3/conv/share.js';
-import { reportCard } from '/v3/conv/card.js';
 
 export const state = {
   session: null,
@@ -855,30 +854,33 @@ async function flowStep(c, id) {
 
 // Partage natif vers le groupe WhatsApp (rapport final ou envoi d'arrivee). Rend true si parti.
 // Echec du partage avec photos : le prochain appui partage le texte seul (c.shareTextOnly).
-async function shareToGroup(c, text, files) {
+// Deux partages vers le groupe (28/10) : le texte seul, puis les photos sans legende (WhatsApp
+// recopierait le texte sous chaque photo s'ils partaient ensemble). Rend true si parti.
+async function shareText(text) {
   busy = true;
-  const textOnly = c.shareTextOnly === true;
-  // Photos + texte en un seul partage, sans legende : le texte part en premiere image (card.js),
-  // sinon WhatsApp le recopierait sous chaque photo. Le texte reste copie (Coller dans WhatsApp).
-  try { const p = navigator.clipboard && navigator.clipboard.writeText(text); if (p && p.catch) p.catch(() => {}); } catch (e) { /* copie facultative */ }
   let r;
-  try {
-    r = textOnly || !files.length ? { ok: false, mode: 'nofiles' }
-      : await shareReport({ text: '', files: [reportCard(text, { name: copyName([[c.apt.num, c.apt.building].filter(Boolean).join(' '), 'report']) })].concat(files) });
-    // Aucune photo, ou le navigateur ne partage pas de fichiers : le texte seul.
-    if (r.mode === 'nofiles') r = await shareReport({ text, files: [], textOnly: true });
-  } catch (e) {
-    r = { ok: false, mode: 'files', error: e && e.message ? e.message : String(e) };
-  } finally { busy = false; }
+  try { r = await shareReport({ text, files: [], textOnly: true }); }
+  catch (e) { r = { ok: false, mode: 'text', error: e && e.message ? e.message : String(e) }; }
+  finally { busy = false; }
   if (r.mode === 'none') { note('This browser cannot share. Open the page in Chrome (Android) or Safari (iPhone).'); render(); return false; }
-  if (!r.ok) {
-    if (r.error && r.mode === 'files') { c.shareTextOnly = true; note('Photos could not be shared. Tap again to share the text only.'); }
-    else if (r.error) note('Share failed: ' + r.error);
-    render(); return false;
-  }
-  c.shareTextOnly = false;
-  if (r.mode === 'text') note(files.length ? 'Text shared without photos.' : 'Shared.');
-  else note('Shared: the report is the first picture. The text is also copied.');
+  if (!r.ok) { if (r.error) note('Share failed: ' + r.error); render(); return false; }
+  note('Text shared. Now send the photos.');
+  return true;
+}
+
+// Aucune photo a joindre, ou ce navigateur ne partage pas de fichiers : on passe (les photos
+// restent sur le serveur et dans la galerie). Annule ou echec : false, on peut reessayer.
+async function sharePhotos(files) {
+  if (!files.length) { note('No new photos to send.'); return true; }
+  busy = true;
+  let r;
+  try { r = await shareReport({ text: '', files }); }
+  catch (e) { r = { ok: false, mode: 'files', error: e && e.message ? e.message : String(e) }; }
+  finally { busy = false; }
+  if (r.mode === 'none') { note('This browser cannot share. Open the page in Chrome (Android) or Safari (iPhone).'); render(); return false; }
+  if (r.mode === 'nofiles') { note('This phone cannot share the photos from here. They are in your gallery.'); return true; }
+  if (!r.ok) { if (r.error) note('Photos could not be shared: ' + r.error + '. Tap again.'); render(); return false; }
+  note('Photos shared.');
   return true;
 }
 
@@ -974,15 +976,27 @@ async function convClick(b) {
   if (d.act === 'delete') { removeProblem(c, Number(d.index)); S.editIndex = null; S.confirmDelete = false; S.toastIndex = null; render(); return; }
   if (d.where && S.editIndex !== null) { editProblem(c, S.editIndex, { where: d.where }); render(); return; }
   if (d.urgency && S.editIndex !== null) { editProblem(c, S.editIndex, { urgency: d.urgency }); render(); return; }
+  if (d.reply === 'send-arrival-text' || d.reply === 'send-text') {
+    if (busy || !currentStep(c).replies.some(r => r.id === d.reply)) return;
+    // Rapport final : la fin du menage part en file des le premier appui, jamais attendue.
+    if (d.reply === 'send-text' && !c.sent) finishNow(c);
+    // Envoi d'arrivee : le texte envoye est fige dans sa bulle (les problemes signales ensuite
+    // vont au rapport final).
+    const text = d.reply === 'send-text' ? reportText(c) : arrivalText(c);
+    if (mode() === 'practice') note('Practice: nothing is shared. The cleaner shares this text to WhatsApp.');
+    else if (!(await shareText(text))) return;
+    if (d.reply === 'send-arrival-text') {
+      const m = c.messages.slice().reverse().find(x => x.type === 'arrival');
+      if (m) m.text = text;
+    }
+    reply(c, d.reply);
+    await after(c);
+    return;
+  }
   if (d.reply === 'send-arrival') {
     if (busy || !currentStep(c).replies.some(r => r.id === 'send-arrival')) return;
-    // Premier envoi (etat a l'arrivee) : partage au groupe, puis le menage continue. Le texte
-    // envoye est fige dans sa bulle (les problemes signales ensuite vont au rapport final).
-    const frozen = arrivalText(c);
-    if (mode() === 'practice') note('Practice: nothing is shared. The cleaner shares this arrival check to WhatsApp.');
-    else if (!(await shareToGroup(c, frozen, arrivalFiles(c)))) return;
-    const m = c.messages.slice().reverse().find(x => x.type === 'arrival');
-    if (m) m.text = frozen;
+    if (mode() === 'practice') note('Practice: nothing is shared. The cleaner shares the photos to WhatsApp.');
+    else if (!(await sharePhotos(arrivalFiles(c)))) return;
     reply(c, 'send-arrival');
     await after(c);
     return;
@@ -1004,8 +1018,9 @@ async function convClick(b) {
         await after(c);
         return;
       }
-      if (!(await shareToGroup(c, reportText(c), reportFiles(c)))) return;
-      if (d.reply === 'share-again') { render(); return; } // ni geste ni bulle
+      // send : les photos (le texte est parti juste avant) ; share-again : le texte seul.
+      if (d.reply === 'share-again') { await shareText(reportText(c)); render(); return; } // ni geste ni bulle
+      if (!(await sharePhotos(reportFiles(c)))) return;
     }
     const prev = c.problems.length;
     reply(c, d.reply);

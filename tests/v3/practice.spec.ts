@@ -305,12 +305,14 @@ test('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part', 
   await expect(page.getByText('No photo: this problem stays in your report.', { exact: false })).toBeVisible();
   await page.locator('[data-flow="no-note"]').click();
   await page.locator('[data-reply="damage-done"]').click();
+  await page.locator('[data-reply="send-arrival-text"]').click();
   await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
   // AC en panne depuis la ligne de sortie : photo facultative, signale tout de suite.
   for (const k of ['gas', 'ac-ko', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
   await page.locator('[data-reply="low-done"]').click();
+  await page.locator('[data-reply="send-text"]').click();
   await page.locator('[data-reply="send"]').click();
   await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
   await expect(page.getByText('Practice: nothing is shared.', { exact: false })).toBeVisible();
@@ -489,11 +491,13 @@ test('6. hors ligne, les gestes marchent et aucun bandeau Saved on device', asyn
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
   await page.locator('[data-reply="walls-ok"]').click();
   await page.locator('[data-reply="no-damage"]').click();
+  await page.locator('[data-reply="send-arrival-text"]').click();
   await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
   for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
   await page.locator('[data-reply="low-done"]').click();
+  await page.locator('[data-reply="send-text"]').click();
   await page.locator('[data-reply="send"]').click();
   await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
   await expect(page.locator('.msg.me .ticks').filter({ hasText: /^✓$/ })).toHaveCount(0);
@@ -765,6 +769,7 @@ test('constat 1 de la revue : Practice puis View as, Exit rend la vraie conversa
   await page.locator('[data-flow="photos-done"]').click();
   await page.locator('[data-flow="no-note"]').click();
   await page.locator('[data-reply="damage-done"]').click();
+  await page.locator('[data-reply="send-arrival-text"]').click();
   await page.locator('[data-reply="send-arrival"]').click();
   await page.locator('[data-reply="linen-yes"]').click();
   await expect(page.locator('.vf-top b')).toHaveText(/^Step 4 · Bed /);
