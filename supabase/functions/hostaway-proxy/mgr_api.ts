@@ -9,6 +9,7 @@ import {
 import { loadProblems, type MgrProblems } from "./mgr_problems.ts";
 import { loadControl, type MgrControl } from "./mgr_control.ts";
 import { loadTodayMaintenance, type MgrTodayMaintenance } from "./mgr_today_mnt.ts";
+import { loadLocationsSafe, type LocPerson } from "./team_locations.ts";
 
 export type MgrToday = {
   day: string; generatedAt: string; bookingsCachedAt: string | null; riskHours: number;
@@ -18,6 +19,8 @@ export type MgrToday = {
   who: MgrWho; problems: MgrProblems; maintenance: MgrTodayMaintenance | null; control: MgrControl; arrivals: MgrArrivals;
   assignable: Array<{ id: number; name: string; role: string }>;
   ticketsByListing: Record<string, MgrTicketLite[]>;
+  // Qui est ou (meme liste que mgr.locations) ; null si la lecture a echoue.
+  locations: LocPerson[] | null;
 };
 
 export async function mgrToday(sb: any, o: {
@@ -36,9 +39,10 @@ export async function mgrToday(sb: any, o: {
   const jobs = buildJobs(core);
   const who = buildWho(core, jobs);
   const arrivals = buildArrivals(core);
-  const [problems, control, maintenance] = await Promise.all([
+  const [problems, control, maintenance, locations] = await Promise.all([
     loadProblems(sb, core, jobs, arrivals.rows), loadControl(sb, core),
     loadTodayMaintenance(sb, { nowMs: o.nowMs, listings: core.listings, people: core.people }),
+    loadLocationsSafe(sb, o.nowMs),
   ]);
   const assignable = Object.values(core.people)
     .filter((p) => p.active && (p.role === "cleaner" || p.role === "subcontractor"))
@@ -57,6 +61,7 @@ export async function mgrToday(sb: any, o: {
       },
       who, problems, maintenance, control, arrivals, assignable,
       ticketsByListing: buildTicketsByListing(core),
+      locations,
     },
   };
 }

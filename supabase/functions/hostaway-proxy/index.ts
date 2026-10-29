@@ -54,6 +54,7 @@ import { healthScore, mgrApartment, mgrApartmentCleanings, mgrApartments, readHe
 import { mntAccess } from "./mnt_rules.ts";
 import { mntDigest, mntList, parseMntQuery } from "./mnt_read.ts";
 import { mntAct } from "./mnt_act.ts";
+import { hostawayCoords, mgrLocations, saveLocation } from "./team_locations.ts";
 import { mntGet, mntPhoto } from "./mnt_get.ts";
 import { mntIngest } from "./mnt_ingest.ts";
 import { parseRemLogQuery, remConfigGet, remConfigSet, remLog, remRead, remRun, remTest } from "./reminders.ts";
@@ -1019,6 +1020,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["mgr.team", "GET"], ["mgr.people", "GET"],
   ["mgr.apartments", "GET"], ["mgr.apartment", "GET"],
   ["mgr.setup", "GET"], ["mgr.reports", "GET"],
+  ["mgr.locations", "GET"],
   // ===== Maintenance (spec 2026-10-12, phase 1) =====
   ["mnt.list", "GET"], ["mnt.digest", "GET"], ["mnt.act", "POST"], ["mnt.proposals.ingest", "POST"],
   ["mnt.get", "GET"], ["mnt.photo", "POST"],
@@ -1192,6 +1194,8 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["v3.deleteProblem", "POST"],
   // Suppression d'une photo depuis sa miniature (branchement 2026-10-05, tache 3)
   ["v3.deletePhoto", "POST"],
+  // Qui est ou (plan 2026-10-29) : derniere position, /v3/ et /manager/
+  ["v3.saveLocation", "POST"],
   // ===== Security contacts (onglet Security, ex security-contacts.json public) =====
   ["getSecurityContacts", "GET"],
   ["setSecurityContacts", "POST"],
@@ -1537,6 +1541,18 @@ Deno.serve(async (req: Request) => {
       return jsonResp(r.body, r.status);
     }
 
+    // Position de la personne connectee (team_locations.ts). Appelee aussi par
+    // /manager/ : meme session (Bearer ou jeton PIN), roles dans V3_ROLES.
+    if (action === "v3.saveLocation" && req.method === "POST") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") return jsonResp({ error: "invalid json body" }, 400);
+      const r = await saveLocation(sb, me, body, Date.now());
+      return jsonResp(r.body, r.status);
+    }
+
     if (action === "v3.myReports" && req.method === "GET") {
       const me = await currentUser(sb, req);
       if (!me) return jsonResp({ error: "auth required" }, 401);
@@ -1791,6 +1807,15 @@ Deno.serve(async (req: Request) => {
       return jsonResp(r.body, r.status);
     }
 
+    // Qui est ou (More > Where is everyone) : managers et maintenance, session email.
+    if (action === "mgr.locations") {
+      const me = await currentUser(sb, req);
+      const acc = planningAccess(bearerToken(req) !== null, me);
+      if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      const r = await mgrLocations(sb, Date.now());
+      return jsonResp(r.body, r.status);
+    }
+
     if (action === "mgr.team") {
       const me = await currentUser(sb, req);
       const acc = mgrAccess(bearerToken(req) !== null, me);
@@ -1955,9 +1980,12 @@ Deno.serve(async (req: Request) => {
         // /listings ci-dessus. Seul ajout a ces ecritures, sur les deux branches :
         // c'est une metadonnee, pas un reglage verrouillable.
         const heroPhotoUrl = heroPhotoFromHostaway(l);
+        // Qui est ou : lat/lng Hostaway, meme statut de metadonnee (deux branches),
+        // absents si non finis pour ne pas effacer une position deja en base.
+        const coords = hostawayCoords(l);
         const payload: any = isLocked
-          ? { listing_id: lid, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString(), hero_photo_url: heroPhotoUrl }
-          : { listing_id: lid, listing_name: l.name || "", bedrooms, price, unit_type: unitType, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString(), hero_photo_url: heroPhotoUrl };
+          ? { listing_id: lid, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString(), hero_photo_url: heroPhotoUrl, ...coords }
+          : { listing_id: lid, listing_name: l.name || "", bedrooms, price, unit_type: unitType, internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString(), hero_photo_url: heroPhotoUrl, ...coords };
         const { error } = await sb.from("listing_config").upsert(payload, { onConflict: "listing_id" });
         if (!error) { synced++; if (isLocked) lockedSkipped++; }
       }

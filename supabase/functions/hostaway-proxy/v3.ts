@@ -80,6 +80,10 @@ export const V3_ROLES: Record<string, string[]> = {
   // Maintenance phase 3 : memes roles que v3.checkTicket.
   "v3.ticketStill": ["cleaner", "subcontractor"],
   "v3.myReports": ["cleaner", "subcontractor"],
+  // Qui est ou (plan 2026-10-29) : cleaners depuis /v3/, managers et maintenance
+  // depuis /manager/ (meme session, Bearer ou jeton PIN). Pas les sous-traitants :
+  // un compte societe n'est pas une personne a localiser.
+  "v3.saveLocation": ["cleaner", "maintenance", "manager"],
 };
 
 // Echoue fermee : une action inconnue de la table n'est autorisee a personne.

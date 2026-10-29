@@ -34,8 +34,8 @@ Deno.test("mgr.today : reponse complete, seuil lu dans app_config", async () => 
   assertEquals(r.status, 200);
   const b: any = r.body;
   assertEquals(Object.keys(b).sort(), [
-    "arrivals", "assignable", "bookingsCachedAt", "control", "day", "generatedAt", "maintenance", "me", "problems",
-    "riskHours", "strip", "ticketsByListing", "who",
+    "arrivals", "assignable", "bookingsCachedAt", "control", "day", "generatedAt", "locations", "maintenance", "me",
+    "problems", "riskHours", "strip", "ticketsByListing", "who",
   ]);
   assertEquals([b.day, b.generatedAt, b.riskHours, b.bookingsCachedAt], [DAY, "2026-10-09T07:00:00.000Z", 3, null]);
   assertEquals(b.me, { id: 8, name: "Walter" });
@@ -81,4 +81,29 @@ Deno.test("mgr.today : lecture maintenance en erreur, maintenance null et le res
   assertEquals(r.status, 200);
   assertEquals(r.body.maintenance, null);
   assertEquals([r.body.strip.cleanings, r.body.problems.top.length], [1, 1]);
+});
+
+Deno.test("mgr.today : locations, memes personnes que mgr.locations (hors sous-traitants et inactifs)", async () => {
+  const sb = db();
+  sb.tables.team_locations = [{ cleaner_id: 4, lat: 25.1, lng: 55.2, accuracy_m: 10, recorded_at: "2026-10-09T06:55:00Z" }];
+  const b: any = (await mgrToday(sb, { day: DAY, nowMs: NOW, me: ME, loadReservations: load })).body;
+  assertEquals(b.locations.map((p: any) => [p.id, p.location?.ageMin ?? null]), [[4, 5], [8, null]]);
+  // Aucun logement geolocalise dans ce jeu : place null.
+  assertEquals(b.locations[0].location.place, null);
+});
+
+Deno.test("mgr.today : lecture des positions en erreur, locations null et le reste de Today servi", async () => {
+  const sb = db();
+  sb.fail["team_locations.select"] = { message: "relation does not exist" };
+  const orig = console.error;
+  console.error = () => {};
+  let r: any;
+  try {
+    r = await mgrToday(sb, { day: DAY, nowMs: NOW, me: ME, loadReservations: load });
+  } finally {
+    console.error = orig;
+  }
+  assertEquals(r.status, 200);
+  assertEquals(r.body.locations, null);
+  assertEquals(r.body.strip.cleanings, 1);
 });

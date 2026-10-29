@@ -21,6 +21,7 @@ const UNIQUE: Record<string, string[]> = {
   extra_cleanings: ["reservation_key"],
   app_config: ["key"],
   maintenance_proposals: ["dedup_key"],
+  team_locations: ["cleaner_id"],
 };
 // Index uniques partiels (WHERE ...) : la contrainte ne vaut que si les deux lignes passent le filtre.
 const UNIQUE_WHERE: Record<string, (r: any) => boolean> = {

@@ -313,14 +313,15 @@ Deno.test("buildMyDay rend heroPhotoUrl depuis listing_config", async () => {
   assertEquals(stopDe(out, "704 Golf Links").heroPhotoUrl, null);
 });
 
-Deno.test("index.ts : syncListings n'ajoute que hero_photo_url, myDay lit la colonne", async () => {
+Deno.test("index.ts : syncListings n'ajoute que hero_photo_url et lat/lng, myDay lit la colonne", async () => {
   const src = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
-  // Ecritures d'avant le correctif, mot pour mot, suivies du seul champ ajoute.
+  // Ecritures d'avant le correctif, mot pour mot, suivies des seuls champs ajoutes
+  // (hero_photo_url, puis lat/lng de qui est ou, 2026-10-29).
   const verrouille = "{ listing_id: lid, internal_name: internalName, apt_number: aptNumber, " +
-    "updated_at: new Date().toISOString(), hero_photo_url: heroPhotoUrl }";
+    "updated_at: new Date().toISOString(), hero_photo_url: heroPhotoUrl, ...coords }";
   const libre = "{ listing_id: lid, listing_name: l.name || \"\", bedrooms, price, unit_type: unitType, " +
     "internal_name: internalName, apt_number: aptNumber, updated_at: new Date().toISOString(), " +
-    "hero_photo_url: heroPhotoUrl }";
+    "hero_photo_url: heroPhotoUrl, ...coords }";
   assertEquals(src.includes("? " + verrouille), true);
   assertEquals(src.includes(": " + libre), true);
   assertEquals(src.includes("const heroPhotoUrl = heroPhotoFromHostaway(l);"), true);
