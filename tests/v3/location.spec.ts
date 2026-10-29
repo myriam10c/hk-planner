@@ -1,0 +1,163 @@
+import { expect, test } from '@playwright/test';
+import { bootV3, fetchLog } from './helpers';
+
+// Position de l'equipe (plan 2026-10-29, tache 2) : avertissement une fois,
+// demande du navigateur seulement apres OK, envoi limite (deplacement > 100 m ou
+// plus de 5 min), rien en Practice. Heure figee a 10:00 Dubai : la fenetre
+// 07:00-23:00 est ouverte quelle que soit l'heure du lancement.
+const DIX_HEURES = new Date('2026-09-12T10:00:00+04:00');
+
+const TEAM = [{ id: 3, name: 'Faiza', role: 'cleaner' }];
+const JOURNEE = {
+  status: 'success', date: '2026-09-12', me: { id: 3, name: 'Faiza', role: 'cleaner' },
+  linenRequired: true, totalMinutes: 0, stops: [],
+};
+const JOUR_MANAGER = {
+  status: 'success', date: '2026-09-12', me: { id: 1, name: 'Hillal', role: 'manager' },
+  linenRequired: true, totalMinutes: 0, stops: [], team: TEAM,
+};
+const JOUR_FAIZA = { ...JOURNEE, viewAs: true, viewer: { id: 1, name: 'Hillal' }, team: TEAM };
+
+const ROUTES = [
+  { match: 'action=v3.myDay&as=3', status: 200, body: JOUR_FAIZA },
+  { match: 'action=v3.myDay', status: 200, body: JOURNEE },
+  { match: 'action=v3.myReports', status: 200, body: { reports: [] } },
+  { match: 'action=v3.saveLocation', status: 200, body: { ok: true, saved: true } },
+];
+
+// Compte les appels a watchPosition : la demande du navigateur part avec lui.
+async function compterWatch(page: any) {
+  await page.addInitScript(() => {
+    try {
+      const proto = (window as any).Geolocation && (window as any).Geolocation.prototype;
+      if (!proto || !proto.watchPosition) return;
+      const vrai = proto.watchPosition;
+      proto.watchPosition = function (this: any, ...args: any[]) {
+        (window as any).__geoWatch = ((window as any).__geoWatch || 0) + 1;
+        return vrai.apply(this, args);
+      };
+    } catch (e) { /* le test le verra */ }
+  });
+}
+
+async function envois(page: any) {
+  return (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.saveLocation') !== -1);
+}
+
+test.beforeEach(async ({ page, context }) => {
+  await page.clock.setFixedTime(DIX_HEURES);
+  await context.grantPermissions(['geolocation']);
+  await context.setGeolocation({ latitude: 25.08, longitude: 55.14, accuracy: 12 });
+  await compterWatch(page);
+});
+
+test('avertissement une fois : Not now ne demande rien et ne revient pas le meme jour', async ({ page }) => {
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: null });
+  const gate = page.locator('#locgate');
+  await expect(gate.getByRole('heading', { name: 'Share your location' })).toBeVisible();
+  await expect(gate).toContainText('between 7 AM and 11 PM');
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+  await gate.getByRole('button', { name: 'Not now' }).click();
+  await expect(gate).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice'))).toBe('later:2026-09-12');
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
+  await page.waitForTimeout(800);
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+  expect(await envois(page)).toHaveLength(0);
+});
+
+test('OK partage la position, puis seulement si deplacement > 100 m ou plus de 5 min', async ({ page, context }) => {
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: null });
+  await page.locator('#locgate').getByRole('button', { name: 'OK' }).click();
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice'))).toBe('ok');
+
+  await expect.poll(async () => (await envois(page)).length).toBe(1);
+  const corps = JSON.parse((await envois(page))[0].body);
+  expect(corps.lat).toBeCloseTo(25.08, 5);
+  expect(corps.lng).toBeCloseTo(55.14, 5);
+  expect(corps.accuracy).toBe(12);
+  expect(typeof corps.recordedAt).toBe('string');
+  expect(Number.isNaN(Date.parse(corps.recordedAt))).toBe(false);
+
+  // ~44 m, meme minute : rien.
+  await context.setGeolocation({ latitude: 25.0804, longitude: 55.14, accuracy: 12 });
+  await page.waitForTimeout(1500);
+  expect(await envois(page)).toHaveLength(1);
+
+  // ~220 m : envoye.
+  await context.setGeolocation({ latitude: 25.082, longitude: 55.14, accuracy: 12 });
+  await expect.poll(async () => (await envois(page)).length).toBe(2);
+
+  // Six minutes plus tard, quasi immobile : envoye quand meme.
+  await page.clock.setFixedTime(new Date(DIX_HEURES.getTime() + 6 * 60 * 1000));
+  await context.setGeolocation({ latitude: 25.08201, longitude: 55.14, accuracy: 12 });
+  await expect.poll(async () => (await envois(page)).length).toBe(3);
+});
+
+test('hors fenetre (23:30 Dubai) : ni avertissement ni demande', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-12T23:30:00+04:00'));
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: null });
+  await page.waitForTimeout(800);
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+});
+
+test('Practice : ni avertissement, ni demande de position, ni envoi', async ({ page }) => {
+  const routes = [{ match: 'action=v3.myDay&as=3', status: 200, body: JOUR_FAIZA },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER }, ...ROUTES.slice(2)];
+  await bootV3(page, routes, { pinToken: 'jeton-manager', hash: '#/profile' });
+  await page.getByRole('button', { name: 'Practice as Faiza' }).click();
+  await expect(page.locator('.practicebar')).toContainText('Practice as Faiza');
+
+  // Avertissement jamais repondu : il ne s'ouvre pas en Practice.
+  await page.evaluate(() => localStorage.removeItem('hkLocNotice'));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
+  await expect(page.locator('.practicebar')).toContainText('Practice as Faiza');
+  await page.waitForTimeout(1000);
+  await expect(page.locator('#locgate')).toHaveCount(0);
+
+  // Partage deja accepte : toujours aucune demande ni envoi en Practice.
+  await page.evaluate(() => localStorage.setItem('hkLocNotice', 'ok'));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
+  await expect(page.locator('.practicebar')).toContainText('Practice as Faiza');
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+  expect(await envois(page)).toHaveLength(0);
+  // Profile en Practice : pas de ligne de partage.
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await expect(page.getByText('Try the cleaner app')).toBeVisible();
+  await expect(page.locator('.locrow')).toHaveCount(0);
+});
+
+test('Profile : la ligne Location sharing dit On et rouvre l avertissement', async ({ page }) => {
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: 'ok', hash: '#/profile' });
+  const ligne = page.locator('.locrow');
+  await expect(ligne).toContainText('Location sharing');
+  await expect(ligne).toContainText('On');
+  await ligne.click();
+  await page.locator('#locgate').getByRole('button', { name: 'Not now' }).click();
+  await expect(ligne).toContainText('Off');
+  await ligne.click();
+  await page.locator('#locgate').getByRole('button', { name: 'OK' }).click();
+  await expect(ligne).toContainText('On');
+});
+
+test('Profile : position bloquee par le navigateur, aide pour Chrome', async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      const p = (navigator as any).permissions;
+      const vrai = p.query.bind(p);
+      p.query = (d: any) => (d && d.name === 'geolocation' ? Promise.resolve({ state: 'denied' }) : vrai(d));
+    } catch (e) { /* le test le verra */ }
+  });
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: 'ok', hash: '#/profile' });
+  await expect(page.locator('.locrow')).toContainText('Blocked');
+  await expect(page.locator('.lochelp')).toHaveText(
+    'Location is blocked. In Chrome: tap the lock icon next to the address, then Permissions, then Location, Allow.');
+});

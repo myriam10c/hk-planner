@@ -1226,7 +1226,7 @@ export async function boot() {
       .catch(function (e) { console.warn('[v3] service worker non enregistre', e); });
   }
   window.__v3ready = true;
-  proposerNotifications();
+  proposerNotifications().then(proposerLocalisation);
 }
 
 // Ecran « Turn on notifications » (rappels automatiques) : apres une journee
@@ -1234,12 +1234,29 @@ export async function boot() {
 // les appels partiraient au simulateur). Import dynamique : /v3/push.js n'est
 // pas dans le precache, et un echec (hors ligne) ne touche jamais l'app.
 function proposerNotifications() {
-  if (!state.session || state.session.kind === 'stale') return;
-  if (state.viewAs || practiceActive() || state.error || !state.day || state.jourGarde) return;
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-  import('/v3/push.js')
+  if (!state.session || state.session.kind === 'stale') return Promise.resolve();
+  if (state.viewAs || practiceActive() || state.error || !state.day || state.jourGarde) return Promise.resolve();
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve();
+  return import('/v3/push.js')
     .then(function (m) { return m.mountPushPrompt(); })
     .catch(function (e) { console.warn('[v3] ecran notifications indisponible', e); });
+}
+
+// Position de l'equipe (plan 2026-10-29) : memes conditions que les
+// notifications, apres elles (location.js attend que leur ecran soit ferme).
+// Jamais en Practice ni en View as : la condition est relue a chaque envoi, un
+// mode choisi plus tard coupe aussi les envois. Import dynamique, hors precache.
+export function partageAutorise() {
+  return !!state.session && state.session.kind !== 'stale' && !state.viewAs && !practiceActive();
+}
+
+function proposerLocalisation() {
+  if (!partageAutorise() || state.error || !state.day || state.jourGarde) return;
+  if (state.day.viewAs) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  import('/v3/location.js')
+    .then(function (m) { m.startLocation(partageAutorise); })
+    .catch(function (e) { console.warn('[v3] partage de position indisponible', e); });
 }
 
 boot();

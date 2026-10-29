@@ -47,6 +47,12 @@
 .pushgate-in .btn-primary { margin-top: 24px; min-height: 64px; font-size: 19px; }
 .pushgate-err { color: var(--ember-ink); font-weight: 700; }
 .pushgate-later { display: block; margin: 18px auto 0; min-height: 44px; padding: 0 16px; border: 0; background: transparent; color: var(--mute); font-size: 15px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+/* Partage de position (Profile) */
+.locrow { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 58px; margin: 18px 0 0; padding: 0 16px; border: 1px solid var(--line); border-radius: 15px; background: var(--card); color: var(--ink); font-size: 16px; font-weight: 700; text-align: left; cursor: pointer; }
+.locrow svg { flex: 0 0 auto; color: var(--terra); }
+.locrow b { margin-left: auto; font-family: var(--disp); font-weight: 800; }
+.locrow[data-state="blocked"] b { color: var(--ember-ink); }
+.lochelp { margin: 8px 2px 0; font-size: 14.5px; line-height: 1.45; color: var(--ink); }
 
 /* Coquille statique : le lien n'apparait que si /v3/app.js n'a pas pris la main en 4 s. */
 .boot-fallback a { visibility: hidden; animation: boot-fallback-show 0s linear 4s forwards; }

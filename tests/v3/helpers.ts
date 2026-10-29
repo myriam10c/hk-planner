@@ -38,10 +38,14 @@ export async function bootV3(
     authRoutes?: FakeRoute[];
     // Pose le drapeau v3TestOffline des le premier document (une seule fois).
     offline?: boolean;
+    // Choix de l'avertissement « Share your location » (hkLocNotice), seme une
+    // fois. Par defaut repousse a une date lointaine : l'avertissement ne couvre
+    // pas l'app et aucune position n'est demandee. null : rien n'est seme.
+    locNotice?: string | null;
   } = {},
 ) {
   await page.addInitScript(
-    (cfg: { routes: FakeRoute[]; authRoutes: FakeRoute[]; pinToken: string | null; emailSession: any; offline: boolean }) => {
+    (cfg: { routes: FakeRoute[]; authRoutes: FakeRoute[]; pinToken: string | null; emailSession: any; offline: boolean; locNotice: string | null }) => {
       // Rien n'est efface ici : addInitScript rejoue a chaque navigation, et un
       // effacement emporterait le drapeau hors ligne et le journal d'un test qui
       // recharge la page. Chaque test part de toute facon d'un contexte neuf.
@@ -56,6 +60,7 @@ export async function bootV3(
           if (cfg.pinToken) localStorage.setItem('cleanerToken', cfg.pinToken);
           if (cfg.emailSession) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.emailSession));
           if (cfg.offline) localStorage.setItem('v3TestOffline', '1');
+          if (cfg.locNotice) localStorage.setItem('hkLocNotice', cfg.locNotice);
         }
         // Ecran « Turn on notifications » / « Add to Home Screen » (relances push du 21/10) :
         // ecarte comme apres « Not now », sinon il couvre l'app dans chaque test.
@@ -147,6 +152,7 @@ export async function bootV3(
     {
       routes, authRoutes: opts.authRoutes ?? [], pinToken: opts.pinToken ?? null,
       emailSession: opts.emailSession ?? null, offline: !!opts.offline,
+      locNotice: opts.locNotice === undefined ? 'later:2999-12-31' : opts.locNotice,
     },
   );
   await page.goto('/v3/' + (opts.hash || ''), { waitUntil: 'domcontentloaded' });

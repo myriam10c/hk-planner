@@ -1,7 +1,9 @@
 // Profile : qui je suis, la porte vers les ecrans que la v3 ne refait pas encore
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
-import { CLE_VIEW_AS, leaveModeForSignOut, practicing, queueStrip, render, startPractice, startViewAs } from '/v3/app.js';
+import {
+  CLE_VIEW_AS, leaveModeForSignOut, partageAutorise, practicing, queueStrip, render, startPractice, startViewAs,
+} from '/v3/app.js';
 import { clearDead, clearFiles, deadEntries, deleteState, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
 import { dayWord } from '/v3/conv/day.js';
@@ -91,6 +93,21 @@ function mesRapports(state) {
   return h + '</div><div class="pad">';
 }
 
+// Partage de position (plan 2026-10-29) : l'etat vient de /v3/location.js, lu
+// par prepare (import dynamique, hors precache : hors ligne la ligne n'apparait
+// pas). Jamais en View as ni en Practice, ou le telephone joue quelqu'un d'autre.
+const MOT_POSITION = { on: 'On', off: 'Off', blocked: 'Blocked' };
+
+function lignePosition(state) {
+  const st = state.loc;
+  if (!MOT_POSITION[st] || state.viewAs) return '';
+  return '<button class="locrow" type="button" data-act="location" data-state="' + esc(st) + '">' +
+      icon('pin', 20) + '<span>Location sharing</span><b>' + MOT_POSITION[st] + '</b></button>' +
+    (st === 'blocked'
+      ? '<p class="lochelp" role="note">' + esc(state.locHelp || '') + '</p>'
+      : '');
+}
+
 function view(state) {
   const jour = state.day || {};
   const me = jour.me || { name: '', role: '' };
@@ -106,6 +123,7 @@ function view(state) {
       '<h1 style="font-family:var(--disp);font-size:26px;margin:0">' + esc(me.name) + '</h1>' +
       '<p class="muted">' + esc(me.role) + '</p>' +
       mesRapports(state) +
+      lignePosition(state) +
       refuses(state) +
       selecteurEquipe(state) +
       '<p class="muted" style="margin-top:18px">Leave requests, linen at the store and your history are still in ' +
@@ -193,6 +211,13 @@ const actions = {
   practice(state, el) {
     return startPractice({ id: el.getAttribute('data-id'), name: el.getAttribute('data-name') });
   },
+  async location(state) {
+    const m = await import('/v3/location.js');
+    m.startLocation(partageAutorise, false);
+    await m.openLocationNotice();
+    state.loc = await m.locationState();
+    if (String(location.hash || '') === '#/profile') render();
+  },
   async 'clear-dead'(state) {
     await clearDead();
     state.dead = [];
@@ -272,8 +297,23 @@ export async function prepare(state) {
   } catch (e) {
     state.dead = [];
   }
+  chargerPosition(state, n);
   if (!voitSesRapports(state)) return;
   chargerRapports(state, n);
+}
+
+// Etat du partage de position, sans attendre : la ligne apparait au redessin.
+async function chargerPosition(state, n) {
+  let st = null, aide = '';
+  try {
+    const m = await import('/v3/location.js');
+    st = await m.locationState();
+    aide = m.BLOCKED_HELP;
+  } catch (e) { st = null; }
+  if (n !== lecture || state.loc === st) return;
+  state.loc = st;
+  state.locHelp = aide;
+  if (String(location.hash || '') === '#/profile') render();
 }
 
 // Relus a chaque ouverture de Profile. Hors ligne : une phrase ; toute autre
