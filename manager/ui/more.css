@@ -308,3 +308,31 @@ a.hr-row:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .sc-val{font-family:ui-monospace,Menlo,monospace;overflow-wrap:anywhere;min-width:0}
 .sc-cred .btn{min-height:44px;font-size:16px}
 .sc-docs{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2)}
+/* Where is everyone : carte (contexte d'empilement propre, Leaflet sous la barre d'onglets), liste. */
+.loc{display:flex;flex-direction:column;gap:var(--s3);max-width:960px}
+.loc-refresh{min-height:44px;font-size:16px}
+.loc-map{position:relative;z-index:0;isolation:isolate;height:45vh;min-height:260px;max-height:560px;background:var(--sunk)}
+.loc-map .leaflet-control-attribution{font-size:11px}
+.loc-map .leaflet-popup-content-wrapper,.loc-map .leaflet-popup-tip{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.loc-map .leaflet-popup-content{margin:10px 14px;font-family:var(--font-ui);font-size:15px;line-height:1.4}
+.loc-map .leaflet-bar a{background:var(--surface);color:var(--ink);border-color:var(--line)}
+.loc-pop-age{color:var(--ink-3)}
+.loc-icon{background:none;border:0}
+.loc-pin{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);font:600 13px/1 var(--font-ui);letter-spacing:.02em}
+.loc-pin.stale{opacity:.55;filter:grayscale(.6)}
+.loc-list{list-style:none;margin:0;padding:0 var(--s2) var(--s2)}
+.loc-list li+li{border-top:1px solid var(--line)}
+.loc-row{display:flex;align-items:center;gap:var(--s3);width:100%;min-height:64px;padding:var(--s2) var(--s3);background:transparent;border:0;color:var(--ink);font:inherit;font-size:16px;text-align:left;min-width:0}
+button.loc-row{cursor:pointer}
+button.loc-row:hover{background:var(--surface-2)}
+button.loc-row:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.loc-row.stale,.loc-row.none{color:var(--ink-3)}
+.loc-row.stale .loc-av,.loc-row.none .loc-av{opacity:.5}
+.loc-av{flex:none;display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;font-weight:600;font-size:14px}
+.loc-txt{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.loc-nm{font-weight:600;display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap;overflow-wrap:anywhere}
+.loc-rl{font-weight:400;font-size:14px;color:var(--ink-3)}
+.loc-where{color:var(--ink-2);overflow-wrap:anywhere}
+.loc-row.stale .loc-where,.loc-row.none .loc-where{color:var(--ink-3)}
+.loc-age{flex:none;font-size:14px;color:var(--ink-2);font-variant-numeric:tabular-nums;text-align:right;max-width:40%}
+.loc-row.stale .loc-age{color:var(--ink-3)}

@@ -1,5 +1,5 @@
-// More > Settings : autopilote, notifications de cet appareil, objectif d'inspections,
-// checklists (lecture seule). Lecture : mgr.settings. Ecritures : mgr.settings.set et
+// More > Settings : autopilote, notifications et partage de position de cet appareil,
+// objectif d'inspections, checklists (lecture seule). Lecture : mgr.settings. Ecritures : mgr.settings.set et
 // mgr.autopilot.run, jamais d'auteur envoye (le proxy le prend de la session).
 // Les liens WhatsApp sont rendus pour un tap manuel, jamais ouverts par le code.
 import { get, post } from '/manager/api.js';
@@ -9,6 +9,10 @@ import { disablePush, enablePush, pushState, testPush } from '/manager/push.js';
 const PUSH_LINE = {
   on: 'On for this device', off: 'Off',
   denied: 'Blocked in the browser settings', unsupported: 'Not supported on this device',
+};
+// Partage de position (plan 2026-10-29) : etat lu dans /manager/location.js.
+const LOC_LINE = {
+  on: 'On for this device', off: 'Off', blocked: 'Location is blocked', unsupported: 'Not available on this device',
 };
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 
@@ -22,7 +26,7 @@ const errLine = (msg) => (msg ? '<p class="set-err" role="alert">' + esc(msg) + 
 export async function renderSettings(ctx) {
   const main = ctx.main;
   const st = {
-    data: null, push: 'off', target: '',
+    data: null, push: 'off', loc: 'unsupported', locHelp: '', target: '',
     err: { autopilot: '', run: '', push: '', target: '' },
     busy: { autopilot: false, run: false, push: false, target: false },
     run: null, want: false,
@@ -79,6 +83,18 @@ export async function renderSettings(ctx) {
       + '<p class="set-sub">Quiet hours 22:00 to 08:30 Dubai time.</p></div>';
   }
 
+  // Le bouton rouvre l'avertissement « Share your location » : OK ou Not now, comme a l'ouverture.
+  function locationCard() {
+    const s = st.loc;
+    const btn = s === 'unsupported' ? ''
+      : '<div class="set-actions"><button class="btn' + (s === 'on' ? '' : ' primary') + '" type="button" data-loc-open>'
+        + (s === 'on' ? 'Change' : 'Share my location') + '</button></div>';
+    return '<div class="sec-head"><h2>Location sharing</h2></div><div class="set-body">'
+      + '<p class="set-line" data-loc-state>' + esc(LOC_LINE[s] || LOC_LINE.off) + '</p>'
+      + (s === 'blocked' && st.locHelp ? '<p class="set-sub">' + esc(st.locHelp) + '</p>' : '')
+      + btn + '<p class="set-sub">Only while HK Planner is open, 7 AM to 11 PM Dubai time.</p></div>';
+  }
+
   function inspectionsCard() {
     const d = st.data;
     const dis = st.busy.target ? ' disabled' : '';
@@ -101,7 +117,7 @@ export async function renderSettings(ctx) {
     return '<div class="sec-head"><h2>Checklists</h2></div><div class="set-body">' + list + '</div>';
   }
 
-  const CARDS = { autopilot: autopilotCard, push: pushCard, inspections: inspectionsCard, checklists: checklistsCard };
+  const CARDS = { autopilot: autopilotCard, push: pushCard, location: locationCard, inspections: inspectionsCard, checklists: checklistsCard };
 
   // Repeint une seule carte : la saisie en cours des autres cartes reste en place.
   function paintCard(name) {
@@ -139,7 +155,19 @@ export async function renderSettings(ctx) {
       return;
     }
     st.push = await pushState().catch(() => 'unsupported');
+    await readLoc();
+    if (!ctx.isCurrent()) return;
     paintAll();
+  }
+
+  // Import dynamique : un echec (hors ligne) laisse la carte en « Not supported ».
+  async function locModule() {
+    try { return await import('/manager/location.js'); } catch (e) { return null; }
+  }
+  async function readLoc() {
+    const m = await locModule();
+    st.loc = m ? await m.locationState() : 'unsupported';
+    st.locHelp = m ? m.BLOCKED_HELP : '';
   }
 
   // Une ecriture : controle desactive pendant l'envoi, message du serveur en ligne en cas d'echec.
@@ -182,6 +210,18 @@ export async function renderSettings(ctx) {
         await setSetting('inspectionTarget', raw === '' ? null : Number(raw));
         st.target = String(st.data.inspectionTarget);
       });
+      return;
+    }
+    if (t.hasAttribute('data-loc-open')) {
+      (async () => {
+        const m = await locModule();
+        if (!m) return;
+        // Le partage n'a peut-etre pas demarre a l'ouverture (hors fenetre, hors ligne).
+        m.startLocation(() => !!ctx.me, false);
+        await m.openLocationNotice();
+        await readLoc();
+        paintCard('location');
+      })();
       return;
     }
     if (t.hasAttribute('data-push-on')) {

@@ -173,7 +173,17 @@ async function boot() {
   rememberRole(cleaner.id, cleaner.role);
   await startShell();
   // Rappel d'abonnement aux notifications : seulement une session confirmee par le serveur.
-  import('/manager/push-bar.js').then((m) => m.mountPushBar()).catch(() => { /* bandeau facultatif */ });
+  import('/manager/push-bar.js').then((m) => m.mountPushBar()).catch(() => { /* bandeau facultatif */ })
+    .then(startLocation);
+}
+
+// Position de l'equipe (plan 2026-10-29) : apres l'ecran des notifications
+// (location.js attend qu'il soit ferme). Seulement une session confirmee par le
+// serveur : `me` pose plus haut, relu a chaque envoi.
+function startLocation() {
+  import('/manager/location.js')
+    .then((m) => m.startLocation(() => !!me))
+    .catch(() => { /* partage facultatif */ });
 }
 
 boot().catch((e) => { console.error('[manager] boot failed', e); }).finally(() => { window.__mgrReady = true; });

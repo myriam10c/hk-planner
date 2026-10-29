@@ -3,6 +3,7 @@
 import { esc, I } from '/manager/ui/dom.js';
 
 const SECTIONS = {
+  locations: ['/manager/screens/more-locations.js', 'renderLocations'],
   settings: ['/manager/screens/more-settings.js', 'renderSettings'],
   team: ['/manager/screens/more-team.js', 'renderTeam'],
   reviews: ['/manager/screens/more-reviews.js', 'renderReviews'],
@@ -19,11 +20,12 @@ const WITH_ID = new Set(['apartment', 'hr', 'setup']);
 
 const ROWS = [
   { title: 'Tasks', desc: 'Team tasks: assign, schedule and close', href: '#/tasks' },
+  { title: 'Where is everyone', desc: 'Last known position of each person, on a map', href: '#/more/locations' },
   { title: 'Team', desc: 'Accounts, roles and invitations', href: '#/more/team' },
   { title: 'Apartment', desc: 'One sheet per apartment: cleanings, linen, tickets, inspections, security contacts', href: '#/more/apartment' },
   { title: 'Security', desc: 'Security contacts of every building: call, WhatsApp, portals and passwords', href: '#/more/security' },
   { title: 'Reviews', desc: 'Review disputes', href: '#/more/reviews' },
-  { title: 'Settings', desc: 'Autopilot, notifications, inspection target, checklists', href: '#/more/settings' },
+  { title: 'Settings', desc: 'Autopilot, notifications, location sharing, inspection target, checklists', href: '#/more/settings' },
   { title: 'Reminders', desc: 'Automatic push reminders: rules, delays, quiet hours, log', href: '#/more/reminders' },
   { title: 'HR and leave', desc: 'Leave requests, balances, documents, public holidays', href: '#/more/hr' },
   { title: 'Ratings and stats', desc: 'Cleanliness ratings, cleanings and times per person', href: '#/more/people' },

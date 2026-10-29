@@ -2,6 +2,7 @@
 // reseau ici, aucun calcul de statut : le proxy les rend deja faits.
 import { addDays, aptLabel, dubaiTime, esc, I, placeLabel } from '/manager/ui/dom.js';
 import { photosBlk } from '/manager/ui/job-photos.js';
+import { isStale, locLine } from '/manager/ui/location-text.js';
 import { dayShort, jobsOn, namesOf as plNamesOf, nextLine as plNextLine } from '/manager/screens/planning-rules.js';
 
 const ROLE = { cleaner: 'Cleaner', subcontractor: 'Subcontractor', manager: 'Manager', maintenance: 'Maintenance' };
@@ -107,12 +108,21 @@ function dayChips(a) {
 }
 const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
 
-function whoHtml(data, ro, ahead) {
+// Position de la personne (data.locations, plan 2026-10-29) : petite ligne sous le role,
+// rien si la position est absente ou si le proxy n'a pas pu la lire (null).
+function locHtml(data, id, nowMs) {
+  const p = Array.isArray(data.locations) ? data.locations.find((x) => Number(x.id) === Number(id)) : null;
+  const line = p && p.location ? locLine(p.location, nowMs) : '';
+  if (!line) return '';
+  return '<div class="loc-ln' + (isStale(p.location, nowMs) ? ' stale' : '') + '">' + esc(line) + '</div>';
+}
+
+function whoHtml(data, ro, ahead, nowMs) {
   if (ahead && ahead.sel !== ahead.days[0]) return aheadHtml(ahead);
   const byKey = jobsByKey(data);
   const w = data.who;
-  let h = '<section class="card o1" aria-labelledby="h-who"><div class="sec-head"><h2 id="h-who">Who does what today</h2><span class="meta tnum">'
-    + w.jobs.length + ' cleaning' + (w.jobs.length === 1 ? '' : 's') + '</span></div>' + dayChips(ahead);
+  let h = '<section class="card o1" aria-labelledby="h-who"><div class="sec-head"><h2 id="h-who">Who does what today</h2><span class="sec-side"><span class="meta tnum">'
+    + w.jobs.length + ' cleaning' + (w.jobs.length === 1 ? '' : 's') + '</span><a class="sec-link" href="#/more/locations">Map</a></span></div>' + dayChips(ahead);
   const list = w.unassigned.map((k) => byKey[k]).filter(Boolean);
   if (list.length) {
     h += '<div class="person unassigned"><div class="person-h"><span class="av" aria-hidden="true">!</span><div><div class="nm">Not assigned</div>'
@@ -133,12 +143,12 @@ function whoHtml(data, ro, ahead) {
   for (const p of w.people) {
     const jobs = p.keys.map((k) => byKey[k]).filter(Boolean);
     h += '<div class="person"><div class="person-h"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><div><div class="nm">' + esc(p.name)
-      + '</div><div class="rl">' + esc(ROLE[p.role] || p.role) + '</div></div><span class="cnt">' + jobs.length + '</span></div><div class="jobs">'
+      + '</div><div class="rl">' + esc(ROLE[p.role] || p.role) + '</div>' + locHtml(data, p.id, nowMs) + '</div><span class="cnt">' + jobs.length + '</span></div><div class="jobs">'
       + (jobs.length ? jobs.map(jobBtn).join('') : '<div class="empty">Nothing recorded for today in HK Planner.</div>') + '</div></div>';
   }
   for (const t of w.technicians) {
     h += '<div class="person"><div class="person-h"><span class="av" aria-hidden="true">' + esc(initials(t.name)) + '</span><div><div class="nm">' + esc(t.name)
-      + '</div><div class="rl">Maintenance tickets</div></div><span class="cnt">' + t.open + '</span></div>'
+      + '</div><div class="rl">Maintenance tickets</div>' + locHtml(data, t.id, nowMs) + '</div><span class="cnt">' + t.open + '</span></div>'
       + (t.oldest ? '<div class="empty">Oldest: <span class="mono">MNT-' + t.oldest.id + '</span> ' + esc(t.oldest.title) + ', since ' + esc(t.oldest.since) + '.</div>' : '')
       + '</div>';
   }
@@ -266,7 +276,7 @@ function arrivalsHtml(data) {
 // ahead : { days, sel, week } pour les jours du bloc « Who does what » (sel = days[0] : aujourd'hui).
 export function boardHtml(data, nowMs, banner, stale, ro, ahead) {
   return header(data, banner, stale) + alertHtml(data, nowMs) + stripHtml(data)
-    + '<div class="board"><div class="col">' + whoHtml(data, ro, ahead) + controlHtml(data) + '</div><div class="col">'
+    + '<div class="board"><div class="col">' + whoHtml(data, ro, ahead, nowMs) + controlHtml(data) + '</div><div class="col">'
     + maintenanceHtml(data) + arrivalsHtml(data) + '</div></div>';
 }
 
