@@ -3,14 +3,18 @@
 // Dubai, choix garde de l'avertissement, watchPosition borne a la page visible,
 // envoi limite (deplacement > 100 m ou dernier envoi > 5 min), battement de
 // coeur a la minute pour un telephone immobile, pause de 5 min apres un echec,
-// arret pour la page apres un 401/403.
+// arret pour la page apres un 401/403 ou une reponse « not_shared » (personne
+// dont le partage est coupe cote serveur, cleaners.share_location = false).
 // Module ES sans dependance. Jamais d'exception vers l'appelant : pas de
 // geolocalisation, permission refusee ou stockage indisponible, on se tait.
 // Aucun ecran ici : l'avertissement est dessine par chaque app.
 
-// Choix garde par personne (telephone partage) : cle 'hkLocNotice:<cleanerId>',
-// valeur 'ok' | 'later:<YYYY-MM-DD>' (jour de Dubai).
-export const NOTICE_KEY = 'hkLocNotice';
+// Choix garde par personne (telephone partage) : cle 'hkLocNotice2:<cleanerId>',
+// valeur 'ok' | 'later:<YYYY-MM-DD>' (jour de Dubai) | 'later:page' (« Not now »
+// d'un cleaner : redemande a la prochaine ouverture de l'app). Le suffixe 2
+// (29/10) redemande a tout le monde, les anciennes cles 'hkLocNotice:' sont ignorees.
+export const NOTICE_KEY = 'hkLocNotice2';
+export const LATER_PAGE = 'later:page';
 export const WINDOW_START_MIN = 7 * 60;       // 07:00 Dubai
 export const WINDOW_END_MIN = 23 * 60;        // 23:00 Dubai, exclu
 export const MIN_MOVE_M = 100;
@@ -72,6 +76,8 @@ export function shouldSend(last, pos, nowMs) {
 }
 
 // Valeur stockee -> 'ok' | 'later' (deja repondu aujourd'hui) | 'ask'.
+// 'later:page' rend 'ask' : seul le « Not now » de la page en cours (memoire,
+// voir readNotice) le tient pour 'later'.
 export function noticeAnswer(raw, nowMs) {
   if (raw === 'ok') return 'ok';
   const m = /^later:(\d{4}-\d{2}-\d{2})$/.exec(String(raw || ''));
@@ -87,6 +93,7 @@ function readKey(k) { try { return localStorage.getItem(k); } catch (e) { return
 function writeKey(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* stockage indisponible */ } }
 
 let personne = null;     // id de la personne connectee (cle du choix)
+let plusTardPage = null; // id de la personne qui a dit « Not now » sur cette page (jusqu'au rechargement)
 
 // Pose la personne dont on lit et ecrit le choix. Sans personne connue : 'ask'
 // a la lecture et rien n'est ecrit, donc jamais de partage.
@@ -98,13 +105,23 @@ export function noticeKey(id) { return NOTICE_KEY + ':' + id; }
 
 export function readNotice(nowMs) {
   if (personne === null) return 'ask';
-  return noticeAnswer(readKey(noticeKey(personne)), nowMs === undefined ? Date.now() : nowMs);
+  const rep = noticeAnswer(readKey(noticeKey(personne)), nowMs === undefined ? Date.now() : nowMs);
+  if (rep === 'ask' && plusTardPage === personne) return 'later';
+  return rep;
 }
 
-// 'ok' ou 'later' (redemande le jour suivant a Dubai).
-export function setNotice(answer, nowMs) {
+// 'ok' ou 'later'. untilReload faux : redemande le jour suivant a Dubai (managers).
+// untilReload vrai (cleaners) : 'later:page' en stockage, plus rien demande sur
+// cette page, redemande a la prochaine ouverture de l'app.
+export function setNotice(answer, nowMs, untilReload) {
   if (personne === null) return;
-  writeKey(noticeKey(personne), answer === 'ok' ? 'ok' : 'later:' + dubaiDay(nowMs === undefined ? Date.now() : nowMs));
+  if (answer === 'ok') { plusTardPage = null; writeKey(noticeKey(personne), 'ok'); return; }
+  if (untilReload) {
+    plusTardPage = personne;
+    writeKey(noticeKey(personne), LATER_PAGE);
+    return;
+  }
+  writeKey(noticeKey(personne), 'later:' + dubaiDay(nowMs === undefined ? Date.now() : nowMs));
 }
 
 export function geoSupported() {
@@ -136,7 +153,7 @@ let last = null;         // dernier envoi reussi
 let enCours = false;     // un envoi a la fois
 let refusVu = false;
 let pauseJusqua = 0;     // apres un echec, aucun envoi avant cette heure
-let coupe = false;       // 401/403 : plus aucun envoi jusqu'au rechargement
+let coupe = false;       // 401/403 ou not_shared : plus aucun envoi jusqu'au rechargement
 let battementEnCours = false;
 let ecouteVisibilite = false;
 
@@ -182,12 +199,18 @@ async function envoyer(pos) {
   enCours = true;
   try {
     const recorded = isFinite(pos.timestamp) && pos.timestamp > 0 ? pos.timestamp : t;
-    await cfg.post({
+    const rep = await cfg.post({
       lat: point.lat,
       lng: point.lng,
       accuracy: isFinite(c.accuracy) ? Math.max(0, c.accuracy) : null,
       recordedAt: new Date(recorded).toISOString(),
     });
+    if (rep && rep.reason === 'not_shared') {
+      // Partage coupe pour cette personne cote serveur : aucun nouvel essai sur cette page.
+      coupe = true;
+      stopWatch();
+      return;
+    }
     last = { lat: point.lat, lng: point.lng, at: t };
     pauseJusqua = 0;
   } catch (e) {
@@ -299,4 +322,5 @@ export function stopLocationSharing() {
   last = null;
   pauseJusqua = 0;
   coupe = false;
+  plusTardPage = null;
 }

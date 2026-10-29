@@ -85,18 +85,44 @@ export function hostawayCoords(l: any): { lat?: number; lng?: number } {
   return { lat, lng };
 }
 
+// Choix par personne (colonne cleaners.share_location, migration 20261029180000) :
+// seul un false explicite coupe le partage ; ligne ou colonne absente = partage.
+export const sharesLocation = (row: any) => !row || row.share_location !== false;
+
+// share_location de la personne connectee, pour le `me` de v3.myDay et cleanerMe.
+// Lecture ratee = true : l'ecran montre le partage, et saveLocation, qui relit
+// la colonne lui-meme, refuse quand meme l'ecriture.
+export async function readShareLocation(sb: any, cleanerId: number): Promise<boolean> {
+  const r = await sb.from("cleaners").select("share_location").eq("id", cleanerId).maybeSingle();
+  if (r.error) {
+    console.error("[team_locations] share_location read failed:", r.error.message ?? r.error);
+    return true;
+  }
+  return sharesLocation(r.data);
+}
+
 // Ecriture de la position de la personne connectee. Hors fenetre : rien n'est ecrit, 200 quand meme
 // (le front n'a rien a corriger). Identite : me.cleaner_id, jamais un id du corps.
+// share_location = false : rien n'est ecrit, reason "not_shared" (le front arrete pour la page).
 export async function saveLocation(sb: any, me: SessionUser | null, body: any, nowMs: number): Promise<{ status: number; body: any }> {
   if (!me) return { status: 401, body: { error: "auth required" } };
   const p = parseLocation(body, nowMs);
   if (!p.ok) return { status: 400, body: { error: p.error } };
+  // Jamais ecraser une position plus recente (deux onglets, requete arrivee en retard).
+  const [who, cur] = await Promise.all([
+    sb.from("cleaners").select("share_location").eq("id", me.cleaner_id).maybeSingle(),
+    sb.from("team_locations").select("recorded_at").eq("cleaner_id", me.cleaner_id).maybeSingle(),
+  ]);
+  // Lecture du choix ratee : rien n'est ecrit (on ne partage jamais sans savoir).
+  if (who.error) {
+    console.error("[team_locations] share_location read failed:", who.error.message ?? who.error);
+    return { status: 500, body: { error: "Location could not be saved." } };
+  }
+  if (!sharesLocation(who.data)) return { status: 200, body: { ok: true, saved: false, reason: "not_shared" } };
   if (!inLocationHours(nowMs)) return { status: 200, body: { ok: true, saved: false, reason: "outside_hours" } };
   if (p.value.accuracy != null && p.value.accuracy > LOC_MAX_ACCURACY_M) {
     return { status: 200, body: { ok: true, saved: false, reason: "inaccurate" } };
   }
-  // Jamais ecraser une position plus recente (deux onglets, requete arrivee en retard).
-  const cur = await sb.from("team_locations").select("recorded_at").eq("cleaner_id", me.cleaner_id).maybeSingle();
   if (cur.error) {
     console.error("[team_locations] read failed:", cur.error.message ?? cur.error);
     return { status: 500, body: { error: "Location could not be saved." } };
@@ -128,12 +154,12 @@ export function locListings(rows: any[]): LocListing[] {
   return out;
 }
 
-// Pur : membres actifs hors system et sous-traitants, positions les plus recentes
-// d'abord, puis ceux sans position par nom.
+// Pur : membres actifs hors system, sous-traitants et share_location = false,
+// positions les plus recentes d'abord, puis ceux sans position par nom.
 export function buildLocations(people: any[], locs: any[], listings: LocListing[], nowMs: number): LocPerson[] {
   const byId = new Map(locs.map((l: any) => [String(l.cleaner_id), l]));
   const out = people
-    .filter((p: any) => p.is_active !== false && p.role !== "system" && p.role !== "subcontractor")
+    .filter((p: any) => p.is_active !== false && p.role !== "system" && p.role !== "subcontractor" && sharesLocation(p))
     .map((p: any): LocPerson & { _ms: number } => {
       const l = byId.get(String(p.id));
       const ms = l ? Date.parse(String(l.recorded_at)) : NaN;
@@ -156,7 +182,7 @@ export function buildLocations(people: any[], locs: any[], listings: LocListing[
 // Lecture des trois tables ; une lecture ratee leve (l'appelant decide : 503 ou null).
 export async function loadLocations(sb: any, nowMs: number): Promise<LocPerson[]> {
   const [people, locs, listings] = await Promise.all([
-    readAllRows((a: number, b: number) => sb.from("cleaners").select("id, name, role, color, is_active").order("id").range(a, b), "cleaners"),
+    readAllRows((a: number, b: number) => sb.from("cleaners").select("id, name, role, color, is_active, share_location").order("id").range(a, b), "cleaners"),
     sb.from("team_locations").select("cleaner_id, lat, lng, accuracy_m, recorded_at").then((r: any) => readOrThrow(r, "team_locations")),
     readAllRows((a: number, b: number) => sb.from("listing_config")
       .select("listing_id, internal_name, listing_name, apt_number, lat, lng").order("listing_id").range(a, b), "listing_config"),

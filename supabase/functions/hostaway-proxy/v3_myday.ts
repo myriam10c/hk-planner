@@ -94,7 +94,8 @@ export interface MyDayInput {
 export interface MyDayPayload {
   status: "success";
   date: string;
-  me: { id: number; name: string; role: string };
+  // shareLocation : pose par index.ts (cleaners.share_location), absent en View as.
+  me: { id: number; name: string; role: string; shareLocation?: boolean };
   linenRequired: boolean;
   totalMinutes: number;
   stops: V3Stop[];

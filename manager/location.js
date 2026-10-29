@@ -93,6 +93,9 @@ export function startLocation(o) {
     isAllowed: o.isAllowed,
     personId: o.personId,
   });
-  // Hors fenetre (avant 7 h, apres 23 h), rien n'est demande.
-  if (o.ask !== false && geoSupported() && readNotice() === 'ask' && inWindow(Date.now())) openLocationNotice();
+  // Hors fenetre (avant 7 h, apres 23 h), rien n'est demande. Partage non permis
+  // (shareLocation false, cleaners.share_location) : jamais d'avertissement.
+  let permis = false;
+  try { permis = !o.isAllowed || o.isAllowed() === true; } catch (e) { permis = false; }
+  if (o.ask !== false && permis && geoSupported() && readNotice() === 'ask' && inWindow(Date.now())) openLocationNotice();
 }

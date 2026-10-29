@@ -69,6 +69,15 @@ for (const scheme of ['light', 'dark'] as const) {
   });
 }
 
+test('Where is everyone : seules les personnes rendues par le serveur (share_location false exclu cote proxy)', async ({ page }) => {
+  await tiles(page);
+  const sans = { ...LOCS, body: { generatedAt: NOW.toISOString(), people: PEOPLE.filter((p) => p.id !== 8) } };
+  await bootMgr(page, [me(MANAGER), sans], { email: true, hash: '#/more/locations', clock: NOW });
+  await expect(page.locator('main .loc-list .loc-row')).toHaveCount(3);
+  await expect(page.locator('main .loc-list')).not.toContainText('Walter');
+  await expect(page.locator('[data-loc-map] .loc-pin')).toHaveCount(2);
+});
+
 test('Where is everyone : taper une ligne centre la carte et ouvre la bulle', async ({ page }) => {
   await tiles(page);
   await bootMgr(page, [me(MANAGER), LOCS], { email: true, hash: '#/more/locations', clock: NOW });
@@ -144,7 +153,7 @@ test.describe('envoi depuis /manager/', () => {
     expect(await calls(page, 'v3.saveLocation')).toBe(0);
     await gate.getByRole('button', { name: 'OK' }).click();
     await expect(gate).toHaveCount(0);
-    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice:8'))).toBe('ok');
+    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice2:8'))).toBe('ok');
     await expect.poll(() => calls(page, 'v3.saveLocation')).toBe(1);
     const log = (await fetchLog(page)).filter((l) => l.url.includes('action=v3.saveLocation'));
     const b = JSON.parse(log[0].body);
@@ -162,7 +171,7 @@ test.describe('envoi depuis /manager/', () => {
     await bootMgr(page, [me(MANAGER), TODAY, SAVE], { email: true, clock: NOW, locNotice: null });
     await page.locator('#locPrompt').getByRole('button', { name: 'Not now' }).click();
     await expect(page.locator('#locPrompt')).toHaveCount(0);
-    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice:8'))).toBe('later:2026-10-09');
+    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice2:8'))).toBe('later:2026-10-09');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => (window as any).__mgrReady === true);
     await page.waitForTimeout(500);
@@ -177,6 +186,26 @@ test.describe('envoi depuis /manager/', () => {
     await expect(page.locator('#locPrompt')).toHaveCount(0);
     await page.locator('#pushPrompt').getByRole('button', { name: 'Not now' }).click();
     await expect(page.locator('#locPrompt').getByRole('heading', { name: 'Share your location' })).toBeVisible();
+  });
+
+  test('shareLocation false (cleanerMe) : ni avertissement, ni envoi, ni carte Settings', async ({ page }) => {
+    const SETTINGS = { autopilot: true, inspectionTarget: 4, excludedCount: 0, templates: [], push: { vapidPublicKey: 'BKEY' } };
+    await bootMgr(page, [me({ ...MANAGER, shareLocation: false }), TODAY, SAVE, { match: 'action=mgr.settings', status: 200, body: SETTINGS }],
+      { email: true, clock: NOW, locNotice: null });
+    await expect(page.getByRole('heading', { name: 'Who does what today' })).toBeVisible();
+    await page.waitForTimeout(800);
+    await expect(page.locator('#locPrompt')).toHaveCount(0);
+    // Meme avec un OK garde : rien n'est envoye.
+    await page.evaluate(() => localStorage.setItem('hkLocNotice2:8', 'ok'));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => (window as any).__mgrReady === true);
+    await page.waitForTimeout(1000);
+    await expect(page.locator('#locPrompt')).toHaveCount(0);
+    expect(await calls(page, 'v3.saveLocation')).toBe(0);
+    await page.evaluate(() => { location.hash = '#/more/settings'; });
+    await expect(page.getByRole('heading', { name: 'Notifications', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Location sharing', exact: true })).toHaveCount(0);
+    await expect(page.locator('[data-card="location"]')).toHaveCount(0);
   });
 
   test('Settings : carte Location sharing, Share my location rouvre l avertissement', async ({ page }) => {

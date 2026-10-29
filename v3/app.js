@@ -1250,11 +1250,21 @@ function proposerNotifications() {
 // Jamais en Practice ni en View as, ni pour un sous-traitant (le proxy refuse
 // son envoi) : la condition est relue a chaque envoi, un mode choisi plus tard
 // coupe aussi les envois. Import dynamique, hors precache.
+// me.shareLocation false (cleaners.share_location, choix par personne) : ni
+// avertissement, ni partage, ni ligne Profile. Champ absent (journee en cache
+// d'avant le 29/10) = true.
 export function partageAutorise() {
   const moi = state.day && !state.day.viewAs ? state.day.me : null;
   const role = moi ? String(moi.role || '') : '';
   return !!state.session && state.session.kind !== 'stale' && !state.viewAs && !practiceActive() &&
-    role !== '' && role !== 'subcontractor';
+    role !== '' && role !== 'subcontractor' && moi.shareLocation !== false;
+}
+
+// Role cleaner (sa propre journee) : « Not now » redemande a chaque ouverture de
+// l'app, et un partage bloque par Chrome est rappele (v3/location.js).
+export function estCleaner() {
+  const moi = state.day && !state.day.viewAs ? state.day.me : null;
+  return !!moi && String(moi.role || '') === 'cleaner';
 }
 
 // La personne connectee (cle du choix de l'avertissement), jamais celle d'un View as.
@@ -1278,7 +1288,7 @@ function proposerLocalisation() {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
   localisationLancee = true;
   import('/v3/location.js')
-    .then(function (m) { m.startLocation({ isAllowed: partageAutorise, personId: monIdentifiant(), busy: ecranOccupe }); })
+    .then(function (m) { m.startLocation({ isAllowed: partageAutorise, personId: monIdentifiant(), busy: ecranOccupe, cleaner: estCleaner }); })
     .catch(function (e) { localisationLancee = false; console.warn('[v3] partage de position indisponible', e); });
 }
 

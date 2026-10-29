@@ -54,7 +54,7 @@ import { healthScore, mgrApartment, mgrApartmentCleanings, mgrApartments, readHe
 import { mntAccess } from "./mnt_rules.ts";
 import { mntDigest, mntList, parseMntQuery } from "./mnt_read.ts";
 import { mntAct } from "./mnt_act.ts";
-import { hostawayCoords, mgrLocations, saveLocation } from "./team_locations.ts";
+import { hostawayCoords, mgrLocations, readShareLocation, saveLocation, sharesLocation } from "./team_locations.ts";
 import { mntGet, mntPhoto } from "./mnt_get.ts";
 import { mntIngest } from "./mnt_ingest.ts";
 import { parseRemLogQuery, remConfigGet, remConfigSet, remLog, remRead, remRun, remTest } from "./reminders.ts";
@@ -1441,6 +1441,12 @@ Deno.serve(async (req: Request) => {
         tickets: ticketRows,
         progress,
       });
+      // Qui est ou, choix par personne : me.shareLocation (false = ni avertissement
+      // ni partage dans l'app). Seulement pour sa propre journee : en View as, `me`
+      // est la personne regardee et le partage est coupe de toute facon.
+      if (!vue.viewer) {
+        body.me = { ...body.me, shareLocation: await readShareLocation(sb, me.cleaner_id) };
+      }
       // Fin du PIN (07/10) : une session PIN (aucun Bearer) dont la ligne n'a
       // aucune adresse cree son compte sur « / », obligatoire. Le drapeau evite
       // a la v3 un appel de plus au boot. Lecture ratee = drapeau absent, ce qui
@@ -2429,9 +2435,14 @@ Deno.serve(async (req: Request) => {
       const me: Record<string, unknown> = {
         id: cleaner.cleaner_id, name: cleaner.name, color: cleaner.color, role: cleaner.role,
       };
+      // `shareLocation` (29/10, qui est ou) : false = /manager/ ne montre ni
+      // l'avertissement ni la carte Settings. Lecture ratee = champ absent (true cote client).
       const { data: emailRow, error: emailErr } = await sb.from("cleaners")
-        .select("email").eq("id", cleaner.cleaner_id).maybeSingle();
-      if (!emailErr && emailRow) me.email = emailRow.email ?? null;
+        .select("email, share_location").eq("id", cleaner.cleaner_id).maybeSingle();
+      if (!emailErr && emailRow) {
+        me.email = emailRow.email ?? null;
+        me.shareLocation = sharesLocation(emailRow);
+      }
       return jsonResp({ status: "success", cleaner: me });
     }
 

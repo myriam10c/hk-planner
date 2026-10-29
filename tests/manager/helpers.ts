@@ -8,7 +8,7 @@ export type FakeRoute = { match: string; status: number; body: any; delay?: numb
 
 // Ids des personnes que les reponses simulees font connecter (me, viewer, cleaner) :
 // le choix de l'avertissement « Share your location » est garde par personne
-// (hkLocNotice:<id>), il est seme pour chacune.
+// (hkLocNotice2:<id>), il est seme pour chacune.
 export function personIds(routes: FakeRoute[]): string[] {
   const ids = new Set<string>();
   for (const r of routes) {
@@ -54,10 +54,10 @@ export async function bootMgr(
         // Bandeau des notifications masque par defaut (push-bar.spec.ts le teste a part).
         localStorage.setItem('mgrPushLater', new Date().toISOString().slice(0, 10));
         if (cfg.cache) localStorage.setItem('mgrTodayCache', JSON.stringify(cfg.cache));
-        // Avertissement « Share your location » (hkLocNotice:<id>, par personne des
+        // Avertissement « Share your location » (hkLocNotice2:<id>, par personne des
         // reponses simulees) repousse loin par defaut : il ne couvre pas l'app et
         // aucune position n'est demandee. null : rien n'est seme.
-        if (cfg.locNotice) for (const id of cfg.locIds) localStorage.setItem('hkLocNotice:' + id, cfg.locNotice);
+        if (cfg.locNotice) for (const id of cfg.locIds) localStorage.setItem('hkLocNotice2:' + id, cfg.locNotice);
         if (cfg.storage) for (const k of Object.keys(cfg.storage)) localStorage.setItem(k, cfg.storage[k]);
       }
     } catch (e) { /* stockage indisponible */ }

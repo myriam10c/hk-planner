@@ -4,7 +4,7 @@ import { planningAccess } from "./mgr_rules.ts";
 import { roleAllowed } from "./v3.ts";
 import {
   buildLocations, haversineM, hostawayCoords, inLocationHours, loadLocationsSafe, locListings, mgrLocations,
-  nearestListing, parseLocation, saveLocation,
+  nearestListing, parseLocation, readShareLocation, saveLocation, sharesLocation,
 } from "./team_locations.ts";
 
 // 29/10/2026 10:00 Dubai = 06:00 UTC.
@@ -143,6 +143,57 @@ Deno.test("saveLocation : erreur d'ecriture, 500 lisible", async () => {
   }
 });
 
+Deno.test("saveLocation : share_location false, 200 not_shared et rien n'est ecrit", async () => {
+  const db = fakeDb({
+    cleaners: [{ id: 4, name: "Faiza", role: "cleaner", share_location: false }],
+    team_locations: [{ cleaner_id: 9, lat: 1, lng: 1, accuracy_m: null, recorded_at: iso(NOW - 3600_000) }],
+  });
+  assertEquals(await saveLocation(db, ME, body(), NOW), { status: 200, body: { ok: true, saved: false, reason: "not_shared" } });
+  // Avant la fenetre aussi : le choix passe en premier, le front s'arrete pour la page.
+  const night = Date.parse("2026-10-29T20:00:00Z");
+  assertEquals((await saveLocation(db, ME, body({ recordedAt: iso(night) }), night)).body.reason, "not_shared");
+  assertEquals(db.writes.length, 0);
+  assertEquals(db.tables.team_locations.length, 1);
+  // true explicite, ou colonne absente (null) : ecrit.
+  const db2 = fakeDb({ cleaners: [{ id: 4, share_location: true }] });
+  assertEquals((await saveLocation(db2, ME, body(), NOW)).body.saved, true);
+  const db3 = fakeDb({ cleaners: [{ id: 4 }] });
+  assertEquals((await saveLocation(db3, ME, body(), NOW)).body.saved, true);
+});
+
+Deno.test("saveLocation : lecture du choix ratee, 500 et rien n'est ecrit", async () => {
+  const db = fakeDb({ cleaners: [{ id: 4, share_location: true }] });
+  db.fail["cleaners.select"] = { message: "column does not exist" };
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    assertEquals(await saveLocation(db, ME, body(), NOW), { status: 500, body: { error: "Location could not be saved." } });
+  } finally {
+    console.error = orig;
+  }
+  assertEquals(db.writes.length, 0);
+});
+
+Deno.test("sharesLocation / readShareLocation : seul un false explicite coupe", async () => {
+  assertEquals(sharesLocation(null), true);
+  assertEquals(sharesLocation({}), true);
+  assertEquals(sharesLocation({ share_location: true }), true);
+  assertEquals(sharesLocation({ share_location: null }), true);
+  assertEquals(sharesLocation({ share_location: false }), false);
+  const db = fakeDb({ cleaners: [{ id: 4, share_location: false }, { id: 5, share_location: true }] });
+  assertEquals(await readShareLocation(db, 4), false);
+  assertEquals(await readShareLocation(db, 5), true);
+  assertEquals(await readShareLocation(db, 77), true);
+  db.fail["cleaners.select"] = { message: "boom" };
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    assertEquals(await readShareLocation(db, 4), true);
+  } finally {
+    console.error = orig;
+  }
+});
+
 const PEOPLE = [
   { id: 4, name: "Faiza", role: "cleaner", color: "#111", is_active: true },
   { id: 5, name: "Joe", role: "maintenance", color: "#222", is_active: true },
@@ -192,6 +243,19 @@ Deno.test("mgrLocations : 200 avec generatedAt et people", async () => {
   assertEquals(r.body.people[0].location.place.label, "1205 · Marina Gate");
 });
 
+Deno.test("mgrLocations et mgr.today : share_location false exclu, meme avec une position en base", async () => {
+  const people = PEOPLE.map((p) => p.id === 8 || p.id === 4 ? { ...p, share_location: false } : p);
+  const locs = [...LOCS, { cleaner_id: 8, lat: 25.1, lng: 55.2, accuracy_m: 5, recorded_at: iso(NOW) }];
+  const db = fakeDb({ cleaners: people, team_locations: locs, listing_config: LISTINGS });
+  const r = await mgrLocations(db, NOW);
+  assertEquals(r.status, 200);
+  assertEquals(r.body.people.map((p: any) => p.id), [5, 3]);
+  // Bloc locations de mgr.today : meme liste.
+  assertEquals((await loadLocationsSafe(db, NOW))!.map((p) => p.id), [5, 3]);
+  // Pur : un true explicite reste montre.
+  assertEquals(buildLocations([{ ...PEOPLE[0], share_location: true }], [], [], NOW).map((p) => p.id), [4]);
+});
+
 Deno.test("mgrLocations : lecture ratee, 503 ; loadLocationsSafe rend null", async () => {
   const db = seed();
   db.fail["team_locations.select"] = { message: "relation does not exist" };
@@ -233,6 +297,13 @@ Deno.test("routes : declarees, session, garde de role, identite de la session", 
   const r = bloc("mgr.locations");
   assert(r.indexOf("planningAccess(bearerToken(req) !== null, me)") > r.indexOf("await currentUser(sb, req)"));
   assert(r.includes("mgrLocations(sb, Date.now())"));
+  // shareLocation expose dans v3.myDay (hors View as) et cleanerMe.
+  const d = bloc("v3.myDay");
+  assert(d.includes("shareLocation: await readShareLocation(sb, me.cleaner_id)"));
+  assert(d.indexOf("if (!vue.viewer)") >= 0);
+  const c = bloc("cleanerMe");
+  assert(c.includes('.select("email, share_location")'));
+  assert(c.includes("me.shareLocation = sharesLocation(emailRow)"));
   // syncListings ecrit lat/lng sur les deux branches.
   const s = bloc("syncListings");
   assertEquals(s.split("...coords").length - 1, 2);

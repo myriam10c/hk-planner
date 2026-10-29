@@ -10,7 +10,7 @@ export type FakeRoute = { match: string; status: number; body: any; delay?: numb
 
 // Ids des personnes que les reponses simulees font connecter (me, viewer, cleaner) :
 // le choix de l'avertissement « Share your location » est garde par personne
-// (hkLocNotice:<id>), il est seme pour chacune.
+// (hkLocNotice2:<id>), il est seme pour chacune.
 export function personIds(routes: FakeRoute[]): string[] {
   const ids = new Set<string>();
   for (const r of routes) {
@@ -54,7 +54,7 @@ export async function bootV3(
     authRoutes?: FakeRoute[];
     // Pose le drapeau v3TestOffline des le premier document (une seule fois).
     offline?: boolean;
-    // Choix de l'avertissement « Share your location » (hkLocNotice:<id>), seme
+    // Choix de l'avertissement « Share your location » (hkLocNotice2:<id>), seme
     // une fois pour chaque personne des reponses simulees (personIds). Par defaut
     // repousse a une date lointaine : l'avertissement ne couvre pas l'app et
     // aucune position n'est demandee. null : rien n'est seme.
@@ -77,7 +77,7 @@ export async function bootV3(
           if (cfg.pinToken) localStorage.setItem('cleanerToken', cfg.pinToken);
           if (cfg.emailSession) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.emailSession));
           if (cfg.offline) localStorage.setItem('v3TestOffline', '1');
-          if (cfg.locNotice) for (const id of cfg.locIds) localStorage.setItem('hkLocNotice:' + id, cfg.locNotice);
+          if (cfg.locNotice) for (const id of cfg.locIds) localStorage.setItem('hkLocNotice2:' + id, cfg.locNotice);
         }
         // Ecran « Turn on notifications » / « Add to Home Screen » (relances push du 21/10) :
         // ecarte comme apres « Not now », sinon il couvre l'app dans chaque test.

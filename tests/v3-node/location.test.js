@@ -83,7 +83,7 @@ function demarrer({ echec = null, onTick } = {}) {
   const h = { t: DIX_HEURES };
   const envois = [];
   const ctl = { echec };
-  env.store.set("hkLocNotice:3", "ok");
+  env.store.set("hkLocNotice2:3", "ok");
   let tick = null;
   const vrai = globalThis.setInterval;
   globalThis.setInterval = (fn) => { tick = fn; return 1; };
@@ -92,7 +92,7 @@ function demarrer({ echec = null, onTick } = {}) {
       post: async (b) => {
         envois.push(b);
         if (ctl.echec) throw Object.assign(new Error("HTTP " + ctl.echec), { status: ctl.echec });
-        return { ok: true };
+        return ctl.reponse || { ok: true };
       },
       personId: 3, isAllowed: () => true, now: () => h.t, onTick,
     });
@@ -102,7 +102,7 @@ function demarrer({ echec = null, onTick } = {}) {
   return { ...env, h, envois, ctl, tick: () => tick() };
 }
 
-test("avertissement garde par personne : hkLocNotice:<id>, rien sans personne", () => {
+test("avertissement garde par personne : hkLocNotice2:<id>, rien sans personne", () => {
   const { store } = fauxNavigateur();
   setLocationPerson(null);
   setNotice("ok", DIX_HEURES);
@@ -110,18 +110,40 @@ test("avertissement garde par personne : hkLocNotice:<id>, rien sans personne", 
   assert.equal(readNotice(DIX_HEURES), "ask");
   setLocationPerson(3);
   setNotice("ok", DIX_HEURES);
-  assert.equal(store.get("hkLocNotice:3"), "ok");
+  assert.equal(store.get("hkLocNotice2:3"), "ok");
   assert.equal(readNotice(DIX_HEURES), "ok");
   // Deuxieme personne sur le meme telephone : rien d'herite.
   setLocationPerson("4");
   assert.equal(readNotice(DIX_HEURES), "ask");
   setNotice("later", DIX_HEURES);
-  assert.equal(store.get("hkLocNotice:4"), "later:2026-10-29");
-  assert.equal(store.get("hkLocNotice:3"), "ok");
-  // L'ancienne cle commune n'est plus lue.
+  assert.equal(store.get("hkLocNotice2:4"), "later:2026-10-29");
+  assert.equal(store.get("hkLocNotice2:3"), "ok");
+  // L'ancienne cle commune et les anciennes cles par personne ne sont plus lues.
   store.set("hkLocNotice", "ok");
+  store.set("hkLocNotice:5", "ok");
   setLocationPerson(5);
   assert.equal(readNotice(DIX_HEURES), "ask");
+});
+
+test("« Not now » d'un cleaner : later pour la page, ask a la prochaine ouverture", () => {
+  const { store } = fauxNavigateur();
+  stopLocationSharing();
+  setLocationPerson(3);
+  store.set("hkLocNotice2:3", "ok");
+  setNotice("later", DIX_HEURES, true);
+  assert.equal(store.get("hkLocNotice2:3"), "later:page");
+  assert.equal(readNotice(DIX_HEURES), "later");
+  // Une autre personne sur la meme page n'herite pas du « Not now ».
+  setLocationPerson(4);
+  assert.equal(readNotice(DIX_HEURES), "ask");
+  setLocationPerson(3);
+  assert.equal(readNotice(DIX_HEURES), "later");
+  // Valeur stockee seule (nouvelle page) : redemande.
+  assert.equal(noticeAnswer("later:page", DIX_HEURES), "ask");
+  // OK ensuite : garde.
+  setNotice("ok", DIX_HEURES, true);
+  assert.equal(readNotice(DIX_HEURES), "ok");
+  stopLocationSharing();
 });
 
 test("partage : apres un echec, aucun envoi pendant 5 min, puis reprise", async () => {
@@ -175,6 +197,43 @@ for (const status of [401, 403]) {
     }
   });
 }
+
+test("partage : reponse not_shared, arret pour la page sans nouvel essai", async () => {
+  const f = demarrer();
+  f.ctl.reponse = { ok: true, saved: false, reason: "not_shared" };
+  try {
+    f.geo.watchCb(pos(25.08, 55.14, f.h.t));
+    await attendre();
+    assert.equal(f.envois.length, 1);
+    assert.equal(f.geo.cleared, 1);
+    // Ni watch, ni battement, ni envoi ensuite, meme apres refresh.
+    f.geo.watchCb && f.geo.watchCb(pos(26, 55.14, f.h.t));
+    f.h.t += 60 * 60_000;
+    f.tick();
+    refreshLocationSharing();
+    await attendre();
+    assert.equal(f.geo.watches, 1);
+    assert.equal(f.geo.current.length, 0);
+    assert.equal(f.envois.length, 1);
+  } finally {
+    stopLocationSharing();
+  }
+});
+
+test("partage : saved false pour une autre raison (outside_hours), le partage continue", async () => {
+  const f = demarrer();
+  f.ctl.reponse = { ok: true, saved: false, reason: "outside_hours" };
+  try {
+    f.geo.watchCb(pos(25.08, 55.14, f.h.t));
+    await attendre();
+    assert.equal(f.geo.cleared, 0);
+    f.geo.watchCb(pos(25.10, 55.14, f.h.t + 1000));
+    await attendre();
+    assert.equal(f.envois.length, 2);
+  } finally {
+    stopLocationSharing();
+  }
+});
 
 test("battement : telephone immobile, un point demande apres 5 min sans envoi", async () => {
   let ticks = 0;

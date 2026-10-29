@@ -10,13 +10,18 @@
 import { api } from '/v3/api.js';
 import { esc, icon } from '/v3/ui.js';
 import {
-  geoSupported, inWindow, readNotice, refreshLocationSharing, setLocationPerson, setNotice, sharingState,
-  startLocationSharing,
+  geoSupported, inWindow, permissionState, readNotice, refreshLocationSharing, setLocationPerson, setNotice,
+  sharingState, startLocationSharing,
 } from '/shared/location-core.js';
 
 export const BLOCKED_HELP = 'Location is blocked. In Chrome: tap the lock icon next to the address, then Permissions, then Location, Allow.';
 
 let ouvert = null;   // promesse de l'avertissement affiche
+let cleaner = null;  // () -> vrai pour un cleaner : « Not now » redemande a la prochaine ouverture
+
+function estCleaner() {
+  try { return !!cleaner && cleaner() === true; } catch (e) { return false; }
+}
 
 function close(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
 
@@ -56,12 +61,45 @@ export function openLocationNotice() {
         const b = e.target && e.target.closest ? e.target.closest('[data-loc]') : null;
         if (!b) return;
         const rep = b.getAttribute('data-loc') === 'ok' ? 'ok' : 'later';
-        setNotice(rep);
+        // Cleaner : « Not now » vaut pour cette ouverture de l'app seulement.
+        setNotice(rep, undefined, estCleaner());
         close(el);
         ouvert = null;
         // Apres OK : le watch demarre, et avec lui la demande du navigateur.
         refreshLocationSharing();
         resolve(rep);
+      });
+    });
+  });
+  return ouvert;
+}
+
+// Variante « bloquee » : un cleaner a dit OK mais Chrome refuse la position.
+// Rappel a chaque ouverture de l'app, un seul bouton OK qui ferme, rien n'est
+// stocke. Meme couche que l'avertissement, apres l'ecran des notifications.
+export function openBlockedNotice() {
+  if (ouvert) return ouvert;
+  ouvert = apresPushgate().then(function () {
+    return new Promise(function (resolve) {
+      const el = document.createElement('div');
+      el.id = 'locgate';
+      el.className = 'pushgate';
+      el.setAttribute('data-variant', 'blocked');
+      el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-modal', 'true');
+      el.setAttribute('aria-labelledby', 'locgate-t');
+      el.innerHTML = '<div class="pushgate-in">' + icon('pin', 40) +
+        '<h1 id="locgate-t">' + esc('Share your location') + '</h1>' +
+        '<p>' + esc(BLOCKED_HELP) + '</p>' +
+        '<button class="btn-primary" type="button" data-loc="close">OK</button>' +
+        '</div>';
+      document.body.appendChild(el);
+      el.addEventListener('click', function (e) {
+        const b = e.target && e.target.closest ? e.target.closest('[data-loc]') : null;
+        if (!b) return;
+        close(el);
+        ouvert = null;
+        resolve('closed');
       });
     });
   });
@@ -88,12 +126,32 @@ function aProposer(isAllowed) {
 // as plus tard coupe aussi les envois. o.personId : la personne connectee (le
 // choix est garde par personne). o.ask faux : depuis Profile, qui ouvre
 // l'avertissement lui-meme. o.busy() vrai (facultatif, garde) : une autre couche
-// est a l'ecran, la minute suivante retentera.
+// est a l'ecran, la minute suivante retentera. o.cleaner() vrai (facultatif,
+// garde) : « Not now » redemande a la prochaine ouverture, et un OK dont Chrome
+// bloque la position est rappele (variante « bloquee ») a chaque ouverture.
 let occupe = null;   // busy() garde d'un appel a l'autre (Profile ne le repasse pas)
+// Rappel « bloquee » : verifie une fois par ouverture de l'app, des que la
+// fenetre est ouverte (au demarrage ou a la minute ou elle s'ouvre).
+let blocageAVerifier = false;
+
+function permis(isAllowed) {
+  try { return !isAllowed || isAllowed() === true; } catch (e) { return false; }
+}
+
+function verifierBlocage(isAllowed) {
+  if (!blocageAVerifier || ouvert) return;
+  if (!estCleaner() || !permis(isAllowed) || !geoSupported() || !inWindow(Date.now())) return;
+  if (readNotice() !== 'ok') return;
+  blocageAVerifier = false;
+  permissionState().then(function (p) {
+    if (p === 'denied' && !ouvert && permis(isAllowed)) openBlockedNotice();
+  }).catch(function () { /* API absente : rien */ });
+}
 
 export function startLocation(o) {
   const isAllowed = o.isAllowed;
   if (o.busy !== undefined) occupe = o.busy;
+  if (o.cleaner !== undefined) cleaner = o.cleaner;
   startLocationSharing({
     post: function (body) { return api.post('v3.saveLocation', body); },
     isAllowed: isAllowed,
@@ -105,8 +163,12 @@ export function startLocation(o) {
       if (document.querySelector('[aria-modal="true"]')) return;
       try { if (occupe && occupe()) return; } catch (e) { return; }
       if (aProposer(isAllowed)) openLocationNotice();
+      else verifierBlocage(isAllowed);
     },
   });
+  if (o.ask === false) return;
   // Hors fenetre (avant 7 h, apres 23 h), rien n'est demande.
-  if (o.ask !== false && aProposer(isAllowed)) openLocationNotice();
+  blocageAVerifier = true;
+  if (aProposer(isAllowed)) openLocationNotice();
+  else verifierBlocage(isAllowed);
 }

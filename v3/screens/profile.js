@@ -2,7 +2,7 @@
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
 import {
-  CLE_VIEW_AS, leaveModeForSignOut, monIdentifiant, partageAutorise, practicing, queueStrip, render, startPractice, startViewAs,
+  CLE_VIEW_AS, estCleaner, leaveModeForSignOut, monIdentifiant, partageAutorise, practicing, queueStrip, render, startPractice, startViewAs,
 } from '/v3/app.js';
 import { clearDead, clearFiles, deadEntries, deleteState, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
@@ -214,7 +214,7 @@ const actions = {
   },
   async location(state) {
     const m = await import('/v3/location.js');
-    m.startLocation({ isAllowed: partageAutorise, personId: monIdentifiant(), ask: false });
+    m.startLocation({ isAllowed: partageAutorise, personId: monIdentifiant(), cleaner: estCleaner, ask: false });
     await m.openLocationNotice();
     state.loc = await m.locationState();
     if (String(location.hash || '') === '#/profile') render();

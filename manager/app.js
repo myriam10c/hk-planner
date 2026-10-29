@@ -169,7 +169,8 @@ async function boot() {
   const d = decideAccess(s, cleaner);
   if (d.go) { location.replace(d.go); return; }
   if (d.screen === 'email') { emailRequired(cleaner.role); return; }
-  me = { id: cleaner.id, name: cleaner.name, role: cleaner.role };
+  // shareLocation : false = ni avertissement ni partage ni carte Settings (champ absent = true).
+  me = { id: cleaner.id, name: cleaner.name, role: cleaner.role, shareLocation: cleaner.shareLocation !== false };
   rememberRole(cleaner.id, cleaner.role);
   await startShell();
   // Rappel d'abonnement aux notifications : seulement une session confirmee par le serveur.
@@ -182,7 +183,9 @@ async function boot() {
 // serveur : `me` pose plus haut, relu a chaque envoi.
 function startLocation() {
   import('/manager/location.js')
-    .then((m) => m.startLocation({ isAllowed: () => !!me && me.role !== 'subcontractor', personId: me && me.id }))
+    .then((m) => m.startLocation({
+      isAllowed: () => !!me && me.role !== 'subcontractor' && me.shareLocation !== false, personId: me && me.id,
+    }))
     .catch(() => { /* partage facultatif */ });
 }
 

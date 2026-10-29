@@ -118,6 +118,9 @@ export async function renderSettings(ctx) {
   }
 
   const CARDS = { autopilot: autopilotCard, push: pushCard, location: locationCard, inspections: inspectionsCard, checklists: checklistsCard };
+  // Partage coupe pour cette personne (cleanerMe.shareLocation false, cleaners.share_location) :
+  // pas de carte Location sharing. Champ absent = partage.
+  if (ctx.me && ctx.me.shareLocation === false) delete CARDS.location;
 
   // Repeint une seule carte : la saisie en cours des autres cartes reste en place.
   function paintCard(name) {
@@ -217,7 +220,10 @@ export async function renderSettings(ctx) {
         const m = await locModule();
         if (!m) return;
         // Le partage n'a peut-etre pas demarre a l'ouverture (hors fenetre, hors ligne).
-        m.startLocation({ isAllowed: () => !!ctx.me && ctx.me.role !== 'subcontractor', personId: ctx.me && ctx.me.id, ask: false });
+        m.startLocation({
+          isAllowed: () => !!ctx.me && ctx.me.role !== 'subcontractor' && ctx.me.shareLocation !== false,
+          personId: ctx.me && ctx.me.id, ask: false,
+        });
         await m.openLocationNotice();
         await readLoc();
         paintCard('location');
