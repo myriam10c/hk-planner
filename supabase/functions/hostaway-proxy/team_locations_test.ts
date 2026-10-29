@@ -99,6 +99,38 @@ Deno.test("saveLocation : hors fenetre rien n'est ecrit, 400 sur entree invalide
   assertEquals(db.writes.length, 0);
 });
 
+Deno.test("saveLocation : 0,0 refuse (400), rien n'est ecrit", async () => {
+  const db = fakeDb();
+  assertEquals(await saveLocation(db, ME, body({ lat: 0, lng: 0 }), NOW), { status: 400, body: { error: "invalid lat/lng" } });
+  assertEquals(db.writes.length, 0);
+  // Un seul des deux a zero reste une coordonnee valide.
+  assertEquals((await saveLocation(fakeDb(), ME, body({ lat: 0, lng: 55.1 }), NOW)).status, 200);
+});
+
+Deno.test("saveLocation : precision au-dela de 2000 m ignoree, 2000 m acceptee", async () => {
+  const db = fakeDb();
+  assertEquals(await saveLocation(db, ME, body({ accuracy: 2000.5 }), NOW),
+    { status: 200, body: { ok: true, saved: false, reason: "inaccurate" } });
+  assertEquals(db.writes.length, 0);
+  assertEquals(await saveLocation(db, ME, body({ accuracy: 2000 }), NOW), { status: 200, body: { ok: true, saved: true } });
+  assertEquals(db.writes.length, 1);
+});
+
+Deno.test("saveLocation : une position plus recente en base n'est jamais ecrasee", async () => {
+  const newer = iso(NOW - 30_000);
+  const db = fakeDb({ team_locations: [{ cleaner_id: 4, lat: 1, lng: 1, accuracy_m: 5, recorded_at: newer }] });
+  assertEquals(await saveLocation(db, ME, body({ recordedAt: iso(NOW - 60_000) }), NOW),
+    { status: 200, body: { ok: true, saved: false, reason: "older" } });
+  assertEquals(db.writes.length, 0);
+  assertEquals(db.tables.team_locations[0].recorded_at, newer);
+  // Meme instant : ecrit (pas plus ancien).
+  assertEquals((await saveLocation(db, ME, body({ recordedAt: newer }), NOW)).body.saved, true);
+  // La ligne d'une autre personne ne compte pas.
+  const db2 = fakeDb({ team_locations: [{ cleaner_id: 7, lat: 1, lng: 1, accuracy_m: 5, recorded_at: iso(NOW) }] });
+  assertEquals((await saveLocation(db2, ME, body(), NOW)).body.saved, true);
+  assertEquals(db2.tables.team_locations.length, 2);
+});
+
 Deno.test("saveLocation : erreur d'ecriture, 500 lisible", async () => {
   const db = fakeDb();
   db.fail["team_locations.upsert"] = { message: "boom" };

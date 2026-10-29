@@ -140,11 +140,11 @@ test.describe('envoi depuis /manager/', () => {
     await bootMgr(page, [me(MANAGER), TODAY, SAVE], { email: true, clock: NOW, locNotice: null });
     const gate = page.locator('#locPrompt');
     await expect(gate.getByRole('heading', { name: 'Share your location' })).toBeVisible();
-    await expect(gate).toContainText('Your managers see where you are while HK Planner is open, between 7 AM and 11 PM, to organise the day.');
+    await expect(gate).toContainText('Managers see where you are while HK Planner is open, between 7 AM and 11 PM, to organise the day.');
     expect(await calls(page, 'v3.saveLocation')).toBe(0);
     await gate.getByRole('button', { name: 'OK' }).click();
     await expect(gate).toHaveCount(0);
-    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice'))).toBe('ok');
+    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice:8'))).toBe('ok');
     await expect.poll(() => calls(page, 'v3.saveLocation')).toBe(1);
     const log = (await fetchLog(page)).filter((l) => l.url.includes('action=v3.saveLocation'));
     const b = JSON.parse(log[0].body);
@@ -162,7 +162,7 @@ test.describe('envoi depuis /manager/', () => {
     await bootMgr(page, [me(MANAGER), TODAY, SAVE], { email: true, clock: NOW, locNotice: null });
     await page.locator('#locPrompt').getByRole('button', { name: 'Not now' }).click();
     await expect(page.locator('#locPrompt')).toHaveCount(0);
-    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice'))).toBe('later:2026-10-09');
+    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice:8'))).toBe('later:2026-10-09');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => (window as any).__mgrReady === true);
     await page.waitForTimeout(500);

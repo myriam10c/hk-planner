@@ -2,7 +2,7 @@
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
 import {
-  CLE_VIEW_AS, leaveModeForSignOut, partageAutorise, practicing, queueStrip, render, startPractice, startViewAs,
+  CLE_VIEW_AS, leaveModeForSignOut, monIdentifiant, partageAutorise, practicing, queueStrip, render, startPractice, startViewAs,
 } from '/v3/app.js';
 import { clearDead, clearFiles, deadEntries, deleteState, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
@@ -95,12 +95,13 @@ function mesRapports(state) {
 
 // Partage de position (plan 2026-10-29) : l'etat vient de /v3/location.js, lu
 // par prepare (import dynamique, hors precache : hors ligne la ligne n'apparait
-// pas). Jamais en View as ni en Practice, ou le telephone joue quelqu'un d'autre.
+// pas). Jamais en View as ni en Practice, ou le telephone joue quelqu'un d'autre,
+// ni pour un sous-traitant (partageAutorise de app.js, la meme regle que l'envoi).
 const MOT_POSITION = { on: 'On', off: 'Off', blocked: 'Blocked' };
 
 function lignePosition(state) {
   const st = state.loc;
-  if (!MOT_POSITION[st] || state.viewAs) return '';
+  if (!MOT_POSITION[st] || state.viewAs || practicing(state) || !partageAutorise()) return '';
   return '<button class="locrow" type="button" data-act="location" data-state="' + esc(st) + '">' +
       icon('pin', 20) + '<span>Location sharing</span><b>' + MOT_POSITION[st] + '</b></button>' +
     (st === 'blocked'
@@ -213,7 +214,7 @@ const actions = {
   },
   async location(state) {
     const m = await import('/v3/location.js');
-    m.startLocation(partageAutorise, false);
+    m.startLocation({ isAllowed: partageAutorise, personId: monIdentifiant(), ask: false });
     await m.openLocationNotice();
     state.loc = await m.locationState();
     if (String(location.hash || '') === '#/profile') render();
@@ -307,7 +308,7 @@ async function chargerPosition(state, n) {
   let st = null, aide = '';
   try {
     const m = await import('/v3/location.js');
-    st = await m.locationState();
+    st = await m.locationState(monIdentifiant());
     aide = m.BLOCKED_HELP;
   } catch (e) { st = null; }
   if (n !== lecture || state.loc === st) return;

@@ -166,7 +166,7 @@ export async function renderSettings(ctx) {
   }
   async function readLoc() {
     const m = await locModule();
-    st.loc = m ? await m.locationState() : 'unsupported';
+    st.loc = m ? await m.locationState(ctx.me && ctx.me.id) : 'unsupported';
     st.locHelp = m ? m.BLOCKED_HELP : '';
   }
 
@@ -217,7 +217,7 @@ export async function renderSettings(ctx) {
         const m = await locModule();
         if (!m) return;
         // Le partage n'a peut-etre pas demarre a l'ouverture (hors fenetre, hors ligne).
-        m.startLocation(() => !!ctx.me, false);
+        m.startLocation({ isAllowed: () => !!ctx.me && ctx.me.role !== 'subcontractor', personId: ctx.me && ctx.me.id, ask: false });
         await m.openLocationNotice();
         await readLoc();
         paintCard('location');

@@ -182,7 +182,7 @@ async function boot() {
 // serveur : `me` pose plus haut, relu a chaque envoi.
 function startLocation() {
   import('/manager/location.js')
-    .then((m) => m.startLocation(() => !!me))
+    .then((m) => m.startLocation({ isAllowed: () => !!me && me.role !== 'subcontractor', personId: me && me.id }))
     .catch(() => { /* partage facultatif */ });
 }
 

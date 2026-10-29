@@ -8,7 +8,8 @@
 import { post } from '/manager/api.js';
 import { esc } from '/manager/ui/dom.js';
 import {
-  geoSupported, inWindow, readNotice, refreshLocationSharing, setNotice, sharingState, startLocationSharing,
+  geoSupported, inWindow, readNotice, refreshLocationSharing, setLocationPerson, setNotice, sharingState,
+  startLocationSharing,
 } from '/shared/location-core.js';
 
 export const BLOCKED_HELP = 'Location is blocked. In Chrome: tap the lock icon next to the address, then Permissions, then Location, Allow.';
@@ -44,7 +45,7 @@ export function openLocationNotice() {
     el.innerHTML = '<div class="pushprompt-in">'
       + '<div class="pushprompt-ic" aria-hidden="true">' + PIN + '</div>'
       + '<h2 id="locPromptTitle">' + esc('Share your location') + '</h2>'
-      + '<p>' + esc('Your managers see where you are while HK Planner is open, between 7 AM and 11 PM, to organise the day.') + '</p>'
+      + '<p>' + esc('Managers see where you are while HK Planner is open, between 7 AM and 11 PM, to organise the day.') + '</p>'
       + '<div class="pushprompt-b">'
       + '<button class="btn primary" type="button" data-loc="ok">OK</button>'
       + '<button class="btn" type="button" data-loc="later">Not now</button></div></div>';
@@ -74,19 +75,24 @@ export function openLocationNotice() {
   return ouvert;
 }
 
-// 'on' | 'off' | 'blocked' | 'unsupported', pour More > Settings.
-export function locationState() {
+// 'on' | 'off' | 'blocked' | 'unsupported', pour More > Settings. `personId` :
+// la personne connectee, dont le choix est lu (garde par personne).
+export function locationState(personId) {
+  if (personId !== undefined) setLocationPerson(personId);
   return sharingState().catch(() => 'unsupported');
 }
 
 // Depuis app.js, apres l'acces confirme par le serveur (session email, role
-// manager ou maintenance). `isAllowed` est relu a chaque envoi. `ask` faux :
-// depuis Settings, qui ouvre l'avertissement lui-meme.
-export function startLocation(isAllowed, ask) {
+// manager ou maintenance ; un sous-traitant n'entre jamais dans /manager/).
+// o.isAllowed est relu a chaque envoi, o.personId : la personne connectee (le
+// choix est garde par personne). o.ask faux : depuis Settings, qui ouvre
+// l'avertissement lui-meme.
+export function startLocation(o) {
   startLocationSharing({
     post: (body) => post('v3.saveLocation', body),
-    isAllowed,
+    isAllowed: o.isAllowed,
+    personId: o.personId,
   });
   // Hors fenetre (avant 7 h, apres 23 h), rien n'est demande.
-  if (ask !== false && geoSupported() && readNotice() === 'ask' && inWindow(Date.now())) openLocationNotice();
+  if (o.ask !== false && geoSupported() && readNotice() === 'ask' && inWindow(Date.now())) openLocationNotice();
 }

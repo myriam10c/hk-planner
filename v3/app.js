@@ -1129,6 +1129,9 @@ export async function loadDay({ silent = false } = {}) {
       if (generation !== generationJour) return;
     } else rafraichirRoles();
     state.loading = false;
+    // Journee ratee au boot puis relue (Retry, retour du reseau) : le partage
+    // demarre maintenant. Au boot, c'est boot qui le lance, apres les notifications.
+    if (bootFini && !localisationLancee) proposerLocalisation();
     if (silent) { persist(); renderLater(); return; }
     render();
     await maybeAutoOpen();
@@ -1226,7 +1229,7 @@ export async function boot() {
       .catch(function (e) { console.warn('[v3] service worker non enregistre', e); });
   }
   window.__v3ready = true;
-  proposerNotifications().then(proposerLocalisation);
+  proposerNotifications().then(function () { bootFini = true; proposerLocalisation(); });
 }
 
 // Ecran « Turn on notifications » (rappels automatiques) : apres une journee
@@ -1244,19 +1247,39 @@ function proposerNotifications() {
 
 // Position de l'equipe (plan 2026-10-29) : memes conditions que les
 // notifications, apres elles (location.js attend que leur ecran soit ferme).
-// Jamais en Practice ni en View as : la condition est relue a chaque envoi, un
-// mode choisi plus tard coupe aussi les envois. Import dynamique, hors precache.
+// Jamais en Practice ni en View as, ni pour un sous-traitant (le proxy refuse
+// son envoi) : la condition est relue a chaque envoi, un mode choisi plus tard
+// coupe aussi les envois. Import dynamique, hors precache.
 export function partageAutorise() {
-  return !!state.session && state.session.kind !== 'stale' && !state.viewAs && !practiceActive();
+  const moi = state.day && !state.day.viewAs ? state.day.me : null;
+  const role = moi ? String(moi.role || '') : '';
+  return !!state.session && state.session.kind !== 'stale' && !state.viewAs && !practiceActive() &&
+    role !== '' && role !== 'subcontractor';
 }
+
+// La personne connectee (cle du choix de l'avertissement), jamais celle d'un View as.
+export function monIdentifiant() {
+  const jour = state.day || {};
+  const id = jour.viewAs ? (jour.viewer && jour.viewer.id) : (jour.me && jour.me.id);
+  return id === undefined || id === null ? null : String(id);
+}
+
+// Une autre couche occupe l'ecran (viseur, photo, confirmation) : l'avertissement
+// propose a la minute attend.
+function ecranOccupe() {
+  return !!(S.camera && S.camera.open) || !!S.flowCam || !!S.viewPhoto || !!S.confirmDelete;
+}
+
+let localisationLancee = false;
+let bootFini = false;
 
 function proposerLocalisation() {
   if (!partageAutorise() || state.error || !state.day || state.jourGarde) return;
-  if (state.day.viewAs) return;
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  localisationLancee = true;
   import('/v3/location.js')
-    .then(function (m) { m.startLocation(partageAutorise); })
-    .catch(function (e) { console.warn('[v3] partage de position indisponible', e); });
+    .then(function (m) { m.startLocation({ isAllowed: partageAutorise, personId: monIdentifiant(), busy: ecranOccupe }); })
+    .catch(function (e) { localisationLancee = false; console.warn('[v3] partage de position indisponible', e); });
 }
 
 boot();

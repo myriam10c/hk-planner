@@ -10,7 +10,8 @@
 import { api } from '/v3/api.js';
 import { esc, icon } from '/v3/ui.js';
 import {
-  geoSupported, inWindow, readNotice, refreshLocationSharing, setNotice, sharingState, startLocationSharing,
+  geoSupported, inWindow, readNotice, refreshLocationSharing, setLocationPerson, setNotice, sharingState,
+  startLocationSharing,
 } from '/shared/location-core.js';
 
 export const BLOCKED_HELP = 'Location is blocked. In Chrome: tap the lock icon next to the address, then Permissions, then Location, Allow.';
@@ -67,20 +68,45 @@ export function openLocationNotice() {
   return ouvert;
 }
 
-// 'on' | 'off' | 'blocked' | 'unsupported', pour Profile.
-export function locationState() {
+// 'on' | 'off' | 'blocked' | 'unsupported', pour Profile. `personId` : la
+// personne connectee, dont le choix est lu (le partage n'a peut-etre pas demarre).
+export function locationState(personId) {
+  if (personId !== undefined) setLocationPerson(personId);
   return sharingState().catch(function () { return 'unsupported'; });
 }
 
+// Avertissement a proposer maintenant : jamais repondu (ou « Not now » d'un autre
+// jour), fenetre ouverte, partage permis.
+function aProposer(isAllowed) {
+  let ok = false;
+  try { ok = !isAllowed || isAllowed() === true; } catch (e) { ok = false; }
+  return ok && geoSupported() && readNotice() === 'ask' && inWindow(Date.now());
+}
+
 // Depuis app.js, apres la session confirmee par le serveur, pour la personne
-// elle-meme. `isAllowed` est relu a chaque envoi : entrer en Practice ou en View
-// as plus tard coupe aussi les envois. `ask` faux : depuis Profile, qui ouvre
-// l'avertissement lui-meme (le partage n'a peut-etre pas demarre au boot, hors ligne).
-export function startLocation(isAllowed, ask) {
+// elle-meme. o.isAllowed est relu a chaque envoi : entrer en Practice ou en View
+// as plus tard coupe aussi les envois. o.personId : la personne connectee (le
+// choix est garde par personne). o.ask faux : depuis Profile, qui ouvre
+// l'avertissement lui-meme. o.busy() vrai (facultatif, garde) : une autre couche
+// est a l'ecran, la minute suivante retentera.
+let occupe = null;   // busy() garde d'un appel a l'autre (Profile ne le repasse pas)
+
+export function startLocation(o) {
+  const isAllowed = o.isAllowed;
+  if (o.busy !== undefined) occupe = o.busy;
   startLocationSharing({
     post: function (body) { return api.post('v3.saveLocation', body); },
     isAllowed: isAllowed,
+    personId: o.personId,
+    // App ouverte avant 7 h : l'avertissement est propose quand la fenetre
+    // s'ouvre, si rien d'autre n'est a l'ecran et la page visible.
+    onTick: function () {
+      if (ouvert || document.visibilityState === 'hidden') return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      try { if (occupe && occupe()) return; } catch (e) { return; }
+      if (aProposer(isAllowed)) openLocationNotice();
+    },
   });
   // Hors fenetre (avant 7 h, apres 23 h), rien n'est demande.
-  if (ask !== false && geoSupported() && readNotice() === 'ask' && inWindow(Date.now())) openLocationNotice();
+  if (o.ask !== false && aProposer(isAllowed)) openLocationNotice();
 }

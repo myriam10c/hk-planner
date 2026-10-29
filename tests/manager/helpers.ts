@@ -6,6 +6,22 @@ import type { Page } from '@playwright/test';
 // raw : corps texte rendu tel quel (ex. un CSV), avec contentType (defaut text/csv).
 export type FakeRoute = { match: string; status: number; body: any; delay?: number; once?: boolean; fail?: boolean; raw?: string; contentType?: string };
 
+// Ids des personnes que les reponses simulees font connecter (me, viewer, cleaner) :
+// le choix de l'avertissement « Share your location » est garde par personne
+// (hkLocNotice:<id>), il est seme pour chacune.
+export function personIds(routes: FakeRoute[]): string[] {
+  const ids = new Set<string>();
+  for (const r of routes) {
+    const b = r && r.body;
+    if (!b || typeof b !== 'object') continue;
+    for (const k of ['me', 'viewer', 'cleaner']) {
+      const v = (b as any)[k];
+      if (v && typeof v === 'object' && v.id !== undefined && v.id !== null) ids.add(String(v.id));
+    }
+  }
+  return Array.from(ids);
+}
+
 export const MANAGER = { id: 8, name: 'Walter', color: '#e94560', role: 'manager', email: 'walter@example.com' };
 export const me = (member: any) => ({ match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: member } });
 // Image d'un pixel servie a la place des URL signees du stockage (aucun appel reseau).
@@ -38,9 +54,10 @@ export async function bootMgr(
         // Bandeau des notifications masque par defaut (push-bar.spec.ts le teste a part).
         localStorage.setItem('mgrPushLater', new Date().toISOString().slice(0, 10));
         if (cfg.cache) localStorage.setItem('mgrTodayCache', JSON.stringify(cfg.cache));
-        // Avertissement « Share your location » (hkLocNotice) repousse loin par defaut :
-        // il ne couvre pas l'app et aucune position n'est demandee. null : rien n'est seme.
-        if (cfg.locNotice) localStorage.setItem('hkLocNotice', cfg.locNotice);
+        // Avertissement « Share your location » (hkLocNotice:<id>, par personne des
+        // reponses simulees) repousse loin par defaut : il ne couvre pas l'app et
+        // aucune position n'est demandee. null : rien n'est seme.
+        if (cfg.locNotice) for (const id of cfg.locIds) localStorage.setItem('hkLocNotice:' + id, cfg.locNotice);
         if (cfg.storage) for (const k of Object.keys(cfg.storage)) localStorage.setItem(k, cfg.storage[k]);
       }
     } catch (e) { /* stockage indisponible */ }
@@ -92,6 +109,7 @@ export async function bootMgr(
     routes, email: opts.email ? emailSession() : null, pin: opts.pin || null,
     cache: opts.cache || null, timeoutMs: opts.timeoutMs || 0, storage: opts.storage || null, authDelayMs: opts.authDelayMs || 0,
     locNotice: opts.locNotice === undefined ? 'later:2999-12-31' : opts.locNotice,
+    locIds: personIds(routes),
   });
   await page.goto('/manager/' + (opts.hash || ''), { waitUntil: 'domcontentloaded' });
 }

@@ -59,7 +59,7 @@ test('avertissement une fois : Not now ne demande rien et ne revient pas le meme
   expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
   await gate.getByRole('button', { name: 'Not now' }).click();
   await expect(gate).toHaveCount(0);
-  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice'))).toBe('later:2026-09-12');
+  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice:3'))).toBe('later:2026-09-12');
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
@@ -73,7 +73,7 @@ test('OK partage la position, puis seulement si deplacement > 100 m ou plus de 5
   await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: null });
   await page.locator('#locgate').getByRole('button', { name: 'OK' }).click();
   await expect(page.locator('#locgate')).toHaveCount(0);
-  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice'))).toBe('ok');
+  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice:3'))).toBe('ok');
 
   await expect.poll(async () => (await envois(page)).length).toBe(1);
   const corps = JSON.parse((await envois(page))[0].body);
@@ -114,7 +114,7 @@ test('Practice : ni avertissement, ni demande de position, ni envoi', async ({ p
   await expect(page.locator('.practicebar')).toContainText('Practice as Faiza');
 
   // Avertissement jamais repondu : il ne s'ouvre pas en Practice.
-  await page.evaluate(() => localStorage.removeItem('hkLocNotice'));
+  await page.evaluate(() => { localStorage.removeItem('hkLocNotice:1'); localStorage.removeItem('hkLocNotice:3'); });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
   await expect(page.locator('.practicebar')).toContainText('Practice as Faiza');
@@ -122,7 +122,7 @@ test('Practice : ni avertissement, ni demande de position, ni envoi', async ({ p
   await expect(page.locator('#locgate')).toHaveCount(0);
 
   // Partage deja accepte : toujours aucune demande ni envoi en Practice.
-  await page.evaluate(() => localStorage.setItem('hkLocNotice', 'ok'));
+  await page.evaluate(() => { localStorage.setItem('hkLocNotice:1', 'ok'); localStorage.setItem('hkLocNotice:3', 'ok'); });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
   await expect(page.locator('.practicebar')).toContainText('Practice as Faiza');
@@ -160,4 +160,43 @@ test('Profile : position bloquee par le navigateur, aide pour Chrome', async ({ 
   await expect(page.locator('.locrow')).toContainText('Blocked');
   await expect(page.locator('.lochelp')).toHaveText(
     'Location is blocked. In Chrome: tap the lock icon next to the address, then Permissions, then Location, Allow.');
+});
+
+test('sous-traitant : ni avertissement, ni demande, ni ligne dans Profile', async ({ page }) => {
+  const sous = { ...JOURNEE, me: { id: 12, name: 'Elite Cleaning', role: 'subcontractor' } };
+  const routes = [{ match: 'action=v3.myDay', status: 200, body: sous }, ...ROUTES.slice(2)];
+  await bootV3(page, routes, { pinToken: 'jeton-pin', locNotice: null });
+  await page.waitForTimeout(1000);
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  // Meme avec un OK garde (par exemple d'avant le changement de role) : rien.
+  await page.evaluate(() => localStorage.setItem('hkLocNotice:12', 'ok'));
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await expect(page.getByRole('button', { name: /sign out/i })).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page.locator('.locrow')).toHaveCount(0);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+  expect(await envois(page)).toHaveLength(0);
+});
+
+test('app ouverte avant 7 h : l avertissement arrive quand la fenetre s ouvre', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-12T06:58:30+04:00') });
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: null });
+  await page.waitForTimeout(800);
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  // Minute suivante, toujours avant 7 h : rien.
+  await page.clock.fastForward(60_000);
+  await page.waitForTimeout(300);
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  // 07:00 passees : propose par le tic de la minute, sans rechargement.
+  await page.clock.fastForward(60_000);
+  await expect(page.locator('#locgate').getByRole('heading', { name: 'Share your location' })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+  await page.locator('#locgate').getByRole('button', { name: 'Not now' }).click();
+  // Repondu : la minute suivante ne le repropose pas.
+  await page.clock.fastForward(60_000);
+  await page.waitForTimeout(300);
+  await expect(page.locator('#locgate')).toHaveCount(0);
 });

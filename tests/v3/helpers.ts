@@ -8,6 +8,22 @@ import type { Page } from '@playwright/test';
 // prend le relais (un 401 puis un 200, par exemple).
 export type FakeRoute = { match: string; status: number; body: any; delay?: number; once?: boolean };
 
+// Ids des personnes que les reponses simulees font connecter (me, viewer, cleaner) :
+// le choix de l'avertissement « Share your location » est garde par personne
+// (hkLocNotice:<id>), il est seme pour chacune.
+export function personIds(routes: FakeRoute[]): string[] {
+  const ids = new Set<string>();
+  for (const r of routes) {
+    const b = r && r.body;
+    if (!b || typeof b !== 'object') continue;
+    for (const k of ['me', 'viewer', 'cleaner']) {
+      const v = (b as any)[k];
+      if (v && typeof v === 'object' && v.id !== undefined && v.id !== null) ids.add(String(v.id));
+    }
+  }
+  return Array.from(ids);
+}
+
 // Session email au format ecrit par supabase-js dans hkAuthSession. Le client
 // juge invalide (et efface) une session sans refresh_token ni expires_at.
 export function emailSession(access: string, refresh: string, expiresInSec: number) {
@@ -38,14 +54,15 @@ export async function bootV3(
     authRoutes?: FakeRoute[];
     // Pose le drapeau v3TestOffline des le premier document (une seule fois).
     offline?: boolean;
-    // Choix de l'avertissement « Share your location » (hkLocNotice), seme une
-    // fois. Par defaut repousse a une date lointaine : l'avertissement ne couvre
-    // pas l'app et aucune position n'est demandee. null : rien n'est seme.
+    // Choix de l'avertissement « Share your location » (hkLocNotice:<id>), seme
+    // une fois pour chaque personne des reponses simulees (personIds). Par defaut
+    // repousse a une date lointaine : l'avertissement ne couvre pas l'app et
+    // aucune position n'est demandee. null : rien n'est seme.
     locNotice?: string | null;
   } = {},
 ) {
   await page.addInitScript(
-    (cfg: { routes: FakeRoute[]; authRoutes: FakeRoute[]; pinToken: string | null; emailSession: any; offline: boolean; locNotice: string | null }) => {
+    (cfg: { routes: FakeRoute[]; authRoutes: FakeRoute[]; pinToken: string | null; emailSession: any; offline: boolean; locNotice: string | null; locIds: string[] }) => {
       // Rien n'est efface ici : addInitScript rejoue a chaque navigation, et un
       // effacement emporterait le drapeau hors ligne et le journal d'un test qui
       // recharge la page. Chaque test part de toute facon d'un contexte neuf.
@@ -60,7 +77,7 @@ export async function bootV3(
           if (cfg.pinToken) localStorage.setItem('cleanerToken', cfg.pinToken);
           if (cfg.emailSession) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.emailSession));
           if (cfg.offline) localStorage.setItem('v3TestOffline', '1');
-          if (cfg.locNotice) localStorage.setItem('hkLocNotice', cfg.locNotice);
+          if (cfg.locNotice) for (const id of cfg.locIds) localStorage.setItem('hkLocNotice:' + id, cfg.locNotice);
         }
         // Ecran « Turn on notifications » / « Add to Home Screen » (relances push du 21/10) :
         // ecarte comme apres « Not now », sinon il couvre l'app dans chaque test.
@@ -153,6 +170,7 @@ export async function bootV3(
       routes, authRoutes: opts.authRoutes ?? [], pinToken: opts.pinToken ?? null,
       emailSession: opts.emailSession ?? null, offline: !!opts.offline,
       locNotice: opts.locNotice === undefined ? 'later:2999-12-31' : opts.locNotice,
+      locIds: personIds(routes),
     },
   );
   await page.goto('/v3/' + (opts.hash || ''), { waitUntil: 'domcontentloaded' });

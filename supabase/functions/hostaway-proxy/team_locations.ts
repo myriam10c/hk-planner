@@ -16,6 +16,8 @@ export const LOC_FUTURE_MS = 2 * 60_000;
 export const LOC_MAX_AGE_MS = 30 * 60_000;
 // « At » un logement a 150 m ou moins, « near » au-dela.
 export const LOC_AT_M = 150;
+// Precision annoncee au-dela de 2 km : point ignore (reseau ou wifi grossier), rien n'est ecrit.
+export const LOC_MAX_ACCURACY_M = 2000;
 
 export type LocPlace = { kind: "at" | "near"; listingId: string; label: string; distanceM: number };
 export type LocPoint = {
@@ -61,6 +63,8 @@ export type LocInput = { lat: number; lng: number; accuracy: number | null; reco
 export function parseLocation(body: any, nowMs: number): { ok: true; value: LocInput } | { ok: false; error: string } {
   if (!body || typeof body !== "object") return { ok: false, error: "invalid json body" };
   if (!coord(body.lat, 90) || !coord(body.lng, 180)) return { ok: false, error: "invalid lat/lng" };
+  // 0,0 : position par defaut d'un capteur sans fix, jamais une vraie position a Dubai.
+  if (body.lat === 0 && body.lng === 0) return { ok: false, error: "invalid lat/lng" };
   const acc = body.accuracy;
   if (acc != null && !(typeof acc === "number" && Number.isFinite(acc) && acc >= 0)) {
     return { ok: false, error: "invalid accuracy" };
@@ -88,6 +92,19 @@ export async function saveLocation(sb: any, me: SessionUser | null, body: any, n
   const p = parseLocation(body, nowMs);
   if (!p.ok) return { status: 400, body: { error: p.error } };
   if (!inLocationHours(nowMs)) return { status: 200, body: { ok: true, saved: false, reason: "outside_hours" } };
+  if (p.value.accuracy != null && p.value.accuracy > LOC_MAX_ACCURACY_M) {
+    return { status: 200, body: { ok: true, saved: false, reason: "inaccurate" } };
+  }
+  // Jamais ecraser une position plus recente (deux onglets, requete arrivee en retard).
+  const cur = await sb.from("team_locations").select("recorded_at").eq("cleaner_id", me.cleaner_id).maybeSingle();
+  if (cur.error) {
+    console.error("[team_locations] read failed:", cur.error.message ?? cur.error);
+    return { status: 500, body: { error: "Location could not be saved." } };
+  }
+  const curMs = cur.data ? Date.parse(String(cur.data.recorded_at)) : NaN;
+  if (Number.isFinite(curMs) && curMs > p.value.recordedMs) {
+    return { status: 200, body: { ok: true, saved: false, reason: "older" } };
+  }
   const { error } = await sb.from("team_locations").upsert({
     cleaner_id: me.cleaner_id, lat: p.value.lat, lng: p.value.lng, accuracy_m: p.value.accuracy,
     recorded_at: new Date(p.value.recordedMs).toISOString(), received_at: new Date(nowMs).toISOString(),
