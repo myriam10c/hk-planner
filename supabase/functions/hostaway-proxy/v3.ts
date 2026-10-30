@@ -84,6 +84,7 @@ export const V3_ROLES: Record<string, string[]> = {
   // depuis /manager/ (meme session, Bearer ou jeton PIN). Pas les sous-traitants :
   // un compte societe n'est pas une personne a localiser.
   "v3.saveLocation": ["cleaner", "maintenance", "manager"],
+  "v3.stopLocation": ["cleaner", "maintenance", "manager"],
 };
 
 // Echoue fermee : une action inconnue de la table n'est autorisee a personne.

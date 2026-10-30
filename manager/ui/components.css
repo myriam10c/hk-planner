@@ -111,3 +111,14 @@ section.card{background:var(--surface);border:1px solid var(--line);border-radiu
 .pushprompt-b{display:flex;flex-direction:column;gap:var(--s2);width:100%;margin-top:var(--s2)}
 .pushprompt-b .btn{min-height:56px;font-size:18px;justify-content:center;width:100%}
 .pushprompt .pushprompt-err{color:var(--bad-ink);font-size:16px}
+/* Bouton « Location ON / OFF » sous l'en-tete des ecrans principaux (loc-pill.js, 30/10) :
+   compact mais visible. ON vert, OFF ambre, bloque rouge, hors fenetre en retrait. */
+.locpill{display:inline-flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;max-width:100%;min-height:48px;margin:0 0 var(--s4);padding:6px var(--s5);border-radius:999px;border:2px solid var(--warn);background:var(--warn-tint);color:var(--warn-ink);font:inherit;text-align:left;cursor:pointer}
+.locpill[hidden]{display:none}
+.locpill:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.locpill:disabled{opacity:.7;cursor:default}
+.locpill-t{font-size:16px;font-weight:700;line-height:1.2}
+.locpill-s{font-size:13px;font-weight:500;line-height:1.25;opacity:.9}
+.locpill[data-state="on"]{border-color:var(--ok);background:var(--ok-tint);color:var(--ok-ink)}
+.locpill[data-state="blocked"]{border-color:var(--bad);background:var(--bad-tint);color:var(--bad-ink)}
+.locpill[data-state="sleeps"]{border-style:dashed;border-color:var(--line-2);background:var(--surface-2);color:var(--ink-3)}

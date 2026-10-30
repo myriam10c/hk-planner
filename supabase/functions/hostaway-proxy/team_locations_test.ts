@@ -3,9 +3,10 @@ import { fakeDb } from "./v3_fakedb.ts";
 import { planningAccess } from "./mgr_rules.ts";
 import { roleAllowed } from "./v3.ts";
 import {
-  buildLocations, haversineM, hostawayCoords, inLocationHours, loadLocationsSafe, locListings, mgrLocations,
-  nearestListing, parseLocation, readShareLocation, saveLocation, sharesLocation,
+  buildLocations, haversineM, hostawayCoords, inLocationHours, loadLocationsSafe, locationNudge, locListings, mgrLocations,
+  nearestListing, nudgePayload, nudgeTargets, parseLocation, readShareLocation, saveLocation, sharesLocation, stopLocation,
 } from "./team_locations.ts";
+import { APP_URL } from "./push.ts";
 
 // 29/10/2026 10:00 Dubai = 06:00 UTC.
 const NOW = Date.parse("2026-10-29T06:00:00Z");
@@ -86,7 +87,68 @@ Deno.test("saveLocation : upsert sur l'id de session, jamais celui du corps", as
   const row = db.tables.team_locations[0];
   assertEquals([row.cleaner_id, row.lat, row.lng, row.accuracy_m, row.recorded_at, row.received_at],
     [4, 25.0866, 55.1474, 12, iso(NOW - 60_000), iso(NOW)]);
-  assertEquals(db.writes.map((w) => [w.table, w.op]), [["team_locations", "upsert"]]);
+  // Puis la marque « turned off » effacee sur la ligne de la session.
+  assertEquals(db.writes.map((w) => [w.table, w.op]), [["team_locations", "upsert"], ["cleaners", "update"]]);
+  assertEquals(db.writes[1].values, { location_off_at: null });
+});
+
+Deno.test("saveLocation : location_off_at efface sur la personne de la session seulement", async () => {
+  const off = iso(NOW - 3600_000);
+  const db = fakeDb({ cleaners: [{ id: 4, share_location: true, location_off_at: off }, { id: 5, location_off_at: off }] });
+  assertEquals((await saveLocation(db, ME, body(), NOW)).body.saved, true);
+  assertEquals(db.tables.cleaners.map((c) => [c.id, c.location_off_at]), [[4, null], [5, off]]);
+  // Ecriture ratee : la position reste enregistree (journalise seulement).
+  const db2 = fakeDb({ cleaners: [{ id: 4, location_off_at: off }] });
+  db2.fail["cleaners.update"] = { message: "column does not exist" };
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    assertEquals(await saveLocation(db2, ME, body(), NOW), { status: 200, body: { ok: true, saved: true } });
+  } finally {
+    console.error = orig;
+  }
+  assertEquals(db2.tables.team_locations.length, 1);
+  // Rien d'ecrit (hors fenetre) : la marque reste.
+  const db3 = fakeDb({ cleaners: [{ id: 4, location_off_at: off }] });
+  const night = Date.parse("2026-10-29T20:00:00Z");
+  await saveLocation(db3, ME, body({ recordedAt: iso(night) }), night);
+  assertEquals(db3.tables.cleaners[0].location_off_at, off);
+});
+
+Deno.test("stopLocation : efface la position de la session, pose location_off_at, 401 sans session", async () => {
+  const db = fakeDb({
+    cleaners: [{ id: 4, name: "Faiza" }, { id: 5, name: "Joe" }],
+    team_locations: [
+      { cleaner_id: 4, lat: 1, lng: 1, accuracy_m: null, recorded_at: iso(NOW - 60_000) },
+      { cleaner_id: 5, lat: 1, lng: 1, accuracy_m: null, recorded_at: iso(NOW - 60_000) },
+    ],
+  });
+  assertEquals(await stopLocation(db, ME, NOW), { status: 200, body: { ok: true } });
+  assertEquals(db.tables.team_locations.map((l) => l.cleaner_id), [5]);
+  assertEquals(db.tables.cleaners.map((c) => [c.id, c.location_off_at ?? null]), [[4, iso(NOW)], [5, null]]);
+  // Hors fenetre aussi (minuit Dubai) : couper est toujours permis.
+  const night = Date.parse("2026-10-29T20:00:00Z");
+  assertEquals((await stopLocation(db, ME, night)).status, 200);
+  assertEquals(db.tables.cleaners[0].location_off_at, iso(night));
+  const db2 = fakeDb();
+  assertEquals(await stopLocation(db2, null, NOW), { status: 401, body: { error: "auth required" } });
+  assertEquals(db2.writes.length, 0);
+});
+
+Deno.test("stopLocation : erreurs d'ecriture, 500 lisible", async () => {
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    const db = fakeDb({ cleaners: [{ id: 4 }] });
+    db.fail["team_locations.delete"] = { message: "boom" };
+    assertEquals(await stopLocation(db, ME, NOW), { status: 500, body: { error: "Location could not be turned off." } });
+    assertEquals(db.tables.cleaners[0].location_off_at, undefined);
+    const db2 = fakeDb({ cleaners: [{ id: 4 }] });
+    db2.fail["cleaners.update"] = { message: "column does not exist" };
+    assertEquals((await stopLocation(db2, ME, NOW)).status, 500);
+  } finally {
+    console.error = orig;
+  }
 });
 
 Deno.test("saveLocation : hors fenetre rien n'est ecrit, 400 sur entree invalide, 401 sans session", async () => {
@@ -113,7 +175,7 @@ Deno.test("saveLocation : precision au-dela de 2000 m ignoree, 2000 m acceptee",
     { status: 200, body: { ok: true, saved: false, reason: "inaccurate" } });
   assertEquals(db.writes.length, 0);
   assertEquals(await saveLocation(db, ME, body({ accuracy: 2000 }), NOW), { status: 200, body: { ok: true, saved: true } });
-  assertEquals(db.writes.length, 1);
+  assertEquals(db.writes.map((w) => w.table), ["team_locations", "cleaners"]);
 });
 
 Deno.test("saveLocation : une position plus recente en base n'est jamais ecrasee", async () => {
@@ -214,7 +276,8 @@ Deno.test("buildLocations : actifs hors system et sous-traitants, plus recents d
   const out = buildLocations(PEOPLE, LOCS, locListings(LISTINGS), NOW);
   assertEquals(out.map((p) => p.id), [4, 5, 3, 8]);
   const faiza = out[0];
-  assertEquals(Object.keys(faiza).sort(), ["color", "id", "location", "name", "role"]);
+  assertEquals(Object.keys(faiza).sort(), ["color", "id", "location", "name", "offAt", "role"]);
+  assertEquals(faiza.offAt, null);
   assertEquals([faiza.name, faiza.role, faiza.color], ["Faiza", "cleaner", "#111"]);
   const l = faiza.location!;
   assertEquals(Object.keys(l).sort(), ["accuracy", "ageMin", "lat", "lng", "place", "recordedAt"]);
@@ -272,10 +335,103 @@ Deno.test("mgrLocations : lecture ratee, 503 ; loadLocationsSafe rend null", asy
 Deno.test("acces : ecriture cleaner, maintenance, manager ; lecture managers et maintenance", () => {
   for (const r of ["cleaner", "maintenance", "manager"]) assertEquals(roleAllowed("v3.saveLocation", r), true, r);
   for (const r of ["subcontractor", "system", ""]) assertEquals(roleAllowed("v3.saveLocation", r), false, r);
+  for (const r of ["cleaner", "maintenance", "manager"]) assertEquals(roleAllowed("v3.stopLocation", r), true, r);
+  for (const r of ["subcontractor", "system", ""]) assertEquals(roleAllowed("v3.stopLocation", r), false, r);
   assertEquals(planningAccess(true, { role: "manager" }), { ok: true });
   assertEquals(planningAccess(true, { role: "maintenance" }), { ok: true });
   assertEquals(planningAccess(true, { role: "cleaner" }), { ok: false, status: 403, error: "forbidden" });
   assertEquals(planningAccess(false, { role: "manager" }), { ok: false, status: 403, error: "email sign-in required" });
+});
+
+Deno.test("buildLocations et mgrLocations : offAt en ISO (ou null), meme sans position", async () => {
+  const off = "2026-10-29T10:02:00+00:00";
+  const people = PEOPLE.map((p) => p.id === 3 ? { ...p, location_off_at: off } : p.id === 8 ? { ...p, location_off_at: "nope" } : p);
+  const out = buildLocations(people, LOCS, [], NOW);
+  assertEquals(out.map((p) => [p.id, p.offAt]), [[4, null], [5, null], [3, "2026-10-29T10:02:00.000Z"], [8, null]]);
+  assertEquals(out.find((p) => p.id === 3)!.location, null);
+  const db = fakeDb({ cleaners: people, team_locations: LOCS, listing_config: LISTINGS });
+  const r = await mgrLocations(db, NOW);
+  assertEquals(r.body.people.find((p: any) => p.id === 3).offAt, "2026-10-29T10:02:00.000Z");
+  // Bloc locations de mgr.today : meme champ.
+  assertEquals((await loadLocationsSafe(db, NOW))!.find((p) => p.id === 3)!.offAt, "2026-10-29T10:02:00.000Z");
+});
+
+// Relance : 10:00 Dubai (hors heures de silence). Faiza a une position de 30 min, Joe de 3 h.
+const NUDGE_PEOPLE = [
+  ...PEOPLE,
+  { id: 13, name: "Annet", role: "cleaner", color: "#888", is_active: true, location_off_at: iso(NOW - 3600_000) },
+  { id: 14, name: "Rahma", role: "cleaner", color: "#999", is_active: true, share_location: false },
+];
+const NUDGE_LOCS = [
+  { cleaner_id: 4, recorded_at: iso(NOW - 30 * 60_000) },
+  { cleaner_id: 5, recorded_at: iso(NOW - 3 * 3600_000) },
+  { cleaner_id: 12, recorded_at: iso(NOW) },
+];
+
+Deno.test("nudgeTargets : actifs, partage permis, roles cleaner/maintenance/manager, sans position de moins de 2 h", () => {
+  const { targets, skipped } = nudgeTargets(NUDGE_PEOPLE, NUDGE_LOCS, NOW);
+  // Sous-traitant, system, inactif et share_location false exclus ; Annet (coupe elle-meme) relancee.
+  assertEquals(targets.map((p) => p.name), ["Amir", "Annet", "Joe", "Walter"]);
+  assertEquals(skipped.map((p) => p.name), ["Faiza"]);
+  // Pile 2 h : plus fraiche, relancee.
+  const t2 = nudgeTargets([PEOPLE[0]], [{ cleaner_id: 4, recorded_at: iso(NOW - 2 * 3600_000) }], NOW);
+  assertEquals(t2.targets.map((p) => p.id), [4]);
+});
+
+Deno.test("nudgePayload : texte, url de l'app racine (cleaner) ou /manager/", () => {
+  assertEquals(nudgePayload("cleaner"), {
+    title: "Turn on your location",
+    body: "Open HK Planner and tap Location ON so your manager can organise the day.",
+    url: APP_URL + "/", tag: "loc-nudge",
+  });
+  assertEquals(nudgePayload("manager").url, APP_URL + "/manager/");
+  assertEquals(nudgePayload("maintenance").url, APP_URL + "/manager/");
+  assert(!/\u2014/.test(JSON.stringify(nudgePayload("cleaner"))));
+});
+
+Deno.test("locationNudge : envoie a chaque cible, sent / noPush / skipped par nom", async () => {
+  const db = fakeDb({ cleaners: NUDGE_PEOPLE, team_locations: NUDGE_LOCS });
+  const calls: any[] = [];
+  const send = async (id: number, payload: any) => {
+    calls.push([id, payload.url]);
+    // Joe : aucun abonnement ; Walter : seul abonnement disparu (desactive par sendPush).
+    if (id === 5) return { sent: 0, pruned: 0, skipped: "no_subscription" };
+    if (id === 8) return { sent: 0, pruned: 1, skipped: null };
+    return { sent: 1, pruned: 0, skipped: null };
+  };
+  const r = await locationNudge(db, NOW, send);
+  assertEquals(r, { status: 200, body: { ok: true, sent: ["Amir", "Annet"], noPush: ["Joe", "Walter"], skipped: ["Faiza"] } });
+  assertEquals(calls, [[3, APP_URL + "/"], [13, APP_URL + "/"], [5, APP_URL + "/manager/"], [8, APP_URL + "/manager/"]]);
+  // Lecture seule cote base : la relance n'ecrit rien elle-meme.
+  assertEquals(db.writes.length, 0);
+});
+
+Deno.test("locationNudge : heures de silence, rien ne part, 200 quiet_hours", async () => {
+  let n = 0;
+  const send = async () => { n++; return { sent: 1, pruned: 0, skipped: null }; };
+  const db = fakeDb({ cleaners: NUDGE_PEOPLE, team_locations: [] });
+  for (const h of ["18:00", "23:59", "04:29"]) { // 22:00, 03:59, 08:29 Dubai
+    assertEquals(await locationNudge(db, Date.parse("2026-10-29T" + h + ":00Z"), send), { status: 200, body: { ok: false, reason: "quiet_hours" } });
+  }
+  assertEquals(n, 0);
+  // 08:30 Dubai : envoye.
+  assertEquals((await locationNudge(db, Date.parse("2026-10-29T04:30:00Z"), send)).body.ok, true);
+  assert(n > 0);
+});
+
+Deno.test("locationNudge : lecture ratee, 503 et rien n'est envoye", async () => {
+  const db = fakeDb({ cleaners: NUDGE_PEOPLE });
+  db.fail["team_locations.select"] = { message: "boom" };
+  let n = 0;
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    const r = await locationNudge(db, NOW, async () => { n++; return { sent: 1, pruned: 0, skipped: null }; });
+    assertEquals(r, { status: 503, body: { error: "Could not send the reminder right now. Try again." } });
+  } finally {
+    console.error = orig;
+  }
+  assertEquals(n, 0);
 });
 
 // index.ts n'est pas importable en test (Deno.serve) : assertions sur la source, comme mnt_routes_test.ts.
@@ -297,6 +453,18 @@ Deno.test("routes : declarees, session, garde de role, identite de la session", 
   const r = bloc("mgr.locations");
   assert(r.indexOf("planningAccess(bearerToken(req) !== null, me)") > r.indexOf("await currentUser(sb, req)"));
   assert(r.includes("mgrLocations(sb, Date.now())"));
+  // Bouton Location OFF : memes gardes que v3.saveLocation, identite de la session.
+  assert(src.includes('["v3.stopLocation", "POST"]'));
+  const off = bloc("v3.stopLocation");
+  assert(off.indexOf("roleAllowed(action, me.role)") > off.indexOf("await currentUser(sb, req)"));
+  assert(off.includes("stopLocation(sb, me, Date.now())"));
+  // Relance : manager en session email ou secret serveur, envoi par sendPush.
+  assert(src.includes('["mgr.locationNudge", "POST"]'));
+  const n = bloc("mgr.locationNudge");
+  assert(n.includes('req.headers.get("x-server-secret")'));
+  assert(n.includes('SERVER_SHARED_SECRET !== "" && serverSecret === SERVER_SHARED_SECRET'));
+  assert(n.indexOf("mgrAccess(bearerToken(req) !== null, me)") > n.indexOf("if (!isServer)"));
+  assert(n.includes("locationNudge(sb, Date.now(), (id, payload) => sendPush(sb, id, payload))"));
   // shareLocation expose dans v3.myDay (hors View as) et cleanerMe.
   const d = bloc("v3.myDay");
   assert(d.includes("shareLocation: await readShareLocation(sb, me.cleaner_id)"));

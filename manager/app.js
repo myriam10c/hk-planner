@@ -181,11 +181,14 @@ async function boot() {
 // Position de l'equipe (plan 2026-10-29) : apres l'ecran des notifications
 // (location.js attend qu'il soit ferme). Seulement une session confirmee par le
 // serveur : `me` pose plus haut, relu a chaque envoi.
+// Puis le bouton « Location ON / OFF » sous l'en-tete des ecrans principaux (loc-pill.js).
+const locAllowed = () => !!me && me.role !== 'subcontractor' && me.shareLocation !== false;
+const refreshPill = () => import('/manager/loc-pill.js').then((p) => p.refreshLocPill()).catch(() => { /* bouton facultatif */ });
 function startLocation() {
   import('/manager/location.js')
-    .then((m) => m.startLocation({
-      isAllowed: () => !!me && me.role !== 'subcontractor' && me.shareLocation !== false, personId: me && me.id,
-    }))
+    .then((m) => m.startLocation({ isAllowed: locAllowed, personId: me && me.id, onState: refreshPill }))
+    .then(() => (locAllowed() ? import('/manager/loc-pill.js') : null))
+    .then((p) => (p ? p.mountLocPill({ isAllowed: locAllowed, personId: me && me.id }) : null))
     .catch(() => { /* partage facultatif */ });
 }
 

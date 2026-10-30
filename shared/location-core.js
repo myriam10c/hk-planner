@@ -11,10 +11,12 @@
 
 // Choix garde par personne (telephone partage) : cle 'hkLocNotice2:<cleanerId>',
 // valeur 'ok' | 'later:<YYYY-MM-DD>' (jour de Dubai) | 'later:page' (« Not now »
-// d'un cleaner : redemande a la prochaine ouverture de l'app). Le suffixe 2
-// (29/10) redemande a tout le monde, les anciennes cles 'hkLocNotice:' sont ignorees.
+// d'un cleaner : redemande a la prochaine ouverture de l'app) | 'off' (bouton
+// « Location OFF », 30/10 : plus d'avertissement, le bouton visible sert de rappel).
+// Le suffixe 2 (29/10) redemande a tout le monde, les anciennes cles 'hkLocNotice:' sont ignorees.
 export const NOTICE_KEY = 'hkLocNotice2';
 export const LATER_PAGE = 'later:page';
+export const OFF = 'off';
 export const WINDOW_START_MIN = 7 * 60;       // 07:00 Dubai
 export const WINDOW_END_MIN = 23 * 60;        // 23:00 Dubai, exclu
 export const MIN_MOVE_M = 100;
@@ -75,14 +77,34 @@ export function shouldSend(last, pos, nowMs) {
   return distance(last, pos) > MIN_MOVE_M;
 }
 
-// Valeur stockee -> 'ok' | 'later' (deja repondu aujourd'hui) | 'ask'.
+// Valeur stockee -> 'ok' | 'off' (coupe par le bouton) | 'later' (deja repondu aujourd'hui) | 'ask'.
 // 'later:page' rend 'ask' : seul le « Not now » de la page en cours (memoire,
 // voir readNotice) le tient pour 'later'.
 export function noticeAnswer(raw, nowMs) {
   if (raw === 'ok') return 'ok';
+  if (raw === OFF) return 'off';
   const m = /^later:(\d{4}-\d{2}-\d{2})$/.exec(String(raw || ''));
   if (m && dubaiDay(nowMs) <= m[1]) return 'later';
   return 'ask';
+}
+
+// Bouton « Location ON / OFF » (v3 et /manager/) : etat de partage (sharingState)
+// et heure -> { state, title, sub }, ou null (rien a montrer). Hors fenetre, le
+// bouton dort mais reste actif : `on` dit le choix garde.
+export const PIN_EMOJI = '\u{1F4CD}';
+export function pillView(st, nowMs) {
+  if (st !== 'on' && st !== 'off' && st !== 'blocked') return null;
+  if (st === 'blocked') return { state: 'blocked', on: false, title: PIN_EMOJI + ' Location blocked', sub: 'Tap for help' };
+  const on = st === 'on';
+  if (!inWindow(nowMs)) {
+    return {
+      state: 'sleeps', on: on, title: PIN_EMOJI + ' Location sleeps (7 AM to 11 PM)',
+      sub: on ? 'On again at 7 AM. Tap to turn off' : 'Off. Tap to turn on',
+    };
+  }
+  return on
+    ? { state: 'on', on: true, title: PIN_EMOJI + ' Location ON', sub: 'Your manager sees where you are' }
+    : { state: 'off', on: false, title: PIN_EMOJI + ' Location OFF', sub: 'Tap to turn on' };
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +138,13 @@ export function readNotice(nowMs) {
 export function setNotice(answer, nowMs, untilReload) {
   if (personne === null) return;
   if (answer === 'ok') { plusTardPage = null; writeKey(noticeKey(personne), 'ok'); return; }
+  if (answer === OFF) {
+    // Coupe par le bouton : le prochain ON renvoie tout de suite un point.
+    plusTardPage = null;
+    last = null;
+    writeKey(noticeKey(personne), OFF);
+    return;
+  }
   if (untilReload) {
     plusTardPage = personne;
     writeKey(noticeKey(personne), LATER_PAGE);
@@ -191,6 +220,8 @@ async function envoyer(pos) {
   const t = now();
   if (t < pauseJusqua) return;
   if (!inWindow(t) || !allowed()) return;
+  // Bouton OFF tape entre le point et cet envoi : rien ne part.
+  if (readNotice(t) !== 'ok') return;
   const c = pos && pos.coords;
   if (!c || !isFinite(c.latitude) || !isFinite(c.longitude)) return;
   if (isFinite(c.accuracy) && c.accuracy > MAX_ACCURACY_M) return;
@@ -308,6 +339,21 @@ export function startLocationSharing(opts) {
 // deja vu est oublie : la personne a pu autoriser entre-temps dans Chrome.
 export function refreshLocationSharing() {
   refusVu = false;
+  evaluer();
+}
+
+// Bouton « Location ON » : vaut accord (choix 'ok'), le watch demarre et avec lui
+// la demande du navigateur. Partage deja demarre par startLocationSharing.
+export function turnLocationOn() {
+  setNotice('ok');
+  refreshLocationSharing();
+}
+
+// Bouton « Location OFF » : choix 'off' garde, watch arrete. L'appel serveur
+// (v3.stopLocation) est fait par l'app.
+export function turnLocationOff() {
+  setNotice(OFF);
+  stopWatch();
   evaluer();
 }
 

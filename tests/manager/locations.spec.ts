@@ -69,6 +69,52 @@ for (const scheme of ['light', 'dark'] as const) {
   });
 }
 
+test('Where is everyone : « Location turned off at 14:02 » sans position, hier, et No location yet sinon', async ({ page }) => {
+  await tiles(page);
+  const people = [
+    ...PEOPLE.slice(0, 3),
+    // 09/10 10:32 Dubai (aujourd'hui) et 08/10 18:40 (hier).
+    { id: 10, name: 'Pionah', role: 'cleaner', color: '#dd2590', location: null, offAt: '2026-10-09T06:32:00.000Z' },
+    { id: 11, name: 'Annet', role: 'cleaner', color: '#6172f3', location: null, offAt: '2026-10-08T14:40:00.000Z' },
+    { id: 12, name: 'Rahma', role: 'cleaner', color: '#0086c9', location: null, offAt: null },
+  ];
+  await bootMgr(page, [me(MANAGER), { ...LOCS, body: { generatedAt: NOW.toISOString(), people } }], { email: true, hash: '#/more/locations', clock: NOW });
+  const rows = page.locator('main .loc-list .loc-row');
+  await expect(rows).toHaveCount(6);
+  await expect(rows.nth(3)).toContainText('Location turned off at 10:32');
+  await expect(rows.nth(4)).toContainText('Location turned off yesterday 18:40');
+  await expect(rows.nth(5)).toContainText('No location yet');
+});
+
+test('Where is everyone : Ask them to turn it on, ligne de resultat', async ({ page }) => {
+  await tiles(page);
+  const NUDGE: FakeRoute = { match: 'action=mgr.locationNudge', status: 200, once: true,
+    body: { ok: true, sent: ['Fauzia', 'Semax'], noPush: ['Annet', 'Rahma'], skipped: ['Faiza'] } };
+  const QUIET: FakeRoute = { match: 'action=mgr.locationNudge', status: 200, body: { ok: false, reason: 'quiet_hours' } };
+  await bootMgr(page, [me(MANAGER), LOCS, NUDGE, QUIET], { email: true, hash: '#/more/locations', clock: NOW });
+  const btn = page.getByRole('button', { name: 'Ask them to turn it on' });
+  await expect(btn).toBeVisible();
+  expect((await btn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await btn.click();
+  const res = page.locator('[data-loc-nudge-res]');
+  await expect(res).toHaveText('Sent to Fauzia, Semax. Notifications off: Annet, Rahma.');
+  const log = (await fetchLog(page)).filter((l) => l.url.includes('action=mgr.locationNudge'));
+  expect(log).toHaveLength(1);
+  expect(log[0].body).toBe('{}');
+  expect(log[0].headers.Authorization).toBe('Bearer jwt-test');
+  await btn.click();
+  await expect(res).toHaveText('Quiet hours (10 PM to 8:30 AM): try later.');
+});
+
+test('Where is everyone : Ask them to turn it on, erreur du serveur lisible', async ({ page }) => {
+  await tiles(page);
+  await bootMgr(page, [me(MANAGER), LOCS, { match: 'action=mgr.locationNudge', status: 503, body: { error: 'Could not send the reminder right now. Try again.' } }],
+    { email: true, hash: '#/more/locations', clock: NOW });
+  await page.getByRole('button', { name: 'Ask them to turn it on' }).click();
+  await expect(page.locator('[data-loc-nudge-res]')).toHaveText('Could not send the reminder right now. Try again.');
+  await expect(page.getByRole('button', { name: 'Ask them to turn it on' })).toBeEnabled();
+});
+
 test('Where is everyone : seules les personnes rendues par le serveur (share_location false exclu cote proxy)', async ({ page }) => {
   await tiles(page);
   const sans = { ...LOCS, body: { generatedAt: NOW.toISOString(), people: PEOPLE.filter((p) => p.id !== 8) } };
@@ -144,6 +190,7 @@ test.describe('envoi depuis /manager/', () => {
   });
   const SAVE: FakeRoute = { match: 'action=v3.saveLocation', status: 200, body: { ok: true, saved: true } };
   const TODAY: FakeRoute = { match: 'action=mgr.today', status: 200, body: todayBody() };
+  const STOP: FakeRoute = { match: 'action=v3.stopLocation', status: 200, body: { ok: true } };
 
   test('avertissement une fois, OK envoie la position par v3.saveLocation', async ({ page }) => {
     await bootMgr(page, [me(MANAGER), TODAY, SAVE], { email: true, clock: NOW, locNotice: null });
@@ -208,15 +255,106 @@ test.describe('envoi depuis /manager/', () => {
     await expect(page.locator('[data-card="location"]')).toHaveCount(0);
   });
 
-  test('Settings : carte Location sharing, Share my location rouvre l avertissement', async ({ page }) => {
+  test('Settings : carte Location sharing, meme geste que le bouton (Share my location / Stop sharing)', async ({ page }) => {
     const SETTINGS = { autopilot: true, inspectionTarget: 4, excludedCount: 0, templates: [], push: { vapidPublicKey: 'BKEY' } };
-    await bootMgr(page, [me(MANAGER), SAVE, { match: 'action=mgr.settings', status: 200, body: SETTINGS }],
+    await bootMgr(page, [me(MANAGER), SAVE, STOP, TODAY, { match: 'action=mgr.settings', status: 200, body: SETTINGS }],
       { email: true, clock: NOW, hash: '#/more/settings', locNotice: 'later:2026-10-09' });
     await expect(page.getByRole('heading', { name: 'Location sharing', exact: true })).toBeVisible();
     await expect(page.locator('[data-loc-state]')).toHaveText('Off');
+    // Sous-ecran de More : pas de bouton d'en-tete.
+    await expect(page.locator('[data-loc-pill]:visible')).toHaveCount(0);
     await page.getByRole('button', { name: 'Share my location' }).click();
-    await page.locator('#locPrompt').getByRole('button', { name: 'OK' }).click();
+    await expect(page.locator('#locPrompt')).toHaveCount(0);
     await expect(page.locator('[data-loc-state]')).toHaveText('On for this device');
+    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice2:8'))).toBe('ok');
     await expect.poll(() => calls(page, 'v3.saveLocation')).toBe(1);
+    await page.getByRole('button', { name: 'Stop sharing' }).click();
+    await expect(page.locator('[data-loc-state]')).toHaveText('Off');
+    expect(await page.evaluate(() => localStorage.getItem('hkLocNotice2:8'))).toBe('off');
+    await expect.poll(() => calls(page, 'v3.stopLocation')).toBe(1);
+    // Today : le bouton d'en-tete dit le meme etat.
+    await page.evaluate(() => { location.hash = '#/today'; });
+    await expect(page.locator('[data-loc-pill]')).toHaveAttribute('data-state', 'off');
+  });
+
+  test('bouton d en-tete : OFF, ON envoie, OFF appelle v3.stopLocation, absent des sous-ecrans', async ({ page, context }) => {
+    await bootMgr(page, [me(MANAGER), TODAY, SAVE, STOP], { email: true, clock: NOW });
+    const pill = page.locator('[data-loc-pill]');
+    await expect(pill).toHaveAttribute('data-state', 'off');
+    await expect(pill).toContainText('📍 Location OFF');
+    await expect(pill).toContainText('Tap to turn on');
+    // Juste sous l'en-tete de Today.
+    expect(await page.evaluate(() => {
+      const p = document.querySelector('[data-loc-pill]');
+      return !!p && !!p.previousElementSibling && p.previousElementSibling.matches('main > header.top');
+    })).toBe(true);
+    const b = (await pill.boundingBox())!;
+    expect(b.height).toBeGreaterThanOrEqual(44);
+    await pill.click();
+    await expect(pill).toHaveAttribute('data-state', 'on');
+    await expect(pill).toContainText('📍 Location ON');
+    await expect(pill).toContainText('Your manager sees where you are');
+    await expect.poll(() => calls(page, 'v3.saveLocation')).toBe(1);
+    await pill.click();
+    await expect(pill).toHaveAttribute('data-state', 'off');
+    await expect.poll(() => calls(page, 'v3.stopLocation')).toBe(1);
+    await context.setGeolocation({ latitude: 25.09, longitude: 55.14, accuracy: 12 });
+    await page.waitForTimeout(1200);
+    expect(await calls(page, 'v3.saveLocation')).toBe(1);
+    // Rechargement : off garde, pas d'avertissement.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => (window as any).__mgrReady === true);
+    await expect(page.locator('[data-loc-pill]')).toHaveAttribute('data-state', 'off');
+    await page.waitForTimeout(500);
+    await expect(page.locator('#locPrompt')).toHaveCount(0);
+    // Sous-ecran de More : rien ; retour sur More : present.
+    await page.evaluate(() => { location.hash = '#/more/team'; });
+    await page.waitForTimeout(400);
+    await expect(page.locator('[data-loc-pill]:visible')).toHaveCount(0);
+    await page.evaluate(() => { location.hash = '#/more'; });
+    await expect(page.locator('[data-loc-pill]')).toBeVisible();
+    const s = await noHorizontalScroll(page);
+    expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
+  });
+
+  test('bouton d en-tete : maintenance (Semax) sur Maintenance, bloque = aide, hors fenetre = sleeps', async ({ page }) => {
+    await page.addInitScript(() => {
+      try {
+        const p = (navigator as any).permissions;
+        const vrai = p.query.bind(p);
+        p.query = (d: any) => (d && d.name === 'geolocation' ? Promise.resolve({ state: 'denied' }) : vrai(d));
+      } catch (e) { /* le test le verra */ }
+    });
+    const SEMAX = { id: 7, name: 'Semax', color: '#0e9384', role: 'maintenance', email: 'semax@example.com' };
+    await bootMgr(page, [me(SEMAX), { match: 'action=mnt.list', status: 200, body: { tickets: [], proposals: [] } }, SAVE, STOP],
+      { email: true, clock: NOW, locNotice: 'ok' });
+    const pill = page.locator('[data-loc-pill]');
+    await expect(pill).toHaveAttribute('data-state', 'blocked');
+    await expect(pill).toContainText('📍 Location blocked');
+    await expect(pill).toContainText('Tap for help');
+    await pill.click();
+    const help = page.locator('#locPrompt[data-variant="blocked"]');
+    await expect(help).toContainText('tap the lock icon');
+    await help.getByRole('button', { name: 'OK' }).click();
+    await expect(page.locator('#locPrompt')).toHaveCount(0);
+    expect(await calls(page, 'v3.stopLocation')).toBe(0);
+  });
+
+  test('bouton d en-tete : 23:30 Dubai, sleeps mais actif', async ({ page }) => {
+    await bootMgr(page, [me(MANAGER), TODAY, SAVE, STOP], { email: true, clock: new Date('2026-10-09T23:30:00+04:00'), locNotice: 'ok' });
+    const pill = page.locator('[data-loc-pill]');
+    await expect(pill).toHaveAttribute('data-state', 'sleeps');
+    await expect(pill).toContainText('📍 Location sleeps (7 AM to 11 PM)');
+    await expect(pill).toHaveAttribute('data-on', '1');
+    await pill.click();
+    await expect(pill).toHaveAttribute('data-on', '0');
+    await expect.poll(() => calls(page, 'v3.stopLocation')).toBe(1);
+  });
+
+  test('bouton d en-tete : absent si shareLocation false', async ({ page }) => {
+    await bootMgr(page, [me({ ...MANAGER, shareLocation: false }), TODAY, SAVE], { email: true, clock: NOW });
+    await expect(page.getByRole('heading', { name: 'Who does what today' })).toBeVisible();
+    await page.waitForTimeout(800);
+    await expect(page.locator('[data-loc-pill]:visible')).toHaveCount(0);
   });
 });

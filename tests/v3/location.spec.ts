@@ -23,6 +23,7 @@ const ROUTES = [
   { match: 'action=v3.myDay', status: 200, body: JOURNEE },
   { match: 'action=v3.myReports', status: 200, body: { reports: [] } },
   { match: 'action=v3.saveLocation', status: 200, body: { ok: true, saved: true } },
+  { match: 'action=v3.stopLocation', status: 200, body: { ok: true } },
 ];
 
 // Compte les appels a watchPosition : la demande du navigateur part avec lui.
@@ -42,6 +43,9 @@ async function compterWatch(page: any) {
 
 async function envois(page: any) {
   return (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.saveLocation') !== -1);
+}
+async function arrets(page: any) {
+  return (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.stopLocation') !== -1);
 }
 
 test.beforeEach(async ({ page, context }) => {
@@ -110,6 +114,7 @@ test('shareLocation false : ni avertissement, ni demande, ni envoi, ni ligne Pro
   await expect(page.locator('#locgate')).toHaveCount(0);
   expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
   expect(await envois(page)).toHaveLength(0);
+  await expect(page.locator('.locpill')).toHaveCount(0);
   await page.evaluate(() => { location.hash = '#/profile'; });
   await expect(page.getByRole('button', { name: /sign out/i })).toBeVisible();
   await page.waitForTimeout(500);
@@ -222,23 +227,141 @@ test('Practice : ni avertissement, ni demande de position, ni envoi', async ({ p
   await page.waitForTimeout(1500);
   expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
   expect(await envois(page)).toHaveLength(0);
+  await expect(page.locator('.locpill')).toHaveCount(0);
   // Profile en Practice : pas de ligne de partage.
   await page.evaluate(() => { location.hash = '#/profile'; });
   await expect(page.getByText('Try the cleaner app')).toBeVisible();
   await expect(page.locator('.locrow')).toHaveCount(0);
 });
 
-test('Profile : la ligne Location sharing dit On et rouvre l avertissement', async ({ page }) => {
+test('Profile : la ligne Location sharing bascule comme le bouton (meme etat)', async ({ page }) => {
   await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: 'ok', hash: '#/profile' });
   const ligne = page.locator('.locrow');
   await expect(ligne).toContainText('Location sharing');
   await expect(ligne).toContainText('On');
   await ligne.click();
-  await page.locator('#locgate').getByRole('button', { name: 'Not now' }).click();
   await expect(ligne).toContainText('Off');
-  await ligne.click();
-  await page.locator('#locgate').getByRole('button', { name: 'OK' }).click();
-  await expect(ligne).toContainText('On');
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice2:3'))).toBe('off');
+  await expect.poll(async () => (await arrets(page)).length).toBe(1);
+  // La liste du jour montre le meme etat.
+  await page.evaluate(() => { location.hash = '#/today'; });
+  await expect(page.locator('.locpill')).toHaveAttribute('data-state', 'off');
+  await page.locator('.locpill').click();
+  await expect(page.locator('.locpill')).toHaveAttribute('data-state', 'on');
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await expect(page.locator('.locrow')).toContainText('On');
+});
+
+// ---------------------------------------------------------------------------
+// Bouton « Location ON / OFF » en tete de la liste du jour (30/10).
+// ---------------------------------------------------------------------------
+
+test('bouton : OFF visible, tap ON envoie, tap OFF appelle v3.stopLocation et arrete les envois', async ({ page, context }) => {
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin' });
+  const pill = page.locator('.locpill');
+  await expect(pill).toHaveAttribute('data-state', 'off');
+  await expect(pill).toContainText('📍 Location OFF');
+  await expect(pill).toContainText('Tap to turn on');
+  // Au-dessus de la liste, grande cible, toute la largeur.
+  const b = (await pill.boundingBox())!;
+  const vw = page.viewportSize()!.width;
+  expect(b.height).toBeGreaterThanOrEqual(56);
+  expect(b.width).toBeGreaterThanOrEqual(Math.min(vw, 560) - 30);
+  const list = (await page.locator('main.list').boundingBox())!;
+  expect(b.y + b.height).toBeLessThanOrEqual(list.y + 1);
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+
+  await pill.click();
+  await expect(pill).toHaveAttribute('data-state', 'on');
+  await expect(pill).toContainText('📍 Location ON');
+  await expect(pill).toContainText('Your manager sees where you are');
+  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice2:3'))).toBe('ok');
+  await expect.poll(async () => (await envois(page)).length).toBe(1);
+
+  await pill.click();
+  await expect(pill).toHaveAttribute('data-state', 'off');
+  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice2:3'))).toBe('off');
+  await expect.poll(async () => (await arrets(page)).length).toBe(1);
+  // Deplacement de 1 km : plus rien ne part.
+  await context.setGeolocation({ latitude: 25.09, longitude: 55.14, accuracy: 12 });
+  await page.waitForTimeout(1500);
+  expect(await envois(page)).toHaveLength(1);
+
+  // Rouvert : OFF garde, ni avertissement ni demande.
+  await rouvrir(page);
+  await expect(page.locator('.locpill')).toHaveAttribute('data-state', 'off');
+  await page.waitForTimeout(800);
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+
+  // ON de nouveau : un point part tout de suite.
+  await page.locator('.locpill').click();
+  await expect.poll(async () => (await envois(page)).length).toBe(2);
+});
+
+test('bouton : choix off garde, aucun avertissement meme pour un cleaner, minute apres minute', async ({ page }) => {
+  await page.clock.install({ time: DIX_HEURES });
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: 'off' });
+  await expect(page.locator('.locpill')).toHaveAttribute('data-state', 'off');
+  await page.clock.runFor(3 * 60_000);
+  await page.waitForTimeout(300);
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+  expect(await envois(page)).toHaveLength(0);
+});
+
+test('bouton : position bloquee par Chrome, Tap for help ouvre l aide', async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      const p = (navigator as any).permissions;
+      const vrai = p.query.bind(p);
+      p.query = (d: any) => (d && d.name === 'geolocation' ? Promise.resolve({ state: 'denied' }) : vrai(d));
+    } catch (e) { /* le test le verra */ }
+  });
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: 'ok' });
+  // Rappel d'ouverture ferme d'abord.
+  await page.locator('#locgate[data-variant="blocked"]').getByRole('button', { name: 'OK' }).click();
+  const pill = page.locator('.locpill');
+  await expect(pill).toHaveAttribute('data-state', 'blocked');
+  await expect(pill).toContainText('📍 Location blocked');
+  await expect(pill).toContainText('Tap for help');
+  await pill.click();
+  const gate = page.locator('#locgate[data-variant="blocked"]');
+  await expect(gate).toBeVisible();
+  await expect(gate.locator('p')).toContainText('tap the lock icon');
+  await gate.getByRole('button', { name: 'OK' }).click();
+  await expect(page.locator('#locgate')).toHaveCount(0);
+  await expect(pill).toHaveAttribute('data-state', 'blocked');
+  expect(await arrets(page)).toHaveLength(0);
+});
+
+test('bouton : hors fenetre (23:30), sleeps mais toujours actif', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-12T23:30:00+04:00'));
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin' });
+  const pill = page.locator('.locpill');
+  await expect(pill).toHaveAttribute('data-state', 'sleeps');
+  await expect(pill).toContainText('📍 Location sleeps (7 AM to 11 PM)');
+  await expect(pill).toHaveAttribute('data-on', '0');
+  await pill.click();
+  await expect(pill).toHaveAttribute('data-on', '1');
+  await expect(pill).toHaveAttribute('data-state', 'sleeps');
+  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice2:3'))).toBe('ok');
+  await page.waitForTimeout(800);
+  expect(await page.evaluate(() => (window as any).__geoWatch || 0)).toBe(0);
+  expect(await envois(page)).toHaveLength(0);
+  await pill.click();
+  await expect(pill).toHaveAttribute('data-on', '0');
+  expect(await page.evaluate(() => localStorage.getItem('hkLocNotice2:3'))).toBe('off');
+  await expect.poll(async () => (await arrets(page)).length).toBe(1);
+});
+
+test('bouton : la fenetre s ouvre a 7 h, le bouton se reveille sans rechargement', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-12T06:59:00+04:00') });
+  await bootV3(page, ROUTES, { pinToken: 'jeton-pin', locNotice: 'off' });
+  await expect(page.locator('.locpill')).toHaveAttribute('data-state', 'sleeps');
+  await page.clock.fastForward(2 * 60_000);
+  await expect(page.locator('.locpill')).toHaveAttribute('data-state', 'off');
 });
 
 test('Profile : position bloquee par le navigateur, aide pour Chrome', async ({ page }) => {
@@ -263,6 +386,7 @@ test('sous-traitant : ni avertissement, ni demande, ni ligne dans Profile', asyn
   await bootV3(page, routes, { pinToken: 'jeton-pin', locNotice: null });
   await page.waitForTimeout(1000);
   await expect(page.locator('#locgate')).toHaveCount(0);
+  await expect(page.locator('.locpill')).toHaveCount(0);
   // Meme avec un OK garde (par exemple d'avant le changement de role) : rien.
   await page.evaluate(() => localStorage.setItem('hkLocNotice2:12', 'ok'));
   await page.evaluate(() => { location.hash = '#/profile'; });
@@ -294,4 +418,16 @@ test('app ouverte avant 7 h : l avertissement arrive quand la fenetre s ouvre', 
   await page.clock.fastForward(60_000);
   await page.waitForTimeout(300);
   await expect(page.locator('#locgate')).toHaveCount(0);
+});
+
+test('bouton : absent en View as, present sur la propre journee', async ({ page }) => {
+  const routes = [{ match: 'action=v3.myDay&as=3', status: 200, body: JOUR_FAIZA },
+    { match: 'action=v3.myDay', status: 200, body: JOUR_MANAGER }, ...ROUTES.slice(2)];
+  await bootV3(page, routes, { pinToken: 'jeton-manager' });
+  await expect(page.locator('.locpill')).toHaveAttribute('data-state', 'off');
+  await page.evaluate(() => { location.hash = '#/profile'; });
+  await page.getByRole('button', { name: 'View Faiza' }).click();
+  await expect(page.locator('.viewas')).toContainText('Viewing Faiza');
+  await page.waitForTimeout(500);
+  await expect(page.locator('.locpill')).toHaveCount(0);
 });

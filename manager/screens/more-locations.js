@@ -1,11 +1,12 @@
 // More > Where is everyone (plan 2026-10-29, tache 3) : derniere position connue
 // de chaque personne, sur une carte Leaflet (vendored dans /vendor/leaflet/, la CSP
 // refuse les feuilles de style externes) avec les tuiles OSM, puis la liste.
-// Lecture seule : mgr.locations. Rafraichi toutes les 60 s tant que l'ecran est
+// Lecture : mgr.locations ; une seule ecriture, la relance « Ask them to turn it on »
+// (mgr.locationNudge, notification aux personnes sans position recente). Rafraichi toutes les 60 s tant que l'ecran est
 // affiche et la page visible ; tout s'arrete en quittant l'ecran.
-import { get } from '/manager/api.js';
+import { get, post } from '/manager/api.js';
 import { dubaiTime, esc, I } from '/manager/ui/dom.js';
-import { ageText, FRESH_MAP_MIN, ageMin, initialsOf, isStale, placeText } from '/manager/ui/location-text.js';
+import { ageText, FRESH_MAP_MIN, ageMin, initialsOf, isStale, nudgeText, offText, placeText } from '/manager/ui/location-text.js';
 
 const REFRESH_MS = 60000;
 const ROLE = { cleaner: 'Cleaner', manager: 'Manager', maintenance: 'Maintenance' };
@@ -62,8 +63,10 @@ function rowHtml(p, nowMs) {
   const dot = '<span class="loc-av" aria-hidden="true"' + (colorOf(p) ? ' style="background:' + colorOf(p) + '"' : '') + '>' + esc(initialsOf(p.name)) + '</span>';
   const name = '<span class="loc-nm">' + esc(p.name) + '<span class="loc-rl">' + esc(role) + '</span></span>';
   if (!loc) {
-    return '<li><div class="loc-row none">' + dot + '<span class="loc-txt">' + name
-      + '<span class="loc-where">No location yet</span></span></div></li>';
+    // Coupe par la personne (bouton Location OFF) : l'heure de la coupure.
+    const off = p.offAt ? offText(p.offAt, nowMs) : '';
+    return '<li><div class="loc-row none' + (off ? ' off' : '') + '">' + dot + '<span class="loc-txt">' + name
+      + '<span class="loc-where">' + esc(off || 'No location yet') + '</span></span></div></li>';
   }
   const where = placeText(loc.place);
   return '<li><button class="loc-row' + (isStale(loc, nowMs) ? ' stale' : '') + '" type="button" data-loc-id="' + esc(p.id) + '">' + dot
@@ -73,7 +76,7 @@ function rowHtml(p, nowMs) {
 
 export async function renderLocations(ctx) {
   const main = ctx.main;
-  const st = { data: null, err: '', loading: false, fitted: false };
+  const st = { data: null, err: '', loading: false, fitted: false, nudging: false };
   let map = null;
   let layer = null;
   let markers = {};
@@ -98,6 +101,11 @@ export async function renderLocations(ctx) {
     main.innerHTML = header('') + '<div class="loc">'
       + '<section class="card loc-card"><div class="loc-map" data-loc-map role="region" aria-label="Map of the team"></div>'
       + '<p class="empty pad loc-map-err" data-loc-map-err hidden>The map could not load. The list below is up to date.</p></section>'
+      // Relance par notification (mgr.locationNudge) : managers seulement.
+      + (ctx.role === 'manager'
+        ? '<section class="card loc-nudge" aria-label="Ask the team"><button class="btn primary loc-nudge-btn" type="button" data-loc-nudge>'
+          + 'Ask them to turn it on</button><p class="loc-nudge-res" data-loc-nudge-res role="status"></p></section>'
+        : '')
       + '<section class="card" aria-labelledby="h-loc"><div class="sec-head"><h2 id="h-loc">Team</h2></div>'
       + '<div data-loc-list><p class="empty pad" role="status">Loading positions…</p></div></section></div>';
   }
@@ -198,10 +206,35 @@ export async function renderLocations(ctx) {
     if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
+  // Une relance a la fois ; le resultat reste affiche jusqu'a la suivante.
+  async function nudge(btn) {
+    if (st.nudging) return;
+    st.nudging = true;
+    btn.disabled = true;
+    const res = $('[data-loc-nudge-res]');
+    if (res) { res.className = 'loc-nudge-res'; res.textContent = 'Sending…'; }
+    let text = '', bad = false;
+    try {
+      text = nudgeText(await post('mgr.locationNudge', {}));
+    } catch (e) {
+      if (!ctx.isCurrent() || handleAccess(e)) return;
+      text = (e && e.message) || 'Could not send. Try again.';
+      bad = true;
+    } finally {
+      st.nudging = false;
+      const b = $('[data-loc-nudge]');
+      if (b) b.disabled = false;
+    }
+    if (!ctx.isCurrent()) return;
+    const r = $('[data-loc-nudge-res]');
+    if (r) { r.className = 'loc-nudge-res' + (bad ? ' bad' : ''); r.textContent = text; }
+  }
+
   const onClick = (e) => {
     if (!ctx.isCurrent()) return;
     const t = e.target && e.target.closest ? e.target.closest('button') : null;
     if (!t) return;
+    if (t.hasAttribute('data-loc-nudge')) { nudge(t); return; }
     if (t.hasAttribute('data-loc-refresh') || t.hasAttribute('data-retry')) { load(); return; }
     if (t.hasAttribute('data-loc-id')) focusPerson(t.getAttribute('data-loc-id'));
   };

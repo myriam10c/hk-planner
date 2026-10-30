@@ -2,7 +2,7 @@
 // (conges, linge du local, historique), et la deconnexion.
 import { api } from '/v3/api.js';
 import {
-  CLE_VIEW_AS, estCleaner, leaveModeForSignOut, monIdentifiant, partageAutorise, practicing, queueStrip, render, startPractice, startViewAs,
+  basculerPosition, CLE_VIEW_AS, leaveModeForSignOut, monIdentifiant, partageAutorise, practicing, queueStrip, render, startPractice, startViewAs,
 } from '/v3/app.js';
 import { clearDead, clearFiles, deadEntries, deleteState, resetQueue } from '/v3/offline.js';
 import { signOutEmail } from '/v3/session.js';
@@ -94,6 +94,7 @@ function mesRapports(state) {
 }
 
 // Partage de position (plan 2026-10-29) : l'etat vient de /v3/location.js, lu
+// (state.loc, le meme que le bouton Location ON / OFF de la liste du jour)
 // par prepare (import dynamique, hors precache : hors ligne la ligne n'apparait
 // pas). Jamais en View as ni en Practice, ou le telephone joue quelqu'un d'autre,
 // ni pour un sous-traitant (partageAutorise de app.js, la meme regle que l'envoi).
@@ -212,12 +213,9 @@ const actions = {
   practice(state, el) {
     return startPractice({ id: el.getAttribute('data-id'), name: el.getAttribute('data-name') });
   },
-  async location(state) {
-    const m = await import('/v3/location.js');
-    m.startLocation({ isAllowed: partageAutorise, personId: monIdentifiant(), cleaner: estCleaner, ask: false });
-    await m.openLocationNotice();
-    state.loc = await m.locationState();
-    if (String(location.hash || '') === '#/profile') render();
+  // Meme geste que le bouton de la liste du jour (un seul etat, state.loc).
+  location() {
+    return basculerPosition();
   },
   async 'clear-dead'(state) {
     await clearDead();

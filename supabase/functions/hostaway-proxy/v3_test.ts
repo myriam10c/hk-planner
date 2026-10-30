@@ -162,8 +162,10 @@ Deno.test("roleAllowed accepte les roles prevus par la specification", () => {
   assertEquals(roleAllowed("inconnue", "cleaner"), false);
   // 7 actions de la phase A, 4 gestes sur un probleme (branchement, tache 2),
   // la suppression de photo (tache 3), ticketStill et myReports (maintenance
-  // phase 3), avec les memes roles que v3.checkTicket, et saveLocation (qui est ou, 2026-10-29).
-  assertEquals(Object.keys(V3_ROLES).length, 15);
+  // phase 3), avec les memes roles que v3.checkTicket, saveLocation (qui est ou, 2026-10-29)
+  // et stopLocation (bouton Location OFF, 2026-10-30), memes roles que saveLocation.
+  assertEquals(Object.keys(V3_ROLES).length, 16);
+  assertEquals(V3_ROLES["v3.stopLocation"], V3_ROLES["v3.saveLocation"]);
   assertEquals(V3_ROLES["v3.ticketStill"], V3_ROLES["v3.checkTicket"]);
   assertEquals(V3_ROLES["v3.myReports"], V3_ROLES["v3.checkTicket"]);
 });

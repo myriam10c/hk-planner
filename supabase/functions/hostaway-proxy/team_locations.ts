@@ -6,6 +6,7 @@
 import type { SessionUser } from "./auth.ts";
 import { splitListing } from "./mgr_rules.ts";
 import { readAllRows, readOrThrow } from "./mgr_today.ts";
+import { APP_URL, isQuietHoursDubai, type PushPayload } from "./push.ts";
 
 // Fenetre 07:00-23:00 heure de Dubai (UTC+4 toute l'annee, sans changement d'heure).
 export const LOC_FROM_HOUR = 7;
@@ -23,7 +24,11 @@ export type LocPlace = { kind: "at" | "near"; listingId: string; label: string; 
 export type LocPoint = {
   lat: number; lng: number; accuracy: number | null; recordedAt: string; ageMin: number; place: LocPlace | null;
 };
-export type LocPerson = { id: number; name: string; role: string; color: string; location: LocPoint | null };
+// offAt : la personne a coupe le partage elle-meme (bouton Location OFF, v3.stopLocation),
+// efface au prochain envoi accepte. Colonne cleaners.location_off_at (migration 20261030120000).
+export type LocPerson = {
+  id: number; name: string; role: string; color: string; location: LocPoint | null; offAt: string | null;
+};
 export type LocListing = { listingId: string; label: string; lat: number; lng: number };
 
 // Distance en metres sur la sphere (rayon moyen 6 371 km) : assez juste a l'echelle d'une ville.
@@ -139,7 +144,34 @@ export async function saveLocation(sb: any, me: SessionUser | null, body: any, n
     console.error("[team_locations] upsert failed:", error.message ?? error);
     return { status: 500, body: { error: "Location could not be saved." } };
   }
+  // Partage repris : la marque « turned off » s'efface. Seulement si elle est posee
+  // (pas une ecriture par envoi) ; un echec est journalise, la position reste enregistree.
+  try {
+    const off = await sb.from("cleaners").update({ location_off_at: null })
+      .eq("id", me.cleaner_id).not("location_off_at", "is", null);
+    if (off?.error) console.error("[team_locations] location_off_at clear failed:", off.error.message ?? off.error);
+  } catch (e) {
+    console.error("[team_locations] location_off_at clear failed:", (e as Error)?.message ?? String(e));
+  }
   return { status: 200, body: { ok: true, saved: true } };
+}
+
+// Bouton « Location OFF » (v3 et /manager/) : la derniere position de la personne
+// connectee disparait de la carte, et l'heure de la coupure est gardee pour les managers.
+// Identite : me.cleaner_id, jamais le corps. Permis a toute heure.
+export async function stopLocation(sb: any, me: SessionUser | null, nowMs: number): Promise<{ status: number; body: any }> {
+  if (!me) return { status: 401, body: { error: "auth required" } };
+  const del = await sb.from("team_locations").delete().eq("cleaner_id", me.cleaner_id);
+  if (del?.error) {
+    console.error("[team_locations] delete failed:", del.error.message ?? del.error);
+    return { status: 500, body: { error: "Location could not be turned off." } };
+  }
+  const up = await sb.from("cleaners").update({ location_off_at: new Date(nowMs).toISOString() }).eq("id", me.cleaner_id);
+  if (up?.error) {
+    console.error("[team_locations] location_off_at write failed:", up.error.message ?? up.error);
+    return { status: 500, body: { error: "Location could not be turned off." } };
+  }
+  return { status: 200, body: { ok: true } };
 }
 
 // Logements geolocalises, libelle « 1205 · Marina Gate » : meme decoupe (splitListing)
@@ -152,6 +184,12 @@ export function locListings(rows: any[]): LocListing[] {
     out.push({ listingId: String(r.listing_id), label: [s.apt, s.bld].filter(Boolean).join(" · "), lat: r.lat, lng: r.lng });
   }
   return out;
+}
+
+function isoOrNull(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  const ms = Date.parse(String(v));
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
 // Pur : membres actifs hors system, sous-traitants et share_location = false,
@@ -172,6 +210,7 @@ export function buildLocations(people: any[], locs: any[], listings: LocListing[
           recordedAt: new Date(ms).toISOString(), ageMin: Math.max(0, Math.floor((nowMs - ms) / 60_000)),
           place: nearestListing(pt, listings),
         } : null,
+        offAt: isoOrNull(p.location_off_at),
         _ms: pt ? ms : -Infinity,
       };
     });
@@ -182,7 +221,7 @@ export function buildLocations(people: any[], locs: any[], listings: LocListing[
 // Lecture des trois tables ; une lecture ratee leve (l'appelant decide : 503 ou null).
 export async function loadLocations(sb: any, nowMs: number): Promise<LocPerson[]> {
   const [people, locs, listings] = await Promise.all([
-    readAllRows((a: number, b: number) => sb.from("cleaners").select("id, name, role, color, is_active, share_location").order("id").range(a, b), "cleaners"),
+    readAllRows((a: number, b: number) => sb.from("cleaners").select("id, name, role, color, is_active, share_location, location_off_at").order("id").range(a, b), "cleaners"),
     sb.from("team_locations").select("cleaner_id, lat, lng, accuracy_m, recorded_at").then((r: any) => readOrThrow(r, "team_locations")),
     readAllRows((a: number, b: number) => sb.from("listing_config")
       .select("listing_id, internal_name, listing_name, apt_number, lat, lng").order("listing_id").range(a, b), "listing_config"),
@@ -207,4 +246,64 @@ export async function mgrLocations(sb: any, nowMs: number): Promise<{ status: nu
     console.error("[mgr.locations]", (e as Error)?.message ?? String(e));
     return { status: 503, body: { error: "Locations are unavailable right now. Try again." } };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Relance « Turn on your location » (bouton de la carte, ou job serveur).
+// ---------------------------------------------------------------------------
+
+// Une position de moins de 2 h : la personne partage deja, rien n'est envoye.
+export const NUDGE_FRESH_MS = 2 * 3600_000;
+export const NUDGE_ROLES = ["cleaner", "maintenance", "manager"];
+
+// Cleaners : l'app racine (elle ouvre /v3/) ; managers et maintenance : /manager/.
+export function nudgePayload(role: string): PushPayload {
+  return {
+    title: "Turn on your location",
+    body: "Open HK Planner and tap Location ON so your manager can organise the day.",
+    url: APP_URL + (role === "cleaner" ? "/" : "/manager/"),
+    tag: "loc-nudge",
+  };
+}
+
+// Pur : qui relancer. Actifs, partage permis, roles cleaner / maintenance / manager
+// (jamais sous-traitant ni system) ; « skipped » = position de moins de 2 h.
+// Ceux qui ont coupe eux-memes (offAt) sont relances aussi : le proprietaire le veut.
+export function nudgeTargets(people: any[], locs: any[], nowMs: number): { targets: any[]; skipped: any[] } {
+  const fresh = new Set<string>();
+  for (const l of locs) {
+    const ms = Date.parse(String(l?.recorded_at));
+    if (Number.isFinite(ms) && nowMs - ms < NUDGE_FRESH_MS) fresh.add(String(l.cleaner_id));
+  }
+  const byName = (a: any, b: any) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "en", { sensitivity: "base" });
+  const eligible = people
+    .filter((p: any) => p.is_active !== false && NUDGE_ROLES.includes(String(p.role)) && sharesLocation(p))
+    .sort(byName);
+  return {
+    targets: eligible.filter((p: any) => !fresh.has(String(p.id))),
+    skipped: eligible.filter((p: any) => fresh.has(String(p.id))),
+  };
+}
+
+type SendFn = (cleanerId: number, payload: PushPayload) => Promise<{ sent: number; pruned: number; skipped: string | null }>;
+
+// Heures de silence (22:00-08:30 Dubai, isQuietHoursDubai) : rien ne part, 200 quand meme.
+// send = sendPush de push.ts (abonnements disparus desactives par lui, jamais d'exception).
+export async function locationNudge(sb: any, nowMs: number, send: SendFn): Promise<{ status: number; body: any }> {
+  if (isQuietHoursDubai(nowMs)) return { status: 200, body: { ok: false, reason: "quiet_hours" } };
+  let people: any[], locs: any[];
+  try {
+    [people, locs] = await Promise.all([
+      readAllRows((a: number, b: number) => sb.from("cleaners").select("id, name, role, is_active, share_location").order("id").range(a, b), "cleaners"),
+      sb.from("team_locations").select("cleaner_id, recorded_at").then((r: any) => readOrThrow(r, "team_locations")),
+    ]);
+  } catch (e) {
+    console.error("[mgr.locationNudge]", (e as Error)?.message ?? String(e));
+    return { status: 503, body: { error: "Could not send the reminder right now. Try again." } };
+  }
+  const { targets, skipped } = nudgeTargets(people, locs, nowMs);
+  const results = await Promise.all(targets.map((p: any) => send(Number(p.id), nudgePayload(String(p.role)))));
+  const sent: string[] = [], noPush: string[] = [];
+  targets.forEach((p: any, i: number) => (results[i] && results[i].sent > 0 ? sent : noPush).push(String(p.name ?? "")));
+  return { status: 200, body: { ok: true, sent, noPush, skipped: skipped.map((p: any) => String(p.name ?? "")) } };
 }

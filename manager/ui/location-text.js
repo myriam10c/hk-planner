@@ -50,3 +50,35 @@ export function locLine(loc, nowMs) {
 export function initialsOf(name) {
   return String(name || '?').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '?';
 }
+
+// Moment d'un evenement passe, heure de Dubai : « at 14:02 » (aujourd'hui),
+// « yesterday 18:40 », « 27/10 18:40 ». '' si illisible.
+export function whenText(iso, nowMs) {
+  const t = Date.parse(iso);
+  if (!isFinite(t)) return '';
+  const hm = dubaiTime(iso);
+  const day = dubaiToday(t);
+  const today = dubaiToday(nowMs);
+  if (day === today) return 'at ' + hm;
+  if (day === addDays(today, -1)) return 'yesterday ' + hm;
+  return ddmm(day) + ' ' + hm;
+}
+
+// Partage coupe par la personne (bouton Location OFF, offAt du proxy).
+export function offText(offAt, nowMs) {
+  const w = whenText(offAt, nowMs);
+  return w ? 'Location turned off ' + w : '';
+}
+
+// Ligne de resultat du bouton « Ask them to turn it on » (mgr.locationNudge).
+export function nudgeText(r) {
+  if (!r) return '';
+  if (r.ok === false && r.reason === 'quiet_hours') return 'Quiet hours (10 PM to 8:30 AM): try later.';
+  const sent = Array.isArray(r.sent) ? r.sent : [];
+  const off = Array.isArray(r.noPush) ? r.noPush : [];
+  const parts = [];
+  if (sent.length) parts.push('Sent to ' + sent.join(', ') + '.');
+  if (off.length) parts.push('Notifications off: ' + off.join(', ') + '.');
+  if (parts.length) return parts.join(' ');
+  return Array.isArray(r.skipped) && r.skipped.length ? 'Everyone is already sharing.' : 'Nobody to ask.';
+}

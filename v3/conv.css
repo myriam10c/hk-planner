@@ -227,3 +227,13 @@ body:has(#app.cv){background:#EFE7DD}
 #app.cv .tbtn{flex:1 1 120px;min-height:52px;padding:0 12px;border-radius:26px;font-size:17px;font-weight:700}
 #app.cv .tbtn.still{border:2px solid var(--cv-urgent);background:#fff;color:var(--cv-urgent)}
 #app.cv .tbtn.fixed{border:2px solid var(--cv-accent);background:var(--cv-accent);color:#fff}
+/* Bouton « Location ON / OFF » (30/10) entre l'en-tete et la liste du jour : un
+   seul geste, grande cible, toute la largeur. ON vert, OFF ambre bien visible,
+   bloque rouge, hors fenetre (sleeps) en retrait mais toujours actif. */
+#app.cv .locpill-wrap{flex:none;padding:10px 12px;background:#fff;border-bottom:1px solid var(--cv-line)}
+#app.cv .locpill{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;width:100%;min-height:64px;padding:8px 20px;border-radius:32px;border:2px solid var(--cv-soon);background:#FFF4D6;color:#6B4505;text-align:left}
+#app.cv .locpill-t{font-size:19px;font-weight:800;line-height:1.2}
+#app.cv .locpill-s{font-size:15px;font-weight:600;line-height:1.25;opacity:.9}
+#app.cv .locpill[data-state="on"]{border-color:#1E8E3E;background:#D9FDD3;color:#0B5D2A}
+#app.cv .locpill[data-state="blocked"]{border-color:var(--cv-urgent);background:#FDE3E0;color:#7A1C12}
+#app.cv .locpill[data-state="sleeps"]{border-style:dashed;border-color:var(--cv-line);background:#F4F5F6;color:var(--cv-mute)}

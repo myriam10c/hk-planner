@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   distance, dubaiDay, dubaiMinutes, inWindow, noticeAnswer, shouldSend, MAX_GAP_MS,
   readNotice, refreshLocationSharing, setLocationPerson, setNotice, startLocationSharing, stopLocationSharing,
+  pillView, turnLocationOff, turnLocationOn,
 } from "../../shared/location-core.js";
 
 // 10:00 a Dubai (UTC+4) = 06:00 UTC.
@@ -282,4 +283,59 @@ test("partage : point a plus de 2000 m de precision jamais envoye", async () => 
   } finally {
     stopLocationSharing();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Bouton « Location ON / OFF » (30/10).
+// ---------------------------------------------------------------------------
+
+test("choix 'off' : lu 'off', jamais 'ask' (aucun avertissement)", () => {
+  assert.equal(noticeAnswer("off", DIX_HEURES), "off");
+  const { store } = fauxNavigateur();
+  stopLocationSharing();
+  setLocationPerson(3);
+  setNotice("off", DIX_HEURES);
+  assert.equal(store.get("hkLocNotice2:3"), "off");
+  assert.equal(readNotice(DIX_HEURES), "off");
+});
+
+test("pillView : ON, OFF, bloque, sleeps hors fenetre (choix garde), rien sinon", () => {
+  assert.deepEqual(pillView("on", DIX_HEURES), { state: "on", on: true, title: "\u{1F4CD} Location ON", sub: "Your manager sees where you are" });
+  assert.deepEqual(pillView("off", DIX_HEURES), { state: "off", on: false, title: "\u{1F4CD} Location OFF", sub: "Tap to turn on" });
+  assert.deepEqual(pillView("blocked", DIX_HEURES), { state: "blocked", on: false, title: "\u{1F4CD} Location blocked", sub: "Tap for help" });
+  const nuit = Date.parse("2026-10-29T19:30:00Z"); // 23:30 Dubai
+  assert.equal(pillView("on", nuit).state, "sleeps");
+  assert.equal(pillView("on", nuit).on, true);
+  assert.equal(pillView("on", nuit).title, "\u{1F4CD} Location sleeps (7 AM to 11 PM)");
+  assert.equal(pillView("off", nuit).on, false);
+  // Bloque l'emporte sur la nuit (l'aide sert a toute heure).
+  assert.equal(pillView("blocked", nuit).state, "blocked");
+  for (const st of ["unsupported", null, undefined, "x"]) assert.equal(pillView(st, DIX_HEURES), null);
+  for (const v of ["on", "off", "blocked"]) assert.ok(!/\u2014/.test(JSON.stringify(pillView(v, DIX_HEURES))));
+});
+
+test("turnLocationOff arrete le watch et plus rien ne part ; turnLocationOn renvoie tout de suite", async () => {
+  const s = demarrer();
+  assert.equal(s.geo.watches, 1);
+  s.geo.watchCb(pos(25.08, 55.14, s.h.t));
+  await attendre();
+  assert.equal(s.envois.length, 1);
+  const cb = s.geo.watchCb;
+  turnLocationOff();
+  assert.equal(s.store.get("hkLocNotice2:3"), "off");
+  assert.equal(s.geo.watchCb, null);
+  // Point arrive en retard apres le OFF : rien ne part.
+  cb(pos(25.09, 55.14, s.h.t));
+  s.tick();
+  await attendre();
+  assert.equal(s.envois.length, 1);
+  assert.equal(s.geo.current.length, 0);
+  turnLocationOn();
+  assert.equal(s.store.get("hkLocNotice2:3"), "ok");
+  assert.equal(s.geo.watches, 2);
+  // Meme endroit, meme minute : envoye quand meme (dernier envoi oublie au OFF).
+  s.geo.watchCb(pos(25.08, 55.14, s.h.t));
+  await attendre();
+  assert.equal(s.envois.length, 2);
+  stopLocationSharing();
 });

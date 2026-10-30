@@ -28,7 +28,7 @@ export async function renderSettings(ctx) {
   const st = {
     data: null, push: 'off', loc: 'unsupported', locHelp: '', target: '',
     err: { autopilot: '', run: '', push: '', target: '' },
-    busy: { autopilot: false, run: false, push: false, target: false },
+    busy: { autopilot: false, run: false, push: false, target: false, loc: false },
     run: null, want: false,
   };
   const $ = (sel) => main.querySelector(sel);
@@ -83,12 +83,13 @@ export async function renderSettings(ctx) {
       + '<p class="set-sub">Quiet hours 22:00 to 08:30 Dubai time.</p></div>';
   }
 
-  // Le bouton rouvre l'avertissement « Share your location » : OK ou Not now, comme a l'ouverture.
+  // Meme geste que le bouton « Location ON / OFF » de l'en-tete (toggleLocation) : un seul etat.
   function locationCard() {
     const s = st.loc;
+    const label = s === 'on' ? 'Stop sharing' : s === 'blocked' ? 'How to allow' : 'Share my location';
     const btn = s === 'unsupported' ? ''
-      : '<div class="set-actions"><button class="btn' + (s === 'on' ? '' : ' primary') + '" type="button" data-loc-open>'
-        + (s === 'on' ? 'Change' : 'Share my location') + '</button></div>';
+      : '<div class="set-actions"><button class="btn' + (s === 'on' ? '' : ' primary') + '" type="button" data-loc-open'
+        + (st.busy.loc ? ' disabled' : '') + '>' + label + '</button></div>';
     return '<div class="sec-head"><h2>Location sharing</h2></div><div class="set-body">'
       + '<p class="set-line" data-loc-state>' + esc(LOC_LINE[s] || LOC_LINE.off) + '</p>'
       + (s === 'blocked' && st.locHelp ? '<p class="set-sub">' + esc(st.locHelp) + '</p>' : '')
@@ -216,16 +217,22 @@ export async function renderSettings(ctx) {
       return;
     }
     if (t.hasAttribute('data-loc-open')) {
+      if (st.busy.loc) return;
       (async () => {
         const m = await locModule();
         if (!m) return;
-        // Le partage n'a peut-etre pas demarre a l'ouverture (hors fenetre, hors ligne).
-        m.startLocation({
-          isAllowed: () => !!ctx.me && ctx.me.role !== 'subcontractor' && ctx.me.shareLocation !== false,
-          personId: ctx.me && ctx.me.id, ask: false,
-        });
-        await m.openLocationNotice();
+        st.busy.loc = true;
+        paintCard('location');
+        try {
+          // Le partage n'a peut-etre pas demarre a l'ouverture (hors fenetre, hors ligne).
+          await m.toggleLocation({
+            isAllowed: () => !!ctx.me && ctx.me.role !== 'subcontractor' && ctx.me.shareLocation !== false,
+            personId: ctx.me && ctx.me.id,
+          });
+        } catch (e) { /* l'etat relu dit ce qui a change */ }
+        st.busy.loc = false;
         await readLoc();
+        if (!ctx.isCurrent()) return;
         paintCard('location');
       })();
       return;

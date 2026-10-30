@@ -14,6 +14,9 @@ const selectBtn = (page: Page) => page.locator('[data-select]');
 // force : une carte aria-disabled recoit quand meme le toucher (Playwright attendrait sinon).
 async function pick(page: Page, mobile: boolean, key: string, day: string, force = false) {
   if (mobile) await page.locator('.pl-strip [data-day="' + day + '"]').click();
+  // force saute le controle de cible : la carte est centree d'abord, jamais sous la barre
+  // d'onglets fixe (le bouton Location de l'en-tete descend la liste de ~60 px).
+  if (force) await card(page, key).evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await card(page, key).click({ force });
 }
 

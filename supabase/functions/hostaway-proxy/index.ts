@@ -54,7 +54,9 @@ import { healthScore, mgrApartment, mgrApartmentCleanings, mgrApartments, readHe
 import { mntAccess } from "./mnt_rules.ts";
 import { mntDigest, mntList, parseMntQuery } from "./mnt_read.ts";
 import { mntAct } from "./mnt_act.ts";
-import { hostawayCoords, mgrLocations, readShareLocation, saveLocation, sharesLocation } from "./team_locations.ts";
+import {
+  hostawayCoords, locationNudge, mgrLocations, readShareLocation, saveLocation, sharesLocation, stopLocation,
+} from "./team_locations.ts";
 import { mntGet, mntPhoto } from "./mnt_get.ts";
 import { mntIngest } from "./mnt_ingest.ts";
 import { parseRemLogQuery, remConfigGet, remConfigSet, remLog, remRead, remRun, remTest } from "./reminders.ts";
@@ -1020,7 +1022,7 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["mgr.team", "GET"], ["mgr.people", "GET"],
   ["mgr.apartments", "GET"], ["mgr.apartment", "GET"],
   ["mgr.setup", "GET"], ["mgr.reports", "GET"],
-  ["mgr.locations", "GET"],
+  ["mgr.locations", "GET"], ["mgr.locationNudge", "POST"],
   // ===== Maintenance (spec 2026-10-12, phase 1) =====
   ["mnt.list", "GET"], ["mnt.digest", "GET"], ["mnt.act", "POST"], ["mnt.proposals.ingest", "POST"],
   ["mnt.get", "GET"], ["mnt.photo", "POST"],
@@ -1196,6 +1198,8 @@ const ROUTES: ReadonlyMap<string, "GET" | "POST"> = new Map([
   ["v3.deletePhoto", "POST"],
   // Qui est ou (plan 2026-10-29) : derniere position, /v3/ et /manager/
   ["v3.saveLocation", "POST"],
+  // Bouton Location OFF (30/10) : efface la derniere position, garde l'heure de la coupure
+  ["v3.stopLocation", "POST"],
   // ===== Security contacts (onglet Security, ex security-contacts.json public) =====
   ["getSecurityContacts", "GET"],
   ["setSecurityContacts", "POST"],
@@ -1559,6 +1563,15 @@ Deno.serve(async (req: Request) => {
       return jsonResp(r.body, r.status);
     }
 
+    // Bouton Location OFF (v3 et /manager/) : memes sessions et roles que v3.saveLocation.
+    if (action === "v3.stopLocation" && req.method === "POST") {
+      const me = await currentUser(sb, req);
+      if (!me) return jsonResp({ error: "auth required" }, 401);
+      if (!roleAllowed(action, me.role)) return jsonResp({ error: "forbidden" }, 403);
+      const r = await stopLocation(sb, me, Date.now());
+      return jsonResp(r.body, r.status);
+    }
+
     if (action === "v3.myReports" && req.method === "GET") {
       const me = await currentUser(sb, req);
       if (!me) return jsonResp({ error: "auth required" }, 401);
@@ -1819,6 +1832,21 @@ Deno.serve(async (req: Request) => {
       const acc = planningAccess(bearerToken(req) !== null, me);
       if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
       const r = await mgrLocations(sb, Date.now());
+      return jsonResp(r.body, r.status);
+    }
+
+    // « Ask them to turn it on » (carte Where is everyone) : push aux personnes sans
+    // position recente. Deux portes, comme pushTest : manager en session email, ou
+    // job serveur (X-Server-Secret, jamais dans le bundle JS).
+    if (action === "mgr.locationNudge") {
+      const serverSecret = req.headers.get("x-server-secret") ?? "";
+      const isServer = SERVER_SHARED_SECRET !== "" && serverSecret === SERVER_SHARED_SECRET;
+      if (!isServer) {
+        const me = await currentUser(sb, req);
+        const acc = mgrAccess(bearerToken(req) !== null, me);
+        if (!acc.ok) return jsonResp({ error: acc.error }, acc.status);
+      }
+      const r = await locationNudge(sb, Date.now(), (id, payload) => sendPush(sb, id, payload));
       return jsonResp(r.body, r.status);
     }
 

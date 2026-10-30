@@ -715,7 +715,7 @@ function renderConv() {
     closeCamera();
     html = renderList({
       me: me(), apartments: S.apartments, convs: S.convs, activeId: S.activeId, now: new Date(),
-      before: modeBar(), after: queueStrip(), empty: journeeVide(),
+      before: modeBar(), after: queueStrip() + boutonPosition(), empty: journeeVide(),
     });
   } else {
     const f = currentFlow(c);
@@ -1036,6 +1036,7 @@ document.addEventListener('click', function (evt) {
   if (!b || b.disabled) return;
   const nom = b.getAttribute('data-act');
   if (nom === 'reload') { loadDay(); return; }
+  if (nom === 'loc-toggle') { evt.preventDefault(); basculerPosition(); return; }
   if (nom === 'viewas-exit') { evt.preventDefault(); exitViewAs(); return; }
   if (routeName() === 'profile') {
     const handler = nom && profile.actions && profile.actions[nom];
@@ -1288,8 +1289,103 @@ function proposerLocalisation() {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
   localisationLancee = true;
   import('/v3/location.js')
-    .then(function (m) { m.startLocation({ isAllowed: partageAutorise, personId: monIdentifiant(), busy: ecranOccupe, cleaner: estCleaner }); })
+    .then(function (m) {
+      m.startLocation({ isAllowed: partageAutorise, personId: monIdentifiant(), busy: ecranOccupe, cleaner: estCleaner, onState: surEtatPosition });
+      relirePosition();
+    })
     .catch(function (e) { localisationLancee = false; console.warn('[v3] partage de position indisponible', e); });
 }
+
+// ---------------------------------------------------------------------------
+// Bouton « Location ON / OFF » (30/10) en tete de la liste du jour, pour les
+// personnes qui partagent (partageAutorise : ni Practice, ni View as, ni
+// sous-traitant, ni shareLocation false). Un seul etat, state.loc, lu aussi par
+// la ligne de Profile. Etat lu dans /v3/location.js (import dynamique, hors
+// precache) : hors ligne au premier rendu, pas de bouton.
+// ---------------------------------------------------------------------------
+let lecturePosition = 0;
+let positionDemandee = false; // une lecture deja lancee (ou ratee) pour cette page
+let vuePosition = '';         // dernier etat dessine : la minute ne redessine qu'au changement
+let bascule = false;
+
+function vueBouton() {
+  if (!partageAutorise() || !pillViewFn) return null;
+  return pillViewFn(state.loc, Date.now());
+}
+
+let pillViewFn = null;
+
+function boutonPosition() {
+  if (!partageAutorise()) return '';
+  if (!positionDemandee) relirePosition();
+  const v = vueBouton();
+  vuePosition = v ? v.state + (v.on ? '1' : '0') : '';
+  if (!v) return '';
+  return '<div class="locpill-wrap"><button type="button" class="locpill" data-act="loc-toggle" data-state="' + esc(v.state) + '"' +
+    ' data-on="' + (v.on ? '1' : '0') + '" aria-pressed="' + (v.on ? 'true' : 'false') + '">' +
+    '<span class="locpill-t">' + esc(v.title) + '</span><span class="locpill-s">' + esc(v.sub) + '</span></button></div>';
+}
+
+// Liste ou Profile a l'ecran : redessin ; ailleurs (conversation, viseur), le
+// prochain rendu prendra l'etat.
+function redessinerPosition() {
+  if (routeName() === 'profile') { render(); return; }
+  if (state.loading || state.error || S.camera.open || (S.screen === 'conv' && conv())) return;
+  renderLater();
+}
+
+export function relirePosition() {
+  positionDemandee = true;
+  const n = ++lecturePosition;
+  return import('/v3/location.js')
+    .then(function (m) {
+      pillViewFn = m.pillView;
+      state.locHelp = m.BLOCKED_HELP;
+      return m.locationState(monIdentifiant());
+    })
+    .then(function (st) {
+      if (n !== lecturePosition) return;
+      const avant = vuePosition;
+      state.loc = st;
+      const v = vueBouton();
+      if ((v ? v.state + (v.on ? '1' : '0') : '') !== avant || routeName() === 'profile') redessinerPosition();
+    })
+    .catch(function () { positionDemandee = false; });
+}
+
+function surEtatPosition() { relirePosition(); }
+
+// Un geste du bouton (ou de la ligne de Profile) : voir toggleLocation.
+export async function basculerPosition() {
+  if (bascule || !partageAutorise()) return;
+  bascule = true;
+  try {
+    const m = await import('/v3/location.js');
+    pillViewFn = m.pillView;
+    state.locHelp = m.BLOCKED_HELP;
+    lecturePosition++;
+    state.loc = await m.toggleLocation({
+      isAllowed: partageAutorise, personId: monIdentifiant(), busy: ecranOccupe, cleaner: estCleaner, onState: surEtatPosition,
+    });
+    localisationLancee = true;
+  } catch (e) {
+    /* hors ligne : rien ne change */
+  } finally {
+    bascule = false;
+  }
+  vuePosition = '';
+  redessinerPosition();
+}
+
+// La fenetre 07:00-23:00 s'ouvre ou se ferme pendant que l'app reste ouverte, et
+// le retour sur la page relit le choix (autorisation changee dans Chrome).
+setInterval(function () {
+  if (!state.loc || !partageAutorise()) return;
+  const v = vueBouton();
+  if ((v ? v.state + (v.on ? '1' : '0') : '') !== vuePosition) redessinerPosition();
+}, 60000);
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && partageAutorise() && state.day) relirePosition();
+});
 
 boot();

@@ -11,8 +11,10 @@ import { api } from '/v3/api.js';
 import { esc, icon } from '/v3/ui.js';
 import {
   geoSupported, inWindow, permissionState, readNotice, refreshLocationSharing, setLocationPerson, setNotice,
-  sharingState, startLocationSharing,
+  sharingState, startLocationSharing, turnLocationOff, turnLocationOn,
 } from '/shared/location-core.js';
+
+export { pillView } from '/shared/location-core.js';
 
 export const BLOCKED_HELP = 'Location is blocked. In Chrome: tap the lock icon next to the address, then Permissions, then Location, Allow.';
 
@@ -130,6 +132,7 @@ function aProposer(isAllowed) {
 // garde) : « Not now » redemande a la prochaine ouverture, et un OK dont Chrome
 // bloque la position est rappele (variante « bloquee ») a chaque ouverture.
 let occupe = null;   // busy() garde d'un appel a l'autre (Profile ne le repasse pas)
+let surEtat = null;  // onState(st) garde de meme : 'blocked' vu par le watch (bouton Location)
 // Rappel « bloquee » : verifie une fois par ouverture de l'app, des que la
 // fenetre est ouverte (au demarrage ou a la minute ou elle s'ouvre).
 let blocageAVerifier = false;
@@ -152,10 +155,12 @@ export function startLocation(o) {
   const isAllowed = o.isAllowed;
   if (o.busy !== undefined) occupe = o.busy;
   if (o.cleaner !== undefined) cleaner = o.cleaner;
+  if (o.onState !== undefined) surEtat = o.onState;
   startLocationSharing({
     post: function (body) { return api.post('v3.saveLocation', body); },
     isAllowed: isAllowed,
     personId: o.personId,
+    onState: function (st) { try { if (surEtat) surEtat(st); } catch (e) { /* l'ecran ne casse jamais le partage */ } },
     // App ouverte avant 7 h : l'avertissement est propose quand la fenetre
     // s'ouvre, si rien d'autre n'est a l'ecran et la page visible.
     onTick: function () {
@@ -171,4 +176,27 @@ export function startLocation(o) {
   blocageAVerifier = true;
   if (aProposer(isAllowed)) openLocationNotice();
   else verifierBlocage(isAllowed);
+}
+
+// Bouton « Location ON / OFF » (liste du jour et ligne de Profile). Un geste :
+//   - bloque par Chrome : l'aide (couche « bloquee »), puis relecture ;
+//   - ON : choix 'off' garde, watch arrete, v3.stopLocation (la position disparait
+//     de la carte ; hors ligne, rien de plus : le watch est deja arrete) ;
+//   - OFF : vaut accord ('ok'), le watch demarre et Chrome demande si besoin.
+// o : memes champs que startLocation. Rend le nouvel etat (sharingState).
+export async function toggleLocation(o) {
+  startLocation(Object.assign({}, o, { ask: false }));
+  const st = await locationState(o.personId);
+  if (st === 'unsupported') return st;
+  if (st === 'blocked') {
+    await openBlockedNotice();
+    // Autorise entre-temps dans Chrome : le refus deja vu est oublie.
+    refreshLocationSharing();
+  } else if (st === 'on') {
+    turnLocationOff();
+    try { await api.post('v3.stopLocation', {}); } catch (e) { /* hors ligne : le partage est deja coupe sur le telephone */ }
+  } else {
+    turnLocationOn();
+  }
+  return locationState();
 }

@@ -336,3 +336,10 @@ button.loc-row:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .loc-row.stale .loc-where,.loc-row.none .loc-where{color:var(--ink-3)}
 .loc-age{flex:none;font-size:14px;color:var(--ink-2);font-variant-numeric:tabular-nums;text-align:right;max-width:40%}
 .loc-row.stale .loc-age{color:var(--ink-3)}
+/* Relance « Ask them to turn it on » (30/10) et ligne « Location turned off at 14:02 ». */
+.loc-nudge{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s2);padding:var(--s4)}
+.loc-nudge-btn{min-height:48px;font-size:16px}
+.loc-nudge-res{margin:0;color:var(--ink-2);font-size:15px;overflow-wrap:anywhere}
+.loc-nudge-res:empty{display:none}
+.loc-nudge-res.bad{color:var(--bad-ink)}
+.loc-row.off .loc-where{color:var(--warn-ink)}

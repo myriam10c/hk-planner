@@ -9,8 +9,10 @@ import { post } from '/manager/api.js';
 import { esc } from '/manager/ui/dom.js';
 import {
   geoSupported, inWindow, readNotice, refreshLocationSharing, setLocationPerson, setNotice, sharingState,
-  startLocationSharing,
+  startLocationSharing, turnLocationOff, turnLocationOn,
 } from '/shared/location-core.js';
+
+export { pillView } from '/shared/location-core.js';
 
 export const BLOCKED_HELP = 'Location is blocked. In Chrome: tap the lock icon next to the address, then Permissions, then Location, Allow.';
 const PIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
@@ -87,15 +89,70 @@ export function locationState(personId) {
 // o.isAllowed est relu a chaque envoi, o.personId : la personne connectee (le
 // choix est garde par personne). o.ask faux : depuis Settings, qui ouvre
 // l'avertissement lui-meme.
+let surEtat = null;  // onState(st) garde d'un appel a l'autre (bouton Location de l'en-tete)
+
 export function startLocation(o) {
+  if (o.onState !== undefined) surEtat = o.onState;
   startLocationSharing({
     post: (body) => post('v3.saveLocation', body),
     isAllowed: o.isAllowed,
     personId: o.personId,
+    onState: (st) => { try { if (surEtat) surEtat(st); } catch (e) { /* l'ecran ne casse jamais le partage */ } },
   });
   // Hors fenetre (avant 7 h, apres 23 h), rien n'est demande. Partage non permis
   // (shareLocation false, cleaners.share_location) : jamais d'avertissement.
   let permis = false;
   try { permis = !o.isAllowed || o.isAllowed() === true; } catch (e) { permis = false; }
   if (o.ask !== false && permis && geoSupported() && readNotice() === 'ask' && inWindow(Date.now())) openLocationNotice();
+}
+
+// Aide « bloquee » (bouton Location blocked) : meme ecran plein, un seul OK, rien n'est stocke.
+export function openBlockedHelp() {
+  if (ouvert) return ouvert;
+  ouvert = apresPushPrompt().then(() => new Promise((resolve) => {
+    const prev = document.activeElement;
+    const el = document.createElement('div');
+    el.id = 'locPrompt';
+    el.className = 'pushprompt';
+    el.setAttribute('data-variant', 'blocked');
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', 'locPromptTitle');
+    el.innerHTML = '<div class="pushprompt-in">'
+      + '<div class="pushprompt-ic" aria-hidden="true">' + PIN + '</div>'
+      + '<h2 id="locPromptTitle">' + esc('Location is blocked') + '</h2>'
+      + '<p>' + esc(BLOCKED_HELP) + '</p>'
+      + '<div class="pushprompt-b"><button class="btn primary" type="button" data-loc="close">OK</button></div></div>';
+    document.body.appendChild(el);
+    el.querySelector('[data-loc="close"]').focus();
+    el.addEventListener('click', (e) => {
+      const b = e.target && e.target.closest ? e.target.closest('[data-loc]') : null;
+      if (!b) return;
+      el.remove();
+      ouvert = null;
+      if (prev && document.body.contains(prev) && prev.focus) prev.focus();
+      resolve('closed');
+    });
+  }));
+  return ouvert;
+}
+
+// Bouton « Location ON / OFF » (en-tete des ecrans principaux, carte Settings) :
+// bloque = aide ; ON = choix 'off' garde, watch arrete, v3.stopLocation ;
+// OFF = accord ('ok'), le watch demarre (Chrome demande si besoin).
+// o : memes champs que startLocation. Rend le nouvel etat (sharingState).
+export async function toggleLocation(o) {
+  startLocation({ ...o, ask: false });
+  const st = await locationState(o.personId);
+  if (st === 'unsupported') return st;
+  if (st === 'blocked') {
+    await openBlockedHelp();
+    refreshLocationSharing();
+  } else if (st === 'on') {
+    turnLocationOff();
+    try { await post('v3.stopLocation', {}); } catch (e) { /* hors ligne : le partage est deja coupe sur cet appareil */ }
+  } else {
+    turnLocationOn();
+  }
+  return locationState();
 }
