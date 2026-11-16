@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { bootMgr, fetchLog, MANAGER, me, noHorizontalScroll, type FakeRoute } from './helpers';
+import { bootMgr, fetchLog, MANAGER, me, OWNER, noHorizontalScroll, type FakeRoute } from './helpers';
 
 // Snapshot de novembre tel que le serveur le rend : le front ne calcule aucun montant.
 const TEAM = {
@@ -24,7 +24,7 @@ const READS: FakeRoute[] = [
 const FRESH = new Date('2026-11-16T09:00:00Z');
 const withTeam = (team: any) => ({ ...NOV, accounting: { ...NOV.accounting, totals: { ...TOTALS, team } } });
 const boot = (page: any, reads: FakeRoute[] = READS, clock = FRESH) =>
-  bootMgr(page, [me(MANAGER), ...reads], { email: true, hash: '#/more/money', clock });
+  bootMgr(page, [me(OWNER), ...reads], { email: true, hash: '#/more/money', clock });
 const stat = (page: any, k: string) => page.locator('[data-mn="summary"] [data-mn-stat="' + k + '"]');
 
 test('les trois chiffres, leurs sous-lignes, la note et l horodatage', async ({ page }) => {
@@ -186,4 +186,35 @@ test('singulier : sous-ligne Elite avec un seul menage', async ({ page }) => {
   await boot(page, [{ match: 'action=mgr.reports', status: 200, body }]);
   await expect(stat(page, 'elite').locator('.mn-sub')).toContainText('1 cleaning ·');
   await expect(stat(page, 'elite').locator('.mn-sub')).not.toContainText('1 cleanings');
+});
+
+test('non owner : message, aucune lecture', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), ...READS], { email: true, hash: '#/more/money', clock: FRESH });
+  await expect(page.locator('[data-mn="owner-only"]')).toHaveText('Only the owner can see this screen.');
+  await expect(page.getByRole('heading', { name: 'Cleaning money', exact: true })).toBeVisible();
+  await expect(page.locator('[data-mn="summary"]')).toHaveCount(0);
+  const urls = (await fetchLog(page)).map((l) => l.url);
+  expect(urls.filter((u) => u.includes('action=mgr.reports'))).toEqual([]);
+});
+
+test('alerte not done : singulier', async ({ page }) => {
+  await boot(page, [{ match: 'action=mgr.reports', status: 200, body: withTeam({ ...TEAM, not_done_count: 1 }) }]);
+  await expect(page.locator('.mn-flags li').first()).toHaveText('1 team cleaning not marked done, not counted.');
+});
+
+test('alerte not done : pluriel', async ({ page }) => {
+  await boot(page, [{ match: 'action=mgr.reports', status: 200, body: withTeam({ ...TEAM, not_done_count: 4 }) }]);
+  await expect(page.locator('.mn-flags li').first()).toHaveText('4 team cleanings not marked done, not counted.');
+});
+
+test('alerte not done : absente a 0', async ({ page }) => {
+  await boot(page, [{ match: 'action=mgr.reports', status: 200, body: withTeam({ ...TEAM, not_done_count: 0 }) }]);
+  await expect(page.locator('[data-mn="summary"]')).toBeVisible();
+  await expect(page.getByText('not marked done')).toHaveCount(0);
+});
+
+test('alerte not done : absente sans la cle', async ({ page }) => {
+  await boot(page, [{ match: 'action=mgr.reports', status: 200, body: withTeam({ ...TEAM }) }]);
+  await expect(page.locator('[data-mn="summary"]')).toBeVisible();
+  await expect(page.getByText('not marked done')).toHaveCount(0);
 });

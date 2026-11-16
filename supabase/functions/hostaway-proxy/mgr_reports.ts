@@ -31,6 +31,29 @@ export function reportsAccess(me: { role: string } | null): { status: number; er
   return null;
 }
 
+// Chiffres de l'equipe interne : reserves a Hillal (cleaners.is_owner), le serveur tranche.
+export const OWNER_ONLY_TOTALS = ["team", "potential_profit_ht"] as const;
+export const OWNER_ONLY_PAYLOAD = ["team_rows", "team_unmatched", "team_skipped", "team_not_done"] as const;
+
+// Proprietaire : la valeur telle quelle. Sinon copie superficielle sans les cles (jamais de mutation).
+// Null, tableau et primitive repartent tels quels.
+export function withoutOwnerOnly(value: unknown, keys: readonly string[], isOwner: boolean): unknown {
+  if (isOwner || value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  for (const k of keys) delete out[k];
+  return out;
+}
+
+// true seulement si la lecture reussit et que is_owner vaut true ; erreur ou exception : false.
+export async function isOwnerMember(sb: any, cleanerId: unknown): Promise<boolean> {
+  try {
+    const { data, error } = await sb.from("cleaners").select("is_owner").eq("id", cleanerId).maybeSingle();
+    return !error && !!data && data.is_owner === true;
+  } catch {
+    return false;
+  }
+}
+
 export type ReportsAccounting = {
   computedAt: string | null; syncedAt: string | null; rowsCount: number | null; unmatchedCount: number | null;
   totals: unknown; rows: unknown; unmatchedResa: unknown; unmatchedPricing: unknown;
@@ -122,7 +145,7 @@ function properties(listings: any[], tickets: any[], equipment: any[], today: st
     a.bld.localeCompare(b.bld) || a.apt.localeCompare(b.apt, undefined, { numeric: true }));
 }
 
-export async function mgrReports(sb: any, month: string, o: { today: string }): Promise<MgrReports> {
+export async function mgrReports(sb: any, month: string, o: { today: string; isOwner: boolean }): Promise<MgrReports> {
   const page = (table: string, cols: string) => readAllRows((a: number, b: number) =>
     sb.from(table).select(cols).order("id").range(a, b), table);
   const [acc, listings, tickets, equipment] = await Promise.all([
@@ -133,5 +156,5 @@ export async function mgrReports(sb: any, month: string, o: { today: string }): 
     page("equipment", "id, listing_id, next_service"),
   ]);
   const ops = await readOps(sb, month, o.today, tickets);
-  return { month, months: acc.months, accounting: acc.accounting, ops, properties: properties(listings, tickets, equipment, o.today) };
+  return { month, months: acc.months, accounting: acc.accounting && { ...acc.accounting, totals: withoutOwnerOnly(acc.accounting.totals, OWNER_ONLY_TOTALS, o.isOwner) }, ops, properties: properties(listings, tickets, equipment, o.today) };
 }

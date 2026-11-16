@@ -170,7 +170,8 @@ async function boot() {
   if (d.go) { location.replace(d.go); return; }
   if (d.screen === 'email') { emailRequired(cleaner.role); return; }
   // shareLocation : false = ni avertissement ni partage ni carte Settings (champ absent = true).
-  me = { id: cleaner.id, name: cleaner.name, role: cleaner.role, shareLocation: cleaner.shareLocation !== false };
+  // isOwner : le serveur tranche (cleanerMe) ; absent = pas proprietaire.
+  me = { id: cleaner.id, name: cleaner.name, role: cleaner.role, shareLocation: cleaner.shareLocation !== false, isOwner: cleaner.isOwner === true };
   rememberRole(cleaner.id, cleaner.role);
   await startShell();
   // Rappel d'abonnement aux notifications : seulement une session confirmee par le serveur.

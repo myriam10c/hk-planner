@@ -70,3 +70,22 @@ Annet     27 cleanings · 13 days · 2.1 per day     AED 4,700.00
 [Elite invoice check] -> #/more/reports
 ```
 Aucun montant n'est calculé dans le front (même règle que Reports) : valeur absente = « Not available ». Mois sans `team` : « Team figures are not available for this month. »
+
+## Amendements du 17/11/2026 (décidés par Hillal)
+
+### A. Un ménage équipe ne compte qu'une fois marqué « done »
+- Source : table `menage_done` (une ligne par ménage marqué, clé = clé d'assignation), lue par l'action `getDone` du proxy.
+- Ordre des contrôles pour une clé équipe : date future (ignorée) ; rapprochement (sans départ ce jour-là ou réservation déjà comptée : écartée dans `skipped`, quel que soit son état done) ; puis pas marquée done : rangée dans `not_done`.
+- Une clé `not_done` ne compte nulle part : ni ménage, ni CA, ni stats cleaner, et elle ne prend pas la réservation. Une clé dont le nom de guest est introuvable et qui n'est pas marquée done va aussi dans `not_done`.
+- Côté Elite : rien ne change.
+- Marques done illisibles : le job ne pousse rien (le snapshot précédent reste) et rend un échec.
+- Contrat : `totals_json.team.not_done_count` (entier) et `payload_json.team_not_done` (liste de `{key, guest, date, cleaner_ids}`).
+- Écran : première note de la liste, seulement si > 0 : `1 team cleaning not marked done, not counted.` / `<n> team cleanings not marked done, not counted.`
+- Effet mesuré le 17/11 sur le snapshot en ligne : septembre 52 ménages rapprochés sur 52 marqués done (CA inchangé), octobre 33 sur 35 (10 428,57 vers 10 095,24), novembre 52 sur 54 (16 319,14 vers 15 652,47).
+
+### B. Écran réservé au propriétaire
+- L'écran Cleaning money et les chiffres de l'équipe sont pour le propriétaire seul (`cleaners.is_owner`).
+- Le serveur est juge : `team` et `potential_profit_ht` (totaux), `team_rows`, `team_unmatched`, `team_skipped`, `team_not_done` (détail) sont retirés des réponses de `mgr.reports`, `getCleaningAccounting` et `listCleaningAccountingMonths` pour tout membre qui n'est pas propriétaire.
+- `cleanerMe` rend `isOwner` (champ absent si la lecture échoue : le client le lit comme « pas propriétaire »).
+- Front : la ligne Cleaning money de More n'apparaît que pour le propriétaire ; la route `#/more/money` ouverte par un autre membre affiche `Only the owner can see this screen.` et ne lit rien.
+- Reports (Elite invoice check) ne change pas : les managers y voient toujours le chiffre, le coût et la marge Elite.

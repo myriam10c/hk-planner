@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { bootMgr, MANAGER, me, noHorizontalScroll } from './helpers';
+import { bootMgr, MANAGER, me, noHorizontalScroll, OWNER } from './helpers';
 
 const navOf = (page: any, info: any) => (info.project.name === 'mgr-desktop' ? page.locator('#sideNav') : page.locator('#tabbar'));
-const boot = (page: any, hash = '#/more') => bootMgr(page, [me(MANAGER)], { email: true, hash });
+const boot = (page: any, hash = '#/more', who: any = OWNER) => bootMgr(page, [me(who)], { email: true, hash });
 
 const ROWS: Array<[string, string, string]> = [
   ['Cleaning money', 'Team revenue, what you keep on Elite, potential profit', '#/more/money'],
@@ -20,7 +20,7 @@ const ROWS: Array<[string, string, string]> = [
   ['Reports', 'Elite accounting, operations, property health and exports', '#/more/reports'],
 ];
 
-test('hub : 13 lignes dans l ordre avec leurs liens, More marque courant', async ({ page }, info) => {
+test('hub : 13 lignes pour le proprietaire, dans l ordre avec leurs liens, More marque courant', async ({ page }, info) => {
   await boot(page);
   await expect(page.getByRole('heading', { name: 'More', exact: true })).toBeVisible();
   const rows = page.locator('main a.more-row');
@@ -35,8 +35,17 @@ test('hub : 13 lignes dans l ordre avec leurs liens, More marque courant', async
   }
   await expect(page.locator('main .more-row .pill', { hasText: 'Current app' })).toHaveCount(0);
   await expect(navOf(page, info).locator('a[href="#/more"]')).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('main').getByText('Signed in as Walter')).toBeVisible();
+  await expect(page.locator('main').getByText('Signed in as Hillal')).toBeVisible();
   await expect(page.locator('main [data-theme-toggle]')).toBeVisible();
+});
+
+test('hub : 12 lignes pour un manager, sans Cleaning money', async ({ page }) => {
+  await boot(page, '#/more', MANAGER);
+  const rows = page.locator('main a.more-row');
+  await expect(rows).toHaveCount(12);
+  await expect(page.locator('main .more-title', { hasText: 'Cleaning money' })).toHaveCount(0);
+  await expect(page.locator('main a[href="#/more/money"]')).toHaveCount(0);
+  await expect(rows.first()).toContainText('Tasks');
 });
 
 test('section inconnue : retour au hub', async ({ page }) => {

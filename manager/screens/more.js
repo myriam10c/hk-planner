@@ -20,7 +20,7 @@ const SECTIONS = {
 const WITH_ID = new Set(['apartment', 'hr', 'setup']);
 
 const ROWS = [
-  { title: 'Cleaning money', desc: 'Team revenue, what you keep on Elite, potential profit', href: '#/more/money' },
+  { title: 'Cleaning money', desc: 'Team revenue, what you keep on Elite, potential profit', href: '#/more/money', ownerOnly: true },
   { title: 'Tasks', desc: 'Team tasks: assign, schedule and close', href: '#/tasks' },
   { title: 'Where is everyone', desc: 'Last known position of each person, on a map', href: '#/more/locations' },
   { title: 'Team', desc: 'Accounts, roles and invitations', href: '#/more/team' },
@@ -52,7 +52,8 @@ export function parseMoreHash(hash) {
 }
 
 function hub(ctx) {
-  const rows = ROWS.map((r) => '<a class="more-row" href="' + esc(r.href) + '">'
+  // Les lignes ownerOnly ne sont montrees qu'au proprietaire (le serveur refuse de toute facon).
+  const rows = ROWS.filter((r) => !r.ownerOnly || (ctx.me && ctx.me.isOwner)).map((r) => '<a class="more-row" href="' + esc(r.href) + '">'
     + '<span class="more-txt"><span class="more-title">' + esc(r.title) + '</span>'
     + '<span class="more-desc">' + esc(r.desc) + '</span></span>'
     + '<span class="more-chev">' + I.next + '</span></a>').join('');

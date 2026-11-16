@@ -1,6 +1,8 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { mgrReports, parseReportsMonth, reportsAccess, REPORTS_PROPERTIES_TABLES } from "./mgr_reports.ts";
+import {
+  isOwnerMember, mgrReports, OWNER_ONLY_TOTALS, parseReportsMonth, reportsAccess, REPORTS_PROPERTIES_TABLES, withoutOwnerOnly,
+} from "./mgr_reports.ts";
 
 // Snapshot tel que le job VPS l'ecrit (forme reelle du 11/10/2026, valeurs a virgule flottante
 // gardees telles quelles : rien ne doit etre arrondi ni recalcule cote serveur).
@@ -65,7 +67,7 @@ const seed = (extra: Record<string, any[]> = {}) => fakeDb({
   ],
   ...extra,
 });
-const OPTS = { today: "2026-10-11" };
+const OPTS = { today: "2026-10-11", isOwner: true };
 
 Deno.test("mgr.reports: forme de la reponse", async () => {
   const r = await mgrReports(seed(), "2026-09", OPTS);
@@ -178,4 +180,46 @@ Deno.test("mgr.reports: validation du mois", () => {
   for (const bad of ["2026-13", "2026-9", "x", "2026-09-01"]) {
     assertEquals(parseReportsMonth(bad, "2026-10-11"), { ok: false, error: "month must be YYYY-MM" });
   }
+});
+
+Deno.test("withoutOwnerOnly: owner gets the same object", () => {
+  const t = { margin_ht: 10, team: { revenue_ht: 5 }, potential_profit_ht: 15 };
+  assert(withoutOwnerOnly(t, OWNER_ONLY_TOTALS, true) === t);
+});
+
+Deno.test("withoutOwnerOnly: non owner loses the keys, keeps the rest, input untouched", () => {
+  const t = { margin_ht: 10, team: { revenue_ht: 5 }, potential_profit_ht: 15 };
+  assertEquals(withoutOwnerOnly(t, OWNER_ONLY_TOTALS, false), { margin_ht: 10 });
+  assert("team" in t && "potential_profit_ht" in t);
+});
+
+Deno.test("withoutOwnerOnly: null, array and string returned as they are for a non owner", () => {
+  const a = [1, 2];
+  assert(withoutOwnerOnly(null, OWNER_ONLY_TOTALS, false) === null);
+  assert(withoutOwnerOnly(a, OWNER_ONLY_TOTALS, false) === a);
+  assert(withoutOwnerOnly("x", OWNER_ONLY_TOTALS, false) === "x");
+});
+
+Deno.test("mgr.reports: non owner gets the Elite totals without team nor potential_profit_ht", async () => {
+  const totals = { margin_ht: 10, team: { revenue_ht: 5 }, potential_profit_ht: 15 };
+  const db = () => seed({ cleaning_accounting_cache: [{ ...SNAP, totals_json: totals }] });
+  const non: any = (await mgrReports(db(), "2026-09", { today: "2026-10-11", isOwner: false })).accounting?.totals;
+  assertEquals(non.margin_ht, 10);
+  assert(!("team" in non) && !("potential_profit_ht" in non));
+  const own: any = (await mgrReports(db(), "2026-09", { today: "2026-10-11", isOwner: true })).accounting?.totals;
+  assertEquals(own.team, { revenue_ht: 5 });
+  assertEquals(own.potential_profit_ht, 15);
+});
+
+Deno.test("isOwnerMember: true only for is_owner true", async () => {
+  const db = fakeDb({ cleaners: [{ id: 1, is_owner: true }, { id: 2, is_owner: false }, { id: 3 }] });
+  assertEquals(await isOwnerMember(db, 1), true);
+  assertEquals(await isOwnerMember(db, 2), false);
+  assertEquals(await isOwnerMember(db, 3), false);
+  assertEquals(await isOwnerMember(db, 99), false);
+  const bad = fakeDb({ cleaners: [{ id: 1, is_owner: true }] });
+  bad.fail["cleaners.select"] = { message: "boom" };
+  assertEquals(await isOwnerMember(bad, 1), false);
+  const throwing = { from() { throw new Error("boom"); } };
+  assertEquals(await isOwnerMember(throwing, 1), false);
 });

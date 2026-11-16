@@ -32,6 +32,7 @@ function summary(t, team) {
 function flags(team) {
   const items = [];
   const f = (v, one, many) => { if (isNum(v) && v > 0) items.push('<li>' + esc(v === 1 ? one : v + many) + '</li>'); };
+  f(team.not_done_count, '1 team cleaning not marked done, not counted.', ' team cleanings not marked done, not counted.');
   f(team.missing_fee_count, '1 team cleaning with no cleaning fee on the booking.', ' team cleanings with no cleaning fee on the booking.');
   f(team.unmatched_count, '1 team cleaning not matched to a booking, revenue not counted.', ' team cleanings not matched to a booking, revenue not counted.');
   f(team.shared_with_elite_count, '1 cleaning with both Elite and a team member, counted as Elite.', ' cleanings with both Elite and a team member, counted as Elite.');
@@ -57,6 +58,11 @@ function teamSection(team) {
 
 export async function renderMoney(ctx) {
   const main = ctx.main;
+  // Ecran reserve au proprietaire : sinon message, aucune lecture (le serveur refuse aussi).
+  if (!(ctx.me && ctx.me.isOwner === true)) {
+    main.innerHTML = header() + '<div class="ph" data-mn="owner-only"><p role="alert">Only the owner can see this screen.</p></div>';
+    return;
+  }
   const st = { data: null, month: '', seq: 0 };
 
   function handleAccess(e) {

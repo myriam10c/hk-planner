@@ -45,7 +45,9 @@ import { mgrPlanning } from "./mgr_planning.ts";
 import { dateFromKey, loadPostponedDates, runAutopilot } from "./autopilot.ts";
 import { dashboardKpis } from "./kpis.ts";
 import { mgrPeople, parsePeopleMonth } from "./mgr_people.ts";
-import { mgrReports, parseReportsMonth, reportsAccess } from "./mgr_reports.ts";
+import {
+  isOwnerMember, mgrReports, OWNER_ONLY_PAYLOAD, OWNER_ONLY_TOTALS, parseReportsMonth, reportsAccess, withoutOwnerOnly,
+} from "./mgr_reports.ts";
 import { completePreventiveRun, mgrSetup, nextDueAfterEdit, setupAccess } from "./mgr_setup.ts";
 import { mgrSettings, mgrSettingsSet } from "./mgr_settings.ts";
 import { deactivateRefusal, mgrTeam } from "./mgr_team.ts";
@@ -1896,7 +1898,9 @@ Deno.serve(async (req: Request) => {
       const mo = parseReportsMonth(url.searchParams.get("month"), today);
       if (!mo.ok) return jsonResp({ error: mo.error }, 400);
       try {
-        return jsonResp(await mgrReports(sb, mo.month, { today }));
+        // Chiffres equipe : proprietaire seulement, tranche ici.
+        const isOwner = await isOwnerMember(sb, me!.cleaner_id);
+        return jsonResp(await mgrReports(sb, mo.month, { today, isOwner }));
       } catch (e) {
         console.error("[mgr.reports]", e);
         return jsonResp({ error: "Reports are unavailable right now. Try again." }, 503);
@@ -2466,10 +2470,11 @@ Deno.serve(async (req: Request) => {
       // `shareLocation` (29/10, qui est ou) : false = /manager/ ne montre ni
       // l'avertissement ni la carte Settings. Lecture ratee = champ absent (true cote client).
       const { data: emailRow, error: emailErr } = await sb.from("cleaners")
-        .select("email, share_location").eq("id", cleaner.cleaner_id).maybeSingle();
+        .select("email, share_location, is_owner").eq("id", cleaner.cleaner_id).maybeSingle();
       if (!emailErr && emailRow) {
         me.email = emailRow.email ?? null;
         me.shareLocation = sharesLocation(emailRow);
+        me.isOwner = emailRow.is_owner === true;
       }
       return jsonResp({ status: "success", cleaner: me });
     }
@@ -4634,8 +4639,10 @@ Deno.serve(async (req: Request) => {
     // Read : current data for a month. Returns the cached snapshot computed by VPS handler.
     if (action === "getCleaningAccounting") {
       // Session manager exigee AVANT toute lecture (mgr_reports.ts, PIN ou email).
-      const rRefusal = reportsAccess(await currentUser(sb, req));
+      const rUser = await currentUser(sb, req);
+      const rRefusal = reportsAccess(rUser);
       if (rRefusal) return jsonResp({ error: rRefusal.error }, rRefusal.status);
+      const isOwner = await isOwnerMember(sb, rUser!.cleaner_id);
       const month = url.searchParams.get("month");  // YYYY-MM
       if (!month || !/^\d{4}-\d{2}$/.test(month)) {
         return jsonResp({ error: "month param required (YYYY-MM)" }, 400);
@@ -4643,18 +4650,28 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await sb.from("cleaning_accounting_cache")
         .select("*").eq("month", month).maybeSingle();
       if (error) throw error;
-      return jsonResp({ status: "success", month, data: data || null });
+      // Chiffres equipe : proprietaire seulement.
+      const shown = data ? {
+        ...data,
+        totals_json: withoutOwnerOnly(data.totals_json, OWNER_ONLY_TOTALS, isOwner),
+        payload_json: withoutOwnerOnly(data.payload_json, OWNER_ONLY_PAYLOAD, isOwner),
+      } : null;
+      return jsonResp({ status: "success", month, data: shown });
     }
     // List all months that have cached data (for the month picker)
     if (action === "listCleaningAccountingMonths") {
       // Session manager exigee AVANT toute lecture (mgr_reports.ts, PIN ou email).
-      const rRefusal = reportsAccess(await currentUser(sb, req));
+      const rUser = await currentUser(sb, req);
+      const rRefusal = reportsAccess(rUser);
       if (rRefusal) return jsonResp({ error: rRefusal.error }, rRefusal.status);
+      const isOwner = await isOwnerMember(sb, rUser!.cleaner_id);
       const { data, error } = await sb.from("cleaning_accounting_cache")
         .select("month, rows_count, unmatched_count, computed_at, totals_json")
         .order("month", { ascending: false });
       if (error) throw error;
-      return jsonResp({ status: "success", months: data || [] });
+      // Chiffres equipe : proprietaire seulement.
+      const months = (data || []).map((r: any) => ({ ...r, totals_json: withoutOwnerOnly(r.totals_json, OWNER_ONLY_TOTALS, isOwner) }));
+      return jsonResp({ status: "success", months });
     }
     // Write : VPS handler pushes computed snapshot.
     if (action === "syncCleaningAccounting" && req.method === "POST") {

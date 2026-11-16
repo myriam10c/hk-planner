@@ -23,6 +23,7 @@ export function personIds(routes: FakeRoute[]): string[] {
 }
 
 export const MANAGER = { id: 8, name: 'Walter', color: '#e94560', role: 'manager', email: 'walter@example.com' };
+export const OWNER = { id: 6, name: 'Hillal', color: '#0a84ff', role: 'manager', email: 'owner@example.com', isOwner: true };
 export const me = (member: any) => ({ match: 'action=cleanerMe', status: 200, body: { status: 'success', cleaner: member } });
 // Image d'un pixel servie a la place des URL signees du stockage (aucun appel reseau).
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
