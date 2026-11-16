@@ -5,6 +5,7 @@ const navOf = (page: any, info: any) => (info.project.name === 'mgr-desktop' ? p
 const boot = (page: any, hash = '#/more') => bootMgr(page, [me(MANAGER)], { email: true, hash });
 
 const ROWS: Array<[string, string, string]> = [
+  ['Cleaning money', 'Team revenue, what you keep on Elite, potential profit', '#/more/money'],
   ['Tasks', 'Team tasks: assign, schedule and close', '#/tasks'],
   ['Where is everyone', 'Last known position of each person, on a map', '#/more/locations'],
   ['Team', 'Accounts, roles and invitations', '#/more/team'],
@@ -19,11 +20,11 @@ const ROWS: Array<[string, string, string]> = [
   ['Reports', 'Elite accounting, operations, property health and exports', '#/more/reports'],
 ];
 
-test('hub : 12 lignes dans l ordre avec leurs liens, More marque courant', async ({ page }, info) => {
+test('hub : 13 lignes dans l ordre avec leurs liens, More marque courant', async ({ page }, info) => {
   await boot(page);
   await expect(page.getByRole('heading', { name: 'More', exact: true })).toBeVisible();
   const rows = page.locator('main a.more-row');
-  await expect(rows).toHaveCount(12);
+  await expect(rows).toHaveCount(13);
   for (let i = 0; i < ROWS.length; i++) {
     const [title, desc, href] = ROWS[i];
     await expect(rows.nth(i)).toHaveAttribute('href', href);
@@ -40,7 +41,7 @@ test('hub : 12 lignes dans l ordre avec leurs liens, More marque courant', async
 
 test('section inconnue : retour au hub', async ({ page }) => {
   await boot(page, '#/more/zzz');
-  await expect(page.locator('main a.more-row')).toHaveCount(12);
+  await expect(page.locator('main a.more-row')).toHaveCount(13);
 });
 
 test('module de section absent : carte d erreur avec Retry et lien vers l ancienne app', async ({ page }) => {
@@ -72,7 +73,7 @@ for (const scheme of ['light', 'dark'] as const) {
     test.use({ colorScheme: scheme });
     test('hub et carte d erreur sans defilement horizontal (' + scheme + ')', async ({ page }) => {
       await boot(page);
-      await expect(page.locator('main a.more-row')).toHaveCount(12);
+      await expect(page.locator('main a.more-row')).toHaveCount(13);
       let s = await noHorizontalScroll(page);
       expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
       await page.route('**/manager/screens/more-settings.js', (r) => r.abort());

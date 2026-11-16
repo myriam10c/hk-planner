@@ -13,12 +13,14 @@ const SECTIONS = {
   people: ['/manager/screens/more-people.js', 'renderPeople'],
   setup: ['/manager/screens/more-setup.js', 'renderSetup'],
   reports: ['/manager/screens/more-reports.js', 'renderReports'],
+  money: ['/manager/screens/more-money.js', 'renderMoney'],
   reminders: ['/manager/screens/more-reminders.js', 'renderReminders'],
 };
 // Sections dont la sous-route porte un identifiant (logement, employe, onglet).
 const WITH_ID = new Set(['apartment', 'hr', 'setup']);
 
 const ROWS = [
+  { title: 'Cleaning money', desc: 'Team revenue, what you keep on Elite, potential profit', href: '#/more/money' },
   { title: 'Tasks', desc: 'Team tasks: assign, schedule and close', href: '#/tasks' },
   { title: 'Where is everyone', desc: 'Last known position of each person, on a map', href: '#/more/locations' },
   { title: 'Team', desc: 'Accounts, roles and invitations', href: '#/more/team' },

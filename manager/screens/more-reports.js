@@ -6,25 +6,25 @@
 import { download, get } from '/manager/api.js';
 import { esc, I } from '/manager/ui/dom.js';
 
-const NA = '<span class="rp-muted">Not available</span>';
-const STALE_MS = 3 * 3600 * 1000;
+export const NA = '<span class="rp-muted">Not available</span>';
+export const STALE_MS = 3 * 3600 * 1000;
 const PROPS_SHOWN = 20;
 const NF2 = new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const NF1 = new Intl.NumberFormat('en-AE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
-const money = (v) => (isNum(v) ? 'AED ' + NF2.format(v) : NA);
+export const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+export const money = (v) => (isNum(v) ? 'AED ' + NF2.format(v) : NA);
 const pct = (v) => (isNum(v) ? NF1.format(v) + '%' : NA);
-const count = (v) => (isNum(v) ? String(v) : NA);
+export const count = (v) => (isNum(v) ? String(v) : NA);
 
 function header() {
   return '<header class="top"><div><a class="more-back" href="#/more">' + I.prev + '<span>More</span></a>'
     + '<h1>Reports</h1></div></header>';
 }
-function monthLabel(m) {
+export function monthLabel(m) {
   const [y, mo] = m.split('-').map(Number);
   return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
-function dubaiStamp(iso) {
+export function dubaiStamp(iso) {
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return '';
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' })
@@ -34,7 +34,7 @@ function weekday(day) {
   return new Date(day + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
 }
 const stat = (label, value) => '<div class="rp-stat"><span>' + esc(label) + '</span><b>' + value + '</b></div>';
-const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+export const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // CSV des lignes du snapshot : colonnes = cles dans l'ordre ou elles arrivent, valeurs brutes.
 export function rowsToCsv(rows) {
