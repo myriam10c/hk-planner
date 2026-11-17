@@ -117,6 +117,9 @@ export function sheetError(msg) {
     body.prepend(el);
   }
   el.textContent = msg;
+  // Le message est pose en haut du panneau : sur telephone, formulaire descendu, il restait
+  // hors de l'ecran et le bouton semblait mort. On remonte le panneau jusqu'a lui.
+  body.scrollTop = 0;
 }
 
 // Propositions de maintenance en attente, pour la pastille Maintenance (app.js).

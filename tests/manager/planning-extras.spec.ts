@@ -31,6 +31,22 @@ test('Add extra : prix obligatoire, une seule creation au double clic, sans aute
   expect(w[0].created_by).toBeUndefined();
 });
 
+test('Add extra : formulaire descendu, le message de refus reste a l ecran (telephone)', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), PLAN(), { match: 'action=addExtraCleaning', status: 200, body: OK }], { email: true, hash: HASH, clock: PNOW });
+  await page.getByRole('button', { name: 'Add extra' }).click();
+  const sh = page.locator('#sheet');
+  await expect(sh.locator('h2')).toHaveText('Add an extra cleaning');
+  await sh.locator('#xListing').selectOption('L8');
+  // La personne est descendue jusqu'aux derniers champs (Assign to, Notes), prix laisse vide.
+  await sh.locator('#xNotes').fill('Late checkout');
+  await sh.locator('.sheet-b').evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await sh.getByRole('button', { name: 'Create extra' }).click();
+  await expect(sh.locator('.sheet-err')).toHaveText('Price billed is required.');
+  // Sans cela le bouton semble mort : le message etait pose en haut du formulaire, hors de l'ecran.
+  await expect(sh.locator('.sheet-err')).toBeInViewport();
+  expect(await writes(page, 'addExtraCleaning')).toEqual([]);
+});
+
 test('Edit extra puis Delete', async ({ page }, info) => {
   await bootMgr(page, [me(MANAGER), PLAN(),
     { match: 'action=updateExtraCleaning', status: 200, body: OK },
