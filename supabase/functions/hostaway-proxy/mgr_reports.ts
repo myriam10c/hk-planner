@@ -1,6 +1,7 @@
 // Rapports de l'app manager (More > Reports, phase 5b) : action mgr.reports, lecture seule.
-//   - compta Elite : le snapshot cleaning_accounting_cache du mois, passe TEL QUEL
-//     (totals_json, payload_json.rows, unmatched_resa, unmatched_pricing). Aucun montant
+//   - compta Elite : le snapshot cleaning_accounting_cache du mois, passe tel quel au proprietaire
+//     (totals_json, payload_json.rows, unmatched_resa, unmatched_pricing) ; pour tout autre, les cles
+//     reservees au proprietaire (OWNER_ONLY_TOTALS, OWNER_ONLY_PAYLOAD) en sont retirees. Aucun montant
 //     n'est recalcule, arrondi ni estime ici ; une valeur absente part en null.
 //   - operations : KPIs de l'ancien getDashboardKPIs, mais lus sur le mois de Dubai borne
 //     cote base et en entier (pages), comme mgr.people : l'ancien chemin dashboardKpis

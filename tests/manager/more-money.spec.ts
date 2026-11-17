@@ -197,6 +197,15 @@ test('non owner : message, aucune lecture', async ({ page }) => {
   expect(urls.filter((u) => u.includes('action=mgr.reports'))).toEqual([]);
 });
 
+test('compte non confirme (cleanerMe en echec reseau) : message dedie, pas owner-only, aucune lecture', async ({ page }) => {
+  await bootMgr(page, [{ match: 'action=cleanerMe', status: 200, body: {}, fail: true }, ...READS], { email: true, hash: '#/more/money', clock: FRESH });
+  await expect(page.locator('[data-mn="unconfirmed"]')).toHaveText('Your account could not be confirmed. Reload to try again.');
+  await expect(page.getByText('Only the owner can see this screen.')).toHaveCount(0);
+  await expect(page.locator('[data-mn="summary"]')).toHaveCount(0);
+  const urls = (await fetchLog(page)).map((l) => l.url);
+  expect(urls.filter((u) => u.includes('action=mgr.reports'))).toEqual([]);
+});
+
 test('alerte not done : singulier', async ({ page }) => {
   await boot(page, [{ match: 'action=mgr.reports', status: 200, body: withTeam({ ...TEAM, not_done_count: 1 }) }]);
   await expect(page.locator('.mn-flags li').first()).toHaveText('1 team cleaning not marked done, not counted.');

@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import {
-  isOwnerMember, mgrReports, OWNER_ONLY_TOTALS, parseReportsMonth, reportsAccess, REPORTS_PROPERTIES_TABLES, withoutOwnerOnly,
+  isOwnerMember, mgrReports, OWNER_ONLY_PAYLOAD, OWNER_ONLY_TOTALS, parseReportsMonth, reportsAccess, REPORTS_PROPERTIES_TABLES, withoutOwnerOnly,
 } from "./mgr_reports.ts";
 
 // Snapshot tel que le job VPS l'ecrit (forme reelle du 11/10/2026, valeurs a virgule flottante
@@ -222,4 +222,16 @@ Deno.test("isOwnerMember: true only for is_owner true", async () => {
   assertEquals(await isOwnerMember(bad, 1), false);
   const throwing = { from() { throw new Error("boom"); } };
   assertEquals(await isOwnerMember(throwing, 1), false);
+});
+
+Deno.test("withoutOwnerOnly : les constantes de confidentialite retirent exactement les cles reservees", () => {
+  assertEquals([...OWNER_ONLY_PAYLOAD], ["team_rows", "team_unmatched", "team_skipped", "team_not_done"]);
+  assertEquals([...OWNER_ONLY_TOTALS], ["team", "potential_profit_ht"]);
+  const payload = { rows: ROWS, unmatched_resa: UNMATCHED_RESA, unmatched_pricing: [], team_rows: [1], team_unmatched: [2], team_skipped: [3], team_not_done: [4] };
+  const seen = withoutOwnerOnly(payload, OWNER_ONLY_PAYLOAD, false) as Record<string, unknown>;
+  assertEquals(Object.keys(seen).sort(), ["rows", "unmatched_pricing", "unmatched_resa"]);
+  const totals = { ...TOTALS, team: { revenue_ht: 1 }, potential_profit_ht: 5 };
+  const seenTotals = withoutOwnerOnly(totals, OWNER_ONLY_TOTALS, false) as Record<string, unknown>;
+  assertEquals(Object.keys(seenTotals).sort(), Object.keys(TOTALS).sort());
+  assertEquals(withoutOwnerOnly(payload, OWNER_ONLY_PAYLOAD, true), payload);
 });

@@ -59,7 +59,12 @@ function teamSection(team) {
 export async function renderMoney(ctx) {
   const main = ctx.main;
   // Ecran reserve au proprietaire : sinon message, aucune lecture (le serveur refuse aussi).
-  if (!(ctx.me && ctx.me.isOwner === true)) {
+  // Compte non confirme au demarrage (hors ligne, renouvellement lent) : message a part, pas « owner-only ».
+  if (!ctx.me) {
+    main.innerHTML = header() + '<div class="ph" data-mn="unconfirmed"><p role="alert">Your account could not be confirmed. Reload to try again.</p></div>';
+    return;
+  }
+  if (ctx.me.isOwner !== true) {
     main.innerHTML = header() + '<div class="ph" data-mn="owner-only"><p role="alert">Only the owner can see this screen.</p></div>';
     return;
   }
