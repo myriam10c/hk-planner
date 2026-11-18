@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { startCamera, startCameraIfCurrent, stampLayout, drawStamp, streamLive, pickPhoto } from "../../v3/conv/camera.js";
+import { startCamera, startCameraIfCurrent, stampLayout, drawStamp, streamLive, pickPhoto, shutterPlan, CAMERA_GRACE_MS } from "../../v3/conv/camera.js";
 
 test("caméra refusée : null, pas d'exception", async () => {
   const md = { getUserMedia: async () => { throw new Error("NotAllowedError"); } };
@@ -22,7 +22,7 @@ test("caméra accordée : le flux est branché sur la vidéo", async () => {
 test("flux arrivé après fermeture/réouverture : arrêté et débranché", async () => {
   let stopped = 0;
   const stream = { getTracks: () => [{ stop: () => { stopped++; } }] };
-  const video = { play: async () => {} };
+  const video = { srcObject: null, play: async () => {} }; // comme une vraie vidéo : rien de branché au départ
   const md = { getUserMedia: async () => stream };
   const r = await startCameraIfCurrent(video, () => false, md);
   assert.deepEqual(r, { stream: null, stale: true });
@@ -34,7 +34,8 @@ test("flux orphelin : un flux plus récent branché entre-temps n'est pas débra
   const stale = { getTracks: () => [{ stop() {} }] };
   const newer = { id: "newer" };
   const video = { play: async () => { video.srcObject = newer; } }; // la demande récente branche son flux pendant l'attente
-  const r = await startCameraIfCurrent(video, () => false, { getUserMedia: async () => stale });
+  let asked = 0; // encore courante à la réponse de la caméra, dépassée pendant le démarrage de la vidéo
+  const r = await startCameraIfCurrent(video, () => asked++ === 0, { getUserMedia: async () => stale });
   assert.equal(r.stale, true);
   assert.equal(video.srcObject, newer);
 });
@@ -266,4 +267,85 @@ test("repli sans caméra : l'horodatage est calculé au retour de la photo (fonc
     assert.equal(await p3, null);
     assert.equal(n, 0);
   } finally { globalThis.createImageBitmap = prev; }
+});
+
+// Incident du 18/11/2026 : viseur noir et déclencheur sans effet sur deux téléphones. Le
+// déclencheur ne doit jamais rester muet : photo, nouvelle demande de flux, attente brève, ou
+// appareil photo du téléphone.
+const liveTrack = { getVideoTracks: () => [{ readyState: "live" }] };
+const deadTrack = { getVideoTracks: () => [{ readyState: "ended" }] };
+const T0 = 1_000_000;
+
+test("déclencheur : le viseur a une image et une piste vivante, la photo est prise", () => {
+  assert.equal(shutterPlan({ live: true, stream: liveTrack, hasFrame: true, since: T0 }, T0 + 500), "shoot");
+  // Une caméra lente à démarrer mais prête au moment de l'appui reste en direct.
+  assert.equal(shutterPlan({ live: true, stream: liveTrack, hasFrame: true, since: T0 }, T0 + 60000), "shoot");
+});
+
+test("déclencheur : piste morte (écran verrouillé longtemps), le flux est redemandé", () => {
+  assert.equal(shutterPlan({ live: true, stream: deadTrack, hasFrame: true, since: T0 }, T0 + 60000), "revive");
+});
+
+test("déclencheur : la caméra n'a pas encore répondu, on patiente le temps du délai", () => {
+  assert.equal(shutterPlan({ live: true, stream: null, hasFrame: false, since: T0 }, T0), "wait");
+  assert.equal(shutterPlan({ live: true, stream: null, hasFrame: false, since: T0 }, T0 + CAMERA_GRACE_MS - 1), "wait");
+});
+
+test("déclencheur : la caméra ne répond jamais, l'appareil photo du téléphone prend le relais", () => {
+  assert.equal(shutterPlan({ live: true, stream: null, hasFrame: false, since: T0 }, T0 + CAMERA_GRACE_MS), "phone");
+});
+
+test("déclencheur : flux arrivé mais viseur sans image, l'appareil photo du téléphone prend le relais", () => {
+  assert.equal(shutterPlan({ live: true, stream: liveTrack, hasFrame: false, since: T0 }, T0 + CAMERA_GRACE_MS), "phone");
+  assert.equal(shutterPlan({ live: true, stream: deadTrack, hasFrame: false, since: T0 }, T0 + CAMERA_GRACE_MS), "phone");
+});
+
+test("déclencheur : sans caméra en direct (refus, repli déjà actif), toujours l'appareil photo du téléphone", () => {
+  assert.equal(shutterPlan({ live: false, stream: null, hasFrame: false, since: T0 }, T0), "phone");
+});
+
+test("déclencheur : heure de la demande inconnue, jamais d'attente sans fin", () => {
+  assert.equal(shutterPlan({ live: true, stream: null, hasFrame: false, since: undefined }, T0), "phone");
+});
+
+// Le délai du déclencheur repart de la réponse de la caméra : une autorisation accordée après
+// plusieurs secondes de lecture ne doit pas faire basculer sur l'appareil photo du téléphone.
+test("caméra accordée : la réponse est signalée avant le démarrage de la vidéo", async () => {
+  const events = [];
+  const stream = { id: "s" };
+  const video = { srcObject: null, play: () => { events.push("play"); return Promise.resolve(); } };
+  await startCamera(video, { getUserMedia: async () => stream }, () => events.push("answer"));
+  assert.deepEqual(events, ["answer", "play"]);
+});
+
+test("caméra refusée : aucune réponse signalée", async () => {
+  let answered = 0;
+  await startCamera({}, { getUserMedia: async () => { throw new Error("denied"); } }, () => { answered++; });
+  assert.equal(answered, 0);
+});
+
+test("demande gardée : la réponse de la caméra est transmise", async () => {
+  let answered = 0;
+  const video = { srcObject: null, play: async () => {} };
+  await startCameraIfCurrent(video, () => true, { getUserMedia: async () => ({ getTracks: () => [] }) }, () => { answered++; });
+  assert.equal(answered, 1);
+});
+
+test("demande dépassée quand la caméra répond : flux arrêté, jamais branché sur la vidéo", async () => {
+  let stopped = 0, played = 0, plugged = 0, answered = 0;
+  const stream = { getTracks: () => [{ stop: () => { stopped++; } }] };
+  const video = { set srcObject(v) { plugged++; }, get srcObject() { return null; }, play: async () => { played++; } };
+  const r = await startCameraIfCurrent(video, () => false, { getUserMedia: async () => stream }, () => { answered++; });
+  assert.deepEqual(r, { stream: null, stale: true });
+  assert.deepEqual({ stopped, played, plugged, answered }, { stopped: 1, played: 0, plugged: 0, answered: 0 });
+});
+
+test("demande dépassée pendant le démarrage de la vidéo : flux arrêté et débranché", async () => {
+  let stopped = 0, asked = 0;
+  const stream = { getTracks: () => [{ stop: () => { stopped++; } }] };
+  const video = { srcObject: null, play: async () => {} };
+  const r = await startCameraIfCurrent(video, () => asked++ === 0, { getUserMedia: async () => stream });
+  assert.deepEqual(r, { stream: null, stale: true });
+  assert.equal(stopped, 1);
+  assert.equal(video.srcObject, null);
 });

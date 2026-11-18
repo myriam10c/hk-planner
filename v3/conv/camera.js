@@ -64,10 +64,13 @@ export function drawStamp(ctx, width, height, text) {
 }
 
 // Caméra arrière dans la page ; repli sur l'appareil photo du téléphone si refus ou absence.
-export async function startCamera(video, md = globalThis.navigator && globalThis.navigator.mediaDevices) {
+// onAnswer : appelé dès que la caméra répond, avant de brancher la vidéo. S'il renvoie false
+// (demande dépassée), le flux est arrêté sans jamais être branché.
+export async function startCamera(video, md = globalThis.navigator && globalThis.navigator.mediaDevices, onAnswer) {
   if (!md || typeof md.getUserMedia !== "function") return null;
   try {
     const stream = await md.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } }, audio: false });
+    if (onAnswer && onAnswer(stream) === false) { stopCamera(stream); return null; }
     video.srcObject = stream;
     if (video.play) await video.play().catch(() => {});
     return stream;
@@ -83,6 +86,19 @@ export function streamLive(stream) {
   return stream.getVideoTracks().some(t => t.readyState === "live");
 }
 
+// Que fait un appui sur le déclencheur (incident du 18/11/2026 : viseur noir, bouton sans effet).
+// Viseur prêt : la photo. Piste morte : le flux est redemandé. Pas encore d'image : on patiente
+// CAMERA_GRACE_MS depuis la demande, ou depuis la réponse de la caméra (autorisation lue
+// longtemps), puis l'appareil photo du téléphone prend le relais (demande qui ne revient jamais,
+// ou flux sans image). Le déclencheur ne reste jamais muet.
+export const CAMERA_GRACE_MS = 4000;
+// since et now : même horloge, performance.now() (elle ne recule jamais, contrairement à l'heure du téléphone).
+export function shutterPlan({ live, stream, hasFrame, since }, now = performance.now(), grace = CAMERA_GRACE_MS) {
+  if (!live) return "phone";
+  if (stream && hasFrame) return streamLive(stream) ? "shoot" : "revive";
+  return now - since < grace ? "wait" : "phone"; // heure inconnue : jamais d'attente sans fin
+}
+
 export function stopCamera(stream) {
   if (stream && stream.getTracks) stream.getTracks().forEach(t => t.stop());
 }
@@ -90,8 +106,17 @@ export function stopCamera(stream) {
 // Demande de flux gardée : si la demande n'est plus la plus récente quand le flux arrive
 // (viseur fermé puis rouvert vite), le flux orphelin est arrêté et débranché de la vidéo
 // (sur iPhone, un flux orphelin peut rendre le nouveau viseur noir).
-export async function startCameraIfCurrent(video, isCurrent, md) {
-  const stream = await startCamera(video, md);
+// La même question est posée dès la réponse de la caméra : une demande déjà dépassée ne branche
+// rien (un flux sans image ne finirait jamais de démarrer, et resterait ouvert). onAnswer : la
+// caméra a répondu à une demande toujours attendue.
+export async function startCameraIfCurrent(video, isCurrent, md, onAnswer) {
+  let dropped = false;
+  const stream = await startCamera(video, md, () => {
+    if (!isCurrent()) { dropped = true; return false; }
+    if (onAnswer) onAnswer();
+    return true;
+  });
+  if (dropped) return { stream: null, stale: true };
   if (isCurrent()) return { stream, stale: false };
   stopCamera(stream);
   if (stream && video.srcObject === stream) video.srcObject = null;

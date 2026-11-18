@@ -49,7 +49,7 @@ import {
   renderList, renderConversation, renderViewfinder, renderToast, renderFlow, renderPhotoView, renderProblemPage,
   renderTicketFix, escapeHtml,
 } from '/v3/conv/ui.js';
-import { startCameraIfCurrent, stopCamera, streamLive, captureFrame, pickPhoto, canSaveCopy, copyName, saveCopy } from '/v3/conv/camera.js';
+import { startCameraIfCurrent, stopCamera, streamLive, captureFrame, pickPhoto, canSaveCopy, copyName, saveCopy, shutterPlan } from '/v3/conv/camera.js';
 import { shareReport } from '/v3/conv/share.js';
 
 export const state = {
@@ -323,10 +323,12 @@ async function openCamera() {
   if (S.camera.open || viewOnly() || !conv() || conv().readOnly) return;
   const c0 = conv();
   const gen = ++camGen;
-  S.camera = { open: true, stream: null, live: true };
+  // since : debut du delai du declencheur (shutterPlan), remis a zero quand la camera repond.
+  S.camera = { open: true, stream: null, live: true, since: performance.now() };
   render();
   const { stream, stale } = await startCameraIfCurrent(vfVideo,
-    () => gen === camGen && S.camera.open && conv() === c0 && S.screen === 'conv');
+    () => gen === camGen && S.camera.open && conv() === c0 && S.screen === 'conv',
+    undefined, () => { S.camera.since = performance.now(); });
   if (stale) {
     // Une demande plus recente a peut-etre deja branche son flux : on le remet.
     if (S.camera.stream && vfVideo.srcObject !== S.camera.stream) { vfVideo.srcObject = S.camera.stream; vfVideo.play().catch(() => {}); }
@@ -343,6 +345,19 @@ function closeCamera() {
   stopCamera(S.camera.stream);
   vfVideo.srcObject = null;
   S.camera = { open: false, stream: null, live: false };
+}
+
+// La camera en direct n'a rien donne passe le delai (demande sans reponse, ou flux sans image) :
+// le viseur continue avec l'appareil photo du telephone, comme apres un refus. Une reponse
+// tardive de la demande en cours est ecartee (camGen). Synchrone : l'appui qui l'appelle ouvre
+// l'appareil photo dans le meme geste.
+function cameraToPhone() {
+  camGen++;
+  // Flux branche mais sans image : il n'est pas encore dans S.camera, on arrete celui de la video.
+  stopCamera(S.camera.stream || vfVideo.srcObject);
+  vfVideo.srcObject = null;
+  S.camera = { open: true, stream: null, live: false };
+  render();
 }
 
 // Viseur ouvert sur un flux mort (ecran verrouille pendant le menage d'une piece) : on redemande un flux.
@@ -401,15 +416,17 @@ function keepCopy(c, p) {
 // Attend que le navigateur ait peint le dernier rendu (nouvelle piece affichee) avant de relacher `busy`.
 const painted = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-// Prise de photo gardee : pas de double capture, rien tant que le flux n'est pas pret.
+// Prise de photo gardee : pas de double capture. Viseur pas encore pret : shutterPlan decide
+// (message d'attente, puis appareil photo du telephone), jamais un appui sans effet.
 // `busy` n'est relache qu'apres le rendu (et la peinture) de la piece suivante.
 // Repli champ fichier : on n'occupe `busy` qu'une fois la photo recue (l'annulation du selecteur ne resout jamais).
 async function capture(c, handle) {
   if (busy) return;
   let p;
-  if (S.camera.live) {
-    if (!S.camera.stream || !vfVideo.videoWidth) return;
-    if (!streamLive(S.camera.stream)) { reviveCamera(); return; }
+  const plan = shutterPlan({ live: S.camera.live, stream: S.camera.stream, hasFrame: !!vfVideo.videoWidth, since: S.camera.since });
+  if (plan === 'wait') { note('Camera is starting. Tap again in a moment.'); render(); return; }
+  if (plan === 'revive') { reviveCamera(); return; }
+  if (plan === 'shoot') {
     busy = true;
     try {
       p = await takePhoto(c);
@@ -419,6 +436,8 @@ async function capture(c, handle) {
     } finally { busy = false; }
     return;
   }
+  // La camera en direct n'a rien donne : le viseur passe d'abord sur l'appareil photo du telephone.
+  if (S.camera.live) cameraToPhone();
   p = await takePhoto(c);
   if (!p || busy || c !== conv()) return;
   busy = true;
