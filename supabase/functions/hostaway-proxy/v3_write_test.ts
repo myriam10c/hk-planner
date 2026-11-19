@@ -2,6 +2,7 @@ import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
 import { finishJob, jobRole, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
 import { V3_LINEN_FIELDS } from "./v3.ts";
+import { START_WAIT_TRIES } from "./v3_start_role.ts";
 
 const FAIZA = { cleaner_id: 3, name: "Faiza", role: "cleaner", color: "#e94560" };
 const JOB = "2026-09-12_Marc Lefevre";
@@ -941,4 +942,36 @@ Deno.test("startJob : la lecture du role echoue, la cle est liberee", async () =
     await startJob(sb, FAIZA as any, { jobId: JOB_ID, idem: "idem-start-0108" }, sansPause);
   } catch (_e) { leve = true; }
   assertEquals(leve, true);
+  // Plus aucune ligne pour cette cle : le rejeu de la file repart d'une cle neuve.
+  assertEquals(sb.tables.job_events.filter((e: any) => e.idem_key === "idem-start-0108").length, 0);
+});
+
+Deno.test("startJob : la premiere reste en attente au-dela des essais, la seconde n'est pas lead", async () => {
+  // La ligne de la premiere reste sans resultat pendant toutes les lectures de la seconde
+  // (fonction lente). Avant la correction, la seconde finissait lead : deux leads.
+  const maintenant = new Date().toISOString();
+  const sb = base({
+    job_events: [{
+      id: 1, idem_key: "idem-pending-04", event_type: "start_job", job_id: JOB_ID,
+      cleaner_id: 3, payload: {}, result: null, created_at: maintenant,
+    }],
+    cleaning_timer: [], cleaning_log: [],
+    cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+  });
+  let pauses = 0;
+  const r = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0109" },
+    () => { pauses++; return Promise.resolve(); });
+  // Le serveur ne tranche pas : erreur relancable (5xx, la file du telephone rejoue), aucun role.
+  assertEquals(r.status, 503);
+  assertEquals((r.body as any).role, undefined);
+  assertEquals(pauses, START_WAIT_TRIES - 1);
+  // Cle liberee : aucune ligne de la seconde ne fausse le calcul suivant.
+  assertEquals(sb.tables.job_events.map((e: any) => e.idem_key), ["idem-pending-04"]);
+  // La premiere aboutit ; le rejeu de la meme cle tranche comme la fin du menage : aide.
+  sb.tables.job_events[0].result = { status: "success" };
+  const rejeu = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0109" }, sansPause);
+  assertEquals(rejeu.status, 200);
+  assertEquals((rejeu.body as any).role, "helper");
+  assertEquals((rejeu.body as any).lead.name, "Faiza");
+  assertEquals(await jobRole(sb, JOB_ID, 4), "helper");
 });

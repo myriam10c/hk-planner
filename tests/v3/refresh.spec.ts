@@ -71,10 +71,7 @@ test('le jour de Dubai change : relecture meme moins de 60 s apres la derniere',
 
 test('une conversation en cours survit a la relecture : meme ecran, memes messages, role remis a jour', async ({ page }) => {
   const creekLead = { ...CREEK, role: 'lead', leadId: null };
-  // Ouvrir un appartement relit la journee (binome, tache 3) : une lecture de plus, identique
-  // au boot, passe avant la relecture au premier plan.
-  const [boot, ...suite] = routes({ ...DAY2, stops: [BLOOM, creekLead, TROISIEME] });
-  await bootV3(page, [boot, { ...myDay(DAY), once: true }, ...suite], { pinToken: 'jeton-pin' });
+  await bootV3(page, routes({ ...DAY2, stops: [BLOOM, creekLead, TROISIEME] }), { pinToken: 'jeton-pin' });
   await page.getByRole('button', { name: /1506 Emaar Creekside 18A/ }).click();
   await page.locator('[data-reply="here"]').click();
   const avant = await page.locator('.msg').count();
@@ -83,7 +80,7 @@ test('une conversation en cours survit a la relecture : meme ecran, memes messag
   expect(await page.evaluate((id) => (window as any).__hk.convs[id].apt.role, idConv)).toBe('helper');
   await plusTard(page, 120_000);
   await auPremierPlan(page);
-  await expect.poll(() => nbMyDay(page)).toBe(3);
+  await expect.poll(() => nbMyDay(page)).toBe(2);
   await expect.poll(() => page.evaluate(() => (window as any).__hk.apartments.length)).toBe(3);
   const etat = await page.evaluate(() => { const h = (window as any).__hk; return { screen: h.screen, active: h.activeId, convs: Object.keys(h.convs) }; });
   expect(etat).toEqual({ screen: 'conv', active: idConv, convs: [idConv] });

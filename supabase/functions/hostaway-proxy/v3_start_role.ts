@@ -13,7 +13,10 @@
 // peut ne pas avoir son resultat memorise quand la seconde lit. roleFromStarts
 // ignore les lignes sans resultat, la seconde se croirait lead. On attend donc
 // brievement qu'une ligne plus ancienne et recente se resolve : posee avec son
-// resultat, elle gagne ; liberee (ecriture ratee), elle disparait.
+// resultat, elle gagne ; liberee (ecriture ratee), elle disparait. Toujours sans
+// resultat au dernier essai : on ne tranche pas (rend null), sinon les deux se
+// verraient lead (correction 1 de la tache 3). L'appelant libere la cle et rend
+// une erreur relancable : au rejeu, la ligne de la premiere est resolue.
 import { roleFromStarts } from "./v3_finish_context.ts";
 
 // Une ligne plus ancienne sans resultat n'est attendue que si elle date de moins
@@ -35,7 +38,7 @@ const avant = (a: any, b: any) =>
 export async function decideStartRole(
   sb: any, jobId: string, me: { cleaner_id: number; name: string }, idem: string,
   opts: { sleep?: (ms: number) => Promise<void>; nowMs?: number } = {},
-): Promise<StartRole> {
+): Promise<StartRole | null> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   let rows: any[] = [];
   for (let essai = 0; essai < START_WAIT_TRIES; essai++) {
@@ -49,7 +52,8 @@ export async function decideStartRole(
     const enAttente = mienne && rows.some((r: any) =>
       !r.result && r.idem_key !== idem && Number(r.cleaner_id) !== Number(me.cleaner_id) &&
       avant(r, mienne) < 0 && now - Date.parse(String(r.created_at ?? "")) < START_PENDING_FRESH_MS);
-    if (!enAttente || essai === START_WAIT_TRIES - 1) break;
+    if (!enAttente) break;
+    if (essai === START_WAIT_TRIES - 1) return null;
     await sleep(START_WAIT_MS);
   }
   // Ma propre ligne compte comme abouti : son resultat s'ecrit juste apres.

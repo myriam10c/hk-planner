@@ -136,13 +136,18 @@ export function createConversation(apt, { me, refStart = 461, now = new Date() }
     tickets: {}, fix: null,
   };
   conv.steps = buildSteps(apt, isHelper(conv));
-  if (isHelper(conv)) {
-    conv.messages.push({ from: "lead", type: "text", text: apt.lead.name + " started at " + apt.lead.startedAt + ". She sends the report. Add your photos and problems." });
-    const line = openProblemsLine(apt);
-    if (line) conv.messages.push({ from: "app", type: "text", text: line });
-  }
+  if (isHelper(conv)) conv.messages.push(...helperIntro(apt));
   conv.messages.push(botMessage(conv));
   return conv;
+}
+
+// Tête du parcours d'aide, à la création comme à la bascule (becomeHelper) : la bulle de la lead
+// puis, s'il y en a, la ligne des tickets ouverts du logement.
+function helperIntro(apt) {
+  const out = [{ from: "lead", type: "text", text: apt.lead.name + " started at " + apt.lead.startedAt + ". She sends the report. Add your photos and problems." }];
+  const line = openProblemsLine(apt);
+  if (line) out.push({ from: "app", type: "text", text: line });
+  return out;
 }
 
 // Binôme (lot 1 des corrections, tâche 3) : le serveur décide qui est lead à « I'm here » (la
@@ -163,10 +168,7 @@ export function becomeHelper(conv, lead) {
   // des étapes qui n'existent plus : il se referme sans effet sur le parcours.
   if (conv.flow && conv.flow.from !== "edit") conv.flow.from = "conv";
   conv.steps = buildSteps(conv.apt, true);
-  const said = conv.apt.lead.name + " started at " + at + ". She sends the report. Add your photos and problems.";
-  conv.messages.push({ from: "lead", type: "text", text: said });
-  const line = openProblemsLine(conv.apt);
-  if (line) conv.messages.push({ from: "app", type: "text", text: line });
+  conv.messages.push(...helperIntro(conv.apt));
   // Pas encore arrivée : on reprend à « I'm here ». Sinon, première pièce sans photo de fin.
   if (!conv.startedAt) conv.i = 0;
   else {

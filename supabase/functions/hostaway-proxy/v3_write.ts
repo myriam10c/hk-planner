@@ -80,7 +80,16 @@ export async function startJob(
     // premier « I'm here » construisent toutes deux le parcours de la lead. La
     // lecture leve : un role faux ou absent rejouerait le defaut, la cle est
     // liberee et la file hors ligne reessaie.
-    const { role, lead } = await decideStartRole(sb, jobId, me, idem, { sleep: attente });
+    const decision = await decideStartRole(sb, jobId, me, idem, { sleep: attente });
+    if (!decision) {
+      // Une collegue a demarre juste avant et son demarrage n'est toujours pas
+      // ecrit : trancher ici donnerait deux leads. Cle liberee (aucune ligne ne
+      // reste pour fausser le calcul suivant), 503 : la file du telephone rejoue
+      // en silence, et au rejeu la ligne de la collegue est resolue.
+      await releaseEvent(sb, idem);
+      return { status: 503, body: { error: "Still starting. Retry." } };
+    }
+    const { role, lead } = decision;
     const result = { status: "success", jobId, startedAt, role, lead };
     await recordResult(sb, idem, result);
     return { status: 200, body: result };

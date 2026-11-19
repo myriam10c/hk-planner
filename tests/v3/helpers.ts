@@ -6,7 +6,9 @@ import type { Page } from '@playwright/test';
 // context.setOffline() coupe vraiment le reseau de l'application.
 // `once` : la route ne sert qu'une fois par page, la suivante qui correspond
 // prend le relais (un 401 puis un 200, par exemple).
-export type FakeRoute = { match: string; status: number; body: any; delay?: number; once?: boolean };
+// `hold` : la reponse est retenue jusqu'a ce que le test la libere (liberer(page, nom)),
+// au lieu d'un delai fixe qui depend de la vitesse de la machine.
+export type FakeRoute = { match: string; status: number; body: any; delay?: number; once?: boolean; hold?: string };
 
 // Ids des personnes que les reponses simulees font connecter (me, viewer, cleaner) :
 // le choix de l'avertissement « Share your location » est garde par personne
@@ -106,6 +108,15 @@ export async function bootV3(
       const real = window.fetch.bind(window);
       // Routes deja servies une fois (option `once`), par page.
       const servies = new Set<FakeRoute>();
+      // Reponses retenues (option `hold`), par nom : liberee une fois, la route repond ensuite
+      // tout de suite.
+      const tenues: Record<string, { libre: boolean; attente: Array<() => void> }> = {};
+      const tenue = (nom: string) => tenues[nom] || (tenues[nom] = { libre: false, attente: [] });
+      (window as any).__liberer = (nom: string) => {
+        const t = tenue(nom);
+        t.libre = true;
+        t.attente.splice(0).forEach((f) => f());
+      };
       const repondre = (routes: FakeRoute[], url: string) => {
         for (const r of routes) {
           if (url.indexOf(r.match) === -1 || servies.has(r)) continue;
@@ -113,6 +124,10 @@ export async function bootV3(
           const make = () => new Response(r.status === 204 ? null : JSON.stringify(r.body), {
             status: r.status, headers: { 'Content-Type': 'application/json' },
           });
+          if (r.hold && !tenue(r.hold).libre) {
+            const t = tenue(r.hold);
+            return new Promise((res) => { t.attente.push(() => res(make())); });
+          }
           if (r.delay) return new Promise((res) => setTimeout(() => res(make()), r.delay));
           return Promise.resolve(make());
         }
@@ -175,6 +190,11 @@ export async function bootV3(
   );
   await page.goto('/v3/' + (opts.hash || ''), { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true, null, { timeout: 10_000 });
+}
+
+// Libere les reponses retenues sous ce nom (route `hold`).
+export async function liberer(page: Page, nom: string) {
+  await page.evaluate((n) => (window as any).__liberer(n), nom);
 }
 
 export async function fetchLog(page: Page) {

@@ -36,6 +36,7 @@ import profile from '/v3/screens/profile.js';
 import { dubaiDate, toApartments } from '/v3/conv/day.js';
 import { needsRefresh, updatedLabel } from '/v3/conv/refresh.js';
 import { stampText } from '/v3/conv/stamp.js';
+import { aptLabel } from '/v3/conv/rules.js';
 import {
   createConversation, currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
   addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto, requireLinen,
@@ -692,9 +693,11 @@ function appliquerRole(c, donnees) {
   if (!c || !donnees || donnees.role !== 'helper' || !donnees.lead) return false;
   if (!becomeHelper(c, donnees.lead)) return false;
   // Le viseur se rouvre sur la bonne etape, et la cleaner est prevenue meme hors de la bulle.
+  // La note nomme l'appartement comme sa ligne de la liste : la reponse peut arriver par la
+  // file pendant qu'elle est dans un autre appartement.
   S.autoOpenedAt = null;
   if (S.camera.open && conv() === c && !currentStep(c).camera) closeCamera();
-  note(c.apt.lead.name + ' started first. You add your photos and problems to her report.');
+  note(aptLabel(c.apt) + ': ' + c.apt.lead.name + ' started first. You add your photos and problems to her report.');
   return true;
 }
 
@@ -929,46 +932,35 @@ async function sharePhotos(files) {
   return true;
 }
 
-// Relecture de la journee a l'ouverture d'un appartement : toujours (sans le delai de 60 s),
-// mais jamais plus de 2,5 s d'attente : un reseau faible n'empeche pas d'ouvrir. La lecture
-// continue en arriere-plan et rafraichirRoles convertit alors la conversation. Hors ligne,
-// relireLaJournee ne fait rien et rend false.
-const ATTENTE_OUVERTURE_MS = 2500;
-let ouverture = false;
-async function relireALOuverture() {
-  let minuteur;
-  try {
-    await Promise.race([
-      relireLaJournee({ force: true }),
-      new Promise(r => { minuteur = setTimeout(r, ATTENTE_OUVERTURE_MS); }),
-    ]);
-  } catch (e) { /* la lecture est un confort : on ouvre avec la journee en memoire */ }
-  clearTimeout(minuteur);
+// Binome (correction 1 de la tache 3) : ouvrir un appartement n'attend jamais le reseau, la
+// conversation s'ouvre avec la journee en memoire. Seulement si une autre cleaner est affectee a
+// ce menage, et tant que cette conversation n'a ni demarre ni pris le parcours d'aide : la
+// journee est relue en arriere-plan, et rafraichirRoles la convertit en aide si la collegue a
+// deja demarre. Sans binome, rien : la relecture au retour au premier plan garde la journee
+// fraiche, et la reponse de v3.startJob tranche le role. Hors ligne, relireLaJournee ne fait rien.
+function relireSiBinome(c, id) {
+  if (!c || c.readOnly || c.startedAt || c.steps.some(s => s.id === 'helper')) return;
+  const stop = ((state.day && state.day.stops) || []).find(s => s && s.jobId === id);
+  const moi = String(me().id);
+  const autres = stop && Array.isArray(stop.othersOnJob) ? stop.othersOnJob.filter(o => o && String(o.id) !== moi) : [];
+  if (!autres.length || !navigator.onLine) return;
+  relireLaJournee({ force: true }).catch(() => { /* confort : la journee en memoire suffit */ });
 }
 
 async function convClick(b) {
   const d = b.dataset;
   const c = conv();
   if (d.act === 'open') {
-    let apt = S.apartments.find(a => a.id === d.id);
-    if (!apt || ouverture) return;
+    const apt = S.apartments.find(a => a.id === d.id);
+    if (!apt) return;
     S.activeId = d.id;
     // View as : la conversation est reconstruite de la journee a chaque ouverture,
     // jamais gardee ni ecrite.
     if (viewOnly()) S.convs[d.id] = readOnlyConversation(apt, { me: me(), now: new Date() });
-    else {
-      // Binome : si la collegue a deja demarre, ce menage s'ouvre directement en aide.
-      // Une conversation deja demarree par cette cleaner n'attend pas : sa reponse de
-      // demarrage fait foi (appliquerRole).
-      const c0 = S.convs[d.id];
-      if (!(c0 && c0.startedAt)) {
-        ouverture = true;
-        try { await relireALOuverture(); } finally { ouverture = false; }
-        apt = S.apartments.find(a => a.id === d.id) || apt;
-      }
-      if (!S.convs[d.id]) S.convs[d.id] = createConversation(apt, { me: me() });
-    }
-    S.screen = 'conv'; S.autoOpenedAt = null; render(); await maybeAutoOpen(); return;
+    else if (!S.convs[d.id]) S.convs[d.id] = createConversation(apt, { me: me() });
+    S.screen = 'conv'; S.autoOpenedAt = null; render();
+    if (!viewOnly()) relireSiBinome(S.convs[d.id], d.id);
+    await maybeAutoOpen(); return;
   }
   if (!c) return;
   if (d.act === 'back') { await toList(c); return; }
