@@ -41,6 +41,7 @@ const PRECACHE = [
   '/v3/conv/day.js',
   '/v3/conv/persist.js',
   '/v3/conv/problems.js',
+  '/v3/conv/refresh.js',
   '/v3/conv/report.js',
   '/v3/conv/rules.js',
   '/v3/conv/share.js',

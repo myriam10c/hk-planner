@@ -98,6 +98,11 @@
 #app.cv .note{pointer-events:none;position:absolute;left:10px;right:10px;bottom:calc(16px + var(--cv-tb));z-index:25;padding:12px 14px;border-radius:12px;background:#111B21;color:#fff;font-size:15px}
 #app.cv .list-top{justify-content:space-between}
 #app.cv .restart{display:flex;align-items:center;text-decoration:none;min-height:48px;padding:0 12px;border-radius:10px;border:1px solid rgba(255,255,255,.6);background:none;color:#fff;font-size:15px;font-weight:700;flex:none}
+#app.cv .list-actions{display:flex;align-items:center;gap:8px;flex:none}
+#app.cv .refresh{min-height:48px;min-width:48px;padding:0 12px;border-radius:10px;border:1px solid rgba(255,255,255,.6);background:none;color:#fff;font-size:15px;font-weight:700;flex:none}
+#app.cv .refresh:disabled{opacity:.6}
+#app.cv .list-top .updated{font-size:13px;opacity:.8}
+#app.cv .list-top .updated.warn{opacity:1;font-weight:700}
 #app.cv .help{margin:0;text-align:center;color:var(--cv-mute);font-size:16px}
 @media (prefers-reduced-motion:reduce){#app.cv .flash{transition:none}}
 #app.cv .msg.app.alert{background:#FDE3E0;color:#7A1C12;font-weight:700;border-left:6px solid var(--cv-urgent)}

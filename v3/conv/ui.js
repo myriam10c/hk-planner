@@ -48,7 +48,8 @@ function rowStatus(apt, conv, now) {
 // Liste du jour. `apartments` : la journée réelle (day.js) ; `before` : bandeau de mode (View as /
 // Practice) au-dessus de l'en-tête ; `after` : bandeau des gestes en attente, sous l'en-tête ;
 // `empty` : texte d'une journée vide.
-export function renderList({ me, apartments, convs, activeId, now, before = "", after = "", empty = "Nothing assigned to you today." }) {
+// refresh : { label, failed, busy } du bouton Refresh (en-tête), ou null (Practice, View as).
+export function renderList({ me, apartments, convs, activeId, now, before = "", after = "", empty = "Nothing assigned to you today.", refresh = null }) {
   const rows = apartments.map(a => {
     // Conversation en lecture seule (View as) : la ligne garde l'état du serveur.
     const c = convs[a.id] && !convs[a.id].readOnly ? convs[a.id] : null;
@@ -62,7 +63,13 @@ export function renderList({ me, apartments, convs, activeId, now, before = "", 
   }).join("");
   const date = now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Dubai" });
   // Profile en haut à droite, hors de la zone du pouce : compte, envois en échec, déconnexion, View as / Practice.
-  return before + '<header class="top list-top"><div><b>Hi ' + escapeHtml(me.name) + "</b><span>" + escapeHtml(date) + '</span></div><a class="restart" href="#/profile">Profile</a></header>' +
+  const statut = refresh ? (refresh.failed ? "Couldn't update, showing the last list" : refresh.label) : "";
+  const bouton = refresh
+    ? '<button type="button" class="refresh" data-act="refresh"' + (refresh.busy ? ' disabled' : "") + ">" + (refresh.busy ? "Refreshing" : "Refresh") + "</button>"
+    : "";
+  return before + '<header class="top list-top"><div><b>Hi ' + escapeHtml(me.name) + "</b><span>" + escapeHtml(date) + "</span>" +
+    (statut ? '<span class="updated' + (refresh.failed ? " warn" : "") + '">' + escapeHtml(statut) + "</span>" : "") + "</div>" +
+    '<div class="list-actions">' + bouton + '<a class="restart" href="#/profile">Profile</a></div></header>' +
     after +
     '<main class="list">' + (apartments.length ? '<p class="hint">Tap the apartment you start with.</p>' + rows : '<p class="hint">' + escapeHtml(empty) + "</p>") + "</main>";
 }

@@ -34,6 +34,7 @@ import {
 import { esc, icon, toast } from '/v3/ui.js';
 import profile from '/v3/screens/profile.js';
 import { dubaiDate, toApartments } from '/v3/conv/day.js';
+import { needsRefresh, updatedLabel } from '/v3/conv/refresh.js';
 import { stampText } from '/v3/conv/stamp.js';
 import {
   createConversation, currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
@@ -62,6 +63,9 @@ export const state = {
   dead: [],             // actions refusees par le proxy, lues par l'ecran Profile
   prepared: false,      // l'ecran courant a deja charge ce dont il a besoin
   jourGarde: false,     // journee reprise de la copie hors ligne, a relire au retour du reseau
+  lastRead: null,       // derniere lecture reussie de v3.myDay : { at: ms, date: jour de Dubai }
+  relisant: false,      // relecture demandee par le bouton Refresh en cours
+  relectureEchec: false, // la derniere relecture a echoue : la liste affichee est celle d'avant
   viewAs: null,         // {id, name, viewerId, confirmed, practice}
   // Conversation (prototype). editIndex : page d'un probleme ouverte ; viewPhoto :
   // miniature de piece agrandie ; flowCam : camera ouverte pour l'ecran des photos
@@ -734,7 +738,7 @@ function renderConv() {
     closeCamera();
     html = renderList({
       me: me(), apartments: S.apartments, convs: S.convs, activeId: S.activeId, now: new Date(),
-      before: modeBar(), after: queueStrip() + boutonPosition(), empty: journeeVide(),
+      before: modeBar(), after: queueStrip() + boutonPosition(), empty: journeeVide(), refresh: boutonRelire(),
     });
   } else {
     const f = currentFlow(c);
@@ -1055,6 +1059,7 @@ document.addEventListener('click', function (evt) {
   if (!b || b.disabled) return;
   const nom = b.getAttribute('data-act');
   if (nom === 'reload') { loadDay(); return; }
+  if (nom === 'refresh') { evt.preventDefault(); relireLaJournee({ force: true, visible: true }); return; }
   if (nom === 'loc-toggle') { evt.preventDefault(); basculerPosition(); return; }
   if (nom === 'viewas-exit') { evt.preventDefault(); exitViewAs(); return; }
   if (routeName() === 'profile') {
@@ -1142,6 +1147,8 @@ export async function loadDay({ silent = false } = {}) {
     state.day = data;
     state.apartments = toApartments(data, data.me, { now: new Date() });
     state.jourGarde = false;
+    state.lastRead = { at: Date.now(), date: dubaiDate(new Date()) };
+    state.relectureEchec = false;
     if (mode() === 'practice') restorePractice();
     else if (!repris && writesActive()) {
       repris = true;
@@ -1157,7 +1164,7 @@ export async function loadDay({ silent = false } = {}) {
     await maybeAutoOpen();
   } catch (err) {
     if (generation !== generationJour) return;
-    if (silent) return;
+    if (silent) { state.relectureEchec = true; return; }
     state.loading = false;
     const garde = err instanceof ApiError && err.kind === 'offline' && !vue && !repris && writesActive()
       ? await journeeGardee() : null;
@@ -1192,6 +1199,41 @@ export async function loadDay({ silent = false } = {}) {
     }
     render();
   }
+}
+
+// Relecture silencieuse de la journee : la liste reste affichee pendant l'appel, les
+// conversations locales ne sont pas touchees (loadDay ne reprend les conversations
+// qu'une fois ; ensuite rafraichirRoles remet a jour les roles). Appelee au retour au
+// premier plan et par le bouton Refresh ; reutilisable ailleurs.
+// force : sans le delai de 60 s (bouton). visible : montre « Refreshing » et la panne.
+// Practice, View as, ecran d'erreur ou de chargement : rien ne change (null).
+let relectureEnCours = false;
+export async function relireLaJournee({ force = false, visible = false } = {}) {
+  if (!state.session || state.loading || state.error || state.viewAs || mode() !== 'real') return null;
+  if (relectureEnCours || !navigator.onLine) return null;
+  if (!force && !needsRefresh({ now: Date.now(), last: state.lastRead, online: true })) return null;
+  relectureEnCours = true;
+  if (visible) { state.relisant = true; renderLater(); }
+  try {
+    await loadDay({ silent: true });
+  } finally {
+    relectureEnCours = false;
+    const redessiner = state.relisant || state.relectureEchec;
+    state.relisant = false;
+    if (redessiner) renderLater();
+  }
+  return !state.relectureEchec;
+}
+
+// Au retour au premier plan : une app installee en plein ecran reste ouverte des jours.
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') relireLaJournee();
+});
+
+// Bouton « Refresh » de la liste : absent en Practice et en View as (journee figee).
+function boutonRelire() {
+  if (!state.session || state.viewAs || mode() !== 'real') return null;
+  return { label: updatedLabel(state.lastRead && state.lastRead.at), failed: state.relectureEchec, busy: state.relisant };
 }
 
 // Journee reprise de la copie hors ligne : relue des que le reseau revient.
