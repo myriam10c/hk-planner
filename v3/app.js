@@ -33,7 +33,7 @@ import {
 } from '/v3/practice.js';
 import { esc, icon, toast } from '/v3/ui.js';
 import profile from '/v3/screens/profile.js';
-import { dubaiDate, toApartments } from '/v3/conv/day.js';
+import { dubaiDate, toApartments, refreshRoomPhotos } from '/v3/conv/day.js';
 import { needsRefresh, updatedLabel } from '/v3/conv/refresh.js';
 import { stampText } from '/v3/conv/stamp.js';
 import { aptLabel } from '/v3/conv/rules.js';
@@ -240,6 +240,16 @@ const appEl = document.getElementById('app');
 const root = document.getElementById('view');   // seul ce conteneur est reecrit a chaque rendu
 const vfVideo = document.getElementById('vf');  // permanent : le flux n'est branche qu'une fois
 const fallbackInput = document.getElementById('cam-fallback');
+
+// Image de reference qui ne charge pas (lien perime, reseau coupe) : elle disparait, ni cadre vide
+// ni icone cassee, et le parcours continue. L'evenement `error` ne remonte pas : ecoute en phase de
+// capture sur le conteneur, qui survit aux rendus. L'URL reste sur l'appartement (un echec passager
+// a l'etape 1 ne doit pas priver l'etape 4 de sa reference) : le rendu suivant la redemande, et la
+// prochaine relecture de la journee en apporte une neuve si elle est perimee.
+appEl.addEventListener('error', evt => {
+  const img = evt.target;
+  if (img && img.tagName === 'IMG' && (img.classList.contains('ref') || img.classList.contains('vf-still'))) img.remove();
+}, true);
 const conv = () => S.convs[S.activeId];
 const me = () => (state.day && state.day.me) || { id: null, name: '' };
 let toastTimer, noteTimer;
@@ -690,6 +700,8 @@ function rafraichirRoles() {
   for (const [id, c] of Object.entries(S.convs)) {
     const frais = state.apartments.find(a => a.id === id);
     if (!frais || !c.apt) continue;
+    // Photos de reference : l'URL rendue est relue sur l'appartement, jamais figee dans la conversation.
+    refreshRoomPhotos(c.apt, frais);
     const aide = frais.role === 'helper' && !!frais.lead;
     if (aide && appliquerRole(c, { role: 'helper', lead: frais.lead })) continue;
     if (enAide(c)) {

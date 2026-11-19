@@ -63,8 +63,9 @@ function botMessage(conv) {
     case "linen": return { from: "app", type: "text", text: "Dirty linen: " + linenSummary(conv.linen) + ". As usual?" };
     case "end-photo":
       // Pièce sans photo d'annonce : pas de « like this » qui pointerait vers une image absente.
+      // Le message garde la pièce, jamais l'URL : le rendu la lit sur l'appartement (relue à chaque journée).
       return a.roomPhotos[st.room]
-        ? { from: "app", type: "text", text: st.room + ": make it look like this.", photo: a.roomPhotos[st.room] }
+        ? { from: "app", type: "text", text: st.room + ": make it look like this.", refRoom: st.room }
         : { from: "app", type: "text", text: st.room + ": clean it, then take a photo." };
     case "leave": return { from: "app", type: "text", text: "Before you leave, check each one." };
     case "low": return { from: "app", type: "text", text: "Running low? Tap what is missing." };

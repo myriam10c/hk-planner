@@ -168,12 +168,12 @@ async function avecHistorique() {
   });
 }
 
-Deno.test("references : la photo de fin la plus recente par piece, URL signee 1 h", async () => {
+Deno.test("references : la photo de fin la plus recente par piece, URL signee 16 h", async () => {
   const out = await buildMyDay(await avecHistorique() as any);
   const marc = stopDe(out, "623 Samana Park View");
   assertEquals(marc.references, {
-    "Kitchen": "https://signed.test/v3/2026-09-09/b.jpg?exp=3600",
-    "Bedroom": "https://signed.test/v3/2026-09-09/c.jpg?exp=3600",
+    "Kitchen": "https://signed.test/v3/2026-09-09/b.jpg?exp=57600",
+    "Bedroom": "https://signed.test/v3/2026-09-09/c.jpg?exp=57600",
   });
 });
 
@@ -246,10 +246,10 @@ function avecCles(extra: Record<string, any[]> = {}) {
 Deno.test("references : le menage precedent par listing_id, sans rapport", async () => {
   const out = await buildMyDay(avecCles() as any);
   assertEquals(stopDe(out, "623 Samana Park View").references, {
-    "Kitchen": "https://signed.test/v3/a-kitchen-2.jpg?exp=3600",
+    "Kitchen": "https://signed.test/v3/a-kitchen-2.jpg?exp=57600",
   });
   assertEquals(stopDe(out, "704 Golf Links").references, {
-    "Bed": "https://signed.test/v3/d-bed.jpg?exp=3600",
+    "Bed": "https://signed.test/v3/d-bed.jpg?exp=57600",
   });
 });
 
@@ -258,7 +258,7 @@ Deno.test("references : un seul appel de signature pour toute la journee", async
   await buildMyDay(base as any);
   const lots = (base.sb as any).storage.signBatches;
   assertEquals(lots.length, 1);
-  assertEquals(lots[0].seconds, 3600);
+  assertEquals(lots[0].seconds, 57600, "16 h : valable toute la journee, un menage dure 2 h 30 en mediane");
   assertEquals(lots[0].paths.sort(), ["v3/a-kitchen-2.jpg", "v3/d-bed.jpg"]);
 });
 

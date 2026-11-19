@@ -124,6 +124,16 @@ function leadOf(stop, meId) {
   return asLead(o);
 }
 
+// Rafraichit les photos de reference d'un appartement depuis le meme appartement de la journee
+// relue (URL signees 16 h, mais une relecture en donne de neuves). Remplace la liste seulement si
+// la journee relue en porte une ; une piece qu'elle ne rend plus disparait (l'image s'efface au
+// rendu, le parcours continue). Rend true si la liste a ete remplacee.
+export function refreshRoomPhotos(apt, fresh) {
+  if (!apt || !fresh || !fresh.roomPhotos || typeof fresh.roomPhotos !== "object") return false;
+  apt.roomPhotos = { ...fresh.roomPhotos };
+  return true;
+}
+
 export function toApartments(payload, me, { now = new Date() } = {}) {
   const stops = (payload && Array.isArray(payload.stops)) ? payload.stops : [];
   const meId = me && me.id !== undefined ? String(me.id) : null;

@@ -40,6 +40,17 @@ export function serializeConversation(conv) {
 
 // `photoOf(idem)` rend l'objet photo reconstruit ({ url, file, idem }) ; la même clé rend
 // toujours le même objet, pour que la bulle et le magasin de la pièce restent une seule photo.
+// Bulle « make it look like this » gardee avant que le message ne porte la piece (refRoom) : elle
+// avait copie l'URL signee, qui peut etre perimee. On la rattache a la piece pour la relire sur l'appartement.
+function legacyRef(m) {
+  if (m.type !== "text" || m.refRoom || !m.photo) return m;
+  const r = /^(.+): make it look like this\.$/.exec(m.text || "");
+  if (!r) return m;
+  delete m.photo;
+  m.refRoom = r[1];
+  return m;
+}
+
 export function deserializeConversation(data, photoOf) {
   if (!isObj(data) || data.v !== PERSIST_VERSION) return null;
   const cache = new Map();
@@ -56,7 +67,7 @@ export function deserializeConversation(data, photoOf) {
     startedAt: data.startedAt ? new Date(data.startedAt) : null,
     endedAt: data.endedAt ? new Date(data.endedAt) : null,
     arrivalSentAt: data.arrivalSentAt ? new Date(data.arrivalSentAt) : null,
-    messages: (data.messages || []).map(m => (m.type === "photo" ? { ...m, photo: photo(m.photo) } : { ...m })),
+    messages: (data.messages || []).map(m => (m.type === "photo" ? { ...m, photo: photo(m.photo) } : legacyRef({ ...m }))),
     arrivalPhotos: mapStore(data.arrivalPhotos),
     endPhotos: mapStore(data.endPhotos),
     problems: (data.problems || []).map(p => ({ ...p, photos: (p.photos || []).map(photo) })),

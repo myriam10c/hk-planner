@@ -130,8 +130,10 @@ function bubble(conv, m) {
       (p.note ? '<span class="pnote">' + escapeHtml(p.note) + "</span>" : "") +
       "<span>" + escapeHtml(p.where + (sentLabel(conv, p) ? " · " + sentLabel(conv, p) : "") + (n > 1 ? " · " + n + " photos" : "")) + "</span>" + ticks + "</button>";
   }
+  // Photo de référence : lue sur l'appartement au rendu (refRoom), jamais copiée dans le message.
+  const shown = m.refRoom ? (conv.apt.roomPhotos || {})[m.refRoom] : m.photo;
   const who = m.from === "lead" ? '<span class="who">' + escapeHtml(leadName(conv.apt) || "Teammate") + "</span>" : "";
-  return '<div class="msg ' + m.from + (m.alert ? " alert" : "") + '">' + who + (m.photo ? imgTag(m.photo, "ref") : "") + "<p>" + escapeHtml(m.text) + "</p>" + ticks + "</div>";
+  return '<div class="msg ' + m.from + (m.alert ? " alert" : "") + '">' + who + (shown ? imgTag(shown, "ref") : "") + "<p>" + escapeHtml(m.text) + "</p>" + ticks + "</div>";
 }
 
 function linenEditor(conv) {

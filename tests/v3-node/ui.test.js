@@ -387,3 +387,44 @@ test("aide sans lead connue : rendu sans plantage, texte neutre jusqu'à « Add 
   assert.ok(c.messages.some(m => m.text === "Your part is done. Your teammate sends the report."));
   assert.match(renderConversation(c, { now }), /Add to the report/);
 });
+
+// Photos de référence (tâche 4) : la bulle « make it look like this » lit l'URL de l'appartement au rendu.
+const aptBloom = () => ({ ...bloom, roomPhotos: { ...bloom.roomPhotos } });
+const aEtape4 = c => { here(c); rooms(c, 3); reply(c, "walls-ok", { now }); reply(c, "no-damage", { now }); reply(c, "send-arrival-text", { now }); reply(c, "send-arrival", { now }); reply(c, "linen-yes", { now }); };
+
+test("la bulle de l'étape 4 ne garde pas l'URL : une URL rafraîchie sur l'appartement s'affiche", () => {
+  const c = createConversation(aptBloom(), { me: ME });
+  aEtape4(c);
+  const m = c.messages.at(-1);
+  assert.equal(m.text, "Bed: make it look like this.");
+  assert.equal("photo" in m, false, "pas de copie figée de l'URL dans le message");
+  assert.match(renderConversation(c, { now }), new RegExp('<img class="ref" alt="" src="' + escapeHtml(REF("bl-Bed")).replace(/[?.]/g, "\\$&") + '">'));
+  c.apt.roomPhotos = { ...c.apt.roomPhotos, Bed: "https://frais.test/bed.jpg?exp=2" };
+  const html = renderConversation(c, { now });
+  assert.match(html, /<img class="ref" alt="" src="https:\/\/frais\.test\/bed\.jpg\?exp=2">/);
+  assert.doesNotMatch(html, /bl-Bed|Bed\.jpg\?token/, "l'ancienne URL n'est plus rendue");
+});
+
+test("la bulle de l'étape 4 : une relecture sans photo pour la pièce retire l'image, sans planter", () => {
+  const c = createConversation(aptBloom(), { me: ME });
+  aEtape4(c);
+  c.apt.roomPhotos = {};
+  let html;
+  assert.doesNotThrow(() => { html = renderConversation(c, { now }); });
+  assert.match(html, /<div class="msg app"><p>Bed: make it look like this\.<\/p>/, "texte seul, sans image (la première bulle garde la photo d'annonce)");
+  assert.doesNotThrow(() => renderViewfinder(c, { live: false }));
+});
+
+test("la bulle d'une conversation gardée avant ce changement (URL copiée) suit elle aussi l'appartement", async () => {
+  const { serializeConversation, deserializeConversation } = await import("../../v3/conv/persist.js");
+  const c = createConversation(aptBloom(), { me: ME });
+  aEtape4(c);
+  const json = JSON.parse(JSON.stringify(serializeConversation(c)));
+  const m = json.messages.find(x => x.text === "Bed: make it look like this.");
+  delete m.refRoom; m.photo = "https://perime.test/bed.jpg";
+  const back = deserializeConversation(json, () => null);
+  back.apt = c.apt;
+  const html = renderConversation(back, { now });
+  assert.doesNotMatch(html, /perime\.test/);
+  assert.match(html, new RegExp('<img class="ref" alt="" src="' + escapeHtml(REF("bl-Bed")).replace(/[?.]/g, "\\$&") + '">'));
+});

@@ -10,8 +10,9 @@
 import { V3_PHOTO_BUCKET } from "./v3.ts";
 import { roleFromStarts } from "./v3_finish_context.ts";
 
-// Duree des URL signees des references : une heure, comme getPhotoUrl d'index.ts.
-export const V3_REFERENCE_URL_SECONDS = 3600;
+// Duree des URL signees des references : 16 heures, de quoi couvrir toute la journee d'une
+// cleaner (un menage dure 2 h 30 en mediane, la photo de fin arrive vers la fin du menage).
+export const V3_REFERENCE_URL_SECONDS = 57600;
 
 // Plafonds de lecture : de quoi couvrir largement les menages precedents des
 // logements du jour, sans rapatrier toute l'histoire des tables.

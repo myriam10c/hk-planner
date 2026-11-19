@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toApartments, splitName, guestOf, dubaiDate, dubaiHHMM } from "../../v3/conv/day.js";
+import { toApartments, refreshRoomPhotos, splitName, guestOf, dubaiDate, dubaiHHMM } from "../../v3/conv/day.js";
 import { aptLabel } from "../../v3/conv/rules.js";
 import { createConversation, reply, addPhoto, currentStep, isHelper } from "../../v3/conv/conversation.js";
 import { DAY, ME, NOW, REF, STOP_OXFORD, STOP_CREEK, STOP_BLOOM } from "./fixtures.js";
@@ -185,4 +185,25 @@ test("extra sans heure, heure absente (ancien proxy) ou invalide : comme avant",
     assert.match(html, /<span class="row-sub">No guest yet<\/span>/);
     assert.equal(createConversation(a, { me: ME, now: NOW }).messages[0].text, "1011C Bloom Towers · no guest yet");
   }
+});
+
+// Photos de référence valables toute la journée (tâche 4) : chaque relecture rafraîchit celles de l'appartement.
+test("refreshRoomPhotos : la journée relue remplace les références, copie comprise", () => {
+  const apt = { id: "j1", roomPhotos: { Bed: "https://old/bed" } };
+  const frais = { id: "j1", roomPhotos: { Bed: "https://new/bed", Kitchen: "https://new/kitchen" } };
+  assert.equal(refreshRoomPhotos(apt, frais), true);
+  assert.deepEqual(apt.roomPhotos, { Bed: "https://new/bed", Kitchen: "https://new/kitchen" });
+  frais.roomPhotos.Bed = "x";
+  assert.equal(apt.roomPhotos.Bed, "https://new/bed", "copie, jamais l'objet de la journée relue");
+});
+
+test("refreshRoomPhotos : sans appartement relu, rien ne change ; une pièce sans photo relue disparaît", () => {
+  const apt = { id: "j1", roomPhotos: { Bed: "https://old/bed", Kitchen: "https://old/k" } };
+  assert.equal(refreshRoomPhotos(apt, undefined), false);
+  assert.equal(refreshRoomPhotos(apt, { id: "j1" }), false, "journée sans références lisibles : l'ancienne liste reste");
+  assert.deepEqual(apt.roomPhotos, { Bed: "https://old/bed", Kitchen: "https://old/k" });
+  assert.equal(refreshRoomPhotos(apt, { id: "j1", roomPhotos: { Bed: "https://new/bed" } }), true);
+  assert.deepEqual(apt.roomPhotos, { Bed: "https://new/bed" });
+  assert.equal(refreshRoomPhotos(apt, { id: "j1", roomPhotos: {} }), true);
+  assert.deepEqual(apt.roomPhotos, {});
 });
