@@ -72,13 +72,14 @@ Deno.test("V3_EVENT_TYPES suit la contrainte CHECK de la migration 2026101309000
   ]);
 });
 
-Deno.test("table des types : quinze types et leur categorie de ticket", () => {
+Deno.test("table des types : seize types et leur categorie de ticket", () => {
   assertEquals(V3_PROBLEM_KINDS, {
     "Gas smell": "appliance", "Leak": "plumbing", "AC": "ac", "AC not working": "ac",
     "Power": "electrical",
     "Insects": "pest", "Missing": "general", "Broken": "general", "Stain": "general",
     "Very dirty": "general", "Guest forgot": "general", "Wall damage": "general",
     "Can't get in": "general", "Gas not working": "appliance", "Wi-Fi not working": "general",
+    "Access card missing": "general",
   });
 });
 
@@ -139,21 +140,21 @@ Deno.test("reportProblem refuse une urgence invalide", async () => {
   assertEquals(sb.tables.maintenance_tickets.length, 0);
 });
 
-Deno.test("photo obligatoire sauf gaz, porte et les trois « not working »", async () => {
+Deno.test("photo obligatoire sauf gaz, porte, les trois « not working » et la carte d'acces absente", async () => {
   const sb = base();
   for (const k of Object.keys(V3_PROBLEM_KINDS)) {
     const r = await reportProblem(sb, FAIZA as any,
       corps({ kind: k, photoId: undefined, idem: "idem-nophoto-" + k.replace(/[^A-Za-z]/g, "") }),
       { push: espionPush().push });
     if (["Gas smell", "Can't get in", "AC not working", "Gas not working",
-      "Wi-Fi not working"].includes(k)) {
+      "Wi-Fi not working", "Access card missing"].includes(k)) {
       assertEquals(r.status, 200, k);
     } else {
       assertEquals(r.status, 400, k);
       assertEquals((r.body as any).error, "photo required");
     }
   }
-  assertEquals(sb.tables.maintenance_tickets.length, 5);
+  assertEquals(sb.tables.maintenance_tickets.length, 6);
   assertEquals(sb.tables.maintenance_tickets.every((t: any) => t.photo_path === null), true);
 });
 

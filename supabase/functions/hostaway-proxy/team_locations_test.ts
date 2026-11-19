@@ -470,7 +470,7 @@ Deno.test("routes : declarees, session, garde de role, identite de la session", 
   assert(d.includes("shareLocation: await readShareLocation(sb, me.cleaner_id)"));
   assert(d.indexOf("if (!vue.viewer)") >= 0);
   const c = bloc("cleanerMe");
-  assert(c.includes('.select("email, share_location")'));
+  assert(c.includes('.select("email, share_location, is_owner")'));
   assert(c.includes("me.shareLocation = sharesLocation(emailRow)"));
   // syncListings ecrit lat/lng sur les deux branches.
   const s = bloc("syncListings");
