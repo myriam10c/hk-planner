@@ -68,7 +68,7 @@ export function renderList({ me, apartments, convs, activeId, now, before = "", 
     ? '<button type="button" class="refresh" data-act="refresh"' + (refresh.busy ? ' disabled' : "") + ">" + (refresh.busy ? "Refreshing" : "Refresh") + "</button>"
     : "";
   return before + '<header class="top list-top"><div><b>Hi ' + escapeHtml(me.name) + "</b><span>" + escapeHtml(date) + "</span>" +
-    (statut ? '<span class="updated' + (refresh.failed ? " warn" : "") + '">' + escapeHtml(statut) + "</span>" : "") + "</div>" +
+    (statut ? '<span class="updated' + (refresh.failed ? " warn" : "") + '"' + (refresh.failed ? ' role="status"' : "") + ">" + escapeHtml(statut) + "</span>" : "") + "</div>" +
     '<div class="list-actions">' + bouton + '<a class="restart" href="#/profile">Profile</a></div></header>' +
     after +
     '<main class="list">' + (apartments.length ? '<p class="hint">Tap the apartment you start with.</p>' + rows : '<p class="hint">' + escapeHtml(empty) + "</p>") + "</main>";

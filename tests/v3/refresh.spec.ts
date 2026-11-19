@@ -143,3 +143,31 @@ test('Practice : pas de bouton Refresh, pas de relecture au retour au premier pl
   await page.waitForTimeout(400);
   expect(await nbMyDay(page)).toBe(avant);
 });
+
+// Contrat de relireLaJournee : true seulement si CETTE lecture a abouti.
+test('relireLaJournee rend true si lue, false si non lancee, echouee ou depassee par une autre lecture', async ({ page }) => {
+  const lente = { ...myDay(DAY2), once: true, delay: 700 };
+  await bootV3(page, [{ ...myDay(DAY), once: true }, lente, ...sansMyDay, myDay(DAY)], { pinToken: 'jeton-pin' });
+  await expect(page.locator('.row')).toHaveCount(2);
+  const r = await page.evaluate(async () => {
+    const m = await import('/v3/app.js');
+    const nonLancee = await m.relireLaJournee();                    // lecture de moins de 60 s
+    const depassee = m.relireLaJournee({ force: true });            // 2e myDay, lente
+    await m.loadDay({ silent: true });                              // une autre lecture la double
+    const d = await depassee;
+    const lue = await m.relireLaJournee({ force: true });
+    return { nonLancee, depassee: d, lue };
+  });
+  expect(r).toEqual({ nonLancee: false, depassee: false, lue: true });
+});
+
+test('relireLaJournee rend false quand la lecture echoue ; le message d echec est annonce (role=status)', async ({ page }) => {
+  await bootV3(page, routes({ error: 'boom' }, 500), { pinToken: 'jeton-pin' });
+  await expect(page.locator('.row')).toHaveCount(2);
+  const ok = await page.evaluate(async () => (await import('/v3/app.js')).relireLaJournee({ force: true, visible: true }));
+  expect(ok).toBe(false);
+  await expect(page.locator('.list-top .updated[role="status"]')).toContainText("Couldn't update");
+  const css = await page.locator('.list-top .updated').evaluate((e) => { const c = getComputedStyle(e); return { size: parseFloat(c.fontSize), opacity: c.opacity }; });
+  expect(css.size).toBeGreaterThanOrEqual(14);
+  expect(css.opacity).toBe('1');
+});

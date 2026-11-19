@@ -1206,14 +1206,16 @@ export async function loadDay({ silent = false } = {}) {
 // qu'une fois ; ensuite rafraichirRoles remet a jour les roles). Appelee au retour au
 // premier plan et par le bouton Refresh ; reutilisable ailleurs.
 // force : sans le delai de 60 s (bouton). visible : montre « Refreshing » et la panne.
-// Practice, View as, ecran d'erreur ou de chargement : rien ne change (null).
+// Practice, View as, ecran d'erreur ou de chargement : rien ne change.
+// Rend true seulement si CETTE lecture a abouti ; false si non lancee, echouee ou depassee par une autre.
 let relectureEnCours = false;
 export async function relireLaJournee({ force = false, visible = false } = {}) {
-  if (!state.session || state.loading || state.error || state.viewAs || mode() !== 'real') return null;
-  if (relectureEnCours || !navigator.onLine) return null;
-  if (!force && !needsRefresh({ now: Date.now(), last: state.lastRead, online: true })) return null;
+  if (!state.session || state.loading || state.error || state.viewAs || mode() !== 'real') return false;
+  if (relectureEnCours || !navigator.onLine) return false;
+  if (!force && !needsRefresh({ now: Date.now(), last: state.lastRead, online: true })) return false;
   relectureEnCours = true;
   if (visible) { state.relisant = true; renderLater(); }
+  const avant = state.lastRead, mienne = generationJour + 1; // loadDay prend cette generation au depart
   try {
     await loadDay({ silent: true });
   } finally {
@@ -1222,7 +1224,7 @@ export async function relireLaJournee({ force = false, visible = false } = {}) {
     state.relisant = false;
     if (redessiner) renderLater();
   }
-  return !state.relectureEchec;
+  return generationJour === mienne && state.lastRead !== avant;
 }
 
 // Au retour au premier plan : une app installee en plein ecran reste ouverte des jours.
