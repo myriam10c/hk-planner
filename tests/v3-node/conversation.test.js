@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { APARTMENTS, ME, REF } from "./fixtures.js";
 import { createConversation, currentStep, reply, addPhoto, addProblem, editProblem, removeProblem, attachProblemPhoto, addProblemPhoto, setProblemNote, isHelper, elapsedMinutes, STEP_TITLES,
-  startProblem, chooseKind, addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto } from "../../v3/conv/conversation.js";
+  startProblem, chooseKind, addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto, becomeHelper } from "../../v3/conv/conversation.js";
 
 const [oxford, creek, bloom] = APARTMENTS;
 const at = (h, m, d = 2) => new Date(2026, 9, d, h, m);
@@ -922,4 +922,82 @@ test("carte d'accès : Next inactif sans photo ; Card is missing crée « Access
   assert.equal(currentStep(d).replies[0].enabled, true);
   removeArrivalOrEndPhoto(d, "arrival", "Access card", 0);
   assert.equal(currentStep(d).replies[0].enabled, false);
+});
+
+// ---- Binôme, tâche 3 du lot 1 : le serveur décide du rôle à « I'm here », la première gagne. ----
+const LEAD = { id: 7, name: "Pionah", startedAt: "2026-10-02T06:30:00Z" }; // 10:30 à Dubai
+
+test("rôle changé en cours de ménage : parcours d'aide, photos et problèmes gardés", () => {
+  const c = createConversation(bloom, { me: ME, now: at(9, 0) });
+  assert.equal(isHelper(c), false);
+  here(c);
+  addPhoto(c, "a-Bed", { now: at(10, 2) });
+  addProblem(c, "Broken", "b", { now: at(10, 3) });
+  const photos = c.arrivalPhotos.Bed ? c.arrivalPhotos.Bed.slice() : [];
+  const cardPhotos = c.arrivalPhotos["Access card"].slice();
+  assert.equal(becomeHelper(c, LEAD), true);
+  assert.equal(isHelper(c), true);
+  assert.equal(c.apt.lead.name, "Pionah");
+  assert.equal(c.apt.lead.startedAt, "10:30");
+  assert.deepEqual(c.steps.map(x => x.id), ["arrive", "end-photo", "end-photo", "end-photo", "helper"]);
+  // Plus de carte, de photos d'arrivée, de linge ni de rapport.
+  for (const id of ["arrival-photo", "walls", "damage", "linen", "leave", "low", "report"]) assert.equal(c.steps.some(x => x.id === id), false, id);
+  // Ce qu'elle avait saisi est toujours là.
+  assert.equal(c.problems.length, 1);
+  assert.deepEqual(c.arrivalPhotos.Bed || [], photos);
+  assert.deepEqual(c.arrivalPhotos["Access card"], cardPhotos);
+  // Elle repart sur la première pièce de l'étape 4, avec le message de la lead.
+  assert.equal(currentStep(c).id, "end-photo");
+  assert.equal(currentStep(c).room, "Bed");
+  assert.ok(c.messages.some(m => m.from === "lead" && /Pionah started at 10:30/.test(m.text)));
+  assert.equal(c.messages[c.messages.length - 1].text.includes("Bed"), true);
+  // Le parcours se termine comme celui d'une aide.
+  rooms(c, 3, "e", at(11, 0));
+  assert.equal(currentStep(c).id, "helper");
+  assert.equal(currentStep(c).replies[0].label, "Add to Pionah's report");
+});
+
+test("rôle changé : les pièces déjà photographiées en fin de ménage sont sautées", () => {
+  const c = createConversation(bloom, { me: ME, now: at(9, 0) });
+  c.endPhotos.Bed = ["x"];
+  reply(c, "here", { now: at(10, 0) });
+  becomeHelper(c, LEAD);
+  assert.equal(currentStep(c).room, "Bathroom");
+});
+
+test("rôle changé avant « I'm here » : reprise à l'arrivée, sans bulle en double", () => {
+  const c = createConversation(bloom, { me: ME, now: at(9, 0) });
+  const avant = c.messages.filter(m => m.photo).length;
+  assert.equal(becomeHelper(c, LEAD), true);
+  assert.equal(c.i, 0);
+  assert.equal(currentStep(c).id, "arrive");
+  assert.equal(c.messages.filter(m => m.photo).length, avant);
+});
+
+test("rôle changé : sans effet si déjà aide, ménage envoyé, lecture seule ou lead inconnue", () => {
+  const h = createConversation(creek, { me: ME, now: at(9, 0) });
+  assert.equal(becomeHelper(h, LEAD), false);
+  const sent = createConversation(bloom, { me: ME, now: at(9, 0) });
+  sent.sent = true;
+  assert.equal(becomeHelper(sent, LEAD), false);
+  const ro = createConversation(bloom, { me: ME, now: at(9, 0) });
+  ro.readOnly = true;
+  assert.equal(becomeHelper(ro, LEAD), false);
+  const sans = createConversation(bloom, { me: ME, now: at(9, 0) });
+  assert.equal(becomeHelper(sans, null), false);
+  assert.equal(isHelper(sans), false);
+});
+
+test("rôle changé, signalement de murs ouvert : sa fin n'avance pas dans les étapes de l'aide", () => {
+  const c = createConversation(bloom, { me: ME, now: at(9, 0) });
+  here(c);
+  rooms(c, 3, "a");
+  reply(c, "walls-ko", { now: at(10, 5) });
+  assert.equal(currentFlow(c).from, "walls");
+  becomeHelper(c, LEAD);
+  const i = c.i;
+  flowReply(c, "no-photo");
+  flowReply(c, "no-note");
+  assert.equal(c.i, i, "la fin du signalement ne saute aucune étape de l'aide");
+  assert.equal(c.problems.length, 1);
 });

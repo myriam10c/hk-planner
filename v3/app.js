@@ -39,7 +39,7 @@ import { stampText } from '/v3/conv/stamp.js';
 import {
   createConversation, currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
   addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto, requireLinen,
-  readOnlyConversation, ticketStill, startTicketFix, addFixPhoto, fixDone, fixCancel,
+  readOnlyConversation, becomeHelper, ticketStill, startTicketFix, addFixPhoto, fixDone, fixCancel,
 } from '/v3/conv/conversation.js';
 import {
   syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL, writeMode,
@@ -506,7 +506,10 @@ function practiceRunner(c, marque) {
     if (!marque) return;
     try {
       const data = await sendOrQueue(a.action, a.body, a.file || null, a.fileName, marque);
-      if (ackSync(c, a.body.idem, data && data.data) && refreshTicks(c)) renderLater();
+      if (ackSync(c, a.body.idem, data && data.data)) {
+        const parcours = a.action === 'v3.startJob' && appliquerRole(c, data && data.data);
+        if (refreshTicks(c) || parcours) renderLater();
+      }
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'practice') return;   // seance finie
       if (refusLinge({ action: a.action, body: a.body }, err)) return;
@@ -539,7 +542,10 @@ onSent(function (entry, data) {
   const idem = entry && entry.body ? entry.body.idem : null;
   for (const c of Object.values(S.convs)) {
     if (!ackSync(c, idem, data)) continue;
-    const change = refreshTicks(c);
+    // Binome : la reponse du demarrage dit qui est la lead. Hors ligne, c'est ici que
+    // le role arrive, au retour du reseau.
+    const parcours = !!entry && entry.action === 'v3.startJob' && appliquerRole(c, data);
+    const change = refreshTicks(c) || parcours;
     persist();
     if (change || (S.screen === 'list')) renderLater();
     return;
@@ -668,12 +674,28 @@ async function journeeGardee() {
 }
 
 // Le role (lead ou aide) vient du serveur : une conversation reprise suit la
-// journee fraiche (v3.myDay), pas la valeur gardee.
+// journee fraiche (v3.myDay), pas la valeur gardee. Binome : la premiere qui demarre est la
+// lead ; une conversation construite en lead dont la journee dit « aide » (la collegue a
+// demarre avant) est reconstruite en parcours d'aide, rien de ce qu'elle a saisi n'est perdu.
 function rafraichirRoles() {
   for (const [id, c] of Object.entries(S.convs)) {
     const frais = state.apartments.find(a => a.id === id);
-    if (frais && c.apt) { c.apt.lead = frais.lead; c.apt.role = frais.role; }
+    if (!frais || !c.apt) continue;
+    if (frais.role === 'helper' && frais.lead && appliquerRole(c, { role: 'helper', lead: frais.lead })) continue;
+    c.apt.lead = frais.lead; c.apt.role = frais.role;
   }
+}
+
+// Reponse de v3.startJob (ou journee relue) : « helper » + la lead. Rend true si la conversation
+// a ete reconstruite. Une conversation qui est deja une aide, ou deja envoyee, ne change pas.
+function appliquerRole(c, donnees) {
+  if (!c || !donnees || donnees.role !== 'helper' || !donnees.lead) return false;
+  if (!becomeHelper(c, donnees.lead)) return false;
+  // Le viseur se rouvre sur la bonne etape, et la cleaner est prevenue meme hors de la bulle.
+  S.autoOpenedAt = null;
+  if (S.camera.open && conv() === c && !currentStep(c).camera) closeCamera();
+  note(c.apt.lead.name + ' started first. You add your photos and problems to her report.');
+  return true;
 }
 
 // Reprise : conversations de la meme personne, du meme jour, sur des menages encore
@@ -907,17 +929,45 @@ async function sharePhotos(files) {
   return true;
 }
 
+// Relecture de la journee a l'ouverture d'un appartement : toujours (sans le delai de 60 s),
+// mais jamais plus de 2,5 s d'attente : un reseau faible n'empeche pas d'ouvrir. La lecture
+// continue en arriere-plan et rafraichirRoles convertit alors la conversation. Hors ligne,
+// relireLaJournee ne fait rien et rend false.
+const ATTENTE_OUVERTURE_MS = 2500;
+let ouverture = false;
+async function relireALOuverture() {
+  let minuteur;
+  try {
+    await Promise.race([
+      relireLaJournee({ force: true }),
+      new Promise(r => { minuteur = setTimeout(r, ATTENTE_OUVERTURE_MS); }),
+    ]);
+  } catch (e) { /* la lecture est un confort : on ouvre avec la journee en memoire */ }
+  clearTimeout(minuteur);
+}
+
 async function convClick(b) {
   const d = b.dataset;
   const c = conv();
   if (d.act === 'open') {
-    const apt = S.apartments.find(a => a.id === d.id);
-    if (!apt) return;
+    let apt = S.apartments.find(a => a.id === d.id);
+    if (!apt || ouverture) return;
     S.activeId = d.id;
     // View as : la conversation est reconstruite de la journee a chaque ouverture,
     // jamais gardee ni ecrite.
     if (viewOnly()) S.convs[d.id] = readOnlyConversation(apt, { me: me(), now: new Date() });
-    else if (!S.convs[d.id]) S.convs[d.id] = createConversation(apt, { me: me() });
+    else {
+      // Binome : si la collegue a deja demarre, ce menage s'ouvre directement en aide.
+      // Une conversation deja demarree par cette cleaner n'attend pas : sa reponse de
+      // demarrage fait foi (appliquerRole).
+      const c0 = S.convs[d.id];
+      if (!(c0 && c0.startedAt)) {
+        ouverture = true;
+        try { await relireALOuverture(); } finally { ouverture = false; }
+        apt = S.apartments.find(a => a.id === d.id) || apt;
+      }
+      if (!S.convs[d.id]) S.convs[d.id] = createConversation(apt, { me: me() });
+    }
     S.screen = 'conv'; S.autoOpenedAt = null; render(); await maybeAutoOpen(); return;
   }
   if (!c) return;

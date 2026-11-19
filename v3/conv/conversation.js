@@ -145,6 +145,40 @@ export function createConversation(apt, { me, refStart = 461, now = new Date() }
   return conv;
 }
 
+// Binôme (lot 1 des corrections, tâche 3) : le serveur décide qui est lead à « I'm here » (la
+// première gagne). Une cleaner qui avait construit le parcours complet apprend qu'elle aide :
+// ses étapes sont reconstruites en parcours d'aide, sans carte, photos d'arrivée, linge ni
+// rapport. Rien de ce qu'elle a saisi n'est perdu : photos de pièces et problèmes restent dans la
+// conversation (et dans conv.sync, donc rien n'est renvoyé ni supprimé) et rejoignent le rapport
+// de la lead côté serveur. `lead` : { id, name, startedAt (ISO ou « HH:MM ») }.
+// Rend true si la conversation a changé. Sans effet : lecture seule, déjà en aide, ménage déjà
+// envoyé (conv.sent : le serveur juge la fin, il ne reste rien à reconstruire).
+export function becomeHelper(conv, lead) {
+  if (!conv || conv.readOnly || conv.sent || !lead || !lead.name) return false;
+  if (conv.steps.some(s => s.id === "helper")) return false;
+  const at = /^\d{2}:\d{2}$/.test(String(lead.startedAt || "")) ? lead.startedAt : (dubaiHHMM(lead.startedAt) || "--:--");
+  // Copie : l'appartement de la journée est partagé avec la liste et les relectures.
+  conv.apt = { ...conv.apt, role: "helper", lead: { id: lead.id, name: String(lead.name), startedAt: at, roomsDone: [] } };
+  // Un signalement ouvert (murs, vérification du manager, dégâts) ne doit plus faire avancer
+  // des étapes qui n'existent plus : il se referme sans effet sur le parcours.
+  if (conv.flow && conv.flow.from !== "edit") conv.flow.from = "conv";
+  conv.steps = buildSteps(conv.apt, true);
+  const said = conv.apt.lead.name + " started at " + at + ". She sends the report. Add your photos and problems.";
+  conv.messages.push({ from: "lead", type: "text", text: said });
+  const line = openProblemsLine(conv.apt);
+  if (line) conv.messages.push({ from: "app", type: "text", text: line });
+  // Pas encore arrivée : on reprend à « I'm here ». Sinon, première pièce sans photo de fin.
+  if (!conv.startedAt) conv.i = 0;
+  else {
+    const next = conv.steps.findIndex((st, k) => k > 0 && (st.id === "helper" || !(conv.endPhotos[st.room] || []).length));
+    conv.i = next < 0 ? conv.steps.length - 1 : next;
+  }
+  // Reprise à « I'm here » : la bulle de l'arrivée est déjà dans le fil.
+  const m = conv.startedAt ? botMessage(conv) : null;
+  if (m) conv.messages.push(m);
+  return true;
+}
+
 // « View as » (tâche 6 du branchement) : la conversation d'une cleaner vue par un manager, en
 // lecture seule, reconstruite depuis v3.myDay. La journée ne rend ni ses photos ni son rapport :
 // seulement l'état du ménage (pas commencé, démarré à telle heure, fini), le binôme et les

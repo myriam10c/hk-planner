@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { finishJob, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
+import { finishJob, jobRole, loadFinishContext, startJob, tickItem } from "./v3_write.ts";
 import { V3_LINEN_FIELDS } from "./v3.ts";
 
 const FAIZA = { cleaner_id: 3, name: "Faiza", role: "cleaner", color: "#e94560" };
@@ -823,4 +823,122 @@ Deno.test("finishJob ne prend le texte du rapport que s'il est une chaine", asyn
     assertEquals(sb.tables.cleaning_reports[0].text, "");
     assertEquals(sb.tables.cleaning_notes.length, 0);
   }
+});
+
+// Lot 1, tache 3 : le role est decide au demarrage, la premiere gagne.
+const HARLENE = { cleaner_id: 4, name: "Harlene", role: "cleaner", color: "#0f3460" };
+const sansPause = () => Promise.resolve();
+
+Deno.test("startJob : la premiere est lead, la seconde helper avec le nom de la lead", async () => {
+  const sb = base({
+    job_events: [], cleaning_timer: [], cleaning_log: [],
+    cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+  });
+  const un = await startJob(sb, FAIZA as any, { jobId: JOB_ID, idem: "idem-start-0101" });
+  const deux = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0102" });
+  assertEquals((un.body as any).role, "lead");
+  assertEquals((un.body as any).lead.name, "Faiza");
+  assertEquals((deux.body as any).role, "helper");
+  assertEquals((deux.body as any).lead.id, 3);
+  assertEquals((deux.body as any).lead.name, "Faiza");
+  // Le chrono ouvert par la premiere n'est pas ecrase.
+  assertEquals(sb.tables.cleaning_timer[0].cleaner_id, 3);
+});
+
+Deno.test("startJob : la lead qui rejoue sa cle reste lead, la helper aussi garde son role", async () => {
+  const sb = base({
+    job_events: [], cleaning_timer: [], cleaning_log: [],
+    cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+  });
+  await startJob(sb, FAIZA as any, { jobId: JOB_ID, idem: "idem-start-0103" });
+  const h1 = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0104" });
+  const h2 = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0104" });
+  assertEquals((h2.body as any).role, "helper");
+  assertEquals(h2.body, h1.body);
+  const l2 = await startJob(sb, FAIZA as any, { jobId: JOB_ID, idem: "idem-start-0103" });
+  assertEquals((l2.body as any).role, "lead");
+});
+
+Deno.test("startJob : deux appels simultanes, une seule lead, accord avec jobRole", async () => {
+  for (const ordre of [0, 1]) {
+    const sb = base({
+      job_events: [], cleaning_timer: [], cleaning_log: [],
+      cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+    });
+    // Appels lances dans le meme tour : les deux cles sont posees avant qu'aucun
+    // resultat ne soit memorise. L'ordre de lancement decide de la lead.
+    const [a, b] = ordre === 0 ? [FAIZA, HARLENE] : [HARLENE, FAIZA];
+    const [ra, rb] = await Promise.all([
+      startJob(sb, a as any, { jobId: JOB_ID, idem: "idem-race-0001" }, sansPause),
+      startJob(sb, b as any, { jobId: JOB_ID, idem: "idem-race-0002" }, sansPause),
+    ]);
+    const roles = [(ra.body as any).role, (rb.body as any).role];
+    assertEquals(roles, ["lead", "helper"]);
+    assertEquals(await jobRole(sb, JOB_ID, a.cleaner_id), "lead");
+    assertEquals(await jobRole(sb, JOB_ID, b.cleaner_id), "helper");
+  }
+});
+
+Deno.test("startJob : une cle plus ancienne restee sans resultat attend, puis cede la place", async () => {
+  const maintenant = new Date().toISOString();
+  const sb = base({
+    job_events: [{
+      id: 1, idem_key: "idem-pending-01", event_type: "start_job", job_id: JOB_ID,
+      cleaner_id: 3, payload: {}, result: null, created_at: maintenant,
+    }],
+    cleaning_timer: [], cleaning_log: [],
+    cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+  });
+  let pauses = 0;
+  // La premiere termine pendant la pause : la seconde doit alors se voir helper.
+  const pause = (_ms: number) => {
+    pauses++;
+    sb.tables.job_events[0].result = { status: "success" };
+    return Promise.resolve();
+  };
+  const r = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0105" }, pause);
+  assertEquals(pauses, 1);
+  assertEquals((r.body as any).role, "helper");
+  assertEquals((r.body as any).lead.name, "Faiza");
+});
+
+Deno.test("startJob : la premiere a echoue et libere sa cle, la seconde devient lead", async () => {
+  const maintenant = new Date().toISOString();
+  const sb = base({
+    job_events: [{
+      id: 1, idem_key: "idem-pending-02", event_type: "start_job", job_id: JOB_ID,
+      cleaner_id: 3, payload: {}, result: null, created_at: maintenant,
+    }],
+    cleaning_timer: [], cleaning_log: [],
+    cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+  });
+  const pause = (_ms: number) => { sb.tables.job_events.splice(0, 1); return Promise.resolve(); };
+  const r = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0106" }, pause);
+  assertEquals((r.body as any).role, "lead");
+});
+
+Deno.test("startJob : une cle abandonnee depuis longtemps n'est pas attendue", async () => {
+  const sb = base({
+    job_events: [{
+      id: 1, idem_key: "idem-pending-03", event_type: "start_job", job_id: JOB_ID,
+      cleaner_id: 3, payload: {}, result: null, created_at: "2026-09-12T01:00:00Z",
+    }],
+    cleaning_timer: [], cleaning_log: [],
+    cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+  });
+  let pauses = 0;
+  const r = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0107" },
+    () => { pauses++; return Promise.resolve(); });
+  assertEquals(pauses, 0);
+  assertEquals((r.body as any).role, "lead");
+});
+
+Deno.test("startJob : la lecture du role echoue, la cle est liberee", async () => {
+  const sb = base({ job_events: [], cleaning_timer: [], cleaning_log: [] });
+  sb.fail["job_events.select"] = { code: "XX000", message: "read failed" };
+  let leve = false;
+  try {
+    await startJob(sb, FAIZA as any, { jobId: JOB_ID, idem: "idem-start-0108" }, sansPause);
+  } catch (_e) { leve = true; }
+  assertEquals(leve, true);
 });

@@ -22,12 +22,16 @@ import {
   dateDeLaCle, jobRole, readReport, V3_REPORT_TEXT_MAX,
 } from "./v3_finish_context.ts";
 import type { FinishContext } from "./v3_finish_context.ts";
+import { decideStartRole } from "./v3_start_role.ts";
 export {
   dateDeLaCle, jobRole, loadFinishContext, readReport, V3_REPORT_MAX_BYTES, V3_REPORT_TEXT_MAX,
 } from "./v3_finish_context.ts";
 export type { FinishContext } from "./v3_finish_context.ts";
 
-export async function startJob(sb: any, me: SessionUser, body: any): Promise<ActionResult> {
+// `attente` : pause entre deux lectures du role, injectee par les tests.
+export async function startJob(
+  sb: any, me: SessionUser, body: any, attente?: (ms: number) => Promise<void>,
+): Promise<ActionResult> {
   const jobId = String(body?.jobId ?? "");
   const idem = body?.idem;
   if (!jobId) return { status: 400, body: { error: "jobId required" } };
@@ -71,7 +75,13 @@ export async function startJob(sb: any, me: SessionUser, body: any): Promise<Act
       if (error) throw error;
       await v3Log(sb, reservationKey, "timer_started", me.name, { cleaner_id: me.cleaner_id, via: "v3" });
     }
-    const result = { status: "success", jobId, startedAt };
+    // Role decide ici, par l'ordre des demarrages (la premiere est lead), et rendu
+    // au telephone : sans lui, deux cleaners qui ouvrent l'appartement avant le
+    // premier « I'm here » construisent toutes deux le parcours de la lead. La
+    // lecture leve : un role faux ou absent rejouerait le defaut, la cle est
+    // liberee et la file hors ligne reessaie.
+    const { role, lead } = await decideStartRole(sb, jobId, me, idem, { sleep: attente });
+    const result = { status: "success", jobId, startedAt, role, lead };
     await recordResult(sb, idem, result);
     return { status: 200, body: result };
   } catch (e) {

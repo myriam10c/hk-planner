@@ -1,0 +1,73 @@
+// Role (lead ou aide) decide au demarrage d'un menage (v3.startJob), lot 1 des
+// corrections cleaner, tache 3. Avant, le role n'etait connu qu'a la fin du menage
+// (jobRole) ou au rechargement (v3.myDay) : deux cleaners qui ouvraient
+// l'appartement avant qu'aucune n'ait touche « I'm here » construisaient toutes
+// deux le parcours complet, et le rapport de la seconde etait jete en silence.
+//
+// Aucune migration : l'ordre d'arrivee est celui des lignes `job_events`
+// start_job, deja posees AVANT l'ecriture metier (claimEvent), et la meme regle
+// (roleFromStarts : created_at puis id) sert a la fin du menage. La premiere
+// ligne gagne, donc la premiere cleaner est lead.
+//
+// Course entre deux appels simultanes : la ligne de la premiere (id plus petit)
+// peut ne pas avoir son resultat memorise quand la seconde lit. roleFromStarts
+// ignore les lignes sans resultat, la seconde se croirait lead. On attend donc
+// brievement qu'une ligne plus ancienne et recente se resolve : posee avec son
+// resultat, elle gagne ; liberee (ecriture ratee), elle disparait.
+import { roleFromStarts } from "./v3_finish_context.ts";
+
+// Une ligne plus ancienne sans resultat n'est attendue que si elle date de moins
+// de ce delai : au dela, c'est une cle abandonnee (fonction morte), jamais un
+// demarrage en cours.
+export const START_PENDING_FRESH_MS = 30_000;
+export const START_WAIT_TRIES = 6;
+export const START_WAIT_MS = 300;
+
+export interface StartRole {
+  role: "lead" | "helper";
+  // Qui a demarre en premier, toujours renseigne (soi-meme pour un lead).
+  lead: { id: number; name: string; startedAt: string | null };
+}
+
+const avant = (a: any, b: any) =>
+  String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || Number(a.id) - Number(b.id);
+
+export async function decideStartRole(
+  sb: any, jobId: string, me: { cleaner_id: number; name: string }, idem: string,
+  opts: { sleep?: (ms: number) => Promise<void>; nowMs?: number } = {},
+): Promise<StartRole> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let rows: any[] = [];
+  for (let essai = 0; essai < START_WAIT_TRIES; essai++) {
+    const { data, error } = await sb.from("job_events")
+      .select("id, idem_key, cleaner_id, created_at, result")
+      .eq("job_id", jobId).eq("event_type", "start_job");
+    if (error) throw error;
+    rows = data ?? [];
+    const mienne = rows.find((r: any) => r.idem_key === idem);
+    const now = opts.nowMs ?? Date.now();
+    const enAttente = mienne && rows.some((r: any) =>
+      !r.result && r.idem_key !== idem && Number(r.cleaner_id) !== Number(me.cleaner_id) &&
+      avant(r, mienne) < 0 && now - Date.parse(String(r.created_at ?? "")) < START_PENDING_FRESH_MS);
+    if (!enAttente || essai === START_WAIT_TRIES - 1) break;
+    await sleep(START_WAIT_MS);
+  }
+  // Ma propre ligne compte comme abouti : son resultat s'ecrit juste apres.
+  const comptees = rows.filter((r: any) => r.result || r.idem_key === idem)
+    .map((r: any) => r.idem_key === idem ? { ...r, result: r.result ?? { status: "success" } } : r);
+  const { role, leadId } = roleFromStarts(comptees, me.cleaner_id);
+  const idLead = leadId ?? me.cleaner_id;
+  const premier = comptees.filter((r: any) => Number(r.cleaner_id) === idLead).sort(avant)[0];
+  const startedAt = premier && premier.created_at ? String(premier.created_at) : null;
+  let name = me.name;
+  if (idLead !== Number(me.cleaner_id)) {
+    name = "Teammate";
+    try {
+      const { data } = await sb.from("cleaners").select("id, name").eq("id", idLead).maybeSingle();
+      if (data && data.name) name = String(data.name);
+    } catch (e) {
+      console.warn("[v3.startJob] nom de la lead illisible: " + String((e as any)?.message ?? e));
+    }
+  }
+  return { role, lead: { id: idLead, name, startedAt } };
+}

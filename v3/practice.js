@@ -284,7 +284,21 @@ function startJob(body) {
   j.state = 'running';
   j.startedAt = startedAt;
   j.durationMinutes = null;
-  return memoriser(body.idem, { status: 'success', jobId: jobId, startedAt: startedAt });
+  // Role et lead rendus comme le proxy (v3.startJob) : le parcours d'aide ne depend plus
+  // que de cette reponse.
+  const role = roleDe(stop, jobId);
+  const lead = leadDe(stop, role);
+  return memoriser(body.idem, { status: 'success', jobId: jobId, startedAt: startedAt, role: role, lead: lead });
+}
+
+// Lead du menage : la cible elle-meme pour un lead, sinon l'autre personne qui a demarre en premier.
+function leadDe(stop, role) {
+  const moi = cible && cible.id !== undefined ? { id: cible.id, name: cible.name || 'You', startedAt: null } : { id: 0, name: 'You', startedAt: null };
+  if (role === 'lead') return moi;
+  const autres = (stop.othersOnJob || []).filter(function (o) { return o && o.startedAt; })
+    .sort(function (a, b) { return Date.parse(a.startedAt) - Date.parse(b.startedAt); });
+  const o = autres.find(function (x) { return String(x.id) === String(stop.leadId); }) || autres[0];
+  return o ? { id: o.id, name: String(o.name || 'Teammate'), startedAt: o.startedAt } : { id: stop.leadId || 0, name: 'Teammate', startedAt: null };
 }
 
 function tick(body) {

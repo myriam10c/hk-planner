@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { APARTMENTS, ME } from "./fixtures.js";
 import {
   createConversation, reply, addPhoto, startProblem, chooseKind, addFlowPhoto, flowReply, editProblem,
-  removeProblem, removeArrivalOrEndPhoto, reopenProblem, currentStep, requireLinen,
+  removeProblem, removeArrivalOrEndPhoto, reopenProblem, currentStep, requireLinen, becomeHelper,
 } from "../../v3/conv/conversation.js";
 import { syncPlan, finishPlan, ackSync, refreshTicks, finishAcked, PHOTO_OPTIONAL, runActions } from "../../v3/conv/sync.js";
 
@@ -350,4 +350,23 @@ test("carte d'accès : téléversée en arrival:Access card avant les pièces ; 
   assert.equal(a[0].body.where, "Entrance & building");
   assert.equal(a[0].body.urgency, "soon");
   assert.equal("photoIdem" in a[0].body, false);
+});
+
+// Binôme (lot 1, tâche 3) : devenue aide en cours de route, la cleaner ne renvoie rien de ce qui est
+// déjà parti et sa fin ne porte ni linge ni rapport.
+test("devenue aide après son démarrage : rien n'est renvoyé, la fin n'a ni linge ni rapport", () => {
+  const h = harness(bloom);
+  reply(h.c, "here", { now: at(10, 0) });
+  addPhoto(h.c, h.photo(), { now: at(10, 1) });
+  reply(h.c, "next-room", { now: at(10, 1) });
+  const avant = h.sync();
+  assert.deepEqual(avant.map(a => a.action), ["v3.startJob", "v3.uploadPhoto"]);
+  assert.equal(becomeHelper(h.c, { id: 7, name: "Pionah", startedAt: "2026-10-02T06:30:00Z" }), true);
+  assert.deepEqual(h.sync().map(a => a.action), [], "la photo d'arrivée déjà partie n'est ni renvoyée ni supprimée");
+  for (const room of bloom.rooms) { addPhoto(h.c, h.photo(), { now: at(11, 0) }); reply(h.c, "next-room", { now: at(11, 0) }); }
+  assert.equal(currentStep(h.c).id, "helper");
+  const fin = h.finish();
+  assert.equal(fin.length, 1);
+  assert.equal("report" in fin[0].body, false);
+  assert.equal("linen" in fin[0].body, false);
 });
