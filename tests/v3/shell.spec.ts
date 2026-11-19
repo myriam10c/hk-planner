@@ -95,9 +95,19 @@ test('module d une autre version deux fois de suite : pas de boucle, le lien de 
     servis += 1;
     return r.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const createConversation = 1;' });
   });
+  // Au second chargement, boot.js laisse remonter l'erreur de liage au lieu de recharger : c'est
+  // le signal que la decision est prise. WebKit la nomme « Unhandled Promise Rejection », Chromium
+  // « SyntaxError » : on lit les deux champs.
+  let decide = 0;
+  page.on('pageerror', (e) => { if (/SyntaxError/.test(e.name + ' ' + e.message)) decide += 1; });
   await page.goto('/v3/', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('link', { name: 'Open the old app' })).toBeVisible({ timeout: 8_000 });
+  // Le lien est dans le HTML statique, visible des le premier chargement : il ne prouve pas que
+  // le second (l'unique nouvel essai) a eu lieu. On attend le second chargement du module, puis la
+  // decision de boot.js ; aucun troisieme chargement ne suit (pas de boucle) et le lien reste.
+  await expect.poll(() => servis, { timeout: 8_000 }).toBe(2);
+  await expect.poll(() => decide, { timeout: 8_000 }).toBe(1);
   expect(servis).toBe(2);
+  await expect(page.getByRole('link', { name: 'Open the old app' })).toBeVisible();
 });
 
 test('v3 qui charge : le lien de secours statique disparait au premier rendu', async ({ page }) => {
