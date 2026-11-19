@@ -674,15 +674,28 @@ async function journeeGardee() {
   return day;
 }
 
+// Conversation qui suit le parcours d'aide (creee ainsi, ou passee en aide).
+const enAide = c => c.steps.some(s => s.id === 'helper');
+
 // Le role (lead ou aide) vient du serveur : une conversation reprise suit la
 // journee fraiche (v3.myDay), pas la valeur gardee. Binome : la premiere qui demarre est la
 // lead ; une conversation construite en lead dont la journee dit « aide » (la collegue a
 // demarre avant) est reconstruite en parcours d'aide, rien de ce qu'elle a saisi n'est perdu.
+// Passage en aide a sens unique (correction 2 de la tache 3) : une journee relue peut avoir ete
+// lue par le serveur avant le demarrage de la collegue et arriver apres la reponse « helper » de
+// v3.startJob (relecture d'un binome a l'ouverture, retour au premier plan). Elle ne ramene
+// jamais en lead une conversation deja en aide et n'efface jamais sa lead : seule une journee qui
+// dit « aide » avec une lead la met a jour (nom, heure).
 function rafraichirRoles() {
   for (const [id, c] of Object.entries(S.convs)) {
     const frais = state.apartments.find(a => a.id === id);
     if (!frais || !c.apt) continue;
-    if (frais.role === 'helper' && frais.lead && appliquerRole(c, { role: 'helper', lead: frais.lead })) continue;
+    const aide = frais.role === 'helper' && !!frais.lead;
+    if (aide && appliquerRole(c, { role: 'helper', lead: frais.lead })) continue;
+    if (enAide(c)) {
+      if (aide) { c.apt.lead = frais.lead; c.apt.role = 'helper'; }
+      continue;
+    }
     c.apt.lead = frais.lead; c.apt.role = frais.role;
   }
 }
@@ -939,7 +952,7 @@ async function sharePhotos(files) {
 // deja demarre. Sans binome, rien : la relecture au retour au premier plan garde la journee
 // fraiche, et la reponse de v3.startJob tranche le role. Hors ligne, relireLaJournee ne fait rien.
 function relireSiBinome(c, id) {
-  if (!c || c.readOnly || c.startedAt || c.steps.some(s => s.id === 'helper')) return;
+  if (!c || c.readOnly || c.startedAt || enAide(c)) return;
   const stop = ((state.day && state.day.stops) || []).find(s => s && s.jobId === id);
   const moi = String(me().id);
   const autres = stop && Array.isArray(stop.othersOnJob) ? stop.othersOnJob.filter(o => o && String(o.id) !== moi) : [];

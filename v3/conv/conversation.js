@@ -11,11 +11,18 @@ export function isHelper(conv) {
   return !!(conv.apt.lead && conv.apt.lead.name !== conv.me.name);
 }
 
+// Nom de la lead, ou null quand elle manque : une conversation d'aide sans lead connue (quelle
+// qu'en soit la cause) s'affiche avec un texte neutre au lieu de planter et de figer l'écran.
+export function leadName(apt) {
+  return apt && apt.lead && apt.lead.name ? String(apt.lead.name) : null;
+}
+
 function buildSteps(apt, helper) {
   const all = apt.rooms;
   if (helper) {
     // L'aide : la première a déjà photographié l'état et fait les étapes 2, 3, 5.
-    const mine = all.filter(r => !apt.lead.roomsDone.includes(r));
+    const done = (apt.lead && apt.lead.roomsDone) || [];
+    const mine = all.filter(r => !done.includes(r));
     return [{ id: "arrive", n: 1 }].concat(mine.map(room => ({ id: "end-photo", n: 4, room })), [{ id: "helper", n: 5 }]);
   }
   // La carte d'acces d'abord : photographiee telle que le voyageur l'a laissee, avant de toucher a rien.
@@ -61,7 +68,8 @@ function botMessage(conv) {
         : { from: "app", type: "text", text: st.room + ": clean it, then take a photo." };
     case "leave": return { from: "app", type: "text", text: "Before you leave, check each one." };
     case "low": return { from: "app", type: "text", text: "Running low? Tap what is missing." };
-    case "helper": return { from: "app", type: "text", text: "Your part is done. " + a.lead.name + " sends the report." };
+    // Lead inconnue (correction 2 de la tâche 3) : texte neutre, jamais de plantage.
+    case "helper": return { from: "app", type: "text", text: "Your part is done. " + (leadName(a) || "Your teammate") + " sends the report." };
     case "linen-send": return { from: "app", type: "text", text: "Send the linen count to Housekeeping." };
     case "report": return { from: "app", type: "report" };
     default: return null;
@@ -262,7 +270,7 @@ export function currentStep(conv) {
       return { ...st, ...base, camera: false, editor: "leave", replies: LEAVE_CHECKS.flatMap(c => [R("leave:" + c.key, leaveLabel(conv, c))].concat(c.ko ? [R("leave:" + c.key + "-ko", c.ko)] : [])) };
     case "low":
       return { ...st, ...base, camera: false, replies: SUPPLIES.map(x => R("low:" + x, (conv.low.includes(x) ? "✓ " : "") + x)).concat([R("low-done", conv.low.length ? "That's it" : "Nothing")]) };
-    case "helper": return { ...st, ...base, camera: false, replies: [R("add-to-lead", "Add to " + a.lead.name + "'s report")] };
+    case "helper": return { ...st, ...base, camera: false, replies: [R("add-to-lead", leadName(a) ? "Add to " + leadName(a) + "'s report" : "Add to the report")] };
     case "linen-send": return { ...st, ...base, camera: false, replies: [R("linen-send", "Send linen count")] };
     // Deux partages (28/10, demande de Hillal) : WhatsApp recopie le texte sous chaque photo quand
     // ils partent ensemble. Le texte seul d'abord, puis les photos sans legende.

@@ -29,10 +29,25 @@ const sansDemarrage = sansJournee.filter((r) => r.match !== 'action=v3.startJob'
 const ouvrir = (page: Page) => page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
 const nbMyDay = async (page: Page) => (await fetchLog(page)).filter((e) => e.url.indexOf('action=v3.myDay') !== -1).length;
 const essaisDemarrage = async (page: Page) => (await fetchLog(page)).filter((e) => e.url.indexOf('action=v3.startJob') !== -1).length;
+// Heure de la derniere journee lue : elle change quand une relecture a abouti.
+const derniereLecture = (page: Page) => page.evaluate(() => (window as any).__hk.lastRead && (window as any).__hk.lastRead.at);
+const roleActif = (page: Page) => page.evaluate(() => {
+  const h = (window as any).__hk;
+  const a = h.convs[h.activeId].apt;
+  return { role: a.role, lead: a.lead ? a.lead.name : null };
+});
+// Avertissements de la file ([v3] onSent) et erreurs de la page : un rendu qui plante fige l'ecran.
+function surveiller(page: Page) {
+  const alertes: string[] = [];
+  page.on('console', (m) => { if (/\[v3\] onSent|TypeError/.test(m.text())) alertes.push(m.type() + ' ' + m.text()); });
+  page.on('pageerror', (e) => alertes.push('pageerror ' + e.message));
+  return alertes;
+}
 
 // Fin du parcours d'aide sur les trois pieces du studio, puis les ecritures : la photo de la
 // carte, deja saisie, n'est ni perdue ni supprimee ; la fin n'a ni linge ni rapport.
-async function finirEnAide(page: Page) {
+// `debut` : les ecritures d'avant la bascule (sans carte quand la reponse arrive avant sa photo).
+async function finirEnAide(page: Page, debut = ['startJob', 'uploadPhoto arrival:Access card']) {
   for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
   await expect(page.locator('[data-reply="add-to-lead"]')).toHaveText("Add to Pionah's report");
   await page.locator('[data-reply="add-to-lead"]').click();
@@ -40,7 +55,7 @@ async function finirEnAide(page: Page) {
   const e = await ecritures(page);
   const noms = e.map((x) => x.action.replace('v3.', '') + (x.action === 'v3.uploadPhoto' ? ' ' + x.body.itemName : ''));
   expect(noms).toEqual([
-    'startJob', 'uploadPhoto arrival:Access card',
+    ...debut,
     'uploadPhoto end:Bed', 'uploadPhoto end:Bathroom', 'uploadPhoto end:Kitchen',
     'finishJob',
   ]);
@@ -142,4 +157,48 @@ test('demarrage refuse un temps (503, la collegue demarre au meme instant) : rie
   await expect(page.locator('.note')).toHaveText(NOTE);
   const e = await finirEnAide(page);
   expect(e[0].essais).toBe(2);
+});
+
+// Correction 2 : le passage en aide est a sens unique sur le telephone. Une journee relue qui dit
+// encore « lead » (lue par le serveur avant le demarrage de la collegue, arrivee apres la reponse
+// de v3.startJob) ne ramene pas la conversation en lead et n'efface pas sa lead.
+test('relecture perimee arrivee apres la reponse helper de startJob : la conversation reste en aide, rien ne se fige', async ({ page }) => {
+  const alertes = surveiller(page);
+  await demarrer(page, [
+    { match: 'action=v3.myDay', status: 200, once: true, body: JOUR_BINOME },
+    { match: 'action=v3.myDay', status: 200, hold: 'relecture', body: JOUR_BINOME },
+    { match: 'action=v3.startJob', status: 200, body: DEMARRAGE_AIDE },
+    ...sansDemarrage,
+  ]);
+  await ouvrir(page);
+  await page.locator('[data-reply="here"]').click();
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 4 · Bed /);
+  const avant = await derniereLecture(page);
+  await liberer(page, 'relecture');
+  await expect.poll(() => derniereLecture(page)).not.toBe(avant);
+  expect(await roleActif(page)).toEqual({ role: 'helper', lead: 'Pionah' });
+  // La photo suivante s'affiche et Next room s'active (piece), jusqu'au bout du parcours d'aide.
+  await finirEnAide(page, ['startJob']);
+  expect(alertes).toEqual([]);
+});
+
+test('retour au premier plan : une journee relue qui dit lead ne ramene pas l aide en lead', async ({ page }) => {
+  const alertes = surveiller(page);
+  await demarrer(page, [
+    { match: 'action=v3.myDay', status: 200, body: JOUR_SEUL },
+    { match: 'action=v3.startJob', status: 200, body: DEMARRAGE_AIDE },
+    ...sansDemarrage,
+  ]);
+  await ouvrir(page);
+  await page.locator('[data-reply="here"]').click();
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 4 · Bed /);
+  const avant = await derniereLecture(page);
+  // Plus de 60 s plus tard, l'app revient au premier plan : relecture de la tache 2.
+  await page.clock.setFixedTime(new Date(Date.now() + 120_000));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(() => derniereLecture(page)).not.toBe(avant);
+  expect(await nbMyDay(page)).toBe(2);
+  expect(await roleActif(page)).toEqual({ role: 'helper', lead: 'Pionah' });
+  await finirEnAide(page, ['startJob']);
+  expect(alertes).toEqual([]);
 });

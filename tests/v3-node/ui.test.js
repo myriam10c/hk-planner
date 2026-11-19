@@ -372,3 +372,18 @@ test("liste : un ménage commencé et pas envoyé ne verrouille aucune autre lig
   for (const r of rows) assert.doesNotMatch(r, /disabled/);
   assert.doesNotMatch(html, /disabled/);
 });
+
+// Binôme, correction 2 de la tâche 3 : une conversation d'aide dont la lead manque, quelle qu'en soit
+// la cause, s'affiche avec un texte neutre du même parcours, sans nom, et rien ne plante.
+test("aide sans lead connue : rendu sans plantage, texte neutre jusqu'à « Add to the report »", () => {
+  const c = createConversation(creek, { me: ME, now });
+  reply(c, "here", { now });
+  c.apt = { ...c.apt, lead: null };
+  const html = renderConversation(c, { now });
+  assert.match(html, /<span class="who">Teammate<\/span>/);
+  rooms(c, creek.rooms.length);
+  assert.equal(currentStep(c).id, "helper");
+  assert.equal(currentStep(c).replies[0].label, "Add to the report");
+  assert.ok(c.messages.some(m => m.text === "Your part is done. Your teammate sends the report."));
+  assert.match(renderConversation(c, { now }), /Add to the report/);
+});

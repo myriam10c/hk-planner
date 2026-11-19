@@ -2,7 +2,7 @@
 // Porté du prototype : la liste reçoit les appartements de la journée réelle (day.js).
 import { LINEN_USUAL, GROUP_NAME, CARD_ROOM, aptLabel, dayLine } from "./rules.js";
 import { KINDS, URGENCY } from "./problems.js";
-import { currentStep, currentFlow, elapsedMinutes, isHelper, ticketCard } from "./conversation.js";
+import { currentStep, currentFlow, elapsedMinutes, isHelper, leadName, ticketCard } from "./conversation.js";
 import { reportText, arrivalText, formatMinutes } from "./report.js";
 import { finishAcked } from "./sync.js";
 import { dayWord } from "./day.js";
@@ -130,7 +130,7 @@ function bubble(conv, m) {
       (p.note ? '<span class="pnote">' + escapeHtml(p.note) + "</span>" : "") +
       "<span>" + escapeHtml(p.where + (sentLabel(conv, p) ? " · " + sentLabel(conv, p) : "") + (n > 1 ? " · " + n + " photos" : "")) + "</span>" + ticks + "</button>";
   }
-  const who = m.from === "lead" ? '<span class="who">' + escapeHtml(conv.apt.lead.name) + "</span>" : "";
+  const who = m.from === "lead" ? '<span class="who">' + escapeHtml(leadName(conv.apt) || "Teammate") + "</span>" : "";
   return '<div class="msg ' + m.from + (m.alert ? " alert" : "") + '">' + who + (m.photo ? imgTag(m.photo, "ref") : "") + "<p>" + escapeHtml(m.text) + "</p>" + ticks + "</div>";
 }
 

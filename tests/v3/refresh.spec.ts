@@ -69,7 +69,12 @@ test('le jour de Dubai change : relecture meme moins de 60 s apres la derniere',
   expect(await nbMyDay(page)).toBe(2);
 });
 
-test('une conversation en cours survit a la relecture : meme ecran, memes messages, role remis a jour', async ({ page }) => {
+// Binome, correction 2 de la tache 3 : le passage en aide est a sens unique sur le telephone. Une
+// journee relue qui dit lead ne ramene pas une conversation d'aide en lead et n'efface pas sa lead
+// (avant, role 'lead' et lead nulle : la bulle de la lead plantait au rendu, l'ecran restait fige).
+test('une conversation en cours survit a la relecture : meme ecran, memes messages, l aide reste aide', async ({ page }) => {
+  const erreurs: string[] = [];
+  page.on('pageerror', (e) => erreurs.push(e.message));
   const creekLead = { ...CREEK, role: 'lead', leadId: null };
   await bootV3(page, routes({ ...DAY2, stops: [BLOOM, creekLead, TROISIEME] }), { pinToken: 'jeton-pin' });
   await page.getByRole('button', { name: /1506 Emaar Creekside 18A/ }).click();
@@ -85,7 +90,9 @@ test('une conversation en cours survit a la relecture : meme ecran, memes messag
   const etat = await page.evaluate(() => { const h = (window as any).__hk; return { screen: h.screen, active: h.activeId, convs: Object.keys(h.convs) }; });
   expect(etat).toEqual({ screen: 'conv', active: idConv, convs: [idConv] });
   expect(await page.locator('.msg').count()).toBe(avant);
-  expect(await page.evaluate((id) => (window as any).__hk.convs[id].apt.role, idConv)).toBe('lead');
+  const apt = await page.evaluate((id) => { const a = (window as any).__hk.convs[id].apt; return { role: a.role, lead: a.lead && a.lead.name }; }, idConv);
+  expect(apt).toEqual({ role: 'helper', lead: 'Pionah' });
+  expect(erreurs).toEqual([]);
 });
 
 test('le compteur du Profile suit la journee relue', async ({ page }) => {
