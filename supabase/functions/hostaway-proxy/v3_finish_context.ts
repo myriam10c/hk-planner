@@ -22,7 +22,8 @@ export const V3_REPORT_TEXT_MAX = 4000;
 
 // Lead ou aide, calcule cote serveur : aide quand une AUTRE personne a demarre
 // (v3.startJob abouti) avant moi sur le meme menage, ou a demarre alors que je
-// ne l'ai jamais fait. Lu dans job_events et non dans cleaning_timer : le chrono
+// ne l'ai jamais fait. Apres un « Clean again », sur le menage relance seulement
+// (roleFromStarts). Lu dans job_events et non dans cleaning_timer : le chrono
 // est partage et ne garde que la premiere personne, et un chrono ouvert depuis
 // l'app racine ne doit faire de personne une aide. La lecture leve : le role
 // decide du linge exige.
@@ -33,22 +34,65 @@ export async function jobRole(sb: any, jobId: string, meId: number): Promise<"le
   return roleFromStarts(data ?? [], meId).role;
 }
 
-// Regle unique du role, partagee par jobRole (fin de menage) et v3.myDay (tache 5
-// du branchement) : apres un rechargement, le telephone doit savoir s'il est lead
-// ou aide exactement comme le serveur le jugera a la fin. `rows` : les
-// start_job d'UN menage. Rend aussi qui est le lead et mon premier demarrage.
-export function roleFromStarts(rows: any[], meId: number): {
-  role: "lead" | "helper"; leadId: number | null; myStartedAt: string | null;
-} {
+// Demarrages aboutis du menage EN COURS, dans l'ordre d'arrivee (created_at puis
+// id). Lot 1 des corrections cleaner, tache 5 : « Clean again » ouvre un nouveau
+// menage sur la meme cle. Son demarrage porte `again: true` dans son resultat
+// (pose seulement quand le serveur l'a accepte sur un menage fini), et seuls les
+// demarrages depuis le dernier de ceux-la comptent. Sans aucun, tous comptent :
+// le calcul est exactement celui d'avant.
+export function startsOfCurrentCycle(rows: any[]): any[] {
   const departs = (rows ?? []).filter((d: any) => d && d.result)
     .sort((a: any, b: any) =>
       String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || Number(a.id) - Number(b.id));
+  let debut = 0;
+  departs.forEach((d: any, i: number) => { if (d.result.again === true) debut = i; });
+  return departs.slice(debut);
+}
+
+// Regle unique du role, partagee par jobRole (fin de menage), v3.startJob et
+// v3.myDay (tache 5 du branchement) : apres un rechargement, le telephone doit
+// savoir s'il est lead ou aide exactement comme le serveur le jugera a la fin.
+// `rows` : les start_job d'UN menage. Rend aussi qui est le lead, son demarrage,
+// mon premier demarrage, et `relance` : le menage en cours a ete ouvert par
+// « Clean again ». La premiere du menage en cours est lead.
+export function roleFromStarts(rows: any[], meId: number): {
+  role: "lead" | "helper"; leadId: number | null; myStartedAt: string | null;
+  leadStartedAt: string | null; relance: boolean;
+} {
+  const departs = startsOfCurrentCycle(rows);
   const mien = departs.find((d: any) => Number(d.cleaner_id) === Number(meId));
   const myStartedAt = mien && mien.created_at ? String(mien.created_at) : null;
-  if (departs.length === 0) return { role: "lead", leadId: null, myStartedAt };
+  if (departs.length === 0) {
+    return { role: "lead", leadId: null, myStartedAt, leadStartedAt: null, relance: false };
+  }
   const leadId = Number(departs[0].cleaner_id);
-  return { role: leadId === Number(meId) ? "lead" : "helper", leadId, myStartedAt };
+  return {
+    role: leadId === Number(meId) ? "lead" : "helper", leadId, myStartedAt,
+    leadStartedAt: departs[0].created_at ? String(departs[0].created_at) : null,
+    relance: departs[0].result.again === true,
+  };
 }
+
+// Menage fini, regle unique de v3.myDay (etat « done » de la liste) et de
+// v3.startJob (garde « menage fini ») : menage_done, ou chrono clos. Un chrono
+// rouvert par « Clean again » (`relance`) est un menage en cours, meme si
+// menage_done reste vrai jusqu'a la fin du second menage (comportement d'un
+// redemarrage, inchange). Sans « Clean again », un chrono oublie ouvert sur un
+// menage marque fait par un manager reste fini, comme avant.
+export function menageFini(fait: boolean, timer: any, relance: boolean): boolean {
+  const ouvert = !!(timer && timer.started_at && !timer.finished_at);
+  if (relance && ouvert) return false;
+  return fait || !!(timer && timer.finished_at);
+}
+
+// Refus de v3.startJob sur un menage fini, pour qui serait lead sans « Clean
+// again ». 422 : un 4xx autre que 409 et 429, donc jamais relance par la file du
+// telephone, et distinct du 503 « Still starting. Retry. ». Le code est lu par le
+// telephone ; le texte est fait pour etre lu tel quel par une ancienne version de
+// l'app, qui l'affiche dans « Not sent: <texte>. Tell your manager. ».
+export const V3_JOB_DONE_STATUS = 422;
+export const V3_JOB_DONE_CODE = "job_done";
+export const V3_JOB_DONE_ERROR = "Cleaning already done";
 
 // Rend le rapport valide, null s'il est absent, ou un message d'erreur.
 export function readReport(v: unknown): { report: Record<string, unknown> | null } | { error: string } {

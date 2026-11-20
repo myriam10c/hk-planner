@@ -152,3 +152,22 @@ test("Practice : l'heure d'un extra (stops[].time) traverse practiceDay", () => 
   d.stops[0].time = "14:00";
   assert.equal(P.practiceDay(d).stops[0].time, "14:00");
 });
+
+// Lot 1, tâche 5 : « Clean again » sur un ménage fini. Comme le proxy, la personne qui relance est
+// lead du nouveau ménage, même si elle était l'aide du premier ; sans l'indicateur, rien ne change.
+test("startJob : « Clean again » sur un ménage fini, la cible est lead du nouveau ménage et rend le rapport", async () => {
+  P.practiceDay({ date: "2026-10-05", me: { id: 3, name: "Faiza", role: "cleaner" }, stops: [{ ...HELPER, state: "done" }] });
+  const r = await post("v3.startJob", { jobId: HELPER.jobId, idem: idem(), again: true });
+  assert.deepEqual({ role: r.role, lead: r.lead.id }, { role: "lead", lead: "3" });
+  const fin = await post("v3.finishJob", { jobId: HELPER.jobId, idem: idem(), linen, report: { text: "READY" } });
+  assert.equal(fin.role, "lead");
+});
+
+test("startJob : sans l'indicateur, le rôle du ménage fini reste celui de la journée", async () => {
+  P.practiceDay({ date: "2026-10-05", me: { id: 3, name: "Faiza", role: "cleaner" }, stops: [{ ...HELPER, state: "done" }] });
+  const r = await post("v3.startJob", { jobId: HELPER.jobId, idem: idem() });
+  assert.equal(r.role, "helper");
+  // L'indicateur sur un ménage en cours ne change rien non plus.
+  P.practiceDay(day());
+  assert.equal((await post("v3.startJob", { jobId: HELPER.jobId, idem: idem(), again: true })).role, "helper");
+});

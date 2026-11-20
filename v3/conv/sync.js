@@ -69,12 +69,14 @@ export function syncPlan(conv, { newIdem, active = true } = {}) {
   const queued = ph => (ph.idem && s.photos[ph.idem] ? ph.idem : null);
 
   // 1. Démarrage (I'm here / I'm in now). La bulle de la cleaner porte la clé, pour ✓ / ✓✓.
+  // « Clean again » confirmé (conv.again, tâche 5 du lot 1) : l'indicateur explicite part avec
+  // lui ; sans lui, le proxy refuse de rouvrir un ménage fini à qui en serait la lead.
   if (conv.startedAt && !s.started) {
     const idem = newIdem();
     s.started = idem;
     const m = conv.messages.slice().reverse().find(x => x.from === "me" && x.type === "text");
     if (m) m.idem = idem;
-    emit("v3.startJob", { jobId, idem });
+    emit("v3.startJob", conv.again ? { jobId, idem, again: true } : { jobId, idem });
   }
 
   // 2. Photos de pièce : retirées d'abord (miniature supprimée), puis les nouvelles.

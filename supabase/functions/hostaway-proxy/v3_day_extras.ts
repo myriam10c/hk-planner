@@ -8,7 +8,7 @@
 // d'ouvrir sa journee. Le role lead / aide qui compte pour le linge est
 // recalcule cote serveur par v3.finishJob, jamais lu de cet affichage.
 import { V3_PHOTO_BUCKET } from "./v3.ts";
-import { roleFromStarts } from "./v3_finish_context.ts";
+import { roleFromStarts, startsOfCurrentCycle } from "./v3_finish_context.ts";
 
 // Duree des URL signees des references : 16 heures, de quoi couvrir toute la journee d'une
 // cleaner (un menage dure 2 h 30 en mediane, la photo de fin arrive vers la fin du menage).
@@ -102,8 +102,12 @@ export async function loadOthersOnJob(
     const departs = await parPaquets(jobIds, (p) =>
       sb.from("job_events").select("id, job_id, cleaner_id, created_at, result")
         .in("job_id", p).eq("event_type", "start_job"));
+    // Demarrages du menage en cours seulement (tache 5 du lot 1) : apres un
+    // « Clean again », l'heure d'une collegue est celle du nouveau menage.
+    const parJob: Record<string, any[]> = {};
+    for (const d of departs) (parJob[String(d.job_id)] ||= []).push(d);
     const debut: Record<string, string> = {};
-    for (const d of departs) {
+    for (const d of Object.values(parJob).flatMap(startsOfCurrentCycle)) {
       if (!d.result || !d.created_at) continue;
       const k = String(d.job_id) + "|" + String(d.cleaner_id);
       const t = String(d.created_at);
@@ -137,6 +141,8 @@ export interface JobRoleInfo {
   role: "lead" | "helper";
   leadId: number | null;
   myStartedAt: string | null;
+  // Menage relance par « Clean again » (tache 5 du lot 1), voir menageFini.
+  relance: boolean;
 }
 
 // Role lead / aide de la personne sur chaque menage du jour (tache 5 du

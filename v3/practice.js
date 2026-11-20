@@ -279,6 +279,10 @@ function startJob(body) {
   if (r) return r;
   // Un chrono deja ouvert n'est jamais ecrase, un chrono clos est repris.
   const j = job(jobId);
+  // « Clean again » sur un menage fini (tache 5 du lot 1), comme le proxy : la cible est lead du
+  // nouveau menage, a son demarrage comme a sa fin. Sur un menage en cours, l'indicateur ne change rien.
+  const fini = j.state ? j.state === 'done' : stop.state === 'done';
+  if (body.again === true && fini) j.relance = true;
   const ouvert = j.state ? (j.state === 'running' && j.startedAt) : (stop.state === 'running' && stop.startedAt);
   const startedAt = ouvert ? String(j.startedAt || stop.startedAt) : new Date().toISOString();
   j.state = 'running';
@@ -706,10 +710,11 @@ function readReport(v) {
 // Role de la cible sur ce menage, comme v3.myDay le rend (meme regle que
 // jobRole). Sans role connu : aide si une autre personne a demarre avant elle.
 function roleDe(stop, jobId) {
+  const j = seance.jobs[jobId];
+  if (j && j.relance) return 'lead';
   if (stop.role === 'lead' || stop.role === 'helper') return stop.role;
   const autres = (stop.othersOnJob || []).filter(function (o) { return o && o.startedAt; });
   if (!autres.length) return 'lead';
-  const j = seance.jobs[jobId];
   const mien = stop.myStartedAt || (j && j.startedAt) || null;
   const premier = autres.map(function (o) { return Date.parse(o.startedAt); }).sort()[0];
   return mien && Date.parse(mien) <= premier ? 'lead' : 'helper';

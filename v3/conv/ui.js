@@ -160,13 +160,28 @@ function replyButtons(step) {
   return step.replies.map(r => '<button class="reply' + (r.label.startsWith("✓ ") ? " on" : "") + '" data-reply="' + escapeHtml(r.id) + '"' + (r.enabled ? "" : " disabled") + ">" + escapeHtml(r.label) + "</button>").join("");
 }
 
+// « Clean again » d'un ménage fini (tâche 5 du lot 1) : un bouton, puis la confirmation sur place,
+// même motif que la suppression d'un problème (« Delete? » / « Yes, delete » / « No »).
+function cleanAgainBar(conv) {
+  if (conv.confirmAgain) {
+    return '<div class="confirm"><b>Start a new cleaning?</b><button class="reply danger" data-act="again-yes">Yes, clean again</button>' +
+      '<button class="reply" data-act="again-no">No</button></div>';
+  }
+  return '<div class="replies"><button class="reply" data-act="again-ask">Clean again</button></div>';
+}
+
 // View as : en-tête « Read only · <état> », fil reconstruit, aucune réponse ni outil.
+// Ménage fini sur ce téléphone sans conversation locale (doneView) : en-tête « Cleaning done »,
+// et seulement « Clean again » en bas.
 function renderReadOnly(conv, before) {
   const a = conv.apt;
+  const status = conv.doneView ? conv.viewStatus : "Read only · " + (conv.viewStatus || "");
   const head = '<header class="top"><button class="icon" data-act="back" aria-label="Back">' + I.back + "</button>" +
-    avatar(a, "avatar small") + '<div class="title"><b>' + escapeHtml(aptLabel(a)) + "</b><span>" + escapeHtml("Read only · " + (conv.viewStatus || "")) + "</span></div></header>";
+    avatar(a, "avatar small") + '<div class="title"><b>' + escapeHtml(aptLabel(a)) + "</b><span>" + escapeHtml(status) + "</span></div></header>";
   const thread = '<main class="thread" id="thread">' + conv.messages.map(m => bubble(conv, m)).join("") + "</main>";
-  const bar = '<footer class="bar"><p class="help">Read only. Only ' + escapeHtml(conv.me.name) + " can answer here.</p></footer>";
+  const bar = conv.doneView
+    ? '<footer class="bar">' + cleanAgainBar(conv) + "</footer>"
+    : '<footer class="bar"><p class="help">Read only. Only ' + escapeHtml(conv.me.name) + " can answer here.</p></footer>";
   return before + head + thread + bar;
 }
 

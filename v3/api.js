@@ -31,12 +31,15 @@ export function authHeaders(session) {
 
 // kind : 'offline' (reseau coupe ou delai depasse, l'action part dans la file),
 // 'auth' (401, il faut se reconnecter), 'server' (le proxy a refuse).
+// code : le code lisible d'un refus du proxy quand il en donne un (« job_done »
+// de v3.startJob sur un menage fini), sinon null.
 export class ApiError extends Error {
-  constructor(message, kind, status) {
+  constructor(message, kind, status, code) {
     super(message);
     this.name = 'ApiError';
     this.kind = kind;
     this.status = status;
+    this.code = code || null;
   }
 }
 
@@ -44,7 +47,7 @@ export class ApiError extends Error {
 function reponseSimulee(r) {
   const data = r && r.body ? r.body : null;
   if (!r || r.status >= 400 || (data && data.error)) {
-    throw new ApiError((data && data.error) || ('HTTP ' + (r ? r.status : 0)), 'server', r ? r.status : 0);
+    throw new ApiError((data && data.error) || ('HTTP ' + (r ? r.status : 0)), 'server', r ? r.status : 0, data && data.code);
   }
   return data;
 }
@@ -119,7 +122,7 @@ async function request(action, opts, dejaRenouvele) {
   let data = null;
   try { data = await resp.json(); } catch (e) { data = null; }
   if (!resp.ok || (data && data.error)) {
-    throw new ApiError((data && data.error) || ('HTTP ' + resp.status), 'server', resp.status);
+    throw new ApiError((data && data.error) || ('HTTP ' + resp.status), 'server', resp.status, data && data.code);
   }
   return data;
 }

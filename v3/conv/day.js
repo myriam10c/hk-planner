@@ -190,6 +190,9 @@ export function toApartments(payload, me, { now = new Date() } = {}) {
       role: s.role === "lead" || s.role === "helper" ? s.role : null,
       state: s.state || "todo",
       startedAt: s.startedAt || null,
+      // Heure de fin du chrono (tâche 5 du lot 1) : l'écran d'un ménage fini l'affiche. null sans
+      // chrono clos (marqué fait par un manager ou par l'ancienne app).
+      finishedAt: s.finishedAt || null,
     };
   });
 }

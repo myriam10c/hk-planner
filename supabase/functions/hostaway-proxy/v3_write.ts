@@ -19,16 +19,19 @@ import {
 import { sendPush } from "./push.ts";
 import type { PushFn } from "./v3_tickets.ts";
 import {
-  dateDeLaCle, jobRole, readReport, V3_REPORT_TEXT_MAX,
+  dateDeLaCle, jobRole, menageFini, readReport, roleFromStarts, V3_JOB_DONE_CODE, V3_JOB_DONE_ERROR,
+  V3_JOB_DONE_STATUS, V3_REPORT_TEXT_MAX,
 } from "./v3_finish_context.ts";
 import type { FinishContext } from "./v3_finish_context.ts";
-import { decideStartRole } from "./v3_start_role.ts";
+import { decideStartRole, readStarts } from "./v3_start_role.ts";
 export {
   dateDeLaCle, jobRole, loadFinishContext, readReport, V3_REPORT_MAX_BYTES, V3_REPORT_TEXT_MAX,
 } from "./v3_finish_context.ts";
 export type { FinishContext } from "./v3_finish_context.ts";
 
 // `attente` : pause entre deux lectures du role, injectee par les tests.
+// `body.again` (tache 5) : le telephone envoie `again: true` seulement apres la
+// confirmation de « Clean again ». Il n'a d'effet que sur un menage fini.
 export async function startJob(
   sb: any, me: SessionUser, body: any, attente?: (ms: number) => Promise<void>,
 ): Promise<ActionResult> {
@@ -41,8 +44,10 @@ export async function startJob(
   // toujours une fois l'id repare.
   const reservationKey = await resolveJob(sb, jobId);
   if (!reservationKey) return { status: 404, body: { error: "Job not found." } };
+  const demandeRelance = body?.again === true;
 
-  const claim = await claimEvent(sb, idem, "start_job", jobId, me.cleaner_id, { jobId });
+  const claim = await claimEvent(sb, idem, "start_job", jobId, me.cleaner_id,
+    demandeRelance ? { jobId, again: true } : { jobId });
   // Rejeu : 200 avec le resultat memorise, ou 409 si la cle a ete posee sans que
   // l'ecriture metier aboutisse. Jamais de succes fabrique : le telephone
   // supprimerait l'entree de sa file hors ligne et le geste serait perdu.
@@ -51,14 +56,59 @@ export async function startJob(
   try {
     // Un chrono deja ouvert n'est jamais ecrase : deux telephones sur le meme
     // menage ne doivent pas remettre le compteur a zero. Un chrono clos, lui, est
-    // repris (re-nettoyage, ou redemarrage apres un arret accidentel), comme le
-    // fait deja l'action startTimer.
-    // La lecture leve : une panne transitoire rendrait `existant` a null, donc
+    // repris par « Clean again » (re-nettoyage), comme le fait deja l'action
+    // startTimer.
+    // Les lectures levent : une panne transitoire rendrait `existant` a null, donc
     // `dejaOuvert` a faux, et l'action ecraserait le chrono ouvert d'une collegue
     // avec une fausse heure de depart. Meme regle que les lectures de v3.myDay.
     const { data: existant, error: lecture } = await sb.from("cleaning_timer")
       .select("started_at, finished_at").eq("reservation_key", reservationKey).maybeSingle();
     if (lecture) throw lecture;
+    const { data: fait, error: lectureFait } = await sb.from("menage_done")
+      .select("done").eq("reservation_key", reservationKey).maybeSingle();
+    if (lectureFait) throw lectureFait;
+    // Role decide ici, par l'ordre des demarrages (la premiere est lead), et rendu
+    // au telephone : sans lui, deux cleaners qui ouvrent l'appartement avant le
+    // premier « I'm here » construisent toutes deux le parcours de la lead. La
+    // lecture leve : un role faux ou absent rejouerait le defaut, la cle est
+    // liberee et la file hors ligne reessaie.
+    const departs = await readStarts(sb, jobId, me, idem, { sleep: attente });
+    if (!departs) {
+      // Une collegue a demarre juste avant et son demarrage n'est toujours pas
+      // ecrit : trancher ici donnerait deux leads. Cle liberee (aucune ligne ne
+      // reste pour fausser le calcul suivant), 503 : la file du telephone rejoue
+      // en silence, et au rejeu la ligne de la collegue est resolue.
+      await releaseEvent(sb, idem);
+      return { status: 503, body: { error: "Still starting. Retry." } };
+    }
+    // Menage fini (tache 5), avec les demarrages deja aboutis : ma ligne, sans
+    // resultat, n'y compte pas encore. « Clean again » n'ouvre un nouveau menage
+    // que sur un menage fini : sur un menage en cours, c'est un demarrage ordinaire.
+    const fini = menageFini(!!(fait && fait.done), existant,
+      roleFromStarts(departs, me.cleaner_id).relance);
+    const relance = demandeRelance && fini;
+    const { role, lead } = await decideStartRole(sb, departs, me, idem, relance);
+    if (fini && !relance) {
+      // Lead d'un menage fini sans « Clean again » : c'est le rechargement qui
+      // rouvrait le chrono clos avec une nouvelle heure de depart. Refuse, cle
+      // liberee, rien d'ecrit.
+      if (role !== "helper") {
+        await releaseEvent(sb, idem);
+        return {
+          status: V3_JOB_DONE_STATUS,
+          body: { error: V3_JOB_DONE_ERROR, code: V3_JOB_DONE_CODE },
+        };
+      }
+      // Aide dont le demarrage arrive apres la fin de la lead (hors ligne) :
+      // accepte, sinon ses photos et problemes seraient perdus. Le chrono clos de
+      // la lead n'est pas touche.
+      const result = {
+        status: "success", jobId, startedAt: existant?.started_at ? String(existant.started_at) : null,
+        role, lead,
+      };
+      await recordResult(sb, idem, result);
+      return { status: 200, body: result };
+    }
     const dejaOuvert = !!(existant && existant.started_at && !existant.finished_at);
     const startedAt = dejaOuvert ? String(existant.started_at) : new Date().toISOString();
     if (!dejaOuvert) {
@@ -75,22 +125,11 @@ export async function startJob(
       if (error) throw error;
       await v3Log(sb, reservationKey, "timer_started", me.name, { cleaner_id: me.cleaner_id, via: "v3" });
     }
-    // Role decide ici, par l'ordre des demarrages (la premiere est lead), et rendu
-    // au telephone : sans lui, deux cleaners qui ouvrent l'appartement avant le
-    // premier « I'm here » construisent toutes deux le parcours de la lead. La
-    // lecture leve : un role faux ou absent rejouerait le defaut, la cle est
-    // liberee et la file hors ligne reessaie.
-    const decision = await decideStartRole(sb, jobId, me, idem, { sleep: attente });
-    if (!decision) {
-      // Une collegue a demarre juste avant et son demarrage n'est toujours pas
-      // ecrit : trancher ici donnerait deux leads. Cle liberee (aucune ligne ne
-      // reste pour fausser le calcul suivant), 503 : la file du telephone rejoue
-      // en silence, et au rejeu la ligne de la collegue est resolue.
-      await releaseEvent(sb, idem);
-      return { status: 503, body: { error: "Still starting. Retry." } };
-    }
-    const { role, lead } = decision;
-    const result = { status: "success", jobId, startedAt, role, lead };
+    // `again` dans le resultat : c'est lui qui ouvre le nouveau menage pour
+    // roleFromStarts (fin, journee relue, demarrages suivants).
+    const result = relance
+      ? { status: "success", jobId, startedAt, role, lead, again: true }
+      : { status: "success", jobId, startedAt, role, lead };
     await recordResult(sb, idem, result);
     return { status: 200, body: result };
   } catch (e) {

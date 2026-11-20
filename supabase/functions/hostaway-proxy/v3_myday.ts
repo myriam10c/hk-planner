@@ -23,6 +23,7 @@ import {
 } from "./v3_day_extras.ts";
 import type { OtherOnJob } from "./v3_day_extras.ts";
 import { extraTimeOut } from "./mgr_extra.ts";
+import { menageFini } from "./v3_finish_context.ts";
 
 export interface V3Ticket {
   id: number;
@@ -51,6 +52,9 @@ export interface V3Stop {
   estimatedMinutes: number;
   state: "todo" | "running" | "done";
   startedAt: string | null;
+  // Tache 5 du lot 1 : heure de fin du chrono, meme format que startedAt ; null
+  // sans chrono clos (menage marque fait par un manager ou par l'ancienne app).
+  finishedAt: string | null;
   checklist: string[];
   photoRequired: string[];
   progress: Record<string, boolean>;
@@ -211,6 +215,13 @@ export function dubaiDayOf(iso: unknown): string | null {
   return Number.isFinite(ms) ? todayDubai(ms) : null;
 }
 
+// Etat d'un menage pour la liste : fini selon menageFini (v3_finish_context.ts,
+// regle partagee avec v3.startJob), sinon en cours si le chrono a demarre.
+function etatDuMenage(fait: boolean, timer: any, relance: boolean): "todo" | "running" | "done" {
+  if (menageFini(fait, timer, relance)) return "done";
+  return timer && timer.started_at ? "running" : "todo";
+}
+
 export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
   const mine = new Set((input.assignedKeys ?? []).map(String));
   // Seuls les tickets montrables portent un nom a lire.
@@ -239,10 +250,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
     const templateName = V3_TEMPLATE_NAME[unitType] ?? "Studio";
     const { items, photoRequired } = templateItems(templatesByName[templateName]);
     const timer = input.timers[base.reservationKey] ?? null;
-    const state: "todo" | "running" | "done" =
-      done.has(base.reservationKey) || (timer && timer.finished_at)
-        ? "done"
-        : (timer && timer.started_at ? "running" : "todo");
+    const state = etatDuMenage(done.has(base.reservationKey), timer, false);
     return {
       jobId: "",
       listingId: base.listingId,
@@ -259,6 +267,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
       estimatedMinutes: estimatedMinutes(unitType),
       state,
       startedAt: timer && timer.started_at ? String(timer.started_at) : null,
+      finishedAt: timer && timer.finished_at ? String(timer.finished_at) : null,
       checklist: items,
       photoRequired,
       progress: input.progress[base.reservationKey] ?? {},
@@ -360,6 +369,9 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
     b.stop.role = r.role;
     b.stop.leadId = r.leadId;
     b.stop.myStartedAt = r.myStartedAt;
+    // Menage relance par « Clean again » et pas encore refini : en cours, meme si
+    // menage_done reste vrai (regle partagee avec la garde de v3.startJob).
+    if (r.relance) b.stop.state = etatDuMenage(done.has(b.cle), input.timers[b.cle] ?? null, true);
   }
   const refs = await loadReferences(input.sb, brut.map((b) => b.stop), input.date);
   brut.forEach((b, i) => { b.stop.references = refs[i] === undefined ? {} : refs[i]; });

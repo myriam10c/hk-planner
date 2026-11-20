@@ -38,9 +38,10 @@ import { needsRefresh, updatedLabel } from '/v3/conv/refresh.js';
 import { stampText } from '/v3/conv/stamp.js';
 import { aptLabel } from '/v3/conv/rules.js';
 import {
-  createConversation, currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
+  currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
   addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto, requireLinen,
-  referenceLine, readOnlyConversation, becomeHelper, ticketStill, startTicketFix, addFixPhoto, fixDone, fixCancel,
+  referenceLine, becomeHelper, ticketStill, startTicketFix, addFixPhoto, fixDone, fixCancel,
+  conversationToOpen, doneConversation, cleanAgainConversation,
 } from '/v3/conv/conversation.js';
 import {
   syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL, writeMode,
@@ -587,6 +588,29 @@ function refusTicketClos(entry, err) {
   }
   return false;
 }
+// Demarrage refuse parce que le menage est fini sur le serveur (tache 5 du lot 1 : 422, code
+// « job_done », jamais relance par la file). Ni magasin mort, ni bandeau d'erreur brute : la
+// conversation qui l'a emis n'a plus lieu d'etre, l'appartement se presente en « Cleaning done »
+// en lecture seule (a l'ecran tout de suite si elle y est), et la file continue derriere.
+onRefused(refusMenageFini);
+function refusMenageFini(entry, err) {
+  if (!entry || entry.action !== 'v3.startJob' || !err || err.status !== 422 || err.code !== 'job_done') return false;
+  const id = entry.body && entry.body.jobId;
+  const apt = S.apartments.find(a => a.id === id);
+  if (apt) apt.state = 'done';
+  const c = S.convs[id];
+  if (c && c.sync && c.sync.started === entry.body.idem) {
+    if (S.activeId === id && S.screen === 'conv') {
+      closeCamera(); S.flowCam = false;
+      S.editIndex = null; S.viewPhoto = null; S.confirmDelete = false; S.toastIndex = null;
+      S.convs[id] = doneConversation(apt || c.apt, { me: me(), now: new Date() });
+    } else delete S.convs[id];
+    note(aptLabel(c.apt) + ': this cleaning is already done.');
+    persist();
+    renderLater();
+  }
+  return true;
+}
 function refusLinge(entry, err) {
   if (!entry || entry.action !== 'v3.finishJob' || !err || err.status !== 400 || !ERREUR_LINGE.test(String(err.message))) return false;
   const c = Object.values(S.convs).find(x => x.sync && x.sync.finish === entry.body.idem);
@@ -622,7 +646,8 @@ function ecrirePractice(snap) {
   if (!snap.day || !snap.day.me || !snap.mark || snap.mark !== practiceMark()) return;
   const convs = {};
   try {
-    for (const [id, c] of Object.entries(snap.convs)) convs[id] = serializeConversation(c);
+    // Ecran d'un menage fini (lecture seule) : reconstruit a chaque ouverture, jamais garde.
+    for (const [id, c] of Object.entries(snap.convs)) if (!c.readOnly) convs[id] = serializeConversation(c);
   } catch (e) { return; }
   practiceSaveConvs({ me: String(snap.day.me.id), date: snap.day.date, activeId: snap.activeId, screen: snap.screen, convs });
 }
@@ -656,7 +681,8 @@ async function ecrireConvs(snap) {
   if (!day || !day.me || day.viewAs) return;
   const convs = {};
   try {
-    for (const [id, c] of Object.entries(snap.convs)) if (!finishAcked(c)) convs[id] = serializeConversation(c);
+    // Ecran d'un menage fini (lecture seule) : reconstruit a chaque ouverture, jamais garde.
+    for (const [id, c] of Object.entries(snap.convs)) if (!finishAcked(c) && !c.readOnly) convs[id] = serializeConversation(c);
   } catch (e) { return; }
   if (!Object.keys(convs).length) { await oublierConvsGardees(); return; }
   const blob = {
@@ -707,6 +733,9 @@ function rafraichirRoles() {
     if (!frais || !c.apt) continue;
     // Photos de reference : l'URL rendue est relue sur l'appartement, jamais figee dans la conversation.
     refreshRoomPhotos(c.apt, frais);
+    // « Clean again » (tache 5 du lot 1) : tant que la journee dit le menage fini, ses roles sont
+    // ceux du premier menage, jamais ceux du nouveau. La reponse de v3.startJob tranche.
+    if (c.again && frais.state === 'done') continue;
     const aide = frais.role === 'helper' && !!frais.lead;
     if (aide && appliquerRole(c, { role: 'helper', lead: frais.lead })) continue;
     if (enAide(c)) {
@@ -985,15 +1014,28 @@ async function convClick(b) {
     if (!apt) return;
     S.activeId = d.id;
     // View as : la conversation est reconstruite de la journee a chaque ouverture,
-    // jamais gardee ni ecrite.
-    if (viewOnly()) S.convs[d.id] = readOnlyConversation(apt, { me: me(), now: new Date() });
-    else if (!S.convs[d.id]) S.convs[d.id] = createConversation(apt, { me: me() });
+    // jamais gardee ni ecrite. Menage fini sur le serveur sans conversation sur ce
+    // telephone (tache 5 du lot 1) : lecture seule, tout de suite, avec la journee
+    // en memoire. Une conversation locale garde son comportement.
+    S.convs[d.id] = conversationToOpen(apt, S.convs[d.id], { me: me(), now: new Date(), viewOnly: viewOnly() });
     S.screen = 'conv'; S.autoOpenedAt = null; render();
     if (!viewOnly()) relireSiBinome(S.convs[d.id], d.id);
     await maybeAutoOpen(); return;
   }
   if (!c) return;
   if (d.act === 'back') { await toList(c); return; }
+  // Menage fini (tache 5 du lot 1) : « Clean again », confirme en deux temps, est le seul geste
+  // de cet ecran et le seul chemin qui relance un menage fini. Le parcours repart comme un menage
+  // neuf, et son demarrage porte l'indicateur explicite.
+  if (c.doneView && !viewOnly()) {
+    if (d.act === 'again-ask') { c.confirmAgain = true; render(); return; }
+    if (d.act === 'again-no') { c.confirmAgain = false; render(); return; }
+    if (d.act !== 'again-yes') return;
+    const apt = S.apartments.find(a => a.id === c.apt.id) || c.apt;
+    S.convs[apt.id] = cleanAgainConversation(apt, { me: me(), now: new Date() });
+    S.autoOpenedAt = null; render();
+    await maybeAutoOpen(); return;
+  }
   // Lecture seule : seul le retour a la liste repond.
   if (c.readOnly || viewOnly()) return;
   if (d.act === 'close-camera') { closeCamera(); render(); return; }

@@ -17,6 +17,10 @@
 // resultat au dernier essai : on ne tranche pas (rend null), sinon les deux se
 // verraient lead (correction 1 de la tache 3). L'appelant libere la cle et rend
 // une erreur relancable : au rejeu, la ligne de la premiere est resolue.
+//
+// Tache 5 : lecture (readStarts) et decision (decideStartRole) sont separees.
+// Entre les deux, v3.startJob juge si le menage est fini avec les memes lignes
+// (garde « menage fini »), et si son « Clean again » ouvre un nouveau menage.
 import { roleFromStarts } from "./v3_finish_context.ts";
 
 // Une ligne plus ancienne sans resultat n'est attendue que si elle date de moins
@@ -35,10 +39,13 @@ export interface StartRole {
 const avant = (a: any, b: any) =>
   String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || Number(a.id) - Number(b.id);
 
-export async function decideStartRole(
-  sb: any, jobId: string, me: { cleaner_id: number; name: string }, idem: string,
+// Lit les start_job du menage, ma ligne comprise. Attend brievement qu'une ligne
+// plus ancienne et recente d'une collegue se resolve (voir plus haut). Rend null
+// si elle reste sans resultat au dernier essai : on ne tranche pas.
+export async function readStarts(
+  sb: any, jobId: string, me: { cleaner_id: number }, idem: string,
   opts: { sleep?: (ms: number) => Promise<void>; nowMs?: number } = {},
-): Promise<StartRole | null> {
+): Promise<any[] | null> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   let rows: any[] = [];
   for (let essai = 0; essai < START_WAIT_TRIES; essai++) {
@@ -56,13 +63,21 @@ export async function decideStartRole(
     if (essai === START_WAIT_TRIES - 1) return null;
     await sleep(START_WAIT_MS);
   }
-  // Ma propre ligne compte comme abouti : son resultat s'ecrit juste apres.
+  return rows;
+}
+
+// Role decide sur les lignes lues par readStarts. `again` : mon demarrage est un
+// « Clean again » accepte (tache 5), il ouvre un nouveau menage dont je suis la
+// premiere, donc la lead ; ma ligne le dira dans son resultat.
+export async function decideStartRole(
+  sb: any, rows: any[], me: { cleaner_id: number; name: string }, idem: string, again = false,
+): Promise<StartRole> {
+  // Ma propre ligne compte comme aboutie : son resultat s'ecrit juste apres.
+  const mon = again ? { status: "success", again: true } : { status: "success" };
   const comptees = rows.filter((r: any) => r.result || r.idem_key === idem)
-    .map((r: any) => r.idem_key === idem ? { ...r, result: r.result ?? { status: "success" } } : r);
-  const { role, leadId } = roleFromStarts(comptees, me.cleaner_id);
+    .map((r: any) => r.idem_key === idem ? { ...r, result: r.result ?? mon } : r);
+  const { role, leadId, leadStartedAt } = roleFromStarts(comptees, me.cleaner_id);
   const idLead = leadId ?? me.cleaner_id;
-  const premier = comptees.filter((r: any) => Number(r.cleaner_id) === idLead).sort(avant)[0];
-  const startedAt = premier && premier.created_at ? String(premier.created_at) : null;
   let name = me.name;
   if (idLead !== Number(me.cleaner_id)) {
     name = "Teammate";
@@ -73,5 +88,5 @@ export async function decideStartRole(
       console.warn("[v3.startJob] nom de la lead illisible: " + String((e as any)?.message ?? e));
     }
   }
-  return { role, lead: { id: idLead, name, startedAt } };
+  return { role, lead: { id: idLead, name, startedAt: leadStartedAt } };
 }

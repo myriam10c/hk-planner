@@ -233,6 +233,45 @@ export function readOnlyConversation(apt, { me, now = new Date() } = {}) {
   return conv;
 }
 
+// Lot 1 des corrections, tâche 5 : ménage fini sur le serveur, sans conversation sur ce téléphone
+// (rechargement après la fin). Avant, il s'ouvrait sur « I'm here » et un appui rouvrait le chrono
+// clos. Il s'ouvre maintenant en lecture seule, avec ce que la journée sait déjà (aucun appel de
+// plus) : début, fin. `doneView` : l'écran propose « Clean again », confirmé en deux temps
+// (`confirmAgain`), seul chemin qui relance un ménage fini.
+export function doneConversation(apt, { me, now = new Date() } = {}) {
+  const conv = createConversation(apt, { me, now });
+  conv.readOnly = true;
+  conv.doneView = true;
+  const debut = dubaiHHMM(apt.startedAt);
+  const fin = dubaiHHMM(apt.finishedAt);
+  conv.viewStatus = fin ? "Cleaning done at " + fin : "Cleaning done";
+  conv.messages = [{ from: "app", type: "text", text: arriveLine(apt), photo: apt.photo }];
+  if (debut) conv.messages.push({ from: "app", type: "text", text: "Started at " + debut + "." });
+  conv.messages.push({ from: "app", type: "text", text: fin ? "Cleaning done at " + fin + "." : "Cleaning done." });
+  return conv;
+}
+
+// Conversation à l'ouverture d'un appartement. View as : la vue du manager, reconstruite à chaque
+// fois. Une conversation locale (en cours ou finie sur ce téléphone) garde son comportement. Un
+// écran en lecture seule resté en mémoire est reconstruit (la journée relue a pu changer). Sinon :
+// ménage fini sur le serveur = lecture seule, autrement une conversation neuve sur « I'm here ».
+export function conversationToOpen(apt, existing, { me, now = new Date(), viewOnly = false } = {}) {
+  if (viewOnly) return readOnlyConversation(apt, { me, now });
+  if (existing && !existing.readOnly) return existing;
+  if (apt.state === "done") return doneConversation(apt, { me, now });
+  return createConversation(apt, { me, now });
+}
+
+// « Clean again » confirmé : le parcours repart comme un ménage neuf, en lead (celle qui relance
+// fait le rapport du nouveau ménage, même si elle était l'aide du premier ; le serveur tranche à
+// la réponse de v3.startJob). `again` : son démarrage porte l'indicateur explicite (sync.js).
+// L'appartement est copié : celui de la journée reste partagé avec la liste et les relectures.
+export function cleanAgainConversation(apt, { me, now = new Date() } = {}) {
+  const conv = createConversation({ ...apt, role: "lead", lead: null }, { me, now });
+  conv.again = true;
+  return conv;
+}
+
 const R = (id, label, enabled = true) => ({ id, label, enabled });
 
 // Le déclencheur ne change jamais de pièce : autant de photos que voulu, puis Next room (actif dès la première).
