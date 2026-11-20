@@ -33,7 +33,7 @@ import {
 } from "./insp_write.ts";
 import { getSecurityContacts, setSecurityContacts } from "./security_contacts.ts";
 import { sessionActor } from "./actor.ts";
-import { mgrAccess, MGR_LOOKBACK_DAYS, MGR_PLANNING_ROLES, planningAccess, normalizeMgrReservations, splitListing, type MgrReservation } from "./mgr_rules.ts";
+import { checkoutKeys, mgrAccess, MGR_LOOKBACK_DAYS, MGR_PLANNING_ROLES, planningAccess, normalizeMgrReservations, splitListing, withBareKeys, type MgrReservation } from "./mgr_rules.ts";
 import { mgrToday } from "./mgr_api.ts";
 import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
@@ -303,7 +303,10 @@ async function buildCheckoutsPayload(sb: any, startDate: string, endDate: string
   const effStart = postponedIn.length
     ? postponedIn.map((r) => r.original_date).sort()[0]
     : startDate;
-  const postKeys = new Set(postponedIn.map((r) => r.reservation_key));
+  // Cles nues comprises (withBareKeys, lot 1 tache 7) : le report d'un menage
+  // suffixe « cle~logement » garde toutes les reservations de sa cle nue, sans
+  // lesquelles la lecture ne saurait plus laquelle garde la cle nue.
+  const postKeys = withBareKeys(postponedIn.map((r) => r.reservation_key));
   const departuresUrl = API_BASE + "/reservations?departureStartDate=" + effStart + "&departureEndDate=" + endDate + "&sortOrder=departureDate&orderDirection=asc";
   // Arrivals window extends 14 days past endDate so each departure can be
   // matched to the NEXT arrival even when it falls outside the queried week.
@@ -1387,7 +1390,8 @@ Deno.serve(async (req: Request) => {
       const ticketRows = donneesOuLeve<any>(ticketRes, "maintenance_tickets");
       const reservations = (payload && payload.reservations) || [];
       const keys = [
-        ...reservations.map((r: any) => String(r.checkOut) + "_" + (r.guest || "Guest")),
+        // Memes cles que buildMyDay (checkoutKeys, lot 1 tache 7), suffixees comprises.
+        ...checkoutKeys(reservations),
         ...extras.map((e: any) => String(e.reservation_key)),
       ].filter((k) => !!k);
       // Toutes les lectures par cle sont bornees aux cles de la semaine lue : ces

@@ -23,6 +23,7 @@ import {
 } from "./v3_day_extras.ts";
 import type { OtherOnJob } from "./v3_day_extras.ts";
 import { extraTimeOut } from "./mgr_extra.ts";
+import { checkoutKeys } from "./mgr_rules.ts";
 import { menageFini } from "./v3_finish_context.ts";
 
 export interface V3Ticket {
@@ -297,8 +298,9 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
   // Chaque entree garde sa cle interne a cote de l'arret, le temps de la
   // construction. Les deux se separent juste avant le retour.
   const brut: Array<{ cle: string; stop: V3Stop }> = [];
-  for (const r of input.reservations ?? []) {
-    const cle = String(r?.checkOut ?? "") + "_" + (r?.guest || "Guest");
+  const cles = checkoutKeys(input.reservations ?? []); // tache 7 : cles de Today et Planning
+  for (const [i, r] of (input.reservations ?? []).entries()) {
+    const cle = cles[i];
     if (!mine.has(cle) || cancelled.has(cle)) continue;
     // Un menage reporte garde sa cle figee sur la date d'origine : sa vraie date
     // vit dans cleaning_postponed (voir applyPostponements cote app.js).

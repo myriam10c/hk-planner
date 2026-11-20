@@ -1,6 +1,7 @@
 // Regles pures de l'app manager /manager/ (spec 2026-10-09-hk-manager-app-design.md,
 // section 5). Aucune base, aucun reseau : tout ce qui decide d'un statut vit ici.
 import { plusDays } from "./v3.ts";
+import { INSP_VALID_STATUSES } from "./insp_rules.ts";
 
 export const MGR_DEFAULT_RISK_HOURS = 6;
 // Heure d'arrivee supposee quand Hostaway n'en donne pas (check-in standard).
@@ -57,9 +58,86 @@ export function normalizeMgrReservations(raw: any[]): MgrReservation[] {
   return out;
 }
 
-// Miroir de keyFor() dans app.js : `${checkOut}_${guest||'Guest'}`.
+// Miroir de keyFor() dans app.js : `${checkOut}_${guest||'Guest'}`. Cle NUE : elle
+// ne porte pas le logement. La cle d'un menage se calcule avec reservationKeys.
 export function reservationKey(r: { departure: string; guest: string }): string {
   return r.departure + "_" + (r.guest || "Guest");
+}
+
+// Separateur du logement dans une cle de menage suffixee (lot 1, tache 7).
+export const KEY_LISTING_SEP = "~";
+
+export type KeyedStay = { id?: unknown; listingId: string; departure: string; guest: string };
+
+// Rang d'anciennete : l'identifiant Hostaway en nombre (« 9 » avant « 10 ») ; un
+// identifiant illisible passe apres tous les autres. A rang egal, le logement
+// departage : jamais l'ordre de la liste, qui change d'une lecture a l'autre.
+const anciennete = (id: unknown): number => {
+  const n = Number(id);
+  return id === null || id === undefined || id === "" || !Number.isFinite(n) ? Infinity : n;
+};
+const plusAncienne = (a: KeyedStay, b: KeyedStay): boolean => {
+  const ra = anciennete(a.id), rb = anciennete(b.id);
+  return ra !== rb ? ra < rb : a.listingId <= b.listingId;
+};
+
+// Cle de menage de chaque reservation d'une liste, dans l'ordre de la liste (lot 1,
+// tache 7). La cle nue ne porte pas le logement : un voyageur qui quittait deux
+// logements le meme jour ne donnait qu'un menage, et l'affectation, le « fait » et
+// l'etat de l'arrivee suivante du premier valaient pour les deux.
+//   - Quand des reservations de logements DIFFERENTS partagent la cle nue, la plus
+//     ancienne (identifiant Hostaway le plus petit, puis le logement) garde la cle
+//     nue pour son logement ; chaque autre logement recoit « cleNue~listingId ».
+//   - Deux reservations du meme logement restent un seul menage, comme avant.
+//   - Sans collision, la cle est exactement celle d'avant (aucune migration).
+//   - Une reservation sans logement garde la cle nue et ne la prend a personne.
+// Today, Planning et la journee de la cleaner passent tous par ici, sur des listes
+// prises AVANT tout filtre par logement ou par personne, statuts valides seulement :
+// chaque lecture voit alors toutes les reservations qui partent le jour d'une cle,
+// et rend la meme cle quel que soit l'ordre de sa liste.
+// Limite : l'ancienne app (app.js, keyFor) et le serveur Python du VPS (saisie
+// d'Elite) ecrivent toujours sous la cle nue, donc sur le menage de la reservation
+// la plus ancienne en cas de collision.
+export function reservationKeys(list: KeyedStay[]): string[] {
+  const out = (list ?? []).map(reservationKey);
+  const groupes = new Map<string, number[]>();
+  out.forEach((k, i) => { if (list[i].listingId) (groupes.get(k) ?? groupes.set(k, []).get(k)!).push(i); });
+  for (const [nue, idx] of groupes) {
+    const aine = idx.reduce((a, b) => (plusAncienne(list[a], list[b]) ? a : b));
+    for (const i of idx) {
+      if (list[i].listingId !== list[aine].listingId) out[i] = nue + KEY_LISTING_SEP + list[i].listingId;
+    }
+  }
+  return out;
+}
+
+// Meme regle sur les lignes du payload checkouts (buildCheckoutsPayload, index.ts) :
+// Planning et la journee de la cleaner lisent ce payload. Une ligne d'un statut
+// non valide ne prend la cle nue a personne, comme dans Today qui l'ecarte avant
+// ses cles (le payload n'en porte deja pas : meme liste de statuts).
+export function checkoutKeys(
+  rows: Array<{ id?: unknown; listingId?: unknown; checkOut?: unknown; guest?: unknown; status?: unknown }>,
+): string[] {
+  return reservationKeys((rows ?? []).map((r) => ({
+    id: r?.id, departure: String(r?.checkOut ?? ""), guest: String(r?.guest ?? ""),
+    listingId: r?.status === undefined || INSP_VALID_STATUSES.includes(String(r.status)) ? String(r?.listingId ?? "") : "",
+  })));
+}
+
+// Les cles donnees plus leurs cles nues. Sert au filtre des reports de
+// buildCheckoutsPayload (index.ts) : le report d'un menage suffixe doit garder dans
+// le payload toutes les reservations de sa cle nue, sinon la lecture ne saurait plus
+// laquelle garde la cle nue. Un « ~ » dans un nom de guest ajoute une cle de trop :
+// elle ne garde qu'un depart hors plage, que chaque lecture ecarte par sa date.
+export function withBareKeys(keys: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const k of keys ?? []) {
+    const s = String(k);
+    out.add(s);
+    const i = s.lastIndexOf(KEY_LISTING_SEP);
+    if (i > 0) out.add(s.slice(0, i));
+  }
+  return out;
 }
 
 export function keyDate(key: string): string | null {

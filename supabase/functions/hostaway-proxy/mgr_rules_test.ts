@@ -1,9 +1,11 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  arrivalStatus, byRoleThenName, dubaiMs, eliteLogDeadlineMs, fmtDur, hhmm, joinNames, keyDate,
-  normalizeMgrReservations, plural, reservationKey, splitListing, usuallyEliteListings,
-  type PrevCleaning,
+  arrivalStatus, byRoleThenName, checkoutKeys, dubaiMs, eliteLogDeadlineMs, fmtDur, hhmm, joinNames, keyDate,
+  normalizeMgrReservations, plural, reservationKey, reservationKeys, splitListing, usuallyEliteListings,
+  withBareKeys, type PrevCleaning,
 } from "./mgr_rules.ts";
+import { dateFromKey } from "./autopilot.ts";
+import { dateDeLaCle } from "./v3_finish_context.ts";
 
 const DAY = "2026-10-09";
 const at = (dubaiHHMM: string) => Date.parse(DAY + "T" + dubaiHHMM + ":00+04:00");
@@ -35,6 +37,69 @@ Deno.test("cle de menage : miroir de keyFor, Guest par defaut ; date d'une cle",
   assertEquals(keyDate("2026-10-07_Jo La"), "2026-10-07");
   assertEquals(keyDate("extra_2026-10-09_deep"), "2026-10-09");
   assertEquals(keyDate("nope"), null);
+});
+
+// Lot 1, tache 7 : un menage par logement quand deux reservations partagent la cle nue.
+const S = (id: unknown, listingId: string, guest: string, departure = DAY) => ({ id, listingId, guest, departure });
+
+Deno.test("cles de menage : deux logements, meme cle nue, la plus ancienne garde la cle nue", () => {
+  // Identifiants compares en nombres : 9 est plus ancien que 10.
+  assertEquals(reservationKeys([S("10", "L1", "Ann Lee"), S("9", "L2", "Ann Lee")]),
+    ["2026-10-09_Ann Lee~L1", "2026-10-09_Ann Lee"]);
+  // Independant de l'ordre de la liste et du type de l'identifiant (nombre du payload checkouts).
+  assertEquals(reservationKeys([S(9, "L2", "Ann Lee"), S(10, "L1", "Ann Lee")]),
+    ["2026-10-09_Ann Lee", "2026-10-09_Ann Lee~L1"]);
+  // Trois logements : chaque autre logement recoit son propre suffixe.
+  assertEquals(reservationKeys([S(5, "L1", "Bo"), S(7, "L3", "Bo"), S(6, "L2", "Bo")]),
+    ["2026-10-09_Bo", "2026-10-09_Bo~L3", "2026-10-09_Bo~L2"]);
+});
+
+Deno.test("cles de menage : guest absent, la cle « Guest » par defaut se partage aussi", () => {
+  assertEquals(reservationKeys([S(3, "L1", ""), S(4, "L2", "")]), ["2026-10-09_Guest", "2026-10-09_Guest~L2"]);
+});
+
+Deno.test("cles de menage : sans collision, exactement la cle d'avant", () => {
+  const list = [S(1, "L1", "Ann Lee"), S(2, "L1", "Bob Ray"), S(3, "L2", "Ann Lee", "2026-10-10"), S(4, "L3", "")];
+  assertEquals(reservationKeys(list), list.map(reservationKey));
+  assertEquals(reservationKeys([]), []);
+});
+
+Deno.test("cles de menage : meme logement en double, toujours un seul menage", () => {
+  assertEquals(reservationKeys([S(8, "L1", "Ann Lee"), S(3, "L1", "Ann Lee")]), ["2026-10-09_Ann Lee", "2026-10-09_Ann Lee"]);
+  // Le logement de la plus ancienne garde la cle nue pour toutes ses reservations.
+  assertEquals(reservationKeys([S(8, "L1", "Ann Lee"), S(3, "L1", "Ann Lee"), S(5, "L2", "Ann Lee")]),
+    ["2026-10-09_Ann Lee", "2026-10-09_Ann Lee", "2026-10-09_Ann Lee~L2"]);
+});
+
+Deno.test("cles de menage : identifiant illisible apres les lisibles, puis ordre des logements", () => {
+  assertEquals(reservationKeys([S(null, "L1", "Ann"), S(12, "L2", "Ann")]), ["2026-10-09_Ann~L1", "2026-10-09_Ann"]);
+  // Deux identifiants illisibles : le logement departage, quel que soit l'ordre ou l'identifiant de repli.
+  assertEquals(reservationKeys([S("L2|a|b", "L2", "Ann"), S(undefined, "L1", "Ann")]), ["2026-10-09_Ann~L2", "2026-10-09_Ann"]);
+  // Une reservation sans logement garde la cle nue et ne la prend a personne.
+  assertEquals(reservationKeys([S(1, "", "Ann"), S(5, "L1", "Ann"), S(6, "L2", "Ann")]),
+    ["2026-10-09_Ann", "2026-10-09_Ann", "2026-10-09_Ann~L2"]);
+});
+
+Deno.test("cles de menage : lignes du payload checkouts (checkOut, guest nul)", () => {
+  assertEquals(checkoutKeys([
+    { id: 101, listingId: "L2", checkOut: DAY, guest: null },
+    { id: 100, listingId: "L1", checkOut: DAY, guest: "" },
+    { id: 102, listingId: "L3", checkOut: DAY, guest: "Ann Lee" },
+  ]), ["2026-10-09_Guest~L2", "2026-10-09_Guest", "2026-10-09_Ann Lee"]);
+  // Statut non valide (Today l'ecarte avant ses cles) : il ne prend la cle nue a personne.
+  assertEquals(checkoutKeys([
+    { id: 99, listingId: "L9", checkOut: DAY, guest: "Ann", status: "cancelled" },
+    { id: 101, listingId: "L2", checkOut: DAY, guest: "Ann", status: "confirmed" },
+    { id: 100, listingId: "L1", checkOut: DAY, guest: "Ann", status: "ownerStay" },
+  ]), ["2026-10-09_Ann", "2026-10-09_Ann~L2", "2026-10-09_Ann"]);
+});
+
+Deno.test("cle suffixee : date lue partout, cles nues des reports", () => {
+  assertEquals(keyDate("2026-10-09_Ann Lee~L2"), "2026-10-09");
+  assertEquals(dateFromKey("2026-10-09_Ann Lee~L2"), "2026-10-09");
+  assertEquals(dateDeLaCle("2026-10-09_Ann Lee~L2"), "2026-10-09");
+  assertEquals([...withBareKeys(["2026-10-07_Jo La", "2026-10-07_Ann~L2", "extra_2026-10-01_x"])].sort(),
+    ["2026-10-07_Ann", "2026-10-07_Ann~L2", "2026-10-07_Jo La", "extra_2026-10-01_x"]);
 });
 
 Deno.test("formats : heures, durees, noms, pluriels, heure Dubai", () => {

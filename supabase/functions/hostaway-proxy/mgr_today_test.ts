@@ -147,3 +147,58 @@ Deno.test("readAllRows : pages explicites, erreur levee avec le nom de la table"
   try { await readAllRows((a, b) => sb.from("t").select("id").range(a, b), "t", 2); } catch (e) { msg = (e as Error).message; }
   assertEquals(msg, "[mgr] t: boom");
 });
+
+// Lot 1, tache 7 : un voyageur qui quitte deux logements le meme jour donne deux
+// menages. 30 (L10) est la plus ancienne et garde la cle nue ; 31 (L11), listee
+// d'abord, recoit « ~L11 ». Le « fait » de l'une et l'affectation de l'autre ne
+// se melangent plus, ni dans les menages ni dans l'etat de l'arrivee suivante.
+const TWINS = [
+  R("31", "L11", "Kim Wu", "2026-10-05", DAY),
+  R("30", "L10", "Kim Wu", "2026-10-05", DAY),
+  R("32", "L10", "Lea Ng", DAY, "2026-10-12", { checkInTime: 16 }),
+  R("33", "L11", "Max Oh", DAY, "2026-10-12", { checkInTime: 17 }),
+];
+const twinDb = () => {
+  const db = seed();
+  db.tables.listing_config.push({ listing_id: "L10", internal_name: "110 - Twin A" }, { listing_id: "L11", internal_name: "111 - Twin B" });
+  db.tables.cleaning_assignments.push({ reservation_key: "2026-10-09_Kim Wu~L11", cleaner_id: 10, service_type: "CHC" });
+  db.tables.menage_done.push({ reservation_key: "2026-10-09_Kim Wu", done: true });
+  return db;
+};
+const isTwin = (l: string) => l === "L10" || l === "L11";
+
+Deno.test("tache 7 : meme depart, meme voyageur, deux logements : deux menages, cles distinctes", async () => {
+  const c = await loadCore(twinDb(), { day: DAY, nowMs: AT_11, riskHours: 6, reservations: [...RES, ...TWINS] });
+  const jobs = buildJobs(c);
+  assertEquals(jobs.filter((j) => isTwin(j.listingId)).map((j) => [j.listingId, j.key, j.state, j.assigned, j.word]), [
+    ["L10", "2026-10-09_Kim Wu", "done", [], "Done"],
+    ["L11", "2026-10-09_Kim Wu~L11", "not_started", [10], "Not started"],
+  ]);
+  // Les menages sans collision gardent exactement leur cle.
+  assertEquals(jobs.filter((j) => !isTwin(j.listingId)).map((j) => j.key), [
+    "2026-10-09_Ann Lee", "2026-10-09_Lu Mo", "2026-10-09_Cy Doe", "2026-10-07_Jo La", "extra_2026-10-09_deep",
+  ]);
+  assertEquals(buildWho(c, jobs).people.find((p) => p.id === 10)!.keys, ["2026-10-09_Kim Wu~L11"]);
+});
+
+Deno.test("tache 7 : l'arrivee suivante de chaque logement lit l'etat de son propre menage", async () => {
+  const c = await loadCore(twinDb(), { day: DAY, nowMs: AT_11, riskHours: 6, reservations: [...RES, ...TWINS] });
+  const rows = buildArrivals(c).rows.filter((r) => isTwin(r.listingId));
+  assertEquals(rows.map((r) => [r.listingId, r.prevKey, r.done, r.cleaners, r.tone, r.cause]), [
+    ["L10", "2026-10-09_Kim Wu", true, [], "ok", "Cleaned after the 12:00 checkout."],
+    ["L11", "2026-10-09_Kim Wu~L11", false, ["Pionah"], "warn", "Not started yet, Pionah. Guest in 6 h, checkout 12:00."],
+  ]);
+});
+
+Deno.test("tache 7 : meme logement en double, toujours un seul menage sous la cle nue", async () => {
+  const dup = [R("41", "L10", "Kim Wu", "2026-10-05", DAY), R("40", "L10", "Kim Wu", "2026-10-06", DAY)];
+  const jobs = buildJobs(await loadCore(twinDb(), { day: DAY, nowMs: AT_11, riskHours: 6, reservations: dup }));
+  assertEquals(jobs.filter((j) => j.kind === "checkout").map((j) => [j.listingId, j.key]), [["L10", "2026-10-09_Kim Wu"]]);
+});
+
+Deno.test("tache 7 : une reservation non valide ne prend pas la cle nue", async () => {
+  // 29 est plus ancienne mais en demande (inquiry) : elle ne compte pas, 30 garde la cle nue.
+  const res = [R("29", "L12", "Kim Wu", "2026-10-05", DAY, { status: "inquiry" }), ...TWINS];
+  const jobs = buildJobs(await loadCore(twinDb(), { day: DAY, nowMs: AT_11, riskHours: 6, reservations: res }));
+  assertEquals(jobs.filter((j) => j.kind === "checkout").map((j) => j.key), ["2026-10-09_Kim Wu", "2026-10-09_Kim Wu~L11"]);
+});

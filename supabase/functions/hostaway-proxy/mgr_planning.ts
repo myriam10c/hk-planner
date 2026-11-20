@@ -9,7 +9,7 @@ import { plusDays } from "./v3.ts";
 import { INSP_VALID_STATUSES } from "./insp_rules.ts";
 import { extraTimeOut } from "./mgr_extra.ts";
 import {
-  byRoleThenName, hhmm, MGR_USUALLY_ELITE_WINDOW_DAYS, reservationKey, splitListing, usuallyEliteListings, type Tone,
+  byRoleThenName, checkoutKeys, hhmm, MGR_USUALLY_ELITE_WINDOW_DAYS, splitListing, usuallyEliteListings, type Tone,
 } from "./mgr_rules.ts";
 import { byKeys, monthsBack, peopleMap, readAllRows, readOrThrow } from "./mgr_today.ts";
 import {
@@ -17,6 +17,7 @@ import {
 } from "./mgr_planning_rules.ts";
 
 export type CheckoutRow = {
+  id?: number | string | null; // identifiant Hostaway : la plus ancienne garde la cle nue (checkoutKeys)
   guest?: string | null; listingId?: string | null; checkOut?: string | null; checkOutTime?: unknown;
   status?: string | null; nextGuest?: { date?: string | null; checkInTime?: unknown; [k: string]: unknown } | null;
 };
@@ -64,7 +65,11 @@ export async function mgrPlanning(sb: any, o: {
     console.error("[mgr.planning] checkouts failed:", e);
     return { status: 503, body: { error: "Bookings are unavailable right now. Try again in a few minutes." } };
   }
-  const res = (loaded.reservations ?? []).filter((r) =>
+  // Cle de chaque menage (lot 1, tache 7) : calculee sur le payload entier, avant
+  // le filtre, comme la journee de la cleaner qui lit le meme payload.
+  const raw = loaded.reservations ?? [];
+  const rawKeys = checkoutKeys(raw);
+  const res = raw.map((r, i) => ({ r, key: rawKeys[i] })).filter(({ r }) =>
     r && r.listingId && r.checkOut && INSP_VALID_STATUSES.includes(String(r.status ?? "")));
 
   // Extras : ceux dont la date tombe pres de la semaine, plus ceux reportes dans
@@ -80,7 +85,7 @@ export async function mgrPlanning(sb: any, o: {
     .filter((e: any) => e.reservation_key && e.status !== "cancelled");
 
   const keys = [...new Set([
-    ...res.map((r) => reservationKey({ departure: String(r.checkOut), guest: String(r.guest ?? "") })),
+    ...res.map((x) => x.key),
     ...extras.map((e: any) => String(e.reservation_key)),
   ])];
   const all = (p: any, what: string) => p.then((r: any) => readOrThrow(r, what));
@@ -151,8 +156,7 @@ export async function mgrPlanning(sb: any, o: {
       laundry: linenMap[key] ?? null, extra, tone: st.tone, word: st.word,
     });
   };
-  for (const r of res) {
-    const key = reservationKey({ departure: String(r.checkOut), guest: String(r.guest ?? "") });
+  for (const { r, key } of res) {
     const ng = r.nextGuest && r.nextGuest.date ? { date: String(r.nextGuest.date), hour: hourOrNull(r.nextGuest.checkInTime) } : null;
     add(key, "checkout", String(r.listingId), String(r.checkOut), hourOrNull(r.checkOutTime), txt(r.guest), ng, null);
   }

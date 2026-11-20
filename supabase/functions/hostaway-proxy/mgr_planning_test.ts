@@ -199,3 +199,51 @@ Deno.test("shortAddress : retire Dubai seul, garde Dubai South", async () => {
   assertEquals(shortAddress("Pulse Residence - Dubai South"), "Pulse Residence - Dubai South");
   assertEquals(shortAddress(null), "");
 });
+
+// Lot 1, tache 7 : un menage par logement quand deux reservations partagent la cle
+// nue. Kim Wu quitte L6 (301, listee d'abord) et L8 (300, la plus ancienne) le 08 ;
+// deux reservations sans nom quittent L1 et L2 le 07 ; L8 porte un doublon (305).
+const TWINS: CheckoutRow[] = [
+  C("L6", "Kim Wu", "2026-10-08", { id: 301 }),
+  C("L8", "Kim Wu", "2026-10-08", { id: 300 }),
+  C("L8", "Kim Wu", "2026-10-08", { id: 305 }),
+  C("L2", "", "2026-10-07", { id: 401 }),
+  C("L1", "", "2026-10-07", { id: 400 }),
+];
+async function runTwins(db = seed()) {
+  const r = await mgrPlanning(db, {
+    start: START, today: TODAY, nowMs: AT_11, me: ME,
+    loadCheckouts: async () => ({ reservations: [...CHECKOUTS, ...TWINS], cachedAt: null }),
+  });
+  assertEquals(r.status, 200);
+  return r.body as MgrPlanning;
+}
+const twin = (j: { key: string }) => j.key.includes("Kim Wu") || j.key.includes("_Guest");
+
+Deno.test("tache 7 : Planning, deux logements meme cle nue : deux menages, la plus ancienne garde la cle nue", async () => {
+  const db = seed();
+  db.tables.cleaning_assignments.push({ reservation_key: "2026-10-08_Kim Wu~L6", cleaner_id: 10, service_type: "CHC" });
+  db.tables.menage_done.push({ reservation_key: "2026-10-08_Kim Wu", done: true });
+  const b = await runTwins(db);
+  assertEquals(b.jobs.filter(twin).map((j) => [j.date, j.key, j.listingId, j.state, j.assigned]), [
+    ["2026-10-07", "2026-10-07_Guest~L2", "L2", "not_started", []],
+    ["2026-10-07", "2026-10-07_Guest", "L1", "not_started", []],
+    ["2026-10-08", "2026-10-08_Kim Wu~L6", "L6", "not_started", [10]],
+    ["2026-10-08", "2026-10-08_Kim Wu", "L8", "done", []],
+  ]);
+  // Sans collision, rien ne change : memes menages, memes cles.
+  assertEquals(b.jobs.filter((j) => !twin(j)).map((j) => j.key), (await run()).jobs.map((j) => j.key));
+});
+
+Deno.test("tache 7 : Planning, le report du menage suffixe ne deplace pas l'autre", async () => {
+  const db = seed();
+  db.tables.cleaning_postponed.push({ reservation_key: "2026-10-08_Kim Wu~L6", original_date: "2026-10-08", new_date: "2026-10-10" });
+  db.tables.cleaning_cancelled.push({ reservation_key: "2026-10-07_Guest~L2", reason: "Owner", cancelled_by: "Walter" });
+  const b = await runTwins(db);
+  assertEquals(b.jobs.filter(twin).map((j) => [j.date, j.key, j.postponedFrom, !!j.cancelled]), [
+    ["2026-10-07", "2026-10-07_Guest~L2", null, true],
+    ["2026-10-07", "2026-10-07_Guest", null, false],
+    ["2026-10-08", "2026-10-08_Kim Wu", null, false],
+    ["2026-10-10", "2026-10-08_Kim Wu~L6", "2026-10-08", false],
+  ]);
+});

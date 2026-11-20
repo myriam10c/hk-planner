@@ -5,7 +5,7 @@ import { plusDays } from "./v3.ts";
 import { dubaiDay, INSP_VALID_STATUSES } from "./insp_rules.ts";
 import {
   arrivalStatus, byRoleThenName, ddmm, dubaiMs, eliteLogDeadlineMs, hhmm, MGR_DEFAULT_CHECKIN_HOUR,
-  MGR_LOOKBACK_DAYS, MGR_USUALLY_ELITE_WINDOW_DAYS, reservationKey, splitListing, usuallyEliteListings,
+  MGR_LOOKBACK_DAYS, MGR_USUALLY_ELITE_WINDOW_DAYS, reservationKeys, splitListing, usuallyEliteListings,
   type MgrReservation, type PrevCleaning, type Tone,
 } from "./mgr_rules.ts";
 import { MGR_OPEN_TICKET_STATUSES } from "./mgr_inbox.ts";
@@ -65,6 +65,14 @@ export function peopleMap(rows: any[]): Record<string, MgrPerson> {
   }]));
 }
 
+// Cle de menage de chaque reservation, par id (reservationKeys, lot 1 tache 7).
+// Toujours calculee sur toutes les reservations valides de Today : une collision
+// entre deux logements se voit en entier dans la fenetre des departs lus.
+function keysById(reservations: MgrReservation[]): Record<string, string> {
+  const ks = reservationKeys(reservations);
+  return Object.fromEntries(reservations.map((r, i) => [r.id, ks[i]]));
+}
+
 export async function byKeys(sb: any, table: string, cols: string, keys: string[]): Promise<any[]> {
   const out: any[] = [];
   for (let i = 0; i < keys.length; i += 100) {
@@ -92,8 +100,9 @@ export async function loadCore(
   ).filter((e: any) => e.status !== "cancelled" && e.reservation_key)
     .map((e: any) => ({ key: String(e.reservation_key), listingId: String(e.listing_id ?? ""), label: String(e.label ?? "Extra cleaning"),
       time: extraTimeOut(e.cleaning_time) }));
+  const keyOf = keysById(reservations);
   const keys = [...new Set([
-    ...reservations.filter((r) => r.departure >= from && r.departure <= day).map(reservationKey),
+    ...reservations.filter((r) => r.departure >= from && r.departure <= day).map((r) => keyOf[r.id]),
     ...extras.map((e: { key: string }) => e.key),
   ])];
   const all = (p: any, what: string) => p.then((r: any) => readOrThrow(r, what));
@@ -192,9 +201,10 @@ export function buildJobs(c: MgrCore): MgrJob[] {
   const from = plusDays(c.day, -MGR_LOOKBACK_DAYS);
   const seen = new Set<string>();
   const jobs: MgrJob[] = [];
+  const keyOf = keysById(c.reservations);
   for (const r of c.reservations) {
     if (r.departure < from || r.departure > c.day) continue;
-    const key = reservationKey(r);
+    const key = keyOf[r.id];
     if (seen.has(key) || c.cancelled.has(key) || (c.postponed[key] ?? r.departure) !== c.day) continue;
     seen.add(key);
     jobs.push(makeJob(c, key, "checkout", r.listingId, r.departure, r.checkOutTime, nextStay(c, r.listingId, c.day, r.id)));
@@ -262,6 +272,7 @@ const SEVERITY: Record<Tone, number> = { bad: 0, warn: 1, idle: 2, ok: 3 };
 
 export function buildArrivals(c: MgrCore): MgrArrivals {
   const rows: MgrArrival[] = [];
+  const keyOf = keysById(c.reservations);
   for (const a of c.reservations) {
     if (a.arrival !== c.day) continue;
     let prev: MgrReservation | null = null;
@@ -275,7 +286,7 @@ export function buildArrivals(c: MgrCore): MgrArrivals {
     let assigned: number[] = [];
     let serviceType: string | null = null;
     if (prev) {
-      const key = reservationKey(prev);
+      const key = keyOf[prev.id];
       const asg = c.assignments[key] ?? [];
       assigned = asg.map((x) => x.cleanerId);
       serviceType = asg[0]?.serviceType ?? null;
