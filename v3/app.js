@@ -40,7 +40,7 @@ import { aptLabel } from '/v3/conv/rules.js';
 import {
   createConversation, currentStep, reply, addPhoto, editProblem, removeProblem, startProblem, chooseKind,
   addFlowPhoto, flowReply, flowBack, currentFlow, reopenProblem, removeArrivalOrEndPhoto, requireLinen,
-  readOnlyConversation, becomeHelper, ticketStill, startTicketFix, addFixPhoto, fixDone, fixCancel,
+  referenceLine, readOnlyConversation, becomeHelper, ticketStill, startTicketFix, addFixPhoto, fixDone, fixCancel,
 } from '/v3/conv/conversation.js';
 import {
   syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL, writeMode,
@@ -248,7 +248,12 @@ const fallbackInput = document.getElementById('cam-fallback');
 // prochaine relecture de la journee en apporte une neuve si elle est perimee.
 appEl.addEventListener('error', evt => {
   const img = evt.target;
-  if (img && img.tagName === 'IMG' && (img.classList.contains('ref') || img.classList.contains('vf-still'))) img.remove();
+  if (!img || img.tagName !== 'IMG' || !(img.classList.contains('ref') || img.classList.contains('vf-still'))) return;
+  // Bulle « make it look like this » : sans image, elle prend le texte de la variante sans photo.
+  const bulle = img.closest('.msg[data-ref-room]');
+  const texte = bulle && bulle.querySelector('p');
+  if (texte) texte.textContent = referenceLine(bulle.dataset.refRoom, false);
+  img.remove();
 }, true);
 const conv = () => S.convs[S.activeId];
 const me = () => (state.day && state.day.me) || { id: null, name: '' };

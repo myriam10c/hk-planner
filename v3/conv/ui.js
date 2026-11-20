@@ -2,7 +2,7 @@
 // Porté du prototype : la liste reçoit les appartements de la journée réelle (day.js).
 import { LINEN_USUAL, GROUP_NAME, CARD_ROOM, aptLabel, dayLine } from "./rules.js";
 import { KINDS, URGENCY } from "./problems.js";
-import { currentStep, currentFlow, elapsedMinutes, isHelper, leadName, ticketCard } from "./conversation.js";
+import { referenceLine, currentStep, currentFlow, elapsedMinutes, isHelper, leadName, ticketCard } from "./conversation.js";
 import { reportText, arrivalText, formatMinutes } from "./report.js";
 import { finishAcked } from "./sync.js";
 import { dayWord } from "./day.js";
@@ -133,7 +133,9 @@ function bubble(conv, m) {
   // Photo de référence : lue sur l'appartement au rendu (refRoom), jamais copiée dans le message.
   const shown = m.refRoom ? (conv.apt.roomPhotos || {})[m.refRoom] : m.photo;
   const who = m.from === "lead" ? '<span class="who">' + escapeHtml(leadName(conv.apt) || "Teammate") + "</span>" : "";
-  return '<div class="msg ' + m.from + (m.alert ? " alert" : "") + '">' + who + (shown ? imgTag(shown, "ref") : "") + "<p>" + escapeHtml(m.text) + "</p>" + ticks + "</div>";
+  // Sans URL au rendu (relecture qui l'a retirée), le texte de la variante sans photo : pas de « like this » dans le vide.
+  const text = m.refRoom ? referenceLine(m.refRoom, !!shown) : m.text;
+  return '<div class="msg ' + m.from + (m.alert ? " alert" : "") + '"' + (m.refRoom ? ' data-ref-room="' + escapeHtml(m.refRoom) + '"' : "") + ">" + who + (shown ? imgTag(shown, "ref") : "") + "<p>" + escapeHtml(text) + "</p>" + ticks + "</div>";
 }
 
 function linenEditor(conv) {

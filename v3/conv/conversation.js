@@ -46,6 +46,9 @@ function leaveLabel(conv, c) { return c.key === "ac" ? conv.acLabel : c.label; }
 // Libellé de la ligne telle qu'elle a été traitée (« Gas not working » si la cleaner a signalé une panne).
 export function leaveDoneLabel(conv, c) { return conv.leave[c.key] === "ko" ? c.ko : leaveLabel(conv, c); }
 
+// Ligne de l'étape 4 : « like this » seulement si une image de référence existe pour la pièce.
+export const referenceLine = (room, hasRef) => room + (hasRef ? ": make it look like this." : ": clean it, then take a photo.");
+
 function botMessage(conv) {
   const st = conv.steps[conv.i];
   if (!st) return null;
@@ -65,8 +68,8 @@ function botMessage(conv) {
       // Pièce sans photo d'annonce : pas de « like this » qui pointerait vers une image absente.
       // Le message garde la pièce, jamais l'URL : le rendu la lit sur l'appartement (relue à chaque journée).
       return a.roomPhotos[st.room]
-        ? { from: "app", type: "text", text: st.room + ": make it look like this.", refRoom: st.room }
-        : { from: "app", type: "text", text: st.room + ": clean it, then take a photo." };
+        ? { from: "app", type: "text", text: referenceLine(st.room, true), refRoom: st.room }
+        : { from: "app", type: "text", text: referenceLine(st.room, false) };
     case "leave": return { from: "app", type: "text", text: "Before you leave, check each one." };
     case "low": return { from: "app", type: "text", text: "Running low? Tap what is missing." };
     // Lead inconnue (correction 2 de la tâche 3) : texte neutre, jamais de plantage.

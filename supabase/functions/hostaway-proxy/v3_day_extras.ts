@@ -166,7 +166,10 @@ export async function loadRoles(
 }
 
 // Photos de reference : pour chaque piece d'un arret, la photo « end:<piece> » du
-// menage PRECEDENT du meme logement, en URL signee 1 h.
+// menage PRECEDENT du meme logement, en URL signee 16 h (V3_REFERENCE_URL_SECONDS).
+//
+// Un arret rend `{}` quand il n'a aucune photo, et `null` quand le serveur n'a pas pu lire ou
+// signer ses photos (references inconnues) : le telephone garde alors sa liste.
 //
 // Menage precedent = le plus recent menage v3 du logement dont la date (prefixe
 // de la reservation_key) ne depasse pas la date demandee, le menage de l'arret
@@ -178,8 +181,8 @@ export async function loadRoles(
 // cleaning_reports.payload.listingId, pose par le serveur a la fin du menage.
 export async function loadReferences(
   sb: any, stops: Array<{ jobId: string; listingId: string; rooms: string[] }>, date: string,
-): Promise<Array<Record<string, string>>> {
-  const out: Array<Record<string, string>> = stops.map(() => ({}));
+): Promise<Array<Record<string, string> | null>> {
+  const out: Array<Record<string, string> | null> = stops.map(() => ({}));
   const logements = [...new Set(stops.map((s) => s.listingId).filter((l) => !!l))];
   if (logements.length === 0) return out;
   try {
@@ -233,13 +236,18 @@ export async function loadReferences(
     if (chemins.length === 0) return out;
     const signees = await signerTout(sb, chemins);
     choix.forEach((c, i) => {
+      if (Object.keys(c).length === 0) return;
+      // Signature en panne : references inconnues pour cet arret, pas « aucune photo ».
+      if (signees === null) { out[i] = null; return; }
+      const mine: Record<string, string> = {};
       for (const [piece, chemin] of Object.entries(c)) {
-        if (signees[chemin]) out[i][piece] = signees[chemin];
+        if (signees[chemin]) mine[piece] = signees[chemin];
       }
+      out[i] = mine;
     });
   } catch (e) {
     console.warn("[v3.myDay] references indisponibles: " + String((e as any)?.message ?? e));
-    return stops.map(() => ({}));
+    return stops.map(() => null);
   }
   return out;
 }
@@ -252,14 +260,14 @@ function dateDuMenage(cle: string): string | null {
 }
 
 // Un seul appel de signature pour toute la journee. Un chemin que le stockage
-// refuse sort simplement de la reponse ; une panne entiere vide les references.
-async function signerTout(sb: any, chemins: string[]): Promise<Record<string, string>> {
+// refuse sort simplement de la reponse ; une panne entiere rend null (references inconnues).
+async function signerTout(sb: any, chemins: string[]): Promise<Record<string, string> | null> {
   const out: Record<string, string> = {};
   const { data, error } = await sb.storage.from(V3_PHOTO_BUCKET)
     .createSignedUrls(chemins, V3_REFERENCE_URL_SECONDS);
   if (error) {
     console.warn("[v3.myDay] signature impossible: " + String((error as any)?.message ?? error));
-    return out;
+    return null;
   }
   for (const d of data ?? []) {
     if (d && !d.error && d.path && d.signedUrl) out[String(d.path)] = String(d.signedUrl);

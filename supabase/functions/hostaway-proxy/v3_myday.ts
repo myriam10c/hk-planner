@@ -61,7 +61,7 @@ export interface V3Stop {
   rooms: string[];            // pieces par type, regle unique cote serveur
   heroPhotoUrl: string | null; // premiere image de l'annonce, cache seulement
   othersOnJob: OtherOnJob[];  // autres personnes du meme menage, par demarrage
-  references: Record<string, string>; // piece -> URL signee 1 h, menage precedent
+  references: Record<string, string> | null; // piece -> URL signee 16 h, menage precedent ; null = inconnues (lecture ou signature en panne)
   // Tache 5 : role sur ce menage selon la regle de v3.finishJob (roleFromStarts).
   // null si la lecture a echoue (le telephone retombe sur othersOnJob).
   role: "lead" | "helper" | null;
@@ -362,7 +362,7 @@ export async function buildMyDay(input: MyDayInput): Promise<MyDayPayload> {
     b.stop.myStartedAt = r.myStartedAt;
   }
   const refs = await loadReferences(input.sb, brut.map((b) => b.stop), input.date);
-  brut.forEach((b, i) => { b.stop.references = refs[i] ?? {}; });
+  brut.forEach((b, i) => { b.stop.references = refs[i] === undefined ? {} : refs[i]; });
 
   const ordered = orderStops(brut.map((b) => b.stop));
   const out: MyDayPayload = {

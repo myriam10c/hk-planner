@@ -411,7 +411,8 @@ test("la bulle de l'étape 4 : une relecture sans photo pour la pièce retire l'
   c.apt.roomPhotos = {};
   let html;
   assert.doesNotThrow(() => { html = renderConversation(c, { now }); });
-  assert.match(html, /<div class="msg app"><p>Bed: make it look like this\.<\/p>/, "texte seul, sans image (la première bulle garde la photo d'annonce)");
+  assert.match(html, /<div class="msg app" data-ref-room="Bed"><p>Bed: clean it, then take a photo\.<\/p>/, "plus de « like this » qui pointerait vers une image absente (même texte que sans référence)");
+  assert.doesNotMatch(html, /make it look like this/);
   assert.doesNotThrow(() => renderViewfinder(c, { live: false }));
 });
 

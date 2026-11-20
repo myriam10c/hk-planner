@@ -124,13 +124,40 @@ function leadOf(stop, meId) {
   return asLead(o);
 }
 
+// Une URL de reference connue est gardee 8 h au plus. La signature du proxy dure 16 h
+// (V3_REFERENCE_URL_SECONDS) : a 8 h, il en reste 8 devant soi, et on en prend une neuve.
+export const REFERENCE_KEEP_MS = 8 * 3600e3;
+
+// Meme fichier = meme origine et meme chemin, la query (jeton de signature) ignoree.
+function memeFichier(a, b) {
+  try {
+    const x = new URL(a), y = new URL(b);
+    return x.origin === y.origin && x.pathname === y.pathname;
+  } catch (e) { return false; }
+}
+
 // Rafraichit les photos de reference d'un appartement depuis le meme appartement de la journee
-// relue (URL signees 16 h, mais une relecture en donne de neuves). Remplace la liste seulement si
-// la journee relue en porte une ; une piece qu'elle ne rend plus disparait (l'image s'efface au
-// rendu, le parcours continue). Rend true si la liste a ete remplacee.
-export function refreshRoomPhotos(apt, fresh) {
-  if (!apt || !fresh || !fresh.roomPhotos || typeof fresh.roomPhotos !== "object") return false;
-  apt.roomPhotos = { ...fresh.roomPhotos };
+// relue. Chaque signature produit un jeton neuf : remplacer une URL qui designe le meme fichier
+// ferait retelecharger l'image (le cache est indexe sur l'URL complete). Par piece : meme fichier et
+// URL connue obtenue il y a moins de REFERENCE_KEEP_MS : on garde l'URL connue et son instant ;
+// sinon (autre fichier, connue trop vieille ou sans instant) on prend la nouvelle, instant present.
+// Une piece que la journee relue ne rend plus est retiree. Journee relue sans cet appartement, ou
+// references inconnues (le serveur n'a pas pu lire ou signer) : rien ne change. Rend true si la
+// liste a ete recalculee.
+export function refreshRoomPhotos(apt, fresh, { now = Date.now() } = {}) {
+  if (!apt || !fresh || fresh.roomPhotosUnknown || !fresh.roomPhotos || typeof fresh.roomPhotos !== "object") return false;
+  const known = apt.roomPhotos || {}, knownAt = apt.roomPhotosAt || {};
+  const photos = {}, at = {};
+  for (const [room, url] of Object.entries(fresh.roomPhotos)) {
+    const t = knownAt[room];
+    if (known[room] && Number.isFinite(t) && now - t < REFERENCE_KEEP_MS && memeFichier(known[room], url)) {
+      photos[room] = known[room]; at[room] = t;
+    } else {
+      photos[room] = url; at[room] = now;
+    }
+  }
+  apt.roomPhotos = photos;
+  apt.roomPhotosAt = at;
   return true;
 }
 
@@ -153,6 +180,10 @@ export function toApartments(payload, me, { now = new Date() } = {}) {
       extraAt: extraAt(s.time),
       photo: s.heroPhotoUrl || null,
       roomPhotos: s.references && typeof s.references === "object" ? { ...s.references } : {},
+      // Instant d'obtention de chaque URL (refreshRoomPhotos) ; null = le serveur n'a pas pu lire ou
+      // signer les photos : une relecture garde alors la liste connue.
+      roomPhotosAt: Object.fromEntries(Object.keys(s.references && typeof s.references === "object" ? s.references : {}).map(r => [r, now.getTime()])),
+      roomPhotosUnknown: s.references === null,
       managerCheck: pest ? { ...PEST, ticketId: pest.id } : null,
       openTickets: tickets,
       lead: leadOf(s, meId),

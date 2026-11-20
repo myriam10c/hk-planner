@@ -194,11 +194,28 @@ Deno.test("references : rien pour une cleaner qui n'a pas ce menage", async () =
   assertEquals(JSON.stringify(out).includes("signed.test"), false);
 });
 
-Deno.test("references : une signature ratee retire la piece sans casser la journee", async () => {
+Deno.test("references : une signature ratee rend null (references inconnues), jamais {} qui effacerait les photos", async () => {
   const base = await avecHistorique();
   (base.sb as any).fail["storage.sign"] = { message: "boom" };
   const out = await buildMyDay(base as any);
+  assertEquals(stopDe(out, "623 Samana Park View").references, null);
+  assertEquals(out.stops.length >= 2, true, "la journee n'est pas cassee");
+});
+
+Deno.test("references : une lecture des photos ratee rend null pour les arrets concernes", async () => {
+  const base = await avecHistorique();
+  (base.sb as any).fail["photos.select"] = { message: "boom" };
+  const out = await buildMyDay(base as any);
+  assertEquals(stopDe(out, "623 Samana Park View").references, null);
+});
+
+Deno.test("references : aucune photo a signer reste {} (aucune photo, pas inconnu)", async () => {
+  const base = await avecHistorique();
+  (base.sb as any).tables.photos = [];
+  (base.sb as any).fail["storage.sign"] = { message: "ne doit pas etre appele" };
+  const out = await buildMyDay(base as any);
   assertEquals(stopDe(out, "623 Samana Park View").references, {});
+  assertEquals(stopDe(out, "704 Golf Links").references, {});
 });
 
 Deno.test("references : un manager en View as voit celles de la cleaner regardee", async () => {

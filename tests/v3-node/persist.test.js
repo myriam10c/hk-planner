@@ -97,3 +97,12 @@ test("envoi d'arrivée relu après rechargement : l'heure reste une Date, le rap
   back.arrivalSentAt = new Date(2026, 9, 26, 10, 7).toISOString();
   assert.match(rt(back, { now: t }), /\(sent 10:07\)/);
 });
+
+// Photos de référence (tâche 4, correction 1) : l'instant d'obtention de chaque URL part avec la conversation.
+test("l'instant des photos de référence est gardé et restauré avec la conversation", () => {
+  const apt = { ...bloom, roomPhotos: { ...bloom.roomPhotos }, roomPhotosAt: { Bed: 1234, Kitchen: 5678 } };
+  const c = createConversation(apt, { me: ME, now: at(9, 0) });
+  const { back } = roundTrip(c);
+  assert.deepEqual(back.apt.roomPhotosAt, { Bed: 1234, Kitchen: 5678 });
+  assert.deepEqual(back.apt.roomPhotos, apt.roomPhotos);
+});

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toApartments, refreshRoomPhotos, splitName, guestOf, dubaiDate, dubaiHHMM } from "../../v3/conv/day.js";
+import { toApartments, refreshRoomPhotos, REFERENCE_KEEP_MS, splitName, guestOf, dubaiDate, dubaiHHMM } from "../../v3/conv/day.js";
 import { aptLabel } from "../../v3/conv/rules.js";
 import { createConversation, reply, addPhoto, currentStep, isHelper } from "../../v3/conv/conversation.js";
 import { DAY, ME, NOW, REF, STOP_OXFORD, STOP_CREEK, STOP_BLOOM } from "./fixtures.js";
@@ -187,23 +187,82 @@ test("extra sans heure, heure absente (ancien proxy) ou invalide : comme avant",
   }
 });
 
-// Photos de référence valables toute la journée (tâche 4) : chaque relecture rafraîchit celles de l'appartement.
-test("refreshRoomPhotos : la journée relue remplace les références, copie comprise", () => {
-  const apt = { id: "j1", roomPhotos: { Bed: "https://old/bed" } };
-  const frais = { id: "j1", roomPhotos: { Bed: "https://new/bed", Kitchen: "https://new/kitchen" } };
-  assert.equal(refreshRoomPhotos(apt, frais), true);
-  assert.deepEqual(apt.roomPhotos, { Bed: "https://new/bed", Kitchen: "https://new/kitchen" });
-  frais.roomPhotos.Bed = "x";
-  assert.equal(apt.roomPhotos.Bed, "https://new/bed", "copie, jamais l'objet de la journée relue");
+// Photos de référence valables toute la journée (tâche 4, correction 1) : une relecture garde l'URL connue
+// quand la nouvelle désigne le même fichier et que la connue date de moins de 8 h (jeton neuf à chaque
+// signature : la remplacer ferait retélécharger l'image).
+const H = 3600e3;
+const T0 = Date.parse("2026-11-20T06:00:00Z");
+const u = (nom, jeton) => "https://x.supabase.co/storage/v1/object/sign/cleaning-photos/v3/" + nom + ".jpg?token=" + jeton;
+const connue = (roomPhotos, roomPhotosAt) => ({ id: "j1", roomPhotos, roomPhotosAt });
+const relue = roomPhotos => ({ id: "j1", roomPhotos, roomPhotosUnknown: false });
+
+test("toApartments : l'instant de chaque référence est celui de la lecture ; references null = inconnues", () => {
+  const [, , bl] = toApartments(DAY, ME, { now: NOW });
+  assert.deepEqual(bl.roomPhotosAt, { Bed: NOW.getTime(), Kitchen: NOW.getTime() });
+  assert.equal(bl.roomPhotosUnknown, false);
+  const inconnu = toApartments({ ...DAY, stops: [{ ...STOP_BLOOM, references: null }] }, ME, { now: NOW })[0];
+  assert.deepEqual(inconnu.roomPhotos, {}, "jamais null : le rendu lit roomPhotos[piece]");
+  assert.equal(inconnu.roomPhotosUnknown, true);
+  const ancien = toApartments({ ...DAY, stops: [{ ...STOP_BLOOM, references: undefined }] }, ME, { now: NOW })[0];
+  assert.equal(ancien.roomPhotosUnknown, false, "un proxy d'avant le lot ne dit rien : aucune photo, comme avant");
 });
 
-test("refreshRoomPhotos : sans appartement relu, rien ne change ; une pièce sans photo relue disparaît", () => {
-  const apt = { id: "j1", roomPhotos: { Bed: "https://old/bed", Kitchen: "https://old/k" } };
-  assert.equal(refreshRoomPhotos(apt, undefined), false);
-  assert.equal(refreshRoomPhotos(apt, { id: "j1" }), false, "journée sans références lisibles : l'ancienne liste reste");
-  assert.deepEqual(apt.roomPhotos, { Bed: "https://old/bed", Kitchen: "https://old/k" });
-  assert.equal(refreshRoomPhotos(apt, { id: "j1", roomPhotos: { Bed: "https://new/bed" } }), true);
-  assert.deepEqual(apt.roomPhotos, { Bed: "https://new/bed" });
-  assert.equal(refreshRoomPhotos(apt, { id: "j1", roomPhotos: {} }), true);
+test("refreshRoomPhotos : même fichier et URL connue de moins de 8 h : on garde l'URL connue et son instant", () => {
+  const apt = connue({ Bed: u("a", "old") }, { Bed: T0 });
+  assert.equal(refreshRoomPhotos(apt, relue({ Bed: u("a", "new") }), { now: T0 + 7 * H }), true);
+  assert.deepEqual(apt.roomPhotos, { Bed: u("a", "old") });
+  assert.deepEqual(apt.roomPhotosAt, { Bed: T0 });
+});
+
+test("refreshRoomPhotos : même fichier mais connue de 8 h ou plus : remplacée, instant présent", () => {
+  const apt = connue({ Bed: u("a", "old") }, { Bed: T0 });
+  refreshRoomPhotos(apt, relue({ Bed: u("a", "new") }), { now: T0 + 8 * H });
+  assert.deepEqual(apt.roomPhotos, { Bed: u("a", "new") });
+  assert.deepEqual(apt.roomPhotosAt, { Bed: T0 + 8 * H });
+  assert.equal(REFERENCE_KEEP_MS, 8 * H);
+});
+
+test("refreshRoomPhotos : autre fichier : remplacée même si la connue est jeune ; autre origine aussi", () => {
+  const apt = connue({ Bed: u("a", "old"), Kitchen: u("k", "old") }, { Bed: T0, Kitchen: T0 });
+  refreshRoomPhotos(apt, relue({ Bed: u("b", "new"), Kitchen: "https://autre.test/storage/v1/object/sign/cleaning-photos/v3/k.jpg?token=new" }), { now: T0 + H });
+  assert.equal(apt.roomPhotos.Bed, u("b", "new"));
+  assert.equal(apt.roomPhotos.Kitchen, "https://autre.test/storage/v1/object/sign/cleaning-photos/v3/k.jpg?token=new");
+  assert.deepEqual(apt.roomPhotosAt, { Bed: T0 + H, Kitchen: T0 + H });
+});
+
+test("refreshRoomPhotos : URL connue sans instant (gardée avant ce lot) : traitée comme trop vieille", () => {
+  const apt = connue({ Bed: u("a", "old") }, undefined);
+  refreshRoomPhotos(apt, relue({ Bed: u("a", "new") }), { now: T0 });
+  assert.equal(apt.roomPhotos.Bed, u("a", "new"));
+  assert.deepEqual(apt.roomPhotosAt, { Bed: T0 });
+  const sans = { id: "j1", roomPhotos: { Bed: u("a", "old") }, roomPhotosAt: { Kitchen: T0 } };
+  refreshRoomPhotos(sans, relue({ Bed: u("a", "new") }), { now: T0 });
+  assert.equal(sans.roomPhotos.Bed, u("a", "new"));
+});
+
+test("refreshRoomPhotos : pièce absente de la relecture retirée ; nouvelle pièce ajoutée ; {} vide la liste", () => {
+  const apt = connue({ Bed: u("a", "x"), Kitchen: u("k", "x") }, { Bed: T0, Kitchen: T0 });
+  refreshRoomPhotos(apt, relue({ Bed: u("a", "y"), Bathroom: u("t", "y") }), { now: T0 + H });
+  assert.deepEqual(apt.roomPhotos, { Bed: u("a", "x"), Bathroom: u("t", "y") });
+  assert.deepEqual(apt.roomPhotosAt, { Bed: T0, Bathroom: T0 + H });
+  assert.equal(refreshRoomPhotos(apt, relue({}), { now: T0 + H }), true);
   assert.deepEqual(apt.roomPhotos, {});
+  assert.deepEqual(apt.roomPhotosAt, {});
+});
+
+test("refreshRoomPhotos : références inconnues, ou appartement non relu : l'ancienne liste reste entière", () => {
+  const apt = connue({ Bed: u("a", "x"), Kitchen: u("k", "x") }, { Bed: T0, Kitchen: T0 });
+  const avant = JSON.stringify(apt);
+  assert.equal(refreshRoomPhotos(apt, undefined, { now: T0 + 20 * H }), false);
+  assert.equal(refreshRoomPhotos(apt, { id: "j1", roomPhotos: {}, roomPhotosUnknown: true }, { now: T0 + 20 * H }), false);
+  assert.equal(refreshRoomPhotos(apt, { id: "j1" }, { now: T0 + 20 * H }), false);
+  assert.equal(JSON.stringify(apt), avant);
+});
+
+test("refreshRoomPhotos : copies, jamais l'objet de la journée relue", () => {
+  const apt = connue({}, {});
+  const fresh = relue({ Bed: u("a", "x") });
+  refreshRoomPhotos(apt, fresh, { now: T0 });
+  fresh.roomPhotos.Bed = "x";
+  assert.equal(apt.roomPhotos.Bed, u("a", "x"));
 });
