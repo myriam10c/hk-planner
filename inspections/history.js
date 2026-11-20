@@ -12,7 +12,7 @@ const ELIG = { checkout: 'Checkout', vacant: 'Vacant', adhoc: 'Ad hoc' };
 export async function renderHistory(ctx) {
   const { go, render, esc } = ctx;
   const isCurrent = ctx.isCurrent || (() => true);
-  const st = { data: null, error: null, edit: null, busy: false, editError: '' };
+  const st = { data: null, error: null, status: 0, loading: false, edit: null, busy: false, editError: '' };
   const me = ctx.me || {};
   const CLOSED = ['resolved', 'cancelled', 'closed'];
   // Date de rectification modifiable : manager ou inspecteur auteur, zone en maintenance, ticket encore ouvert.
@@ -61,7 +61,9 @@ export async function renderHistory(ctx) {
   };
   const body = () => {
     let h = '<main class="wrap"><button class="btn ghost" data-act="back">Back to fleet</button>';
-    if (st.error) return h + '<p class="notice bad" role="alert">' + esc(st.error) + '</p></main>';
+    // Erreur de chargement : Retry (refus 403 : Back, relire n'y change rien), comme Reports.
+    if (st.error) return h + '<p class="notice bad" role="alert">' + esc(st.error) + '</p>'
+      + (st.status === 403 ? '<button class="btn primary" data-act="back">Back</button>' : '<button class="btn primary" data-act="retry">Retry</button>') + '</main>';
     if (!st.data) return h + '<p class="mute">Loading…</p></main>';
     h += '<h1>' + esc(st.data.name) + '</h1>';
     const list = st.data.inspections || [];
@@ -91,11 +93,22 @@ export async function renderHistory(ctx) {
     if (isCurrent()) paint();
   }
 
+  // Lecture de l'entree, relancee par Retry : une seule a la fois (double appui = une requete).
+  async function load() {
+    if (st.loading) return;
+    st.loading = true; st.error = null; st.status = 0;
+    paint();
+    try { st.data = await get('insp.history', { listingId: ctx.listingId }); } catch (e) { st.error = e.message || 'Could not load the history.'; st.status = e.status || 0; }
+    st.loading = false;
+    if (isCurrent()) paint();
+  }
+
   const view = document.getElementById('view');
   view.onclick = (ev) => {
     const b = ev.target.closest('[data-act]');
     if (!b) return;
     if (b.dataset.act === 'back') return go('#/fleet');
+    if (b.dataset.act === 'retry') return load();
     if (b.disabled) return;
     if (b.dataset.act === 'fix-edit') {
       const f = find(b.dataset.k);
@@ -132,7 +145,5 @@ export async function renderHistory(ctx) {
     if (t.dataset.f === 'fixSlot') st.edit.slot = t.value;
   };
 
-  paint();
-  try { st.data = await get('insp.history', { listingId: ctx.listingId }); } catch (e) { st.error = e.message || 'Could not load the history.'; }
-  if (isCurrent()) paint();
+  await load();
 }

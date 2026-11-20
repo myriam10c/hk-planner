@@ -14,7 +14,7 @@ export async function renderFleet(ctx) {
   const isCurrent = ctx.isCurrent || (() => true);
   const isMgr = me.role === 'manager';
   let busy = false;
-  const st = { data: null, error: null, q: '', menu: null };
+  const st = { data: null, error: null, status: 0, loading: false, q: '', menu: null };
 
   const rowHtml = (r) => {
     const id = esc(r.listingId);
@@ -37,7 +37,9 @@ export async function renderFleet(ctx) {
 
   const body = () => {
     let h = '<main class="wrap"><header class="top"><div><h1>Fleet</h1></div><button class="btn ghost" data-act="home">' + (ctx.embedded ? 'Back' : 'Today') + '</button></header>';
-    if (st.error && !st.data) return h + '<p class="notice bad" role="alert">' + esc(st.error) + '</p></main>';
+    // Erreur de chargement : Retry (refus 403 : Back, relire n'y change rien), comme Reports.
+    if (st.error && !st.data) return h + '<p class="notice bad" role="alert">' + esc(st.error) + '</p>'
+      + (st.status === 403 ? '<button class="btn primary" data-act="home">Back</button>' : '<button class="btn primary" data-act="retry">Retry</button>') + '</main>';
     if (!st.data) return h + '<p class="mute">Loading…</p></main>';
     const d = st.data;
     h += '<p class="count">' + esc(d.coveragePct) + '% of apartments inspected in the last 30 days · '
@@ -73,18 +75,27 @@ export async function renderFleet(ctx) {
     if (isCurrent()) paint();
   }
 
+  // Lecture de l'entree, relancee par Retry : une seule a la fois (double appui = une requete).
+  async function load() {
+    if (st.loading) return;
+    st.loading = true; st.error = null; st.status = 0;
+    paint();
+    try { st.data = await get('insp.overview'); } catch (e) { st.error = e.message || 'Could not load the fleet.'; st.status = e.status || 0; }
+    st.loading = false;
+    if (isCurrent()) paint();
+  }
+
   const view = document.getElementById('view');
   view.onclick = (ev) => {
     const b = ev.target.closest('[data-act]');
     if (!b) return;
     const a = b.dataset.act;
     if (a === 'home') return go('#/');
+    if (a === 'retry') return load();
     if (a === 'open') { st.focusQ = false; return go('#/history/' + encodeURIComponent(b.dataset.id)); }
     if (a === 'toggle') { st.focusQ = false; return toggle(b.dataset.id, b.dataset.ex === '1', b); }
   };
   view.oninput = (ev) => { if (ev.target.id === 'fq') { st.q = ev.target.value; st.focusQ = true; paint(); } };
 
-  paint();
-  try { st.data = await get('insp.overview'); } catch (e) { st.error = e.message || 'Could not load the fleet.'; }
-  if (isCurrent()) paint();
+  await load();
 }

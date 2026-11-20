@@ -39,9 +39,17 @@ export async function bootInsp(
         for (const r of cfg.routes) {
           if (url.indexOf(r.match) === -1 || servies.has(r)) continue;
           if (r.once) servies.add(r);
-          const make = () => new Response(r.status === 204 ? null : JSON.stringify(r.body), {
-            status: r.status, headers: { 'Content-Type': 'application/json' },
-          });
+          // Reponse rendue (meme tardive) : notee a part dans inspFetchDone, pour attendre sans delai fixe.
+          const make = () => {
+            try {
+              const l = JSON.parse(localStorage.getItem('inspFetchDone') || '[]');
+              l.push(url);
+              localStorage.setItem('inspFetchDone', JSON.stringify(l.slice(-80)));
+            } catch (e) { /* quota */ }
+            return new Response(r.status === 204 ? null : JSON.stringify(r.body), {
+              status: r.status, headers: { 'Content-Type': 'application/json' },
+            });
+          };
           if (r.delay) return new Promise((res) => setTimeout(() => res(make()), r.delay));
           return Promise.resolve(make());
         }
@@ -60,6 +68,13 @@ export async function fetchLog(page: Page) {
   return await page.evaluate(() => {
     try { return JSON.parse(localStorage.getItem('inspFetchLog') || '[]'); } catch (e) { return []; }
   }) as Array<{ url: string; body: string; headers: any }>;
+}
+
+// URL des reponses deja rendues par le faux serveur (y compris les reponses lentes).
+export async function fetchDone(page: Page) {
+  return await page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('inspFetchDone') || '[]'); } catch (e) { return []; }
+  }) as string[];
 }
 
 export async function noHorizontalScroll(page: Page) {

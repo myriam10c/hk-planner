@@ -121,3 +121,48 @@ test('Today manager : lien Open inspections dans Team control', async ({ page })
   await bootMgr(page, [me(MANAGER), { match: 'action=mgr.today', status: 200, body: todayBody() }], { email: true, clock: NOW });
   await expect(page.getByRole('link', { name: 'Open inspections' })).toHaveAttribute('href', '#/inspections');
 });
+
+// Today des inspections dans la coquille : meme module que /inspections/, memes regles.
+const inspCalls = async (page: any, action: string) => (await fetchLog(page)).filter((l) => l.url.includes('action=' + action)).length;
+const backToTab = (page: any) => page.evaluate(() => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  document.dispatchEvent(new Event('visibilitychange'));
+});
+const frame = (page: any) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
+const INSP_LATER = () => { const r = INSP_TODAY(); r.body.target = 5; return r; };
+
+test('Today inspections : erreur de chargement, Retry recharge (Loading…), double appui = une requete', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { match: 'action=insp.today', status: 503, once: true, body: { error: 'Bookings are unavailable right now. Try again in a few minutes.' } },
+    { ...INSP_TODAY(), delay: 800 }, OVERVIEW], { email: true, hash: '#/inspections', clock: NOW });
+  await expect(page.getByText('Bookings are unavailable right now.', { exact: false })).toBeVisible();
+  await page.locator('#view').getByRole('button', { name: 'Retry' }).dblclick();
+  await expect(page.getByText('Loading…')).toBeVisible();
+  await expect(page.getByText('Apt 101 · Tower A')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+  expect(await inspCalls(page, 'insp.today')).toBe(2);
+  expect(await inspCalls(page, 'insp.overview')).toBe(0);
+});
+
+test('Today inspections : relu au retour sur l onglet au-dela de 60 s, pas avant', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...INSP_TODAY(), once: true }, INSP_LATER()], { email: true, hash: '#/inspections', clock: NOW });
+  await expect(page.getByText('Target today: 4')).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 30_000));
+  await backToTab(page);
+  await frame(page);
+  expect(await inspCalls(page, 'insp.today')).toBe(1);
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await backToTab(page);
+  await expect(page.getByText('Target today: 5')).toBeVisible();
+  expect(await inspCalls(page, 'insp.today')).toBe(2);
+});
+
+test('Today inspections quitte pour Fleet : plus de relecture au retour sur l onglet', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), INSP_TODAY(), OVERVIEW], { email: true, hash: '#/inspections', clock: NOW });
+  await expect(page.getByText('Target today: 4')).toBeVisible();
+  await page.getByRole('button', { name: 'Fleet' }).click();
+  await expect(page.getByRole('heading', { name: 'Fleet', exact: true })).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await backToTab(page);
+  await frame(page);
+  expect(await inspCalls(page, 'insp.today')).toBe(1);
+});

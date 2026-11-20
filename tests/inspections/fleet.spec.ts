@@ -60,3 +60,45 @@ test('parc : saisie lettre par lettre garde la valeur et le focus', async ({ pag
   await expect(page.locator('#fq')).toHaveValue('Apt 3');
   await expect(page.locator('#fq')).toBeFocused();
 });
+
+// Erreur de chargement : Retry relance la lecture de l'entree (Loading… pendant ce temps),
+// un double appui n'envoie qu'une requete. Refus 403 : Back a la place de Retry.
+const count = async (page: any, action: string) => (await fetchLog(page)).filter((l) => l.url.includes('action=' + action)).length;
+
+test('parc : erreur de chargement, Retry recharge (Loading…), double appui = une requete', async ({ page }) => {
+  await bootInsp(page, [MGR, { status: 500, match: 'action=insp.overview', body: { error: 'Server error' }, once: true }, { ...OVERVIEW, delay: 800 }],
+    { pinToken: 'tok', hash: '#/fleet' });
+  await expect(page.getByText('Server error')).toBeVisible();
+  await page.getByRole('button', { name: 'Retry' }).dblclick();
+  await expect(page.getByText('Loading…')).toBeVisible();
+  await expect(page.getByText('Never inspected')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+  expect(await count(page, 'insp.overview')).toBe(2);
+});
+
+test('parc : refus 403, Back et pas de Retry', async ({ page }) => {
+  await bootInsp(page, [MGR, { status: 403, match: 'action=insp.overview', body: { error: 'forbidden' } }], { pinToken: 'tok', hash: '#/fleet' });
+  await expect(page.getByText('forbidden')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(page).toHaveURL(/\/inspections\/#\/$/);
+});
+
+test('historique : erreur de chargement, Retry recharge (Loading…), double appui = une requete', async ({ page }) => {
+  await bootInsp(page, [MGR, { status: 500, match: 'action=insp.history', body: { error: 'Server error' }, once: true }, { ...HISTORY, delay: 800 }],
+    { pinToken: 'tok', hash: '#/history/B' });
+  await expect(page.getByText('Server error')).toBeVisible();
+  await page.getByRole('button', { name: 'Retry' }).dblclick();
+  await expect(page.getByText('Loading…')).toBeVisible();
+  await expect(page.getByText('Good overall')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+  expect(await count(page, 'insp.history')).toBe(2);
+});
+
+test('historique : refus 403, Back et pas de Retry', async ({ page }) => {
+  await bootInsp(page, [MGR, { status: 403, match: 'action=insp.history', body: { error: 'forbidden' } }], { pinToken: 'tok', hash: '#/history/B' });
+  await expect(page.getByText('forbidden')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(page).toHaveURL(/#\/fleet$/);
+});

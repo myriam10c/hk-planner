@@ -1,4 +1,5 @@
 import { get, post } from '/inspections/api.js';
+import { todayDubai } from '/inspections/fix.js';
 
 const TZ = 'Asia/Dubai';
 const hh = (n) => String(n).padStart(2, '0') + ':00';
@@ -6,6 +7,13 @@ const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 const dayMonth = (iso) => { const p = String(iso).split('-'); return Number(p[2]) + ' ' + MON[Number(p[1]) - 1]; };
 const clock = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: TZ });
 const longDate = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+
+// Liste relue au retour au premier plan quand elle a plus d'une minute. Ecran ouvert, le jour
+// de Dubai est verifie toutes les 30 s (une minuterie calee sur minuit glisse quand l'appareil dort).
+const STALE_MS = 60000;
+const DAY_CHECK_MS = 30000;
+// Gestes qui dependent de la liste du jour (Inspect another apartment n'en depend pas).
+const DAY_ACTS = ['claim', 'release', 'assign', 'assign-to', 'start'];
 
 function reason(e) {
   if (!e) return '';
@@ -33,7 +41,14 @@ export async function renderToday(ctx) {
   const isCurrent = ctx.isCurrent || (() => true);
   let busy = false;
   const isMgr = me.role === 'manager';
-  const st = { data: null, error: null, picker: null, assign: null, cleaners: null, q: '' };
+  // okAt : heure de la derniere reponse reussie de insp.today. triedOn : jour de Dubai de la
+  // derniere lecture tentee (une seule tentative automatique par jour). status : code de l'erreur.
+  const st = { data: null, error: null, status: 0, okAt: 0, triedOn: null, picker: null, assign: null, cleaners: null, q: '' };
+  // Une seule lecture de insp.today a la fois (reading) : un appel pendant une lecture en cours
+  // la rejoint. gen compte les reponses de gestes appliquees a la liste : une lecture partie
+  // avant l'une d'elles est ecartee (elle ne remplace pas une reponse plus recente).
+  let reading = null, gen = 0;
+  const view = document.getElementById('view');
 
   const cardHtml = (c) => {
     const mine = c.claimedBy === me.cleaner_id;
@@ -86,6 +101,13 @@ export async function renderToday(ctx) {
     let h = '<main class="wrap">' + head();
     if (st.error) {
       h += '<p class="notice bad" role="alert">' + esc(st.error) + '</p>';
+      // Refus 403 : relire n'y change rien (lien retour vers HK Planner dans l'en-tete). Lecture
+      // en cours : le bouton reste a sa place, desactive, pour qu'un second appui ne tombe pas
+      // sur « Inspect another apartment » remonte sous le doigt.
+      if (st.status !== 403) {
+        h += reading ? '<button class="btn primary" data-act="retry" disabled>Loading…</button>'
+          : '<button class="btn primary" data-act="retry">Retry</button>';
+      }
     } else if (st.data) {
       const d = st.data;
       if (d.cachedAt) h += '<p class="notice">Bookings data from ' + esc(clock(d.cachedAt)) + '</p>';
@@ -104,9 +126,45 @@ export async function renderToday(ctx) {
     const pq = document.getElementById('pq');
     if (pq) { pq.focus(); pq.setSelectionRange(pq.value.length, pq.value.length); }
   };
+  // Repeinte apres une lecture : rien tant que la recherche ou le choix d'une personne est
+  // ouvert (ecran, saisie et focus gardes, liste repeinte au retour). Sur la liste, le bloc
+  // « Also possible today » ouvert le reste et le bouton qui avait le focus le retrouve.
+  function show() {
+    if (!isCurrent() || st.picker || st.assign) return;
+    const also = view.querySelector('details.also');
+    const open = !!(also && also.open);
+    const a = document.activeElement;
+    const sel = a && a !== view && view.contains(a) && a.dataset && a.dataset.act
+      ? '[data-act="' + a.dataset.act + '"]' + (a.dataset.id ? '[data-id="' + CSS.escape(a.dataset.id) + '"]' : '') : null;
+    paint();
+    const d = view.querySelector('details.also');
+    if (d && open) d.open = true;
+    const el = sel && view.querySelector(sel);
+    if (el) el.focus();
+  }
+
+  const isToday = () => !!st.data && st.data.day === todayDubai();
+  function load() {
+    if (reading) return reading;
+    const g = gen;
+    st.triedOn = todayDubai();
+    reading = get('insp.today').then((d) => {
+      if (g !== gen && st.data) return;
+      st.data = d; st.okAt = Date.now(); st.error = null; st.status = 0;
+    }, (e) => {
+      // Relecture ratee : la liste du jour reste telle quelle ; une liste d'un autre jour de
+      // Dubai n'est plus montree, l'erreur et Retry la remplacent.
+      if (isToday()) return;
+      st.data = null; st.error = e.message || 'Could not load today\'s inspections.'; st.status = e.status || 0;
+    }).then(() => { reading = null; show(); });
+    // Sans liste : « Loading… » (premier chargement, ou bouton de l'erreur desactive).
+    if (!st.data) show();
+    return reading;
+  }
 
   function patch(p) {
     if (!p || !st.data) return;
+    gen++;
     for (const c of st.data.today.concat(st.data.also || [])) {
       if (c.listingId === p.listingId) { c.claimedBy = p.claimedBy; c.claimedByName = p.claimedByName; }
     }
@@ -119,21 +177,21 @@ export async function renderToday(ctx) {
     if (btn) btn.disabled = true;
     try { await fn(); } catch (e) {
       toast(e.message || 'Something went wrong.');
-      if (e.kind === 'server') {
-        st.assign = null;
-        try { st.data = await get('insp.today'); st.error = null; } catch (e2) { /* on garde l'ecran actuel */ }
-      }
+      if (e.kind === 'server') { st.assign = null; await load(); }
     } finally { busy = false; }
     if (isCurrent()) paint();
   }
 
-  const view = document.getElementById('view');
   view.onclick = (ev) => {
     const b = ev.target.closest('[data-act]');
     if (!b) return;
     const a = b.dataset.act, id = b.dataset.id;
     if (a === 'fleet') return go('#/fleet');
     if (a === 'reports') return go('#/reports');
+    if (a === 'retry') { load(); return; }
+    // Liste d'un autre jour de Dubai (ou plus de liste) : un geste du jour n'ecrit rien et
+    // n'ouvre rien, il relit Today (une lecture deja en cours n'est pas doublee).
+    if (DAY_ACTS.includes(a) && !isToday()) { if (!busy) load(); return; }
     if (a === 'start') return go('#/inspect/' + encodeURIComponent(id) + '?e=' + (b.dataset.e || 'adhoc'));
     if (a === 'adhoc') return go('#/inspect/' + encodeURIComponent(id) + '?e=adhoc');
     if (a === 'back') { st.picker = null; st.assign = null; st.q = ''; return paint(); }
@@ -157,7 +215,25 @@ export async function renderToday(ctx) {
   };
   view.oninput = (ev) => { if (ev.target.id === 'pq') { st.q = ev.target.value; paint(); } };
 
-  paint();
-  try { st.data = await get('insp.today'); } catch (e) { st.error = e.message || 'Could not load today\'s inspections.'; }
-  if (isCurrent()) paint();
+  // Retour au premier plan : Today relu quand la derniere reponse reussie a plus d'une minute
+  // ou que la liste n'est pas du jour de Dubai. Jamais pendant un geste.
+  const due = () => !st.data || Date.now() - st.okAt > STALE_MS || st.data.day !== todayDubai();
+  const onVis = () => {
+    if (!isCurrent()) { stop(); return; }
+    if (document.visibilityState !== 'visible' || busy) return;
+    if (due()) load();
+  };
+  // Changement de jour de Dubai, ecran ouvert : une seule tentative automatique par jour
+  // (en echec sur la liste de la veille, l'erreur garde Retry).
+  const dayCheck = setInterval(() => {
+    if (!isCurrent()) { stop(); return; }
+    if (busy || reading || !st.data) return;
+    const day = todayDubai();
+    if (st.data.day !== day && st.triedOn !== day) load();
+  }, DAY_CHECK_MS);
+  function stop() { clearInterval(dayCheck); document.removeEventListener('visibilitychange', onVis); }
+  document.addEventListener('visibilitychange', onVis);
+  if (ctx.onLeave) ctx.onLeave(stop);
+
+  await load();
 }

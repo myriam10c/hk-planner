@@ -9,6 +9,10 @@ const TODAY = { status: 200, match: 'action=insp.today', body: { day: '2026-10-0
   today: [card({}), card({ listingId: 'B', name: 'Apt 202 · Tower B', eligibility: { kind: 'vacant', nextArrival: '2026-10-10' }, daysSince: 35, lastInspector: 'Walter', missed: 0, claimedBy: 2, claimedByName: 'Walter' })],
   also: [card({ listingId: 'C', name: 'Apt 303 · Tower C', eligibility: { kind: 'vacant', nextArrival: null }, daysSince: 5, lastInspector: 'Harlene', missed: 0 })] } };
 
+// Liste du mardi 6 octobre : horloge de la page posee ce jour-la (10:00 a Dubai). Sinon la
+// liste serait d'un autre jour de Dubai, et un geste relirait Today au lieu d'ecrire.
+test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-10-06T06:00:00Z')); });
+
 test('liste du jour : raisons, retard, badges, prise en charge', async ({ page }) => {
   await bootInsp(page, [ME, TODAY, { status: 200, match: 'action=insp.claim', body: { proposal: { listingId: 'A', claimedBy: 3, claimedByName: 'Faiza' } } }], { pinToken: 'tok' });
   await expect(page.getByText('Apt 101 · Tower A')).toBeVisible();
