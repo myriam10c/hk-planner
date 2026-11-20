@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { bootV3, fetchLog } from './helpers';
-import { BLOOM, carteAcces, demarrer, ecritures, fileVide, fileVideApresRetour, photo, piece } from './conv-helpers';
+import { BLOOM, DAY, WRITE_ROUTES, carteAcces, demarrer, ecritures, fileVide, fileVideApresRetour, photo, piece } from './conv-helpers';
 
 // File hors ligne de la v3. Les premiers tests passent par sendOrQueue (chemin
 // direct, garde pour les actions hors conversation) et lisent le bandeau « Saved
@@ -34,6 +34,9 @@ const JOURNEE = {
     },
   ],
 };
+
+// Copie de la journee gardee dans IndexedDB (tache 6 du lot 1).
+const copieDuJour = (page: any) => page.evaluate(async () => (await import('/v3/offline.js')).getState('v3Day'));
 
 const ROUTES = [
   { match: 'action=v3.myDay', status: 200, body: JOURNEE },
@@ -124,6 +127,8 @@ test('Sign out vide la file hors ligne et le magasin mort', async ({ page }) => 
     { match: 'action=cleanerLogout', status: 200, body: { status: 'success' } },
   ], { pinToken: 'jeton-pin' });
   await expect(page.locator('.row')).toHaveCount(1);
+  // Copie de la journee (tache 6 du lot 1) : gardee des la lecture, effacee par Sign out.
+  await expect.poll(async () => (await copieDuJour(page)) !== null).toBe(true);
 
   // 1. Un geste refuse par le proxy : il quitte la file pour le magasin mort.
   // Drapeau plutot que context.setOffline : la deconnexion navigue vers « / »,
@@ -163,6 +168,7 @@ test('Sign out vide la file hors ligne et le magasin mort', async ({ page }) => 
     const m = await import('/v3/offline.js');
     return { file: (await m.pendingEntries()).length, morts: (await m.deadEntries()).length };
   })).toEqual({ file: 0, morts: 0 });
+  expect(await copieDuJour(page)).toBeNull();
 });
 
 test('la file survit a un rechargement de page', async ({ page }) => {
@@ -344,4 +350,125 @@ test('une entree illisible au rejeu (erreur locale) part au magasin mort au bout
   expect(r.morts).toEqual(['v3.uploadPhoto']);
   const ticks = (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.tick') !== -1);
   expect(ticks.length).toBe(1);
+});
+
+// ---------------------------------------------------------------------------
+// Liste du jour sans reseau (tache 6 du lot 1). La journee lue avec succes est gardee a part des
+// conversations : entre deux appartements, l'app rouverte sans reseau montre la liste de la
+// derniere lecture, et le menage suivant demarre. Avant, faute de conversation en cours, rien
+// n'etait garde et la cleaner voyait « No network. ».
+// ---------------------------------------------------------------------------
+const heureDubai = (ms: number) => new Date(ms + 4 * 3600e3).toISOString().slice(11, 16);
+const enFile = (page: any) => page.evaluate(async () => (await (await import('/v3/offline.js')).pendingEntries()).length);
+const sansMyDay = WRITE_ROUTES.filter((r) => r.match !== 'action=v3.myDay');
+// Fini a 11:30 (heure de Dubai) ; le suivant de la journee, a faire.
+const BLOOM_FINI = { ...BLOOM, state: 'done', startedAt: '2026-10-02T06:00:00Z', finishedAt: '2026-10-02T07:30:00Z' };
+const OXFORD = { ...BLOOM, jobId: 'job_00000000000000oxf122', listingId: '201', listingName: '122 - Oxford Boulevard' };
+const ROUTES_ENTRE = [{ match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM_FINI, OXFORD] } }, ...sansMyDay];
+
+async function rouvrir(page: any) {
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true);
+}
+
+test('entre deux appartements, app rouverte sans reseau : la liste de la copie, « Offline · list from », le menage suivant demarre en file', async ({ page }) => {
+  await demarrer(page, ROUTES_ENTRE);
+  // Aucune conversation sur le telephone : la journee est gardee quand meme.
+  await expect.poll(async () => ((await copieDuJour(page)) || {}).me).toBe('4');
+  const copie = await copieDuJour(page);
+  expect(copie).toMatchObject({ me: '4', date: DAY.date });
+  expect(copie.day.stops.map((s: any) => s.jobId)).toEqual([BLOOM.jobId, OXFORD.jobId]);
+  expect(await page.evaluate(() => sessionStorage.getItem('v3Convs'))).toBeNull();
+
+  // Coupure par le drapeau du faux fetch (le rechargement doit passer, voir plus haut).
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await rouvrir(page);
+  await expect(page.locator('.row-name')).toHaveText(['1011C Bloom Towers', '122 Oxford Boulevard']);
+  await expect(page.locator('.list-top .updated')).toHaveText('Offline · list from ' + heureDubai(copie.at));
+  await expect(page.getByText('No network.', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /1011C Bloom Towers/ }).locator('.row-sub')).toHaveText('Cleaning done');
+
+  // Le menage suivant demarre et sa premiere photo est prise : tout attend dans la file.
+  await page.getByRole('button', { name: /122 Oxford Boulevard/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
+  await expect.poll(() => enFile(page)).toBe(2);
+  await expect(page.locator('.vf-top b')).toHaveText(/^Step 1 · Bed /);
+
+  // Retour du reseau : la file part, la journee est relue, la copie remplacee, la mention disparait.
+  await page.evaluate(() => { localStorage.removeItem('v3TestOffline'); window.dispatchEvent(new Event('online')); });
+  await fileVideApresRetour(page);
+  const e = await ecritures(page);
+  expect(e.map((x) => x.action)).toEqual(['v3.startJob', 'v3.uploadPhoto']);
+  expect(e[0].body.jobId).toBe(OXFORD.jobId);
+  await expect.poll(async () => ((await copieDuJour(page)) || {}).at > copie.at).toBe(true);
+  await page.locator('[data-act="close-camera"]').click();
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(page.locator('.list-top .updated')).toHaveText(/^Updated \d\d:\d\d$/);
+});
+
+test('la copie suit chaque lecture : un menage fini en ligne est relu, il ne revit pas dans la liste hors ligne', async ({ page }) => {
+  // Le serveur dit le menage fini une fois sa fin recue.
+  await demarrer(page, [
+    { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM, OXFORD] }, once: true },
+    { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM_FINI, OXFORD] } },
+    ...sansMyDay,
+  ]);
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
+  await page.locator('[data-reply="walls-ok"]').click();
+  await page.locator('[data-reply="no-damage"]').click();
+  await page.locator('[data-reply="send-arrival-text"]').click();
+  await page.locator('[data-reply="send-arrival"]').click();
+  await page.locator('[data-reply="linen-yes"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
+  for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
+  await page.locator('[data-reply="low-done"]').click();
+  await page.locator('[data-reply="send-text"]').click();
+  await page.locator('[data-reply="send"]').click();
+  await fileVide(page);
+  // Fin confirmee : la journee est relue et la copie la dit finie ; la conversation n'est plus gardee.
+  await expect.poll(async () => {
+    const c = await copieDuJour(page);
+    return c && c.day.stops[0] ? [c.day.stops[0].state, c.day.stops[0].finishedAt] : null;
+  }).toEqual(['done', BLOOM_FINI.finishedAt]);
+  await expect.poll(async () => page.evaluate(async () => (await (await import('/v3/offline.js')).getState('v3Convs')))).toBeNull();
+
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await rouvrir(page);
+  await expect(page.locator('.list-top .updated')).toHaveText(/^Offline · list from \d\d:\d\d$/);
+  const ligne = page.getByRole('button', { name: /1011C Bloom Towers/ });
+  await expect(ligne.locator('.row-sub')).toHaveText('Cleaning done');
+  await ligne.click();
+  await expect(page.locator('.top .title span')).toHaveText('Cleaning done at 11:30');
+  await expect(page.locator('[data-reply="here"]')).toHaveCount(0);
+});
+
+test('copie d un autre jour de Dubai ou d une autre personne : purgee au demarrage, jamais affichee', async ({ page }) => {
+  await demarrer(page, ROUTES_ENTRE);
+  await expect.poll(async () => (await copieDuJour(page)) !== null).toBe(true);
+  // 1. La copie est celle de la veille.
+  await page.evaluate(async () => {
+    const m = await import('/v3/offline.js');
+    const c = await m.getState('v3Day');
+    await m.putState('v3Day', { ...c, date: '2026-01-01', day: { ...c.day, date: '2026-01-01' } });
+    localStorage.setItem('v3TestOffline', '1');
+  });
+  await rouvrir(page);
+  await expect(page.getByText('No network. Your saved actions will sync on their own.')).toBeVisible();
+  await expect(page.locator('.row')).toHaveCount(0);
+  expect(await copieDuJour(page)).toBeNull();
+
+  // 2. Le telephone a change de main : la copie d'aujourd'hui est celle d'une autre personne.
+  await page.evaluate(() => localStorage.removeItem('v3TestOffline'));
+  await rouvrir(page);
+  await expect(page.locator('.row')).toHaveCount(2);
+  await expect.poll(async () => ((await copieDuJour(page)) || {}).me).toBe('4');
+  await page.evaluate(() => { localStorage.setItem('hkSessionCleanerId', '9'); localStorage.setItem('v3TestOffline', '1'); });
+  await rouvrir(page);
+  await expect(page.getByText('No network. Your saved actions will sync on their own.')).toBeVisible();
+  await expect(page.locator('.row')).toHaveCount(0);
+  expect(await copieDuJour(page)).toBeNull();
 });

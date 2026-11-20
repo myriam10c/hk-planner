@@ -140,20 +140,22 @@ function memeFichier(a, b) {
 // relue. Chaque signature produit un jeton neuf : remplacer une URL qui designe le meme fichier
 // ferait retelecharger l'image (le cache est indexe sur l'URL complete). Par piece : meme fichier et
 // URL connue obtenue il y a moins de REFERENCE_KEEP_MS : on garde l'URL connue et son instant ;
-// sinon (autre fichier, connue trop vieille ou sans instant) on prend la nouvelle, instant present.
+// sinon (autre fichier, connue trop vieille ou sans instant) on prend la nouvelle avec l'instant de
+// la journee relue (celui de la lecture gardee pour une journee reprise de la copie, tache 6 du
+// lot 1), a defaut l'instant present.
 // Une piece que la journee relue ne rend plus est retiree. Journee relue sans cet appartement, ou
 // references inconnues (le serveur n'a pas pu lire ou signer) : rien ne change. Rend true si la
 // liste a ete recalculee.
 export function refreshRoomPhotos(apt, fresh, { now = Date.now() } = {}) {
   if (!apt || !fresh || fresh.roomPhotosUnknown || !fresh.roomPhotos || typeof fresh.roomPhotos !== "object") return false;
-  const known = apt.roomPhotos || {}, knownAt = apt.roomPhotosAt || {};
+  const known = apt.roomPhotos || {}, knownAt = apt.roomPhotosAt || {}, freshAt = fresh.roomPhotosAt || {};
   const photos = {}, at = {};
   for (const [room, url] of Object.entries(fresh.roomPhotos)) {
     const t = knownAt[room];
     if (known[room] && Number.isFinite(t) && now - t < REFERENCE_KEEP_MS && memeFichier(known[room], url)) {
       photos[room] = known[room]; at[room] = t;
     } else {
-      photos[room] = url; at[room] = now;
+      photos[room] = url; at[room] = Number.isFinite(freshAt[room]) ? freshAt[room] : now;
     }
   }
   apt.roomPhotos = photos;
@@ -161,7 +163,9 @@ export function refreshRoomPhotos(apt, fresh, { now = Date.now() } = {}) {
   return true;
 }
 
-export function toApartments(payload, me, { now = new Date() } = {}) {
+// readAt : instant de la lecture de cette journee (ms), qui date les URL signees des references ;
+// celui de la copie gardee pour une journee reprise sans reseau (tache 6 du lot 1). Par defaut, now.
+export function toApartments(payload, me, { now = new Date(), readAt = now.getTime() } = {}) {
   const stops = (payload && Array.isArray(payload.stops)) ? payload.stops : [];
   const meId = me && me.id !== undefined ? String(me.id) : null;
   return stops.map(s => {
@@ -182,7 +186,7 @@ export function toApartments(payload, me, { now = new Date() } = {}) {
       roomPhotos: s.references && typeof s.references === "object" ? { ...s.references } : {},
       // Instant d'obtention de chaque URL (refreshRoomPhotos) ; null = le serveur n'a pas pu lire ou
       // signer les photos : une relecture garde alors la liste connue.
-      roomPhotosAt: Object.fromEntries(Object.keys(s.references && typeof s.references === "object" ? s.references : {}).map(r => [r, now.getTime()])),
+      roomPhotosAt: Object.fromEntries(Object.keys(s.references && typeof s.references === "object" ? s.references : {}).map(r => [r, readAt])),
       roomPhotosUnknown: s.references === null,
       managerCheck: pest ? { ...PEST, ticketId: pest.id } : null,
       openTickets: tickets,

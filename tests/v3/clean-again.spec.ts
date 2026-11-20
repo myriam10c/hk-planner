@@ -17,9 +17,12 @@ const sansMyDay = WRITE_ROUTES.filter((r) => r.match !== 'action=v3.myDay');
 const ROUTES_FINI = [{ match: 'action=v3.myDay', status: 200, body: JOUR_FINI }, ...sansMyDay];
 const REFUS = { status: 422, body: { error: 'Cleaning already done', code: 'job_done' } };
 // La journee du telephone dit encore « todo » (lue avant la fin d'une collegue) : le proxy refuse.
+// Relue apres le refus (tache 6 du lot 1), elle dit le menage fini, avec son heure de fin.
 const ROUTES_REFUS = [
+  { match: 'action=v3.myDay', status: 200, body: DAY, once: true },
+  { match: 'action=v3.myDay', status: 200, body: JOUR_FINI },
   { match: 'action=v3.startJob', ...REFUS },
-  ...WRITE_ROUTES.filter((r) => r.match !== 'action=v3.startJob'),
+  ...WRITE_ROUTES.filter((r) => r.match !== 'action=v3.startJob' && r.match !== 'action=v3.myDay'),
 ];
 
 const morts = (page: Page) => page.evaluate(async () => (await (await import('/v3/offline.js')).deadEntries()).length);
@@ -101,6 +104,13 @@ test('demarrage refuse en ligne (menage fini) : ni erreur brute ni magasin mort,
   expect((await demarrages(page)).length).toBe(1);
   await page.locator('[data-act="back"]').click();
   await expect(page.getByRole('button', { name: /1011C Bloom Towers/ }).locator('.row-sub')).toHaveText('Cleaning done');
+  // Journee relue apres le refus (tache 6 du lot 1) : l'heure de fin est connue, la copie gardee aussi.
+  await expect.poll(async () => page.evaluate(async () => {
+    const c = await (await import('/v3/offline.js')).getState('v3Day');
+    return c && c.day.stops[0].finishedAt;
+  })).toBe(FINI.finishedAt);
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await expect(page.locator('.top .title span')).toHaveText('Cleaning done at 11:30');
 });
 
 test('demarrage refuse au rejeu (hors ligne puis retour) : la file continue derriere, rien au magasin mort', async ({ page }) => {

@@ -96,3 +96,26 @@ export function photoIdems(data) {
   walk([data && data.messages, data && data.arrivalPhotos, data && data.endPhotos, data && data.problems, data && data.tickets]);
   return [...out];
 }
+
+// Copie de la journée (tâche 6 du lot 1) : la dernière lecture réussie de v3.myDay est gardée à
+// part des conversations, pour la personne et le jour de Dubaï de cette lecture, avec l'instant
+// réel de la lecture (`at`, ms). Sans réseau au démarrage, la liste du jour s'affiche depuis elle.
+// Jamais d'une journée View as (ni de Practice, qui en est une). Rend null si rien n'est à garder.
+const JOUR = /^\d{4}-\d{2}-\d{2}$/;
+export function dayCopy(day, at) {
+  if (!isObj(day) || day.viewAs || !isObj(day.me) || day.me.id === undefined || day.me.id === null) return null;
+  if (!JOUR.test(String(day.date || ""))) return null;
+  return { me: String(day.me.id), date: day.date, at: Number.isFinite(at) ? at : 0, day };
+}
+
+// Copie utilisable : celle d'aujourd'hui à Dubaï (`today`), de la personne du téléphone quand elle
+// est connue (`me`), cohérente avec sa journée. Rend { day, at } ou null : une copie refusée est à
+// purger. Une copie sans instant (journée gardée avec les conversations avant ce lot) vaut 0 : ses
+// photos de référence sont tenues pour périmées.
+export function usableDayCopy(saved, { today, me = null } = {}) {
+  const day = isObj(saved) ? saved.day : null;
+  if (!isObj(day) || day.viewAs || !isObj(day.me) || saved.me !== String(day.me.id)) return null;
+  if (saved.date !== today || day.date !== today) return null;
+  if (me !== null && me !== undefined && String(me) !== saved.me) return null;
+  return { day, at: Number.isFinite(saved.at) ? saved.at : 0 };
+}

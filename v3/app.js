@@ -34,7 +34,7 @@ import {
 import { esc, icon, toast } from '/v3/ui.js';
 import profile from '/v3/screens/profile.js';
 import { dubaiDate, toApartments, refreshRoomPhotos } from '/v3/conv/day.js';
-import { needsRefresh, updatedLabel } from '/v3/conv/refresh.js';
+import { needsRefresh, offlineLabel, updatedLabel } from '/v3/conv/refresh.js';
 import { stampText } from '/v3/conv/stamp.js';
 import { aptLabel } from '/v3/conv/rules.js';
 import {
@@ -46,7 +46,7 @@ import {
 import {
   syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL, writeMode,
 } from '/v3/conv/sync.js';
-import { serializeConversation, deserializeConversation, photoIdems } from '/v3/conv/persist.js';
+import { serializeConversation, deserializeConversation, photoIdems, dayCopy, usableDayCopy } from '/v3/conv/persist.js';
 import { reportText, reportFiles, arrivalText, arrivalFiles } from '/v3/conv/report.js';
 import {
   renderList, renderConversation, renderViewfinder, renderToast, renderFlow, renderPhotoView, renderProblemPage,
@@ -565,6 +565,9 @@ onSent(function (entry, data) {
     const change = refreshTicks(c) || parcours;
     persist();
     if (change || (S.screen === 'list')) renderLater();
+    // Fin confirmee (tache 6 du lot 1) : la journee est relue, et la copie gardee dit ce menage
+    // fini, avec son heure de fin. Sans reseau, l'appartement ne repasse jamais « a faire ».
+    if (entry && entry.action === 'v3.finishJob') relireLaJournee({ force: true }).catch(() => { /* la journee en memoire suffit */ });
     return;
   }
 });
@@ -609,6 +612,8 @@ function refusMenageFini(entry, err) {
     persist();
     renderLater();
   }
+  // Journee relue (tache 6 du lot 1) : l'heure de fin et la copie gardee suivent le serveur.
+  relireLaJournee({ force: true }).catch(() => { /* la journee en memoire suffit */ });
   return true;
 }
 function refusLinge(entry, err) {
@@ -675,7 +680,8 @@ function restorePractice() {
 // Gardee dans sessionStorage ET dans IndexedDB : iOS vide sessionStorage quand il
 // ferme l'app installee, la reprise lit alors IndexedDB. Une conversation dont la
 // fin est confirmee par le proxy n'est plus gardee : le serveur fait foi pour
-// elle. Plus rien a reprendre : les deux copies sont effacees.
+// elle. Plus rien a reprendre : les deux copies sont effacees. La journee n'est
+// plus gardee ici mais a part, a chaque lecture (garderJournee, tache 6 du lot 1).
 async function ecrireConvs(snap) {
   const day = snap.day;
   if (!day || !day.me || day.viewAs) return;
@@ -685,11 +691,7 @@ async function ecrireConvs(snap) {
     for (const [id, c] of Object.entries(snap.convs)) if (!finishAcked(c) && !c.readOnly) convs[id] = serializeConversation(c);
   } catch (e) { return; }
   if (!Object.keys(convs).length) { await oublierConvsGardees(); return; }
-  const blob = {
-    me: String(day.me.id), date: day.date, activeId: snap.activeId, screen: snap.screen, convs,
-    // La journee elle-meme : un rechargement sans reseau reprend le menage en cours.
-    day: day,
-  };
+  const blob = { me: String(day.me.id), date: day.date, activeId: snap.activeId, screen: snap.screen, convs };
   try { sessionStorage.setItem(CLE_CONVS, JSON.stringify(blob)); } catch (e) { /* stockage plein ou indisponible */ }
   try { await putState(CLE_CONVS, blob); } catch (e) { /* idem */ }
 }
@@ -707,12 +709,35 @@ async function lireConvs() {
   try { return await getState(CLE_CONVS); } catch (e) { return null; }
 }
 
-// Journee gardee avec les conversations, si elle est bien celle d'aujourd'hui a Dubai.
+// Copie de la journee (tache 6 du lot 1) : chaque lecture reussie de v3.myDay sur la vraie journee
+// (ni Practice, ni View as) remplace la copie, gardee dans IndexedDB a part des conversations, avec
+// l'instant de la lecture. Une seule copie : celle d'un autre jour ou d'une autre personne est
+// remplacee a l'ecriture et purgee au demarrage. Sign out l'efface (Profile).
+const CLE_JOUR = 'v3Day';
+let chaineJour = Promise.resolve();   // ecritures dans l'ordre des lectures
+
+function garderJournee(day, at) {
+  const copie = dayCopy(day, at);
+  if (!copie) return;
+  chaineJour = chaineJour.then(() => putState(CLE_JOUR, copie)).catch(() => { /* stockage plein ou indisponible */ });
+}
+
+// Personne et jour de Dubai qu'une copie doit avoir pour servir.
+const critereCopie = () => ({ today: dubaiDate(new Date()), me: identiteLocale() });
+
+async function purgerJourneeGardee() {
+  let saved = null;
+  try { saved = await getState(CLE_JOUR); } catch (e) { return; }
+  if (!saved || usableDayCopy(saved, critereCopie())) return;
+  try { await deleteState(CLE_JOUR); } catch (e) { /* stockage indisponible */ }
+}
+
+// Journee gardee, si elle est bien celle d'aujourd'hui a Dubai et de cette personne : { day, at }.
+// Repli : la journee que les conversations gardaient avant ce lot (sans instant, at 0).
 async function journeeGardee() {
-  const saved = await lireConvs();
-  const day = saved && saved.day;
-  if (!day || !day.me || saved.me !== String(day.me.id) || day.date !== dubaiDate(new Date())) return null;
-  return day;
+  let saved = null;
+  try { saved = await getState(CLE_JOUR); } catch (e) { saved = null; }
+  return usableDayCopy(saved, critereCopie()) || usableDayCopy(await lireConvs(), critereCopie());
 }
 
 // Conversation qui suit le parcours d'aide (creee ainsi, ou passee en aide).
@@ -1263,6 +1288,7 @@ export async function loadDay({ silent = false } = {}) {
     state.jourGarde = false;
     state.lastRead = { at: Date.now(), date: dubaiDate(new Date()) };
     state.relectureEchec = false;
+    if (writesActive()) garderJournee(data, state.lastRead.at);
     if (mode() === 'practice') restorePractice();
     else if (!repris && writesActive()) {
       repris = true;
@@ -1294,12 +1320,14 @@ export async function loadDay({ silent = false } = {}) {
     if (err instanceof ApiError && err.kind === 'auth') {
       perdreSession();
     } else if (garde) {
-      // Rechargement sans reseau au milieu d'un menage : la journee gardee suffit
-      // pour reprendre la conversation ; la file partira au retour du reseau, et
-      // la journee sera relue a ce moment-la (evenement online).
-      state.day = garde;
+      // Ouverture sans reseau, au milieu d'un menage ou entre deux appartements : la
+      // journee gardee suffit pour la liste et les conversations ; la file partira au
+      // retour du reseau, et la journee sera relue a ce moment-la (evenement online).
+      // Les URL des references ont l'age de la lecture gardee, jamais celui de la reprise.
+      state.day = garde.day;
       state.jourGarde = true;
-      state.apartments = toApartments(state.day, state.day.me, { now: new Date() });
+      state.lastRead = garde.at ? { at: garde.at, date: dubaiDate(new Date(garde.at)) } : null;
+      state.apartments = toApartments(state.day, state.day.me, { now: new Date(), readAt: garde.at });
       repris = true;
       await restoreConvs();
       if (generation !== generationJour) return;
@@ -1347,9 +1375,11 @@ document.addEventListener('visibilitychange', function () {
 });
 
 // Bouton « Refresh » de la liste : absent en Practice et en View as (journee figee).
+// Liste reprise de la copie gardee : « Offline · list from 11:42 » jusqu'a la prochaine lecture reussie.
 function boutonRelire() {
   if (!state.session || state.viewAs || mode() !== 'real') return null;
-  return { label: updatedLabel(state.lastRead && state.lastRead.at), failed: state.relectureEchec, busy: state.relisant };
+  const at = state.lastRead && state.lastRead.at;
+  return { label: state.jourGarde ? offlineLabel(at) : updatedLabel(at), failed: state.relectureEchec, busy: state.relisant };
 }
 
 // Journee reprise de la copie hors ligne : relue des que le reseau revient.
@@ -1397,6 +1427,8 @@ export async function boot() {
   watchNetwork();
   // Photos de plus de deux jours : la journee est finie, elles ne servent plus.
   purgeFiles(2 * 24 * 3600 * 1000).catch(function () { /* stockage indisponible */ });
+  // Copie de la journee d'un autre jour ou d'une autre personne : effacee avant toute lecture.
+  await purgerJourneeGardee();
   state.queued = await pendingCount();
   await loadDay();
   if (navigator.onLine) flush();

@@ -266,3 +266,26 @@ test("refreshRoomPhotos : copies, jamais l'objet de la journée relue", () => {
   fresh.roomPhotos.Bed = "x";
   assert.equal(apt.roomPhotos.Bed, u("a", "x"));
 });
+
+// Journée reprise de la copie gardée (tâche 6 du lot 1) : les URL signées ont l'âge de la lecture
+// gardée, jamais celui de la restauration ; le voyageur suit l'heure présente.
+test("toApartments : readAt (lecture gardée) date les références ; now reste l'heure présente", () => {
+  const lu = NOW.getTime() - 5 * H;
+  const repris = toApartments(DAY, ME, { now: NOW, readAt: lu });
+  assert.deepEqual(repris[2].roomPhotosAt, { Bed: lu, Kitchen: lu });
+  assert.deepEqual(repris[0].guest, toApartments(DAY, ME, { now: NOW })[0].guest);
+  assert.deepEqual(toApartments(DAY, ME, { now: NOW, readAt: 0 })[2].roomPhotosAt, { Bed: 0, Kitchen: 0 }, "copie sans instant : périmées");
+});
+
+test("refreshRoomPhotos : URL prise d'une journée reprise de la copie : instant de cette lecture, jamais l'instant présent", () => {
+  const apt = connue({ Bed: u("a", "old"), Kitchen: u("k", "old") }, { Bed: T0, Kitchen: T0 });
+  // Copie lue à T0 + 9 h, restaurée hors ligne à T0 + 15 h.
+  const copie = { id: "j1", roomPhotos: { Bed: u("a", "copie"), Kitchen: u("z", "copie") }, roomPhotosAt: { Bed: T0 + 9 * H, Kitchen: T0 + 9 * H }, roomPhotosUnknown: false };
+  refreshRoomPhotos(apt, copie, { now: T0 + 15 * H });
+  assert.deepEqual(apt.roomPhotos, { Bed: u("a", "copie"), Kitchen: u("z", "copie") });
+  assert.deepEqual(apt.roomPhotosAt, { Bed: T0 + 9 * H, Kitchen: T0 + 9 * H });
+  // Copie sans instant : 0, la relecture suivante la remplace.
+  const vieux = connue({ Bed: u("a", "old") }, { Bed: T0 });
+  refreshRoomPhotos(vieux, { id: "j1", roomPhotos: { Bed: u("b", "copie") }, roomPhotosAt: { Bed: 0 } }, { now: T0 + H });
+  assert.deepEqual(vieux.roomPhotosAt, { Bed: 0 });
+});

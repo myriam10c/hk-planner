@@ -22,3 +22,10 @@ export function updatedLabel(at) {
   const t = dubaiHHMM(new Date(at).toISOString());
   return t ? "Updated " + t : "";
 }
+
+// Liste reprise de la copie gardee, sans reseau (tache 6 du lot 1) : « Offline · list from 11:42 »,
+// heure de Dubai de la lecture qui l'a donnee ; « Offline » quand cet instant est inconnu.
+export function offlineLabel(at) {
+  const t = Number.isFinite(at) && at > 0 ? dubaiHHMM(new Date(at).toISOString()) : null;
+  return t ? "Offline · list from " + t : "Offline";
+}

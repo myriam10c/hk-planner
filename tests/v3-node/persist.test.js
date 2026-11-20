@@ -2,12 +2,12 @@
 // identique, au même endroit, sans qu'aucun geste déjà parti ne soit réémis.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { APARTMENTS, ME } from "./fixtures.js";
+import { APARTMENTS, DAY, ME } from "./fixtures.js";
 import {
   createConversation, reply, addPhoto, startProblem, chooseKind, addFlowPhoto, flowReply, currentStep, currentFlow,
 } from "../../v3/conv/conversation.js";
 import { syncPlan } from "../../v3/conv/sync.js";
-import { serializeConversation, deserializeConversation, photoIdems } from "../../v3/conv/persist.js";
+import { serializeConversation, deserializeConversation, photoIdems, dayCopy, usableDayCopy } from "../../v3/conv/persist.js";
 
 const [oxford, , bloom] = APARTMENTS;
 const at = (h, m) => new Date(2026, 9, 2, h, m);
@@ -105,4 +105,53 @@ test("l'instant des photos de référence est gardé et restauré avec la conver
   const { back } = roundTrip(c);
   assert.deepEqual(back.apt.roomPhotosAt, { Bed: 1234, Kitchen: 5678 });
   assert.deepEqual(back.apt.roomPhotos, apt.roomPhotos);
+});
+
+// Copie de la journée (tâche 6 du lot 1) : la dernière lecture réussie de v3.myDay est gardée à
+// part des conversations, pour la personne et le jour de Dubaï de cette lecture, avec l'instant réel
+// de la lecture. Sans réseau au démarrage, la liste du jour s'affiche depuis elle.
+const LU = Date.parse("2026-10-02T07:42:00Z"); // 11:42 à Dubaï
+const AUJ = "2026-10-02";
+
+test("copie de la journée : personne, jour de Dubaï et instant de la lecture, avec la journée entière", () => {
+  const copie = dayCopy(DAY, LU);
+  assert.deepEqual(copie, { me: "4", date: AUJ, at: LU, day: DAY });
+  // Elle passe par le stockage sans rien perdre.
+  assert.deepEqual(usableDayCopy(JSON.parse(JSON.stringify(copie)), { today: AUJ, me: "4" }), { day: DAY, at: LU });
+});
+
+test("copie de la journée : jamais d'une journée View as, ni sans personne, ni sans date", () => {
+  assert.equal(dayCopy({ ...DAY, viewAs: true, viewer: { id: 9, name: "Hillal" } }, LU), null);
+  assert.equal(dayCopy({ ...DAY, me: null }, LU), null);
+  assert.equal(dayCopy({ ...DAY, date: undefined }, LU), null);
+  assert.equal(dayCopy(null, LU), null);
+});
+
+test("copie d'un autre jour de Dubaï : jamais utilisée (à purger)", () => {
+  const copie = dayCopy(DAY, LU);
+  assert.equal(usableDayCopy(copie, { today: "2026-10-03", me: "4" }), null);
+  assert.equal(usableDayCopy(copie, { today: "2026-10-01" }), null);
+  // Journée dont la date ne dit pas celle de la copie : incohérente, jamais utilisée.
+  assert.equal(usableDayCopy({ ...copie, day: { ...DAY, date: "2026-10-01" } }, { today: AUJ }), null);
+});
+
+test("copie d'une autre personne : jamais utilisée (à purger) ; identité du téléphone inconnue : acceptée", () => {
+  const copie = dayCopy(DAY, LU);
+  assert.equal(usableDayCopy(copie, { today: AUJ, me: "9" }), null);
+  assert.deepEqual(usableDayCopy(copie, { today: AUJ, me: null }), { day: DAY, at: LU });
+  assert.deepEqual(usableDayCopy(copie, { today: AUJ }), { day: DAY, at: LU });
+  // Copie incohérente (la personne gardée n'est pas celle de la journée), ou journée View as.
+  assert.equal(usableDayCopy({ ...copie, me: "9" }, { today: AUJ }), null);
+  assert.equal(usableDayCopy({ ...copie, day: { ...DAY, viewAs: true } }, { today: AUJ }), null);
+});
+
+test("copie sans instant (journée gardée avec les conversations avant ce lot) : instant 0, photos tenues pour périmées", () => {
+  const ancienne = { me: "4", date: AUJ, activeId: null, screen: "list", convs: {}, day: DAY };
+  assert.deepEqual(usableDayCopy(ancienne, { today: AUJ, me: "4" }), { day: DAY, at: 0 });
+  assert.deepEqual(usableDayCopy({ ...dayCopy(DAY, LU), at: "x" }, { today: AUJ }), { day: DAY, at: 0 });
+  assert.equal(dayCopy(DAY, undefined).at, 0);
+  // Conversations gardées sans journée (forme de ce lot) : rien à afficher.
+  assert.equal(usableDayCopy({ me: "4", date: AUJ, convs: {} }, { today: AUJ }), null);
+  assert.equal(usableDayCopy(null, { today: AUJ }), null);
+  assert.equal(usableDayCopy("x", { today: AUJ }), null);
 });

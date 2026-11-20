@@ -345,6 +345,11 @@ test('3 et 4. tous les gestes marchent comme pour la cleaner, et rien ne part', 
   expect(await fileEtMorts(page)).toEqual({ file: 0, morts: 0 });
   expect(await page.evaluate(() => (window as any).__shared)).toEqual([]);
   expect(await rienDeReel(page)).toEqual({ session: null, idb: null, fichiers: 0 });
+  // Copie de la journee (tache 6 du lot 1) : toujours la vraie journee du manager, jamais celle de Practice.
+  expect(await page.evaluate(async () => {
+    const c = await (await import('/v3/offline.js')).getState('v3Day');
+    return c && { me: c.me, viewAs: !!c.day.viewAs };
+  })).toEqual({ me: '1', viewAs: false });
   await expect(page.getByText('forbidden')).toHaveCount(0);
   await expect(page.getByText('Not sent', { exact: false })).toHaveCount(0);
   await expect(page.getByText('Saved on device', { exact: false })).toHaveCount(0);

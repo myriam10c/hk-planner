@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { needsRefresh, updatedLabel, REFRESH_AFTER_MS } from "../../v3/conv/refresh.js";
+import { needsRefresh, updatedLabel, offlineLabel, REFRESH_AFTER_MS } from "../../v3/conv/refresh.js";
 
 // 2026-11-19 12:04 a Dubai = 08:04 UTC.
 const T = Date.parse("2026-11-19T08:04:00Z");
@@ -37,4 +37,12 @@ test("libelle : « Updated HH:MM » a l'heure de Dubai, vide sans lecture", () =
   assert.equal(updatedLabel(T), "Updated 12:04");
   assert.equal(updatedLabel(Date.parse("2026-11-19T20:05:00Z")), "Updated 00:05");
   assert.equal(updatedLabel(null), "");
+});
+
+// Liste reprise de la copie gardée, sans réseau (tâche 6 du lot 1).
+test("mention hors ligne : « Offline · list from HH:MM » à l'heure de Dubaï de la lecture gardée ; « Offline » sans instant", () => {
+  assert.equal(offlineLabel(T), "Offline · list from 12:04");
+  assert.equal(offlineLabel(Date.parse("2026-11-19T07:42:00Z")), "Offline · list from 11:42");
+  assert.equal(offlineLabel(0), "Offline");
+  assert.equal(offlineLabel(null), "Offline");
 });

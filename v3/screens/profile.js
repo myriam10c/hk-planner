@@ -278,6 +278,8 @@ const actions = {
     try { await clearFiles(); } catch (e) { /* stockage indisponible */ }
     try { sessionStorage.removeItem('v3Convs'); } catch (e) { /* stockage indisponible */ }
     try { await deleteState('v3Convs'); } catch (e) { /* stockage indisponible */ }
+    // Copie de la journee (tache 6 du lot 1) : la liste de la personne qui sort.
+    try { await deleteState('v3Day'); } catch (e) { /* stockage indisponible */ }
     location.replace('/#cleaner');
   },
 };
