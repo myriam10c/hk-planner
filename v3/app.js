@@ -46,7 +46,9 @@ import {
 import {
   syncPlan, finishPlan, ackSync, refreshTicks, runActions, finishAcked, PHOTO_OPTIONAL, writeMode,
 } from '/v3/conv/sync.js';
-import { serializeConversation, deserializeConversation, photoIdems, dayCopy, usableDayCopy } from '/v3/conv/persist.js';
+import {
+  serializeConversation, deserializeConversation, photoIdems, dayCopy, usableDayCopy, withMark, withoutMark, marksAfterRead, applyDoneMarks,
+} from '/v3/conv/persist.js';
 import { reportText, reportFiles, arrivalText, arrivalFiles } from '/v3/conv/report.js';
 import {
   renderList, renderConversation, renderViewfinder, renderToast, renderFlow, renderPhotoView, renderProblemPage,
@@ -565,9 +567,13 @@ onSent(function (entry, data) {
     const change = refreshTicks(c) || parcours;
     persist();
     if (change || (S.screen === 'list')) renderLater();
-    // Fin confirmee (tache 6 du lot 1) : la journee est relue, et la copie gardee dit ce menage
-    // fini, avec son heure de fin. Sans reseau, l'appartement ne repasse jamais « a faire ».
-    if (entry && entry.action === 'v3.finishJob') relireLaJournee({ force: true }).catch(() => { /* la journee en memoire suffit */ });
+    // Fin confirmee (tache 6 du lot 1) : la copie gardee la marque tout de suite, puis la journee
+    // est relue. Si la relecture rate, la marque suffit : sans reseau, l'appartement ne repasse
+    // jamais « a faire » (correction 1).
+    if (entry && entry.action === 'v3.finishJob') {
+      noterFins(withMark(finsAccusees, c.apt.id, Date.now()));
+      relireLaJournee({ force: true }).catch(() => { /* la journee en memoire suffit */ });
+    }
     return;
   }
 });
@@ -715,11 +721,25 @@ async function lireConvs() {
 // remplacee a l'ecriture et purgee au demarrage. Sign out l'efface (Profile).
 const CLE_JOUR = 'v3Day';
 let chaineJour = Promise.resolve();   // ecritures dans l'ordre des lectures
+// Correction 1 : fins accusees sur ce telephone ({ jobId: instant de l'accuse }), ecrites avec la
+// copie. Une relecture ratee apres l'accuse laisse la journee gardee dire le menage « a faire » :
+// la marque le dit fini a la reprise, sans second appel reseau. Seule une lecture reussie partie
+// apres l'accuse la remplace. `jourCopie` : la journee de la copie, pour la reecrire avec ses marques.
+let finsAccusees = {};
+let jourCopie = null;
 
 function garderJournee(day, at) {
-  const copie = dayCopy(day, at);
+  const copie = dayCopy(day, at, finsAccusees);
   if (!copie) return;
+  jourCopie = { day, at: copie.at };
   chaineJour = chaineJour.then(() => putState(CLE_JOUR, copie)).catch(() => { /* stockage plein ou indisponible */ });
+}
+
+// Marques changees (accuse de fin, Clean again) : la copie est reecrite, jamais en Practice ni View as.
+function noterFins(fins) {
+  if (!writesActive()) return;
+  finsAccusees = fins;
+  if (jourCopie) garderJournee(jourCopie.day, jourCopie.at);
 }
 
 // Personne et jour de Dubai qu'une copie doit avoir pour servir.
@@ -1058,6 +1078,8 @@ async function convClick(b) {
     if (d.act !== 'again-yes') return;
     const apt = S.apartments.find(a => a.id === c.apt.id) || c.apt;
     S.convs[apt.id] = cleanAgainConversation(apt, { me: me(), now: new Date() });
+    // La marque de fin de ce menage part : le nouveau parcours n'est pas masque a la reprise.
+    if (apt.id in finsAccusees) noterFins(withoutMark(finsAccusees, apt.id));
     S.autoOpenedAt = null; render();
     await maybeAutoOpen(); return;
   }
@@ -1255,6 +1277,7 @@ export async function loadDay({ silent = false } = {}) {
     state.error = '';
     render();
   }
+  const debut = Date.now();   // une fin accusee apres ce depart n'est peut-etre pas dans la reponse
   try {
     const data = await api.get('v3.myDay', vue ? { as: vue.id } : {});
     if (generation !== generationJour) return;
@@ -1288,7 +1311,10 @@ export async function loadDay({ silent = false } = {}) {
     state.jourGarde = false;
     state.lastRead = { at: Date.now(), date: dubaiDate(new Date()) };
     state.relectureEchec = false;
-    if (writesActive()) garderJournee(data, state.lastRead.at);
+    if (writesActive()) {
+      finsAccusees = marksAfterRead(finsAccusees, debut);
+      garderJournee(data, state.lastRead.at);
+    }
     if (mode() === 'practice') restorePractice();
     else if (!repris && writesActive()) {
       repris = true;
@@ -1324,10 +1350,13 @@ export async function loadDay({ silent = false } = {}) {
       // journee gardee suffit pour la liste et les conversations ; la file partira au
       // retour du reseau, et la journee sera relue a ce moment-la (evenement online).
       // Les URL des references ont l'age de la lecture gardee, jamais celui de la reprise.
+      // Un menage dont la fin a ete accusee ici s'ouvre fini, comme cote serveur (correction 1).
       state.day = garde.day;
       state.jourGarde = true;
       state.lastRead = garde.at ? { at: garde.at, date: dubaiDate(new Date(garde.at)) } : null;
-      state.apartments = toApartments(state.day, state.day.me, { now: new Date(), readAt: garde.at });
+      finsAccusees = garde.done;
+      jourCopie = { day: garde.day, at: garde.at };
+      state.apartments = toApartments(applyDoneMarks(state.day, garde.done), state.day.me, { now: new Date(), readAt: garde.at });
       repris = true;
       await restoreConvs();
       if (generation !== generationJour) return;

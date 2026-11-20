@@ -561,3 +561,69 @@ test('trois demandes forcees pendant une relecture : une seule relecture de ratt
   expect(await page.evaluate(async () => (await import('/v3/app.js')).relireLaJournee({ force: true }))).toBe(true);
   expect(await nbMyDay(page)).toBe(6);
 });
+
+// Correction 1 (tache 6 du lot 1) : une fin accusee se lit dans la copie gardee, sans second appel
+// reseau. Avant, une relecture en echec juste apres l'envoi du rapport laissait la copie dire le
+// menage « a faire » : rouverte sans reseau, l'app proposait de le refaire (« I'm here »).
+const marques = async (page: any) => ((await copieDuJour(page)) || {}).done;
+
+test('fin accusee puis relecture en echec (500) : rouverte sans reseau, « Cleaning done » a l heure de l accuse, jamais « I m here »', async ({ page }) => {
+  await demarrer(page, [
+    { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM, OXFORD] }, once: true },
+    { match: 'action=v3.myDay', status: 500, body: { error: 'boom' }, once: true, hold: 'relue' },
+    ...sansMyDay,
+  ]);
+  await menageComplet(page, /1011C Bloom Towers/);
+  await fileVide(page);
+  // Fin accusee, relecture en vol puis refusee : la journee gardee reste celle d'avant la fin.
+  await expect.poll(() => nbMyDay(page)).toBe(2);
+  await liberer(page, 'relue');
+  await expect.poll(() => page.evaluate(() => (window as any).__hk.relectureEchec)).toBe(true);
+  expect(await etatsCopie(page)).toEqual(['todo', 'todo']);
+
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await rouvrir(page);
+  const ligne = page.getByRole('button', { name: /1011C Bloom Towers/ });
+  await expect(ligne.locator('.row-sub')).toHaveText('Cleaning done');
+  await ligne.click();
+  await expect(page.locator('[data-reply="here"]')).toHaveCount(0);
+  // La marque gardee avec la copie donne l'heure de l'accuse.
+  const done = await marques(page);
+  expect(Object.keys(done)).toEqual([BLOOM.jobId]);
+  await expect(page.locator('.top .title span')).toHaveText('Cleaning done at ' + heureDubai(done[BLOOM.jobId]));
+  // « Clean again » confirme : la marque de ce menage part, le nouveau parcours s'ouvre.
+  await page.locator('[data-act="again-ask"]').click();
+  await page.locator('[data-act="again-yes"]').click();
+  await expect(page.locator('[data-reply="here"]')).toBeVisible();
+  await expect.poll(() => marques(page)).toEqual({});
+});
+
+test('lecture partie avant l accuse de fin et arrivee apres : la marque reste ; la lecture partie apres fait foi et l efface', async ({ page }) => {
+  await demarrer(page, [
+    { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM, OXFORD] }, once: true },
+    // Partie avant l'accuse : le serveur n'avait pas encore la fin.
+    { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM, OXFORD] }, once: true, hold: 'avant' },
+    // Partie apres l'accuse (relecture de rattrapage) : le serveur dit le menage fini.
+    { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM_FINI, OXFORD] }, once: true, hold: 'apres' },
+    { match: 'action=v3.finishJob', status: 200, body: { status: 'success', role: 'lead', durationMinutes: 90 }, hold: 'fin' },
+    ...sansMyDay,
+  ]);
+  await menageComplet(page, /1011C Bloom Towers/);
+  const lueAuDepart = (await copieDuJour(page)).at;
+  // Une lecture part pendant que la fin attend sa reponse.
+  await page.evaluate(async () => { (window as any).__avant = (await import('/v3/app.js')).relireLaJournee({ force: true }); });
+  await expect.poll(() => nbMyDay(page)).toBe(2);
+  await liberer(page, 'fin');
+  await expect.poll(async () => Object.keys((await marques(page)) || {})).toEqual([BLOOM.jobId]);
+  await liberer(page, 'avant');
+  expect(await page.evaluate(() => (window as any).__avant)).toBe(true);
+  // Copie remplacee par cette lecture, la marque gardee.
+  await expect.poll(async () => ((await copieDuJour(page)) || {}).at > lueAuDepart).toBe(true);
+  expect(await etatsCopie(page)).toEqual(['todo', 'todo']);
+  expect(Object.keys(await marques(page))).toEqual([BLOOM.jobId]);
+  // La relecture demandee a l'accuse part ensuite : elle fait foi, la marque part.
+  await expect.poll(() => nbMyDay(page)).toBe(3);
+  await liberer(page, 'apres');
+  await expect.poll(() => etatsCopie(page)).toEqual(['done', 'todo']);
+  expect(await marques(page)).toEqual({});
+});

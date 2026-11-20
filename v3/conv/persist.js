@@ -102,20 +102,63 @@ export function photoIdems(data) {
 // réel de la lecture (`at`, ms). Sans réseau au démarrage, la liste du jour s'affiche depuis elle.
 // Jamais d'une journée View as (ni de Practice, qui en est une). Rend null si rien n'est à garder.
 const JOUR = /^\d{4}-\d{2}-\d{2}$/;
-export function dayCopy(day, at) {
+export function dayCopy(day, at, done = {}) {
   if (!isObj(day) || day.viewAs || !isObj(day.me) || day.me.id === undefined || day.me.id === null) return null;
   if (!JOUR.test(String(day.date || ""))) return null;
-  return { me: String(day.me.id), date: day.date, at: Number.isFinite(at) ? at : 0, day };
+  return { me: String(day.me.id), date: day.date, at: Number.isFinite(at) ? at : 0, day, done: marquesLisibles(done) };
 }
 
 // Copie utilisable : celle d'aujourd'hui à Dubaï (`today`), de la personne du téléphone quand elle
-// est connue (`me`), cohérente avec sa journée. Rend { day, at } ou null : une copie refusée est à
-// purger. Une copie sans instant (journée gardée avec les conversations avant ce lot) vaut 0 : ses
-// photos de référence sont tenues pour périmées.
+// est connue (`me`), cohérente avec sa journée. Rend { day, at, done } ou null : une copie refusée
+// est à purger, ses fins accusées avec elle. Une copie sans instant (journée gardée avec les
+// conversations avant ce lot) vaut 0 : ses photos de référence sont tenues pour périmées.
 export function usableDayCopy(saved, { today, me = null } = {}) {
   const day = isObj(saved) ? saved.day : null;
   if (!isObj(day) || day.viewAs || !isObj(day.me) || saved.me !== String(day.me.id)) return null;
   if (saved.date !== today || day.date !== today) return null;
   if (me !== null && me !== undefined && String(me) !== saved.me) return null;
-  return { day, at: Number.isFinite(saved.at) ? saved.at : 0 };
+  return { day, at: Number.isFinite(saved.at) ? saved.at : 0, done: marquesLisibles(saved.done) };
+}
+
+// Fins accusées (correction 1 de la tâche 6) : { jobId: instant de l'accusé de v3.finishJob }, gardées
+// avec la copie de la journée, donc pour la même personne et le même jour de Dubaï, purgées et
+// effacées avec elle. Elles disent fini, sans second appel réseau, un ménage que la journée gardée
+// croit encore à faire (relecture ratée après l'accusé). Jamais modifiées en place.
+function marquesLisibles(done) {
+  const out = {};
+  if (!isObj(done)) return out;
+  for (const [id, at] of Object.entries(done)) if (Number.isFinite(at)) out[id] = at;
+  return out;
+}
+
+export function withMark(done, jobId, at) {
+  return { ...marquesLisibles(done), [jobId]: at };
+}
+
+// « Clean again » confirmé : le nouveau parcours de ce ménage ne doit pas être masqué.
+export function withoutMark(done, jobId) {
+  const out = marquesLisibles(done);
+  delete out[jobId];
+  return out;
+}
+
+// Lecture réussie partie à `startedAt` : elle fait foi pour toute fin accusée avant son départ, et
+// remplace donc ces marques. Une fin accusée pendant le vol de la lecture (même instant compris)
+// n'y est peut-être pas : sa marque reste.
+export function marksAfterRead(done, startedAt) {
+  const out = {};
+  for (const [id, at] of Object.entries(marquesLisibles(done))) if (at >= startedAt) out[id] = at;
+  return out;
+}
+
+// Journée reprise sans réseau : un ménage marqué est fini, avec l'heure de l'accusé quand la copie
+// n'a pas d'heure de fin. Rend la même journée sans marque utile ; sinon une copie, les autres
+// ménages inchangés.
+export function applyDoneMarks(day, done) {
+  const marques = marquesLisibles(done);
+  if (!isObj(day) || !Array.isArray(day.stops) || !day.stops.some(s => isObj(s) && s.jobId in marques)) return day;
+  const stops = day.stops.map(s => (isObj(s) && s.jobId in marques
+    ? { ...s, state: "done", finishedAt: s.finishedAt || new Date(marques[s.jobId]).toISOString() }
+    : s));
+  return { ...day, stops };
 }
