@@ -607,6 +607,9 @@ function refusMenageFini(entry, err) {
   const id = entry.body && entry.body.jobId;
   const apt = S.apartments.find(a => a.id === id);
   if (apt) apt.state = 'done';
+  // Le serveur dit ce menage fini : la copie le retient sans attendre la relecture (correction 1,
+  // complement). Heure de fin inconnue : l'instant du refus ne sert qu'a l'ordre des lectures.
+  if (id) noterFins(withMark(finsAccusees, id, Date.now(), { timeKnown: false }));
   const c = S.convs[id];
   if (c && c.sync && c.sync.started === entry.body.idem) {
     if (S.activeId === id && S.screen === 'conv') {
@@ -721,10 +724,11 @@ async function lireConvs() {
 // remplacee a l'ecriture et purgee au demarrage. Sign out l'efface (Profile).
 const CLE_JOUR = 'v3Day';
 let chaineJour = Promise.resolve();   // ecritures dans l'ordre des lectures
-// Correction 1 : fins accusees sur ce telephone ({ jobId: instant de l'accuse }), ecrites avec la
-// copie. Une relecture ratee apres l'accuse laisse la journee gardee dire le menage « a faire » :
-// la marque le dit fini a la reprise, sans second appel reseau. Seule une lecture reussie partie
-// apres l'accuse la remplace. `jourCopie` : la journee de la copie, pour la reecrire avec ses marques.
+// Correction 1 : fins accusees sur ce telephone ({ jobId: { at, timeKnown } }, voir persist.js),
+// ecrites avec la copie. Une relecture ratee apres l'accuse (ou apres un refus 422) laisse la
+// journee gardee dire le menage « a faire » : la marque le dit fini a la reprise, sans second appel
+// reseau. Seule une lecture reussie partie apres la marque la remplace. `jourCopie` : la journee de
+// la copie, pour la reecrire avec ses marques.
 let finsAccusees = {};
 let jourCopie = null;
 

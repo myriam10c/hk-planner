@@ -163,52 +163,82 @@ test("copie sans instant (journée gardée avec les conversations avant ce lot) 
 // Fins accusées (correction 1 de la tâche 6) : une fin confirmée par le proxy est marquée dans la copie
 // gardée, sans attendre une relecture. À la reprise sans réseau, le ménage marqué s'ouvre comme un
 // ménage fini côté serveur ; seule une lecture partie APRÈS l'accusé efface la marque.
+// Complément : un refus 422 `job_done` marque aussi le ménage, sans heure de fin connue. Son instant
+// ne sert qu'à l'ordre des lectures, jamais d'heure de fin. Une marque : { at, timeKnown }.
 const BLOOM_ID = DAY.stops[2].jobId, OXFORD_ID = DAY.stops[0].jobId;
 const ACCUSE = Date.parse("2026-10-02T08:15:00Z"); // 12:15 à Dubaï
+const avecHeure = at => ({ at, timeKnown: true });
+const sansHeure = at => ({ at, timeKnown: false });
 
 test("fin accusée : marquée, gardée avec la copie et rendue à la reprise ; marques illisibles écartées", () => {
   const done = withMark({}, BLOOM_ID, ACCUSE);
-  assert.deepEqual(done, { [BLOOM_ID]: ACCUSE });
+  assert.deepEqual(done, { [BLOOM_ID]: avecHeure(ACCUSE) });
   const copie = JSON.parse(JSON.stringify(dayCopy(DAY, LU, done)));
-  assert.deepEqual(usableDayCopy(copie, { today: AUJ, me: "4" }), { day: DAY, at: LU, done: { [BLOOM_ID]: ACCUSE } });
-  assert.deepEqual(usableDayCopy({ ...copie, done: { [BLOOM_ID]: "x", a: null, [OXFORD_ID]: ACCUSE } }, { today: AUJ }).done, { [OXFORD_ID]: ACCUSE });
+  assert.deepEqual(usableDayCopy(copie, { today: AUJ, me: "4" }), { day: DAY, at: LU, done: { [BLOOM_ID]: avecHeure(ACCUSE) } });
+  const brouillees = { [BLOOM_ID]: "x", a: null, b: ACCUSE, c: { at: "x" }, [OXFORD_ID]: avecHeure(ACCUSE) };
+  assert.deepEqual(usableDayCopy({ ...copie, done: brouillees }, { today: AUJ }).done, { [OXFORD_ID]: avecHeure(ACCUSE) });
   assert.deepEqual(usableDayCopy({ ...copie, done: "x" }, { today: AUJ }).done, {});
+  // Heure de fin jamais supposée : seule une marque qui la dit connue (true) l'affiche.
+  assert.deepEqual(usableDayCopy({ ...copie, done: { [BLOOM_ID]: { at: ACCUSE } } }, { today: AUJ }).done, { [BLOOM_ID]: sansHeure(ACCUSE) });
 });
 
-test("marque appliquée à la reprise : ménage fini en lecture seule, « Cleaning done at » heure de l'accusé, Clean again", () => {
-  const jour = applyDoneMarks(DAY, { [BLOOM_ID]: ACCUSE });
+test("refus 422 : marque sans heure de fin, gardée avec la copie", () => {
+  const done = withMark({}, BLOOM_ID, ACCUSE, { timeKnown: false });
+  assert.deepEqual(done, { [BLOOM_ID]: sansHeure(ACCUSE) });
+  const copie = JSON.parse(JSON.stringify(dayCopy(DAY, LU, done)));
+  assert.deepEqual(usableDayCopy(copie, { today: AUJ, me: "4" }).done, { [BLOOM_ID]: sansHeure(ACCUSE) });
+});
+
+const ouvrir = (jour, i) => conversationToOpen(toApartments(jour, ME, { now: NOW })[i], undefined, { me: ME, now: NOW });
+
+test("marque appliquée à la reprise : avec heure « Cleaning done at HH:MM », sans heure « Cleaning done »", () => {
+  const jour = applyDoneMarks(DAY, { [BLOOM_ID]: avecHeure(ACCUSE) });
   assert.equal(DAY.stops[2].state, "todo", "la journée gardée n'est jamais modifiée");
   assert.deepEqual([jour.stops[2].state, jour.stops[2].finishedAt], ["done", new Date(ACCUSE).toISOString()]);
   assert.equal(jour.stops[0], DAY.stops[0], "un ménage sans marque reste tel quel");
-  const apt = toApartments(jour, ME, { now: NOW })[2];
-  const c = conversationToOpen(apt, undefined, { me: ME, now: NOW });
+  const c = ouvrir(jour, 2);
   assert.equal(c.viewStatus, "Cleaning done at 12:15");
   assert.equal(c.doneView, true);
-  // Copie qui le dit déjà fini avec son heure de fin : elle fait foi pour l'heure.
-  const fini = { ...DAY, stops: [{ ...DAY.stops[2], state: "done", finishedAt: "2026-10-02T07:30:00Z" }] };
-  assert.equal(applyDoneMarks(fini, { [BLOOM_ID]: ACCUSE }).stops[0].finishedAt, "2026-10-02T07:30:00Z");
+  // Refus 422 : fini, lecture seule, sans heure (l'instant du refus ne s'affiche jamais).
+  const refus = applyDoneMarks(DAY, { [BLOOM_ID]: sansHeure(ACCUSE) });
+  assert.deepEqual([refus.stops[2].state, refus.stops[2].finishedAt], ["done", null]);
+  const r = ouvrir(refus, 2);
+  assert.equal(r.viewStatus, "Cleaning done");
+  assert.deepEqual([r.doneView, r.readOnly], [true, true]);
+  assert.equal(r.messages.at(-1).text, "Cleaning done.");
   assert.equal(applyDoneMarks(DAY, {}), DAY);
 });
 
-test("lecture partie avant l'accusé : la marque reste ; partie après : elle fait foi et la marque part", () => {
-  const done = { [BLOOM_ID]: ACCUSE, [OXFORD_ID]: ACCUSE + 60e3 };
-  assert.deepEqual(marksAfterRead(done, ACCUSE - 1), done, "partie avant les deux accusés");
+test("copie qui porte une heure de fin : elle garde la sienne, marque avec ou sans heure", () => {
+  const fini = { ...DAY, stops: [{ ...DAY.stops[2], state: "done", finishedAt: "2026-10-02T07:30:00Z" }] };
+  for (const m of [avecHeure(ACCUSE), sansHeure(ACCUSE)]) {
+    const jour = applyDoneMarks(fini, { [BLOOM_ID]: m });
+    assert.equal(jour.stops[0].finishedAt, "2026-10-02T07:30:00Z");
+    assert.equal(ouvrir(jour, 0).viewStatus, "Cleaning done at 11:30");
+  }
+});
+
+test("lecture partie avant l'accusé ou le refus : la marque reste ; partie après : elle fait foi et la marque part", () => {
+  const done = { [BLOOM_ID]: avecHeure(ACCUSE), [OXFORD_ID]: sansHeure(ACCUSE + 60e3) };
+  assert.deepEqual(marksAfterRead(done, ACCUSE - 1), done, "partie avant les deux marques");
   assert.deepEqual(marksAfterRead(done, ACCUSE), done, "même instant : gardée (prudence)");
-  assert.deepEqual(marksAfterRead(done, ACCUSE + 1), { [OXFORD_ID]: ACCUSE + 60e3 });
+  assert.deepEqual(marksAfterRead(done, ACCUSE + 1), { [OXFORD_ID]: sansHeure(ACCUSE + 60e3) });
   assert.deepEqual(marksAfterRead(done, ACCUSE + 61e3), {});
-  assert.deepEqual(done, { [BLOOM_ID]: ACCUSE, [OXFORD_ID]: ACCUSE + 60e3 }, "jamais modifiées en place");
+  assert.deepEqual(done, { [BLOOM_ID]: avecHeure(ACCUSE), [OXFORD_ID]: sansHeure(ACCUSE + 60e3) }, "jamais modifiées en place");
 });
 
 test("marques d'un autre jour de Dubaï ou d'une autre personne : purgées avec la copie", () => {
-  const copie = dayCopy(DAY, LU, { [BLOOM_ID]: ACCUSE });
-  assert.equal(usableDayCopy(copie, { today: "2026-10-03", me: "4" }), null);
-  assert.equal(usableDayCopy(copie, { today: AUJ, me: "9" }), null);
-  assert.equal(dayCopy({ ...DAY, viewAs: true }, LU, { [BLOOM_ID]: ACCUSE }), null, "jamais en View as ni en Practice");
+  for (const m of [avecHeure(ACCUSE), sansHeure(ACCUSE)]) {
+    const copie = dayCopy(DAY, LU, { [BLOOM_ID]: m });
+    assert.equal(usableDayCopy(copie, { today: "2026-10-03", me: "4" }), null);
+    assert.equal(usableDayCopy(copie, { today: AUJ, me: "9" }), null);
+    assert.equal(dayCopy({ ...DAY, viewAs: true }, LU, { [BLOOM_ID]: m }), null, "jamais en View as ni en Practice");
+  }
 });
 
 test("« Clean again » confirmé retire la marque de ce ménage, et seulement la sienne", () => {
-  const done = { [BLOOM_ID]: ACCUSE, [OXFORD_ID]: ACCUSE };
-  assert.deepEqual(withoutMark(done, BLOOM_ID), { [OXFORD_ID]: ACCUSE });
+  const done = { [BLOOM_ID]: sansHeure(ACCUSE), [OXFORD_ID]: avecHeure(ACCUSE) };
+  assert.deepEqual(withoutMark(done, BLOOM_ID), { [OXFORD_ID]: avecHeure(ACCUSE) });
   assert.deepEqual(withoutMark(done, "job_inconnu"), done);
   assert.equal(Object.keys(done).length, 2, "jamais modifiées en place");
   const jour = applyDoneMarks(DAY, withoutMark(done, BLOOM_ID));

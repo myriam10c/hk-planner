@@ -120,19 +120,23 @@ export function usableDayCopy(saved, { today, me = null } = {}) {
   return { day, at: Number.isFinite(saved.at) ? saved.at : 0, done: marquesLisibles(saved.done) };
 }
 
-// Fins accusées (correction 1 de la tâche 6) : { jobId: instant de l'accusé de v3.finishJob }, gardées
-// avec la copie de la journée, donc pour la même personne et le même jour de Dubaï, purgées et
-// effacées avec elle. Elles disent fini, sans second appel réseau, un ménage que la journée gardée
-// croit encore à faire (relecture ratée après l'accusé). Jamais modifiées en place.
+// Fins accusées (correction 1 de la tâche 6) : { jobId: { at, timeKnown } }, gardées avec la copie de
+// la journée, donc pour la même personne et le même jour de Dubaï, purgées et effacées avec elle.
+// Elles disent fini, sans second appel réseau, un ménage que la journée gardée croit encore à faire
+// (relecture ratée après l'accusé). `at` : instant de l'accusé de v3.finishJob, qui est aussi l'heure
+// de fin (`timeKnown: true`), ou instant d'un refus 422 `job_done` (`timeKnown: false`) : il ne sert
+// alors qu'à l'ordre des lectures et ne s'affiche jamais. Jamais modifiées en place.
 function marquesLisibles(done) {
   const out = {};
   if (!isObj(done)) return out;
-  for (const [id, at] of Object.entries(done)) if (Number.isFinite(at)) out[id] = at;
+  for (const [id, m] of Object.entries(done)) {
+    if (isObj(m) && Number.isFinite(m.at)) out[id] = { at: m.at, timeKnown: m.timeKnown === true };
+  }
   return out;
 }
 
-export function withMark(done, jobId, at) {
-  return { ...marquesLisibles(done), [jobId]: at };
+export function withMark(done, jobId, at, { timeKnown = true } = {}) {
+  return { ...marquesLisibles(done), [jobId]: { at, timeKnown: timeKnown === true } };
 }
 
 // « Clean again » confirmé : le nouveau parcours de ce ménage ne doit pas être masqué.
@@ -147,18 +151,18 @@ export function withoutMark(done, jobId) {
 // n'y est peut-être pas : sa marque reste.
 export function marksAfterRead(done, startedAt) {
   const out = {};
-  for (const [id, at] of Object.entries(marquesLisibles(done))) if (at >= startedAt) out[id] = at;
+  for (const [id, m] of Object.entries(marquesLisibles(done))) if (m.at >= startedAt) out[id] = m;
   return out;
 }
 
-// Journée reprise sans réseau : un ménage marqué est fini, avec l'heure de l'accusé quand la copie
-// n'a pas d'heure de fin. Rend la même journée sans marque utile ; sinon une copie, les autres
-// ménages inchangés.
+// Journée reprise sans réseau : un ménage marqué est fini. Heure de fin : celle de la copie, sinon
+// celle de l'accusé ; aucune pour un refus 422 (« Cleaning done » sans heure). Rend la même journée
+// sans marque utile ; sinon une copie, les autres ménages inchangés.
 export function applyDoneMarks(day, done) {
   const marques = marquesLisibles(done);
   if (!isObj(day) || !Array.isArray(day.stops) || !day.stops.some(s => isObj(s) && s.jobId in marques)) return day;
   const stops = day.stops.map(s => (isObj(s) && s.jobId in marques
-    ? { ...s, state: "done", finishedAt: s.finishedAt || new Date(marques[s.jobId]).toISOString() }
+    ? { ...s, state: "done", finishedAt: s.finishedAt || (marques[s.jobId].timeKnown ? new Date(marques[s.jobId].at).toISOString() : null) }
     : s));
   return { ...day, stops };
 }

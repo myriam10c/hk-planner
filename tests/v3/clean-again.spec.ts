@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { BLOOM, DAY, WRITE_ROUTES, carteAcces, demarrer, ecritures, fileVide, fileVideApresRetour } from './conv-helpers';
-import { fetchLog, noHorizontalScroll } from './helpers';
+import { fetchLog, liberer, noHorizontalScroll } from './helpers';
 
 // Lot 1 des corrections cleaner, tache 5 : un menage fini sur le serveur, sans conversation sur ce
 // telephone (rechargement apres la fin), s'ouvre en lecture seule : « Cleaning done », l'heure de
@@ -111,6 +111,47 @@ test('demarrage refuse en ligne (menage fini) : ni erreur brute ni magasin mort,
   })).toBe(FINI.finishedAt);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
   await expect(page.locator('.top .title span')).toHaveText('Cleaning done at 11:30');
+});
+
+// Correction 1 de la tache 6, complement : le 422 dit le menage fini ; le telephone le retient sans
+// attendre la relecture qui suit. Avant, si cette relecture ratait, la copie gardee disait encore
+// « todo » : rouverte sans reseau, l'app reproposait « I'm here ». Heure de fin inconnue : jamais
+// celle du refus a l'ecran.
+const copieDuJour = (page: Page) => page.evaluate(async () => (await import('/v3/offline.js')).getState('v3Day'));
+const nbMyDay = async (page: Page) => (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.myDay') !== -1).length;
+
+test('demarrage refuse en 422 puis relecture en echec (500) : rouverte sans reseau, « Cleaning done » sans heure, jamais « I m here »', async ({ page }) => {
+  await demarrer(page, [
+    { match: 'action=v3.myDay', status: 200, body: DAY, once: true },
+    { match: 'action=v3.myDay', status: 500, body: { error: 'boom' }, once: true, hold: 'relue' },
+    { match: 'action=v3.myDay', status: 500, body: { error: 'boom' } },
+    { match: 'action=v3.startJob', ...REFUS },
+    ...WRITE_ROUTES.filter((r) => r.match !== 'action=v3.startJob' && r.match !== 'action=v3.myDay'),
+  ]);
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await page.locator('[data-reply="here"]').click();
+  await expect(page.locator('.top .title span')).toHaveText('Cleaning done', { timeout: 10_000 });
+  // Relecture forcee apres le refus, retenue puis refusee : la copie dit encore le menage a faire.
+  await expect.poll(() => nbMyDay(page)).toBe(2);
+  await liberer(page, 'relue');
+  await expect.poll(() => page.evaluate(() => (window as any).__hk.relectureEchec)).toBe(true);
+  expect(((await copieDuJour(page)).day.stops[0] || {}).state).toBe('todo');
+
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true);
+  const ligne = page.getByRole('button', { name: /1011C Bloom Towers/ });
+  await expect(ligne.locator('.row-sub')).toHaveText('Cleaning done');
+  await ligne.click();
+  await expect(page.locator('.top .title span')).toHaveText('Cleaning done');
+  await expect(page.getByText('Cleaning done.')).toBeVisible();
+  await expect(page.locator('[data-reply="here"]')).toHaveCount(0);
+  // Marque sans heure de fin ; « Clean again » confirme la retire.
+  expect((await copieDuJour(page)).done).toEqual({ [BLOOM.jobId]: { at: expect.any(Number), timeKnown: false } });
+  await page.locator('[data-act="again-ask"]').click();
+  await page.locator('[data-act="again-yes"]').click();
+  await expect(page.locator('[data-reply="here"]')).toBeVisible();
+  await expect.poll(async () => (await copieDuJour(page)).done).toEqual({});
 });
 
 test('demarrage refuse au rejeu (hors ligne puis retour) : la file continue derriere, rien au magasin mort', async ({ page }) => {

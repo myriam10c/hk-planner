@@ -590,7 +590,8 @@ test('fin accusee puis relecture en echec (500) : rouverte sans reseau, « Clean
   // La marque gardee avec la copie donne l'heure de l'accuse.
   const done = await marques(page);
   expect(Object.keys(done)).toEqual([BLOOM.jobId]);
-  await expect(page.locator('.top .title span')).toHaveText('Cleaning done at ' + heureDubai(done[BLOOM.jobId]));
+  expect(done[BLOOM.jobId].timeKnown).toBe(true);
+  await expect(page.locator('.top .title span')).toHaveText('Cleaning done at ' + heureDubai(done[BLOOM.jobId].at));
   // « Clean again » confirme : la marque de ce menage part, le nouveau parcours s'ouvre.
   await page.locator('[data-act="again-ask"]').click();
   await page.locator('[data-act="again-yes"]').click();
