@@ -12,6 +12,10 @@ const LATER = () => todayBody({ generatedAt: '2026-10-09T07:01:01.000Z' });
 const BEFORE_MIDNIGHT = new Date('2026-10-09T19:59:00Z');
 const FRIDAY = () => todayBody({ generatedAt: '2026-10-09T19:59:00.000Z' });
 const SATURDAY = () => todayBody({ day: '2026-10-10', generatedAt: '2026-10-09T20:00:00.000Z' });
+// Vendredi 9 a 23:59:40 a Dubai (donnees de moins de 60 s au passage de minuit), puis 00:00:05.
+const LATE = new Date('2026-10-09T19:59:40Z');
+const FRIDAY_LATE = () => todayBody({ generatedAt: '2026-10-09T19:59:40.000Z' });
+const AFTER_MIDNIGHT = new Date('2026-10-09T20:00:05Z');
 
 const todayCalls = async (page: Page) => (await fetchLog(page)).filter((l) => l.url.includes('action=mgr.today')).length;
 const writes = async (page: Page, action: string) =>
@@ -27,6 +31,7 @@ const backToTab = (page: Page) => page.evaluate(() => {
 const frame = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
 const chip = (page: Page, day: string) => page.locator('[data-wday="' + day + '"]');
 const dateLine = (page: Page) => page.locator('#main .top .date');
+const jobOpen = (page: Page, apt: string) => page.locator('.person.unassigned .job', { hasText: apt }).locator('[data-open="job"]');
 const assignBtn = (page: Page, apt: string) => page.locator('.person.unassigned .job', { hasText: apt }).getByRole('button', { name: 'Assign' });
 
 test('retour sur l onglet : Today relu seulement au-dela de 60 s', async ({ page }) => {
@@ -49,8 +54,7 @@ test.describe('minuit a Dubai', () => {
   test.use({ timezoneId: 'America/New_York' });
 
   test('retour sur l onglet juste apres minuit (donnees de moins de 60 s) : Today relu, le samedi devient Today', async ({ page }) => {
-    await bootMgr(page, [me(MANAGER), { ...TODAY(todayBody({ generatedAt: '2026-10-09T19:59:40.000Z' })), once: true }, TODAY(SATURDAY())],
-      { email: true, clock: new Date('2026-10-09T19:59:40Z') });
+    await bootMgr(page, [me(MANAGER), { ...TODAY(FRIDAY_LATE()), once: true }, TODAY(SATURDAY())], { email: true, clock: LATE });
     await expect(dateLine(page)).toContainText('9 October');
     await page.clock.setFixedTime(new Date('2026-10-09T20:00:10Z'));
     await backToTab(page);
@@ -88,13 +92,50 @@ test.describe('minuit a Dubai', () => {
     await expect(page.locator('.banner.warn')).toContainText('Bookings are unavailable right now.');
     await expect(page.locator('.banner.warn')).toContainText('Not today\'s data.');
     await expect(page.locator('[data-assign]')).toHaveCount(0);
-    await page.locator('.person.unassigned .job', { hasText: 'Apt 308' }).locator('[data-open="job"]').click();
+    // Relecture du jour deja tentee : la fiche s'ouvre, en lecture seule, avec la ligne.
+    await jobOpen(page, 'Apt 308').click();
+    await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'false');
+    await expect(page.locator('#sheet #sheetTitle')).toHaveText(/Apt 308/);
     await expect(page.locator('#sheet').getByText('Reconnect to make changes.')).toBeVisible();
     // Pas de nouvel essai a chaque verification : le bouton Retry reste la.
     await page.clock.runFor(120_000);
     await page.evaluate(() => Promise.resolve());
     expect(await todayCalls(page)).toBe(2);
     await expect(page.locator('.banner.warn').getByRole('button', { name: 'Retry' })).toBeVisible();
+  });
+
+  test('appui sur un menage de la veille juste apres minuit : Today relu, aucune fiche, le samedi affiche', async ({ page }) => {
+    await bootMgr(page, [me(MANAGER), { ...TODAY(FRIDAY_LATE()), once: true }, TODAY(SATURDAY())], { email: true, clock: LATE });
+    await expect(dateLine(page)).toContainText('9 October');
+    // Minuit passe, avant la verification des 30 s (minuteries en temps reel, a peine lancees).
+    await page.clock.setFixedTime(AFTER_MIDNIGHT);
+    await jobOpen(page, 'Apt 308').click();
+    await expect(dateLine(page)).toContainText('10 October');
+    expect(await todayCalls(page)).toBe(2);
+    await expect(chip(page, '2026-10-10')).toHaveText('Today');
+    await frame(page);
+    await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
+    await expect(page.getByText('Reconnect to make changes.')).toHaveCount(0);
+  });
+
+  test('appui sur un menage de la veille pendant une relecture lente : ignore, une seule relecture', async ({ page }) => {
+    await bootMgr(page, [me(MANAGER), { ...TODAY(FRIDAY_LATE()), once: true }, { ...TODAY(SATURDAY()), delay: 2000 }],
+      { email: true, clock: LATE });
+    await expect(dateLine(page)).toContainText('9 October');
+    await page.clock.setFixedTime(AFTER_MIDNIGHT);
+    await backToTab(page);
+    await expect.poll(() => todayCalls(page)).toBe(2);
+    await jobOpen(page, 'Apt 308').click();
+    await frame(page);
+    // Toujours pendant la relecture : aucune fiche, aucune seconde relecture.
+    expect((await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(1);
+    await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
+    expect(await todayCalls(page)).toBe(2);
+    await expect.poll(async () => (await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(2);
+    await expect(dateLine(page)).toContainText('10 October');
+    await frame(page);
+    expect(await todayCalls(page)).toBe(2);
+    await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
   });
 
   test('ecran quitte avant minuit : Today n est plus relu', async ({ page }) => {
@@ -168,7 +209,7 @@ test('geste apres plus de 60 s, fiche fermee pendant la relecture : aucune ecrit
 
 // Toute fiche de Today reste ouverte pendant et apres une relecture, avec ce qui y est saisi.
 const SHEETS = [
-  { name: 'menage', title: /Apt 308/, open: (page: Page) => page.locator('.person.unassigned .job', { hasText: 'Apt 308' }).locator('[data-open="job"]').click() },
+  { name: 'menage', title: /Apt 308/, open: (page: Page) => jobOpen(page, 'Apt 308').click() },
   { name: 'arrivee', title: /Apt 103/, open: (page: Page) => page.locator('.arr', { hasText: 'Apt 103' }).click() },
   { name: 'choix d une personne', title: /Assign a cleaner/, open: (page: Page) => assignBtn(page, 'Apt 308').click() },
 ];

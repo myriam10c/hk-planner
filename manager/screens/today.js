@@ -352,6 +352,13 @@ export async function renderToday(ctx) {
       return;
     }
     const op = el.getAttribute('data-open');
+    // Tableau d'un autre jour de Dubai : Today relu avant toute fiche. Relecture en cours :
+    // appui ignore. Relecture du jour deja tentee (en echec) : fiche en lecture seule.
+    const day = dubaiDay(Date.now());
+    if (op && st.data.day !== day) {
+      if (st.loading) return;
+      if (st.triedOn !== day) { refresh(); return; }
+    }
     const now = Date.now();
     if (op === 'job') {
       const j = st.data.who.jobs.find((x) => x.key === el.getAttribute('data-key'));
