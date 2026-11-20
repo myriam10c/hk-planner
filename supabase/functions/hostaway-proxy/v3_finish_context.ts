@@ -4,6 +4,7 @@
 // sous 400 lignes ; v3_write.ts re-exporte tout ce fichier, donc les imports
 // existants (index.ts, tests) ne changent pas.
 import { managerIds, pickSnapshot } from "./v3.ts";
+import { checkoutKeys } from "./mgr_rules.ts";
 
 export interface FinishContext {
   sameDay: boolean;
@@ -147,8 +148,10 @@ export async function loadFinishContext(sb: any, reservationKey: string): Promis
         .select("key, payload, updated_at").like("key", "checkouts:%");
       const snap = pickSnapshot(data ?? [], date);
       const reservations = (snap && snap.payload && snap.payload.reservations) || [];
-      const hit = reservations.find((r: any) =>
-        String(r.checkOut) + "_" + (r.guest || "Guest") === reservationKey);
+      // Meme attribution que la journee de la cleaner (checkoutKeys, lot 1 tache
+      // 7) : une cle suffixee trouve la reservation de son logement, la cle nue
+      // d'une collision celle de la reservation gardienne.
+      const hit = reservations[checkoutKeys(reservations).indexOf(reservationKey)];
       if (hit) {
         sameDay = !!(hit.nextGuest && hit.nextGuest.sameDay);
         listingName = String(hit.listing ?? "");

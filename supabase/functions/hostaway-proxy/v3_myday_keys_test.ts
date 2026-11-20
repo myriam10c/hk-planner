@@ -13,7 +13,7 @@ import { checkoutKeys, normalizeMgrReservations } from "./mgr_rules.ts";
 import { buildJobs, loadCore } from "./mgr_today.ts";
 import { mgrPlanning, type MgrPlanning } from "./mgr_planning.ts";
 import { buildMyDay } from "./v3_myday.ts";
-import { finishJob, startJob } from "./v3_write.ts";
+import { finishJob, loadFinishContext, startJob } from "./v3_write.ts";
 
 const DAY = "2026-11-21";
 const NOW = Date.parse("2026-11-21T06:00:00Z"); // 10:00 Dubai
@@ -163,6 +163,66 @@ Deno.test("tache 7 : le menage suffixe reporte au jour de la cleaner arrive avec
   assertEquals(harlene.stops.map((s) => [s.listingId, s.jobId]), [["11", await jobKeyFor("2026-11-20_Kim Wu~11")]]);
   // Le menage du logement 10 n'est pas reporte : il n'est pas du 21.
   assertEquals((await journee(sb, FAIZA, payload, report)).stops, []);
+});
+
+// Correction avant revue : le contexte de fin (notification same-day aux managers,
+// logement du rapport) retrouve la reservation d'un menage par la meme
+// attribution que la journee de la cleaner. Instantane checkouts du 21 : Max Oh
+// arrive le jour meme sur le logement 11 seulement.
+function instantane(lignes: any[]) {
+  return { key: "checkouts:" + DAY + "_" + plusDays(DAY, 6), updated_at: new Date().toISOString(), payload: { reservations: lignes } };
+}
+const LIGNES = checkouts(DAY, plusDays(DAY, 6)).map((r) => ({
+  ...r,
+  nextGuest: r.listingId === "11" && r.checkOut === DAY
+    ? { guest: "Max Oh", date: DAY, checkInTime: 15, sameDay: true }
+    : r.listingId === "10" && r.checkOut === DAY ? { guest: "Lea Ng", date: "2026-11-23", checkInTime: null, sameDay: false } : null,
+}));
+const contexteDb = (lignes: any[]) => {
+  const sb = base();
+  sb.tables.proxy_cache = [instantane(lignes)];
+  return sb;
+};
+
+Deno.test("tache 7 : contexte de fin d'une cle suffixee, le logement suffixe et son same-day", async () => {
+  const ctx = await loadFinishContext(contexteDb(LIGNES), SUFFIXEE);
+  assertEquals([ctx.sameDay, ctx.listingId, ctx.listingName, ctx.managerIds], [true, "11", "111 - Twin B", [8]]);
+});
+
+Deno.test("tache 7 : contexte de fin de la cle nue d'une collision, la gardienne quel que soit l'ordre", async () => {
+  for (const lignes of [LIGNES, [...LIGNES].reverse()]) {
+    const ctx = await loadFinishContext(contexteDb(lignes), NUE);
+    assertEquals([ctx.sameDay, ctx.listingId, ctx.listingName], [false, "10", "110 - Twin A"]);
+  }
+});
+
+Deno.test("tache 7 : contexte de fin sans collision, comme avant", async () => {
+  // Kim Wu ne quitte plus que le logement 11 : la cle nue est la sienne.
+  const seule = LIGNES.filter((r) => !(r.listingId === "10" && r.checkOut === DAY));
+  const ctx = await loadFinishContext(contexteDb(seule), NUE);
+  assertEquals([ctx.sameDay, ctx.listingId, ctx.listingName], [true, "11", "111 - Twin B"]);
+  // Une cle absente de l'instantane : aucune notification, aucun logement, sans erreur.
+  const rien = await loadFinishContext(contexteDb(seule), SUFFIXEE);
+  assertEquals([rien.sameDay, rien.listingId, rien.listingName], [false, null, ""]);
+});
+
+Deno.test("tache 7 : la fin du menage suffixe same-day notifie les managers et pose son logement", async () => {
+  const sb = contexteDb(LIGNES);
+  const [stop] = (await journee(sb, HARLENE, checkouts(DAY, plusDays(DAY, 6)))).stops;
+  await startJob(sb, HARLENE as any, { jobId: stop.jobId, idem: "idem-twin-0101" }, () => Promise.resolve());
+  const linen: Record<string, number> = {};
+  for (const f of V3_LINEN_FIELDS) linen[f] = 1;
+  const envois: Array<{ cid: number; payload: any }> = [];
+  // Meme enchainement que index.ts : la cle resolue donne le contexte, puis la fin.
+  const ctx = await loadFinishContext(sb, SUFFIXEE);
+  const f = await finishJob(sb, HARLENE as any, {
+    jobId: stop.jobId, checklist: { "Living Room": true, "Bathroom": true }, linen,
+    report: { text: "All good" }, idem: "idem-twin-0102",
+  }, ctx, { push: (_sb: any, cid: number, payload: any) => { envois.push({ cid, payload }); return Promise.resolve({ sent: 1, pruned: 0, skipped: null }); } });
+  assertEquals(f.status, 200);
+  assertEquals(envois.map((e) => [e.cid, e.payload.title]), [[8, "Same-day cleaning finished"]]);
+  assertEquals(envois[0].payload.body.startsWith("111 - Twin B is ready."), true);
+  assertEquals(sb.tables.cleaning_reports.map((r: any) => [r.reservation_key, r.payload.listingId]), [[SUFFIXEE, "11"]]);
 });
 
 async function sourceIndex(): Promise<string> {

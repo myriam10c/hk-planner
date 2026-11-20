@@ -95,9 +95,17 @@ const plusAncienne = (a: KeyedStay, b: KeyedStay): boolean => {
 // prises AVANT tout filtre par logement ou par personne, statuts valides seulement :
 // chaque lecture voit alors toutes les reservations qui partent le jour d'une cle,
 // et rend la meme cle quel que soit l'ordre de sa liste.
-// Limite : l'ancienne app (app.js, keyFor) et le serveur Python du VPS (saisie
-// d'Elite) ecrivent toujours sous la cle nue, donc sur le menage de la reservation
-// la plus ancienne en cas de collision.
+// Limites :
+//   - l'ancienne app (app.js, keyFor) et le serveur Python du VPS (saisie d'Elite)
+//     ecrivent toujours sous la cle nue, donc sur le menage de la reservation la
+//     plus ancienne en cas de collision ;
+//   - si la reservation gardienne est annulee apres coup, l'autre logement passe de
+//     « cleNue~listingId » a la cle nue : il herite de l'etat ecrit pour le menage
+//     annule (affectation, fait, chrono), et le sien reste orphelin sous la cle
+//     suffixee. Les reservations annulees ne comptent pas parce que le payload
+//     checkouts (buildCheckoutsPayload), lu par Planning et la journee de la
+//     cleaner, ne les porte pas : les compter dans Today seul casserait l'egalite
+//     des cles entre les trois lectures.
 export function reservationKeys(list: KeyedStay[]): string[] {
   const out = (list ?? []).map(reservationKey);
   const groupes = new Map<string, number[]>();
