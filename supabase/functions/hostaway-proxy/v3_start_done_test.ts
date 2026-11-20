@@ -279,3 +279,35 @@ Deno.test("buildMyDay : menage marque fait par un manager pendant un chrono oubl
     { [JOB]: { ...CHRONO_CLOS, finished_at: null } }, [JOB]);
   assertEquals((await buildMyDay(oublie.input as any)).stops[0].state, "done");
 });
+
+// Correction 1 (revue) : deux « Clean again » au meme moment. La seconde attend le demarrage
+// de la premiere, puis lit le chrono que la premiere vient de rouvrir : le menage n'est plus
+// fini, son indicateur est ignore et elle rejoint en aide. Lu avant l'attente, le chrono
+// paraissait encore clos : deux cycles, deux leads, chrono ecrit deux fois.
+Deno.test("startJob : deux « Clean again » au meme moment, une seule lead, un seul cycle, un seul chrono ecrit", async () => {
+  const sb = fini();
+  let pauses = 0;
+  const premier = startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-harl-0009", again: true }, sansPause);
+  const second = startJob(sb, PIONAH as any, { jobId: JOB_ID, idem: "idem-pion-0009", again: true },
+    async () => { pauses++; await premier; });
+  const [a, b] = await Promise.all([premier, second]);
+  assertEquals(pauses >= 1, true);
+  assertEquals(a.status, 200);
+  assertEquals(corps(a).role, "lead");
+  assertEquals(corps(a).again, true);
+  assertEquals(b.status, 200);
+  assertEquals(corps(b).role, "helper");
+  assertEquals(corps(b).lead.id, 4);
+  assertEquals("again" in corps(b), false);
+  // Un seul cycle ouvert, par Harlene.
+  assertEquals(sb.tables.job_events.filter((e: any) => e.result && e.result.again === true)
+    .map((e: any) => e.idem_key), ["idem-harl-0009"]);
+  // Un seul chrono ecrit : celui de Harlene, rouvert une fois.
+  assertEquals(sb.tables.cleaning_timer.length, 1);
+  assertEquals(sb.tables.cleaning_timer[0].cleaner_id, 4);
+  assertEquals(sb.tables.cleaning_timer[0].started_at, corps(a).startedAt);
+  assertEquals(sb.tables.cleaning_timer[0].finished_at, null);
+  assertEquals(sb.tables.cleaning_log.filter((l: any) => l.action === "timer_started").length, 1);
+  assertEquals(await jobRole(sb, JOB_ID, 4), "lead");
+  assertEquals(await jobRole(sb, JOB_ID, 7), "helper");
+});

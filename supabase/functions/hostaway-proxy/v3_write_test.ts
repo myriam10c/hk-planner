@@ -975,3 +975,71 @@ Deno.test("startJob : la premiere reste en attente au-dela des essais, la second
   assertEquals((rejeu.body as any).lead.name, "Faiza");
   assertEquals(await jobRole(sb, JOB_ID, 4), "helper");
 });
+
+// Tache 5, correction 1 (revue) : le chrono et menage_done sont lus APRES l'attente du
+// demarrage d'une collegue. Lus avant, la seconde ne voyait pas le chrono que la premiere
+// ouvre pendant l'attente et l'ecrasait (cleaner_id de l'aide, heure de depart reculee,
+// pauses remises a zero, timer_started journalise deux fois).
+Deno.test("startJob : simultanes, la premiere ouvre le chrono pendant l'attente de la seconde, chrono intact", async () => {
+  const OUVERT = {
+    reservation_key: "2026-09-12_Marc Lefevre", cleaner_id: 3, started_at: "2026-09-12T06:00:00Z",
+    finished_at: null, duration_minutes: null, paused_at: null, total_pause_seconds: 0, pause_count: 0,
+  };
+  const sb = base({
+    job_events: [{
+      id: 1, idem_key: "idem-pending-05", event_type: "start_job", job_id: JOB_ID,
+      cleaner_id: 3, payload: {}, result: null, created_at: new Date().toISOString(),
+    }],
+    cleaning_timer: [], cleaning_log: [], menage_done: [],
+    cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+  });
+  // Pendant la pause, la premiere fait ce que fait son vrai startJob : chrono ouvert, puis resultat.
+  let pauses = 0;
+  const pause = (_ms: number) => {
+    pauses++;
+    if (!sb.tables.cleaning_timer.length) sb.tables.cleaning_timer.push({ ...OUVERT });
+    sb.tables.job_events[0].result = { status: "success" };
+    return Promise.resolve();
+  };
+  const r = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0110" }, pause);
+  assertEquals(pauses, 1);
+  assertEquals((r.body as any).role, "helper");
+  assertEquals(sb.tables.cleaning_timer, [OUVERT]);
+  assertEquals(sb.tables.cleaning_log.length, 0);
+});
+
+Deno.test("startJob : simultanes, vrais appels, la seconde attend la fin de la premiere, un seul chrono ecrit", async () => {
+  const sb = base({
+    job_events: [], cleaning_timer: [], cleaning_log: [], menage_done: [],
+    cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+  });
+  let pauses = 0;
+  const premier = startJob(sb, FAIZA as any, { jobId: JOB_ID, idem: "idem-race-0003" }, sansPause);
+  // La seconde attend vraiment la premiere : sa pause rend la main a la fin de l'appel de Faiza.
+  const second = startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-race-0004" },
+    async () => { pauses++; await premier; });
+  const [a, b] = await Promise.all([premier, second]);
+  assertEquals(pauses >= 1, true);
+  assertEquals([(a.body as any).role, (b.body as any).role], ["lead", "helper"]);
+  assertEquals(sb.tables.cleaning_timer.length, 1);
+  assertEquals(sb.tables.cleaning_timer[0].cleaner_id, 3);
+  assertEquals(sb.tables.cleaning_timer[0].started_at, (a.body as any).startedAt);
+  assertEquals((b.body as any).startedAt, (a.body as any).startedAt);
+  assertEquals(sb.tables.cleaning_log.filter((l: any) => l.action === "timer_started").length, 1);
+});
+
+Deno.test("startJob : 503 (premiere toujours en attente), rien n'est ecrit, ni chrono ni journal", async () => {
+  const sb = base({
+    job_events: [{
+      id: 1, idem_key: "idem-pending-06", event_type: "start_job", job_id: JOB_ID,
+      cleaner_id: 3, payload: {}, result: null, created_at: new Date().toISOString(),
+    }],
+    cleaning_timer: [], cleaning_log: [], menage_done: [],
+    cleaners: [{ id: 3, name: "Faiza" }, { id: 4, name: "Harlene" }],
+  });
+  const r = await startJob(sb, HARLENE as any, { jobId: JOB_ID, idem: "idem-start-0111" }, sansPause);
+  assertEquals(r.status, 503);
+  assertEquals(sb.tables.cleaning_timer, []);
+  assertEquals(sb.tables.cleaning_log, []);
+  assertEquals(sb.tables.job_events.map((e: any) => e.idem_key), ["idem-pending-06"]);
+});

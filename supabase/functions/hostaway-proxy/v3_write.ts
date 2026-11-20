@@ -54,19 +54,6 @@ export async function startJob(
   const rejeu = replayResponse(claim);
   if (rejeu) return rejeu;
   try {
-    // Un chrono deja ouvert n'est jamais ecrase : deux telephones sur le meme
-    // menage ne doivent pas remettre le compteur a zero. Un chrono clos, lui, est
-    // repris par « Clean again » (re-nettoyage), comme le fait deja l'action
-    // startTimer.
-    // Les lectures levent : une panne transitoire rendrait `existant` a null, donc
-    // `dejaOuvert` a faux, et l'action ecraserait le chrono ouvert d'une collegue
-    // avec une fausse heure de depart. Meme regle que les lectures de v3.myDay.
-    const { data: existant, error: lecture } = await sb.from("cleaning_timer")
-      .select("started_at, finished_at").eq("reservation_key", reservationKey).maybeSingle();
-    if (lecture) throw lecture;
-    const { data: fait, error: lectureFait } = await sb.from("menage_done")
-      .select("done").eq("reservation_key", reservationKey).maybeSingle();
-    if (lectureFait) throw lectureFait;
     // Role decide ici, par l'ordre des demarrages (la premiere est lead), et rendu
     // au telephone : sans lui, deux cleaners qui ouvrent l'appartement avant le
     // premier « I'm here » construisent toutes deux le parcours de la lead. La
@@ -81,6 +68,19 @@ export async function startJob(
       await releaseEvent(sb, idem);
       return { status: 503, body: { error: "Still starting. Retry." } };
     }
+    // Un chrono deja ouvert n'est jamais ecrase (deux telephones sur le meme
+    // menage) ; un chrono clos est repris par « Clean again », comme startTimer.
+    // Lus APRES l'attente de readStarts (tache 5, correction 1) : la collegue
+    // attendue ouvre le chrono avant de memoriser son resultat ; lu avant, il
+    // paraissait absent ou clos, et ce demarrage l'ecrasait ou relancait encore.
+    // Les lectures levent : une panne transitoire rendrait `existant` a null, donc
+    // `dejaOuvert` a faux, et l'action ecraserait le chrono ouvert d'une collegue.
+    const { data: existant, error: lecture } = await sb.from("cleaning_timer")
+      .select("started_at, finished_at").eq("reservation_key", reservationKey).maybeSingle();
+    if (lecture) throw lecture;
+    const { data: fait, error: lectureFait } = await sb.from("menage_done")
+      .select("done").eq("reservation_key", reservationKey).maybeSingle();
+    if (lectureFait) throw lectureFait;
     // Menage fini (tache 5), avec les demarrages deja aboutis : ma ligne, sans
     // resultat, n'y compte pas encore. « Clean again » n'ouvre un nouveau menage
     // que sur un menage fini : sur un menage en cours, c'est un demarrage ordinaire.
