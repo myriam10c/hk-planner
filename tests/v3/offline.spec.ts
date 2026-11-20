@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bootV3, fetchLog } from './helpers';
+import { bootV3, fetchLog, liberer } from './helpers';
 import { BLOOM, DAY, WRITE_ROUTES, carteAcces, demarrer, ecritures, fileVide, fileVideApresRetour, photo, piece } from './conv-helpers';
 
 // File hors ligne de la v3. Les premiers tests passent par sendOrQueue (chemin
@@ -366,6 +366,32 @@ const BLOOM_FINI = { ...BLOOM, state: 'done', startedAt: '2026-10-02T06:00:00Z',
 const OXFORD = { ...BLOOM, jobId: 'job_00000000000000oxf122', listingId: '201', listingName: '122 - Oxford Boulevard' };
 const ROUTES_ENTRE = [{ match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM_FINI, OXFORD] } }, ...sansMyDay];
 
+// Un menage entier, de « I'm here » a l'envoi du rapport, puis retour a la liste.
+async function menageComplet(page: any, nom: RegExp) {
+  await page.getByRole('button', { name: nom }).click();
+  await page.locator('[data-reply="here"]').click();
+  await carteAcces(page);
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
+  await page.locator('[data-reply="walls-ok"]').click();
+  await page.locator('[data-reply="no-damage"]').click();
+  await page.locator('[data-reply="send-arrival-text"]').click();
+  await page.locator('[data-reply="send-arrival"]').click();
+  await page.locator('[data-reply="linen-yes"]').click();
+  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
+  for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
+  await page.locator('[data-reply="low-done"]').click();
+  await page.locator('[data-reply="send-text"]').click();
+  await page.locator('[data-reply="send"]').click();
+  await expect(page.locator('.msg.me').last()).toContainText('Report sent to the group');
+  await page.getByRole('button', { name: 'Back' }).click();
+}
+
+const nbMyDay = async (page: any) => (await fetchLog(page)).filter((l) => l.url.indexOf('action=v3.myDay') !== -1).length;
+const etatsCopie = async (page: any) => {
+  const c = await copieDuJour(page);
+  return c ? c.day.stops.map((s: any) => s.state) : null;
+};
+
 async function rouvrir(page: any) {
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__v3ready === true);
@@ -414,20 +440,7 @@ test('la copie suit chaque lecture : un menage fini en ligne est relu, il ne rev
     { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM_FINI, OXFORD] } },
     ...sansMyDay,
   ]);
-  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
-  await page.locator('[data-reply="here"]').click();
-  await carteAcces(page);
-  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 1, r);
-  await page.locator('[data-reply="walls-ok"]').click();
-  await page.locator('[data-reply="no-damage"]').click();
-  await page.locator('[data-reply="send-arrival-text"]').click();
-  await page.locator('[data-reply="send-arrival"]').click();
-  await page.locator('[data-reply="linen-yes"]').click();
-  for (const r of ['Bed', 'Bathroom', 'Kitchen']) await piece(page, 4, r);
-  for (const k of ['gas', 'ac', 'wifi', 'lights', 'windows', 'trash', 'door']) await page.locator('[data-reply="leave:' + k + '"]').click();
-  await page.locator('[data-reply="low-done"]').click();
-  await page.locator('[data-reply="send-text"]').click();
-  await page.locator('[data-reply="send"]').click();
+  await menageComplet(page, /1011C Bloom Towers/);
   await fileVide(page);
   // Fin confirmee : la journee est relue et la copie la dit finie ; la conversation n'est plus gardee.
   await expect.poll(async () => {
@@ -471,4 +484,80 @@ test('copie d un autre jour de Dubai ou d une autre personne : purgee au demarra
   await expect(page.getByText('No network. Your saved actions will sync on their own.')).toBeVisible();
   await expect(page.locator('.row')).toHaveCount(0);
   expect(await copieDuJour(page)).toBeNull();
+});
+
+// Correction avant revue (tache 6 du lot 1) : une relecture forcee demandee pendant qu'une autre est
+// en vol n'est plus perdue. Une seule relecture de rattrapage part a la fin de celle en cours.
+const OXFORD_FINI = { ...OXFORD, state: 'done', startedAt: '2026-10-02T07:40:00Z', finishedAt: '2026-10-02T08:50:00Z' };
+
+test('deux fins confirmees a la suite pendant une relecture en vol : une relecture de plus, la copie dit les deux menages finis', async ({ page }) => {
+  await demarrer(page, [
+    { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM, OXFORD] }, once: true },
+    // Relecture lancee par la premiere fin : servie avant la seconde, retenue jusqu'a liberer().
+    { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM_FINI, OXFORD] }, once: true, hold: 'relue' },
+    { match: 'action=v3.myDay', status: 200, body: { ...DAY, stops: [BLOOM_FINI, OXFORD_FINI] } },
+    ...sansMyDay,
+  ]);
+  // Deux menages faits sans reseau : leurs deux fins partiront a la suite au retour du reseau.
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await menageComplet(page, /1011C Bloom Towers/);
+  await menageComplet(page, /122 Oxford Boulevard/);
+  expect(await nbMyDay(page)).toBe(1);
+  await page.evaluate(() => { localStorage.removeItem('v3TestOffline'); window.dispatchEvent(new Event('online')); });
+  await fileVideApresRetour(page);
+  // Les deux fins sont confirmees (plus aucune conversation gardee) ; la relecture de la premiere est en vol.
+  await expect.poll(async () => page.evaluate(async () => (await (await import('/v3/offline.js')).getState('v3Convs')))).toBeNull();
+  expect((await ecritures(page)).filter((x) => x.action === 'v3.finishJob').map((x) => x.body.jobId)).toEqual([BLOOM.jobId, OXFORD.jobId]);
+  expect(await nbMyDay(page)).toBe(2);
+  await liberer(page, 'relue');
+  // La relecture de la seconde fin part apres celle en vol, et la copie dit les deux menages finis.
+  await expect.poll(() => etatsCopie(page)).toEqual(['done', 'done']);
+  expect(await nbMyDay(page)).toBe(3);
+});
+
+test('trois demandes forcees pendant une relecture : une seule relecture de rattrapage, silencieuse ; une demande non forcee reste jetee', async ({ page }) => {
+  await bootV3(page, [
+    { match: 'action=v3.myDay', status: 200, body: DAY, once: true },
+    { match: 'action=v3.myDay', status: 200, body: DAY, once: true, hold: 'en-vol' },
+    { match: 'action=v3.myDay', status: 200, body: DAY, once: true, hold: 'rattrapage' },
+    { match: 'action=v3.myDay', status: 200, body: DAY, once: true },
+    { match: 'action=v3.myDay', status: 200, body: DAY, once: true, hold: 'en-vol-2' },
+    ...sansMyDay,
+    { match: 'action=v3.myDay', status: 200, body: DAY },
+  ], { pinToken: 'jeton-pin' });
+  await expect(page.locator('.row')).toHaveCount(2);
+  // 1. Une relecture en vol, puis trois demandes forcees : chacune rend false tout de suite.
+  const demandes = await page.evaluate(async () => {
+    const m = await import('/v3/app.js');
+    (window as any).__premiere = m.relireLaJournee({ force: true });
+    return [await m.relireLaJournee({ force: true }), await m.relireLaJournee({ force: true }), await m.relireLaJournee({ force: true })];
+  });
+  expect(demandes).toEqual([false, false, false]);
+  expect(await nbMyDay(page)).toBe(2);
+  await liberer(page, 'en-vol');
+  // La premiere rend true (sa lecture a abouti) ; une seule relecture de rattrapage part, sans « Refreshing ».
+  expect(await page.evaluate(() => (window as any).__premiere)).toBe(true);
+  await expect.poll(() => nbMyDay(page)).toBe(3);
+  expect(await page.evaluate(() => (window as any).__hk.relisant)).toBe(false);
+  await expect(page.locator('.list-top .refresh')).toHaveText('Refresh');
+  await page.evaluate(() => { (window as any).__avantRattrapage = (window as any).__hk.lastRead; });
+  await liberer(page, 'rattrapage');
+  await expect.poll(async () => page.evaluate(() => (window as any).__hk.lastRead !== (window as any).__avantRattrapage)).toBe(true);
+  // Aucune autre relecture en file : la suivante, forcee, part tout de suite et aboutit.
+  expect(await page.evaluate(async () => (await import('/v3/app.js')).relireLaJournee({ force: true }))).toBe(true);
+  expect(await nbMyDay(page)).toBe(4);
+
+  // 2. Une demande non forcee pendant une relecture en vol est jetee, meme si la liste a plus de 60 s.
+  await page.clock.setFixedTime(new Date(Date.now() + 2 * 60e3));
+  const nonForcee = await page.evaluate(async () => {
+    const m = await import('/v3/app.js');
+    (window as any).__seconde = m.relireLaJournee({ force: true });
+    return await m.relireLaJournee();
+  });
+  expect(nonForcee).toBe(false);
+  expect(await nbMyDay(page)).toBe(5);
+  await liberer(page, 'en-vol-2');
+  expect(await page.evaluate(() => (window as any).__seconde)).toBe(true);
+  expect(await page.evaluate(async () => (await import('/v3/app.js')).relireLaJournee({ force: true }))).toBe(true);
+  expect(await nbMyDay(page)).toBe(6);
 });

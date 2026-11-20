@@ -1350,23 +1350,36 @@ export async function loadDay({ silent = false } = {}) {
 // force : sans le delai de 60 s (bouton). visible : montre « Refreshing » et la panne.
 // Practice, View as, ecran d'erreur ou de chargement : rien ne change.
 // Rend true seulement si CETTE lecture a abouti ; false si non lancee, echouee ou depassee par une autre.
+// Demande forcee pendant une relecture en cours (deux fins confirmees a la suite, refus 422) : elle
+// rend false tout de suite et UNE relecture forcee et silencieuse de plus part a la fin de celle en
+// cours, quel que soit le nombre de demandes ; elle repasse par les gardes du debut. Une demande non
+// forcee pendant une relecture en cours est jetee.
 let relectureEnCours = false;
+let rattrapage = false;
 export async function relireLaJournee({ force = false, visible = false } = {}) {
   if (!state.session || state.loading || state.error || state.viewAs || mode() !== 'real') return false;
-  if (relectureEnCours || !navigator.onLine) return false;
+  if (!navigator.onLine) return false;
+  if (relectureEnCours) { if (force) rattrapage = true; return false; }
   if (!force && !needsRefresh({ now: Date.now(), last: state.lastRead, online: true })) return false;
   relectureEnCours = true;
   if (visible) { state.relisant = true; renderLater(); }
   const avant = state.lastRead, mienne = generationJour + 1; // loadDay prend cette generation au depart
+  let lue = false;
   try {
     await loadDay({ silent: true });
   } finally {
     relectureEnCours = false;
+    // Avant le rattrapage, qui prend la generation suivante : cette lecture n'est pas « depassee ».
+    lue = generationJour === mienne && state.lastRead !== avant;
     const redessiner = state.relisant || state.relectureEchec;
     state.relisant = false;
     if (redessiner) renderLater();
+    if (rattrapage) {
+      rattrapage = false;
+      relireLaJournee({ force: true }).catch(() => { /* la journee en memoire suffit */ });
+    }
   }
-  return generationJour === mienne && state.lastRead !== avant;
+  return lue;
 }
 
 // Au retour au premier plan : une app installee en plein ecran reste ouverte des jours.
