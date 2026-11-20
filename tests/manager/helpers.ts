@@ -53,7 +53,10 @@ export async function bootMgr(
         if (cfg.email) localStorage.setItem('hkAuthSession', JSON.stringify(cfg.email));
         if (cfg.pin) localStorage.setItem('cleanerToken', cfg.pin);
         // Bandeau des notifications masque par defaut (push-bar.spec.ts le teste a part).
-        localStorage.setItem('mgrPushLater', new Date().toISOString().slice(0, 10));
+        // Jour local du navigateur, calcule comme push-bar.js (le jour UTC differe la nuit).
+        let day;
+        try { day = new Date().toLocaleDateString('en-CA'); } catch (e) { day = new Date().toISOString().slice(0, 10); }
+        localStorage.setItem('mgrPushLater', day);
         if (cfg.cache) localStorage.setItem('mgrTodayCache', JSON.stringify(cfg.cache));
         // Avertissement « Share your location » (hkLocNotice2:<id>, par personne des
         // reponses simulees) repousse loin par defaut : il ne couvre pas l'app et

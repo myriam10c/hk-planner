@@ -48,8 +48,9 @@ test('retour sur l onglet : Today relu seulement au-dela de 60 s', async ({ page
   await expect(page.getByText('Reconnect to make changes.')).toHaveCount(0);
 });
 
-// Navigateur a New York : le jour de Today est celui de Dubai, jamais celui du navigateur
-// (et l'ecran des notifications, garde au jour local, reste ferme).
+// Navigateur a New York : le jour de Today est celui de Dubai, jamais celui du navigateur.
+// Le jour local ne change pas pendant ces tests : l'ecran des notifications, ecarte au jour
+// local du demarrage (helpers.ts), reste ferme meme s'il s'affiche apres minuit a Dubai.
 test.describe('minuit a Dubai', () => {
   test.use({ timezoneId: 'America/New_York' });
 
