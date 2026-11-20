@@ -5,6 +5,7 @@
 // proxy, une cle d'idempotence par geste, jamais d'auteur envoye.
 import { get, post } from '/manager/api.js';
 import { createGestures, uncertain } from '/manager/gesture.js';
+import { createFreshGate, isStale } from '/manager/fresh.js';
 import { clearCache, loadCache, saveCache } from '/manager/today-cache.js';
 import {
   addDays, closeSheet, dubaiTime, dubaiToday, esc, focusBack, focusMark, openSheet, placeLabel, sheetBusy, sheetError, sheetIsOpen, toast,
@@ -16,8 +17,6 @@ import { driverDefaultDay, driverSheet, driverText } from '/manager/screens/driv
 
 const KEY = 'mgrPlanningCache';
 const RO_LINE = 'Reconnect to make changes.';
-// Au-dela, la semaine est relue avant d'ouvrir un choix de personne.
-const STALE_MS = 60000;
 
 export async function renderPlanning(ctx) {
   const main = ctx.main;
@@ -209,19 +208,10 @@ export async function renderPlanning(ctx) {
   }
   // Semaine lue il y a plus d'une minute : relue avant d'ouvrir un choix de personne.
   // Relecture en echec : anciennes donnees gardees, mais aucune ecriture.
-  let reloading = false;
-  async function freshEnough() {
-    if (readOnly()) { toast(RO_LINE); return false; }
-    if (Date.now() - st.fetchedAt <= STALE_MS) return true;
-    if (reloading) return false;
-    const start = st.start;
-    reloading = true;
-    await refresh();
-    reloading = false;
-    if (!ctx.isCurrent() || st.start !== start) return false;
-    if (readOnly()) { toast(RO_LINE); return false; }
-    return true;
-  }
+  const freshEnough = createFreshGate({
+    blocked: readOnly, stale: () => isStale(st.fetchedAt, Date.now()), refresh, readOnly,
+    refuse: () => toast(RO_LINE), isCurrent: ctx.isCurrent, scope: () => st.start,
+  });
   ACT.assign = async (j) => {
     if (!j) return;
     const key = j.key;

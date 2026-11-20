@@ -1,0 +1,199 @@
+import { test, expect, type Page } from '@playwright/test';
+import { bootMgr, fetchDone, fetchLog, MANAGER, me } from './helpers';
+import { NOW, todayBody } from './fixtures';
+import { noIdem, OK } from './planning-fixtures';
+
+// Today se relit seul : au retour sur l'onglet et avant un geste quand les donnees ont plus
+// de 60 s, et au changement de jour de Dubai. Une relecture ne ferme aucune fiche.
+const TODAY = (body: any = todayBody()) => ({ match: 'action=mgr.today', status: 200, body });
+// Today relu une minute plus tard : seule l'heure des donnees change (Data as of 11:01).
+const LATER = () => todayBody({ generatedAt: '2026-10-09T07:01:01.000Z' });
+// Vendredi 9 a 23:59 a Dubai, puis les donnees du samedi 10.
+const BEFORE_MIDNIGHT = new Date('2026-10-09T19:59:00Z');
+const FRIDAY = () => todayBody({ generatedAt: '2026-10-09T19:59:00.000Z' });
+const SATURDAY = () => todayBody({ day: '2026-10-10', generatedAt: '2026-10-09T20:00:00.000Z' });
+
+const todayCalls = async (page: Page) => (await fetchLog(page)).filter((l) => l.url.includes('action=mgr.today')).length;
+const writes = async (page: Page, action: string) =>
+  (await fetchLog(page)).filter((l) => l.url.includes('action=' + action)).map((l) => JSON.parse(l.body));
+// Suite des lectures de Today et des ecritures, dans l'ordre des appels.
+const sequence = async (page: Page) => (await fetchLog(page))
+  .filter((l) => /action=(mgr\.today|assignCleaner|setDone)/.test(l.url))
+  .map((l) => (l.url.includes('mgr.today') ? 'today' : 'write'));
+const backToTab = (page: Page) => page.evaluate(() => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  document.dispatchEvent(new Event('visibilitychange'));
+});
+const frame = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
+const chip = (page: Page, day: string) => page.locator('[data-wday="' + day + '"]');
+const dateLine = (page: Page) => page.locator('#main .top .date');
+const assignBtn = (page: Page, apt: string) => page.locator('.person.unassigned .job', { hasText: apt }).getByRole('button', { name: 'Assign' });
+
+test('retour sur l onglet : Today relu seulement au-dela de 60 s', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(LATER())], { email: true, clock: NOW });
+  await expect(page.locator('.asof')).toContainText('Data as of 11:00');
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 30_000));
+  await backToTab(page);
+  await frame(page);
+  expect(await todayCalls(page)).toBe(1);
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await backToTab(page);
+  await expect.poll(() => todayCalls(page)).toBe(2);
+  await expect(page.locator('.asof')).toContainText('Data as of 11:01');
+  await expect(page.getByText('Reconnect to make changes.')).toHaveCount(0);
+});
+
+// Navigateur a New York : le jour de Today est celui de Dubai, jamais celui du navigateur
+// (et l'ecran des notifications, garde au jour local, reste ferme).
+test.describe('minuit a Dubai', () => {
+  test.use({ timezoneId: 'America/New_York' });
+
+  test('retour sur l onglet juste apres minuit (donnees de moins de 60 s) : Today relu, le samedi devient Today', async ({ page }) => {
+    await bootMgr(page, [me(MANAGER), { ...TODAY(todayBody({ generatedAt: '2026-10-09T19:59:40.000Z' })), once: true }, TODAY(SATURDAY())],
+      { email: true, clock: new Date('2026-10-09T19:59:40Z') });
+    await expect(dateLine(page)).toContainText('9 October');
+    await page.clock.setFixedTime(new Date('2026-10-09T20:00:10Z'));
+    await backToTab(page);
+    await expect(dateLine(page)).toContainText('10 October');
+    expect(await todayCalls(page)).toBe(2);
+    await expect(chip(page, '2026-10-10')).toHaveText('Today');
+    await expect(chip(page, '2026-10-09')).toHaveCount(0);
+    await expect(assignBtn(page, 'Apt 308')).toBeVisible();
+  });
+
+  test('passage de minuit, ecran ouvert : Today relu tout seul, la veille n est plus jamais Today', async ({ page }) => {
+    await page.clock.install({ time: BEFORE_MIDNIGHT });
+    await bootMgr(page, [me(MANAGER), { ...TODAY(FRIDAY()), once: true }, TODAY(SATURDAY())], { email: true });
+    await expect(dateLine(page)).toContainText('9 October');
+    await expect(chip(page, '2026-10-09')).toHaveText('Today');
+    await page.clock.runFor(90_000);
+    await expect.poll(() => todayCalls(page)).toBe(2);
+    await expect(dateLine(page)).toContainText('10 October');
+    await expect(chip(page, '2026-10-10')).toHaveText('Today');
+    await expect(chip(page, '2026-10-10')).toHaveAttribute('aria-pressed', 'true');
+    await expect(chip(page, '2026-10-09')).toHaveCount(0);
+    // Les gestes du jour sont ouverts : aucune lecture seule apres une relecture reussie.
+    await assignBtn(page, 'Apt 308').click();
+    await expect(page.locator('#sheet [data-pick="10"]')).toBeVisible();
+    await expect(page.getByText('Reconnect to make changes.')).toHaveCount(0);
+  });
+
+  test('passage de minuit, relecture en echec : donnees de la veille signalees, Reconnect, un seul essai', async ({ page }) => {
+    await page.clock.install({ time: BEFORE_MIDNIGHT });
+    await bootMgr(page, [me(MANAGER), { ...TODAY(FRIDAY()), once: true },
+      { match: 'action=mgr.today', status: 503, body: { error: 'Bookings are unavailable right now. Try again in a few minutes.' } }], { email: true });
+    await expect(dateLine(page)).toContainText('9 October');
+    await page.clock.runFor(90_000);
+    await expect.poll(() => todayCalls(page)).toBe(2);
+    await expect(page.locator('.banner.warn')).toContainText('Bookings are unavailable right now.');
+    await expect(page.locator('.banner.warn')).toContainText('Not today\'s data.');
+    await expect(page.locator('[data-assign]')).toHaveCount(0);
+    await page.locator('.person.unassigned .job', { hasText: 'Apt 308' }).locator('[data-open="job"]').click();
+    await expect(page.locator('#sheet').getByText('Reconnect to make changes.')).toBeVisible();
+    // Pas de nouvel essai a chaque verification : le bouton Retry reste la.
+    await page.clock.runFor(120_000);
+    await page.evaluate(() => Promise.resolve());
+    expect(await todayCalls(page)).toBe(2);
+    await expect(page.locator('.banner.warn').getByRole('button', { name: 'Retry' })).toBeVisible();
+  });
+
+  test('ecran quitte avant minuit : Today n est plus relu', async ({ page }) => {
+    await page.clock.install({ time: BEFORE_MIDNIGHT });
+    await bootMgr(page, [me(MANAGER), TODAY(FRIDAY())], { email: true });
+    await expect(dateLine(page)).toContainText('9 October');
+    await page.evaluate(() => { location.hash = '#/more'; });
+    await expect(page.locator('main a.more-row').first()).toBeVisible();
+    await page.clock.runFor(90_000);
+    await page.evaluate(() => Promise.resolve());
+    expect(await todayCalls(page)).toBe(1);
+  });
+});
+
+test('geste apres plus de 60 s : Today relu avant l ecriture, Undo vers la liste relue', async ({ page }) => {
+  // Entre-temps, quelqu'un a mis Elite Cleaning sur Apt 308.
+  const later = LATER();
+  later.who.jobs[0] = { ...later.who.jobs[0], assigned: [12], serviceType: 'CHC' };
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { match: 'action=assignCleaner', status: 200, body: OK }, TODAY(later)],
+    { email: true, clock: NOW });
+  await assignBtn(page, 'Apt 308').click();
+  const sheet = page.locator('#sheet');
+  await expect(sheet.locator('[data-pick="10"]')).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await sheet.locator('[data-pick="10"]').click();
+  await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender assigned to Pionah');
+  expect((await sequence(page)).slice(0, 3)).toEqual(['today', 'today', 'write']);
+  // Relecture d'apres l'ecriture rendue, puis Undo plus d'une minute apres : relu d'abord.
+  await expect.poll(async () => (await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(3);
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 122_000));
+  await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
+  expect((await sequence(page)).slice(0, 6)).toEqual(['today', 'today', 'write', 'today', 'today', 'write']);
+  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([
+    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [10], mode: 'set', service_type: 'CHC' },
+    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [12], mode: 'set', service_type: 'CHC' },
+  ]);
+});
+
+test('geste apres plus de 60 s, relecture en echec : Reconnect, aucune ecriture, fiche et donnees gardees', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { match: 'action=mgr.today', status: 0, body: {}, fail: true },
+    { match: 'action=setDone', status: 200, body: OK }], { email: true, clock: NOW });
+  await page.locator('.arr', { hasText: 'Apt 103' }).click();
+  const sheet = page.locator('#sheet');
+  await expect(sheet.getByRole('button', { name: 'Mark done' })).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await sheet.getByRole('button', { name: 'Mark done' }).click();
+  await expect(page.locator('#toast')).toContainText('Reconnect to make changes.');
+  expect(await todayCalls(page)).toBe(2);
+  expect(await writes(page, 'setDone')).toHaveLength(0);
+  await expect(sheet).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('.banner.warn')).toContainText('No connection. Try again.');
+  await expect(page.locator('.person.unassigned')).toContainText('Apt 308');
+});
+
+test('geste apres plus de 60 s, fiche fermee pendant la relecture : aucune ecriture', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { ...TODAY(LATER()), delay: 1000 },
+    { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
+  await assignBtn(page, 'Apt 308').click();
+  const sheet = page.locator('#sheet');
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await sheet.locator('[data-pick="10"]').click();
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
+  await expect(sheet).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(async () => (await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(2);
+  await expect(page.locator('.asof')).toContainText('Data as of 11:01');
+  await frame(page);
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+  await expect(sheet).toHaveAttribute('aria-hidden', 'true');
+});
+
+// Toute fiche de Today reste ouverte pendant et apres une relecture, avec ce qui y est saisi.
+const SHEETS = [
+  { name: 'menage', title: /Apt 308/, open: (page: Page) => page.locator('.person.unassigned .job', { hasText: 'Apt 308' }).locator('[data-open="job"]').click() },
+  { name: 'arrivee', title: /Apt 103/, open: (page: Page) => page.locator('.arr', { hasText: 'Apt 103' }).click() },
+  { name: 'choix d une personne', title: /Assign a cleaner/, open: (page: Page) => assignBtn(page, 'Apt 308').click() },
+];
+for (const s of SHEETS) {
+  test('relecture avec une fiche ouverte (' + s.name + ') : la fiche reste ouverte, la saisie aussi', async ({ page }) => {
+    await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(LATER())], { email: true, clock: NOW });
+    await s.open(page);
+    const sheet = page.locator('#sheet');
+    await expect(sheet).toHaveAttribute('aria-hidden', 'false');
+    await expect(sheet.locator('#sheetTitle')).toHaveText(s.title);
+    // Champ pose dans la fiche : une saisie en cours, curseur dedans.
+    await page.evaluate(() => {
+      const i = document.createElement('input');
+      i.id = 'probe';
+      i.setAttribute('aria-label', 'Probe');
+      document.querySelector('#sheet .sheet-b')!.appendChild(i);
+    });
+    await page.locator('#probe').fill('half typed');
+    await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+    await backToTab(page);
+    await expect(page.locator('.asof')).toContainText('Data as of 11:01');
+    expect(await todayCalls(page)).toBe(2);
+    await expect(sheet).toHaveAttribute('aria-hidden', 'false');
+    await expect(sheet.locator('#sheetTitle')).toHaveText(s.title);
+    await expect(page.locator('#probe')).toHaveValue('half typed');
+    await expect(page.locator('#probe')).toBeFocused();
+  });
+}

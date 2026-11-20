@@ -3,6 +3,7 @@
 import { get, post } from '/manager/api.js';
 import { clearToday, loadToday, saveToday } from '/manager/today-cache.js';
 import { createGestures } from '/manager/gesture.js';
+import { createFreshGate, isStale } from '/manager/fresh.js';
 import { addDays, announceMntBadge, closeSheet, dubaiTime, esc, focusBack, focusMark, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { fillPhotos } from '/manager/ui/job-photos.js';
 import { aheadPickerSheet, arrivalSheet, boardHtml, jobSheet, pickerSheet } from '/manager/screens/today-view.js';
@@ -16,15 +17,16 @@ function dubaiParts(ms) {
 }
 function dubaiDay(ms) { const p = dubaiParts(ms); return p.year + '-' + p.month + '-' + p.day; }
 
-// Au-dela, la semaine d'un autre jour est relue avant d'ouvrir le choix de personne.
-const STALE_MS = 60000;
+// Ecran ouvert : le jour de Dubai est verifie toutes les 30 s (Today relu quand il change).
+const DAY_CHECK_MS = 30000;
 
 function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div></header>' + inner; }
 
 export async function renderToday(ctx) {
   const main = ctx.main;
-  // day : jour choisi dans « Who does what » (null = aujourd'hui).
-  const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null, day: null };
+  // day : jour choisi dans « Who does what » (null = aujourd'hui). triedOn : jour de Dubai
+  // de la derniere relecture tentee.
+  const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null, day: null, triedOn: null };
   // Semaines mgr.planning lues pour les autres jours, en memoire pour la vie de l'ecran :
   // start -> { data, fresh, loading, error, seq, at }. wseq : garde contre une reponse tardive.
   // at : heure de la derniere reponse fraiche.
@@ -103,6 +105,7 @@ export async function renderToday(ctx) {
   async function refresh() {
     st.loading = true;
     st.error = null;
+    st.triedOn = dubaiDay(Date.now());
     paint();
     try {
       const d = await get('mgr.today');
@@ -119,6 +122,14 @@ export async function renderToday(ctx) {
     st.loading = false;
     paint();
   }
+
+  // Relecture due : donnees de plus d'une minute ou d'un autre jour de Dubai.
+  function due() { return !st.data || isStale(st.savedAt, Date.now()) || st.data.day !== dubaiDay(Date.now()); }
+  // Geste du jour : Today relu d'abord quand la relecture est due (meme garde que Planning).
+  // Donnees en cache ou derniere lecture ratee : refus sans relecture.
+  const freshEnough = createFreshGate({
+    blocked: () => !st.fresh || !st.data, stale: due, refresh, readOnly, refuse: refuseRo, isCurrent: ctx.isCurrent,
+  });
 
   // Semaine d'un autre jour : seule la derniere demande pour cette semaine compte, et
   // l'ecran n'est repeint que si le jour choisi est encore dans cette semaine.
@@ -172,7 +183,7 @@ export async function renderToday(ctx) {
     let t = aheadJob(key);
     if (!t) return;
     if (!t.w.fresh) { refuseRo(); return; }
-    if (Date.now() - t.w.at > STALE_MS) {
+    if (isStale(t.w.at, Date.now())) {
       if (opening) return;
       opening = true;
       await loadWeek(t.start);
@@ -251,7 +262,8 @@ export async function renderToday(ctx) {
   function busyToast() { toast('Saving, wait a second.'); }
   async function undo(fn) {
     if (st.busy) { busyToast(); return; }
-    if (readOnly()) { refuseRo(); return; }
+    if (!(await freshEnough())) return;
+    if (st.busy) { busyToast(); return; }
     st.busy = true;
     try { await fn(); } catch (e) { if (!handleAccess(e)) toast(e.message); }
     st.busy = false;
@@ -301,6 +313,21 @@ export async function renderToday(ctx) {
       send('setDone', { key, done: !val }));
   }
 
+  // Geste du jour (choix d'une personne, Assign, Mark done) : Today relu d'abord si la
+  // relecture est due. Geste lance depuis une fiche : abandonne si la fiche a ete fermee
+  // pendant la relecture ; fiche fermee si son menage n'est plus dans Today relu.
+  async function todayGesture(el) {
+    const key = el.getAttribute(el.hasAttribute('data-done') ? 'data-done' : el.hasAttribute('data-assign') ? 'data-assign' : 'data-key');
+    const fromSheet = !!el.closest('#sheet');
+    if (!(await freshEnough())) return;
+    if (fromSheet && !heldHere(key)) return;
+    const t = targetFor(key);
+    if (!t) { if (fromSheet) closeSheet(); return; }
+    if (el.hasAttribute('data-pick')) { assign(key, el.getAttribute('data-pick')); return; }
+    if (el.hasAttribute('data-assign')) { st.sheetKey = t.key; openSheet(pickerSheet(st.data, t, readOnly())); return; }
+    setDone(key, el.getAttribute('data-val') === '1');
+  }
+
   function onClick(e) {
     const el = e.target && e.target.closest
       ? e.target.closest('[data-retry],[data-open],[data-assign],[data-pick],[data-done],[data-wday],[data-wretry],[data-wassign],[data-wpick]') : null;
@@ -321,15 +348,9 @@ export async function renderToday(ctx) {
     }
     if (el.hasAttribute('data-pick') || el.hasAttribute('data-assign') || el.hasAttribute('data-done')) {
       if (st.busy) { busyToast(); return; }
-      if (readOnly()) { refuseRo(); return; }
-    }
-    if (el.hasAttribute('data-pick')) { assign(el.getAttribute('data-key'), el.getAttribute('data-pick')); return; }
-    if (el.hasAttribute('data-assign')) {
-      const t = targetFor(el.getAttribute('data-assign'));
-      if (t) { st.sheetKey = t.key; openSheet(pickerSheet(st.data, t, readOnly())); }
+      todayGesture(el);
       return;
     }
-    if (el.hasAttribute('data-done')) { setDone(el.getAttribute('data-done'), el.getAttribute('data-val') === '1'); return; }
     const op = el.getAttribute('data-open');
     const now = Date.now();
     if (op === 'job') {
@@ -351,16 +372,26 @@ export async function renderToday(ctx) {
     if (next) { e.preventDefault(); next.focus(); }
   }
 
-  // Retour sur l'onglet : la semaine du jour affiche (autre jour) est relue.
+  // Retour sur l'onglet : Today relu si la relecture est due, et la semaine du jour
+  // affiche (autre jour) relue.
   const onVis = () => {
     if (document.visibilityState !== 'visible' || !ctx.isCurrent() || st.busy) return;
+    if (!st.loading && due()) refresh();
     const d = otherDay();
     if (d) loadWeek(weekStartOf(d));
   };
+  // Changement de jour de Dubai, ecran ouvert : Today relu tout seul, une tentative par jour
+  // (en echec, le bandeau garde Retry).
+  const dayCheck = setInterval(() => {
+    if (!ctx.isCurrent() || st.busy || st.loading || !st.data) return;
+    const day = dubaiDay(Date.now());
+    if (st.data.day !== day && st.triedOn !== day) refresh();
+  }, DAY_CHECK_MS);
   document.addEventListener('click', onClick);
   document.addEventListener('keydown', onKey);
   document.addEventListener('visibilitychange', onVis);
   ctx.onLeave(() => {
+    clearInterval(dayCheck);
     document.removeEventListener('click', onClick);
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('visibilitychange', onVis);
