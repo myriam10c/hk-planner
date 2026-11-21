@@ -430,3 +430,178 @@ Deno.test("focus : aucun point = liste vide", async () => {
   const r = await startInspection(db, FAIZA, { listingId: "L1", eligibility: "checkout", idem: "idem-start-1" }, NOW);
   assertEquals((r.body as any).focus, []);
 });
+
+// ---- Demarrage : reprise de l'inspection ouverte, inspection deja terminee du jour, Inspect again ----
+
+// NOW = 12:00 a Dubai le 6 octobre. Lignes posees a la main dans la table.
+const row = (o: any) => ({ listing_id: "L1", inspector_id: 3, eligibility: "checkout", finished_at: null, ...o });
+const FINI_TOT = row({ id: 7, inspection_date: "2026-10-06", idem_key: "idem-old-0007",
+  started_at: "2026-10-05T20:05:00.000Z", finished_at: "2026-10-05T20:30:00.000Z" }); // 00:30 a Dubai le 6
+const FINI_TARD = row({ id: 8, inspection_date: "2026-10-06", idem_key: "idem-old-0008",
+  started_at: "2026-10-06T05:00:00.000Z", finished_at: "2026-10-06T06:05:00.000Z" }); // 10:05 a Dubai le 6
+const startBody = (o: any = {}) => ({ listingId: "L1", eligibility: "checkout", idem: "idem-start-9", ...o });
+// Copies : une ecriture du test ne touche jamais aux constantes partagees.
+const put = (db: any, ...rows: any[]) => { db.tables.inspections = rows.map((r) => ({ ...r })); };
+
+Deno.test("start : terminee aujourd'hui (Dubai) par cet inspecteur, la plus recente rendue marquee terminee, rien de cree", async () => {
+  const db = seed();
+  put(db, FINI_TOT, FINI_TARD);
+  const r = await startInspection(db, FAIZA, startBody(), NOW);
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).inspection.id, 8);
+  assertEquals((r.body as any).inspection.finishedAt, "2026-10-06T06:05:00.000Z");
+  assertEquals(db.tables.inspections.length, 2);
+});
+
+Deno.test("start : terminee a 00:30 a Dubai (veille en UTC), comptee aujourd'hui", async () => {
+  const db = seed();
+  put(db, FINI_TOT);
+  const r = await startInspection(db, FAIZA, startBody(), NOW);
+  assertEquals((r.body as any).inspection.id, 7);
+  assertEquals((r.body as any).inspection.finishedAt, "2026-10-05T20:30:00.000Z");
+  assertEquals(db.tables.inspections.length, 1);
+});
+
+Deno.test("start : terminee hier (23:30 a Dubai), nouvelle inspection creee", async () => {
+  const db = seed();
+  put(db, row({ id: 7, inspection_date: "2026-10-05", idem_key: "idem-old-0007",
+    started_at: "2026-10-05T19:00:00.000Z", finished_at: "2026-10-05T19:30:00.000Z" }));
+  const r = await startInspection(db, FAIZA, startBody(), NOW);
+  assertEquals(r.status, 200);
+  assert((r.body as any).inspection.id !== 7);
+  assertEquals((r.body as any).inspection.finishedAt, null);
+  assertEquals(db.tables.inspections.length, 2);
+  assertEquals(db.tables.inspections[1].inspection_date, "2026-10-06");
+});
+
+Deno.test("start : terminee aujourd'hui par un autre inspecteur, ouverte d'un autre inspecteur : creation", async () => {
+  const db = seed();
+  put(db, row({ ...FINI_TARD, inspector_id: 2 }),
+    row({ id: 9, inspector_id: 2, inspection_date: "2026-10-06", idem_key: "idem-old-0009", started_at: "2026-10-06T07:00:00.000Z" }));
+  const r = await startInspection(db, FAIZA, startBody(), NOW);
+  assert(![8, 9].includes((r.body as any).inspection.id));
+  assertEquals((r.body as any).inspection.finishedAt, null);
+  assertEquals(db.tables.inspections.length, 3);
+});
+
+Deno.test("start : again true, nouvelle inspection malgre la terminee du jour", async () => {
+  const db = seed();
+  put(db, FINI_TARD);
+  const r = await startInspection(db, FAIZA, startBody({ again: true }), NOW);
+  assertEquals(r.status, 200);
+  assert((r.body as any).inspection.id !== 8);
+  assertEquals((r.body as any).inspection.finishedAt, null);
+  assertEquals((r.body as any).items, []);
+  assertEquals(db.tables.inspections.length, 2);
+});
+
+Deno.test("start : again autre que le booleen true, terminee du jour rendue, rien de cree", async () => {
+  for (const again of ["true", 1, false, null]) {
+    const db = seed();
+    put(db, FINI_TARD);
+    const r = await startInspection(db, FAIZA, startBody({ again }), NOW);
+    assertEquals((r.body as any).inspection.id, 8);
+    assertEquals(db.tables.inspections.length, 1);
+  }
+});
+
+Deno.test("start : again, rejeu de la meme cle, pas de seconde creation", async () => {
+  const db = seed();
+  put(db, FINI_TARD);
+  const a = await startInspection(db, FAIZA, startBody({ again: true }), NOW);
+  const b = await startInspection(db, FAIZA, startBody({ again: true }), NOW + 60_000);
+  assertEquals((b.body as any).inspection.id, (a.body as any).inspection.id);
+  assertEquals(db.tables.inspections.length, 2);
+});
+
+Deno.test("start : non terminee d'un autre jour, reprise sans creation, date d'inspection gardee", async () => {
+  const db = seed();
+  put(db, row({ id: 6, inspection_date: "2026-10-04", idem_key: "idem-old-0006", started_at: "2026-10-04T06:00:00.000Z" }));
+  db.tables.inspection_items = [{ inspection_id: 6, zone: "ac", status: "ok" }];
+  const r = await startInspection(db, FAIZA, startBody(), NOW);
+  assertEquals(r.status, 200);
+  assertEquals((r.body as any).inspection.id, 6);
+  assertEquals((r.body as any).inspection.finishedAt, null);
+  assertEquals((r.body as any).items.map((i: any) => i.zone), ["ac"]);
+  assertEquals(db.tables.inspections.length, 1);
+  assertEquals(db.tables.inspections[0].inspection_date, "2026-10-04");
+});
+
+Deno.test("start : plusieurs non terminees, la plus recente par started_at", async () => {
+  const db = seed();
+  put(db, row({ id: 6, inspection_date: "2026-10-03", idem_key: "idem-old-0006", started_at: "2026-10-03T06:00:00.000Z" }),
+    row({ id: 5, inspection_date: "2026-10-05", idem_key: "idem-old-0005", started_at: "2026-10-05T06:00:00.000Z" }),
+    row({ id: 4, inspection_date: "2026-10-04", idem_key: "idem-old-0004", started_at: "2026-10-04T06:00:00.000Z" }));
+  const r = await startInspection(db, FAIZA, startBody(), NOW);
+  assertEquals((r.body as any).inspection.id, 5);
+  assertEquals(db.tables.inspections.length, 3);
+});
+
+Deno.test("start : non terminee et terminee aujourd'hui, la non terminee reprise", async () => {
+  const db = seed();
+  put(db, FINI_TARD,
+    row({ id: 6, inspection_date: "2026-10-05", idem_key: "idem-old-0006", started_at: "2026-10-05T06:00:00.000Z" }));
+  const r = await startInspection(db, FAIZA, startBody(), NOW);
+  assertEquals((r.body as any).inspection.id, 6);
+  assertEquals((r.body as any).inspection.finishedAt, null);
+  assertEquals(db.tables.inspections.length, 2);
+});
+
+Deno.test("start : again true avec une non terminee, reprise sans creation", async () => {
+  const db = seed();
+  put(db, FINI_TARD,
+    row({ id: 6, inspection_date: "2026-10-05", idem_key: "idem-old-0006", started_at: "2026-10-05T06:00:00.000Z" }));
+  const r = await startInspection(db, FAIZA, startBody({ again: true }), NOW);
+  assertEquals((r.body as any).inspection.id, 6);
+  assertEquals(db.tables.inspections.length, 2);
+});
+
+Deno.test("start : rejeu de la cle d'une inspection terminee, rendue marquee terminee", async () => {
+  const db = seed(); const id = await started(db);
+  for (const z of INSP_ZONES) await saveItem(db, FAIZA, { inspectionId: id, zone: z.key, status: "ok" });
+  const f = await finishInspection(db, FAIZA, { inspectionId: id }, NOW);
+  // Avec again (la regle du jour est sautee) et deux jours plus tard (plus terminee aujourd'hui) : le rejeu passe avant tout.
+  for (const [extra, at] of [[{ again: true }, NOW + 60_000], [{}, NOW + 2 * 86400_000]] as const) {
+    const r = await startInspection(db, FAIZA, { listingId: "L1", eligibility: "checkout", idem: "idem-start-1", ...extra }, at);
+    assertEquals((r.body as any).inspection.id, id);
+    assertEquals((r.body as any).inspection.finishedAt, (f.body as any).inspection.finishedAt);
+  }
+  assertEquals(db.tables.inspections.length, 1);
+});
+
+Deno.test("start : course sur uq_inspections_open, recherche des ouvertes ratee une fois, rend l'inspection de l'autre requete", async () => {
+  const db = seed();
+  const id = await started(db);
+  const orig = db.from; let missed = false;
+  db.from = (t: string) => {
+    const q = orig(t);
+    if (t !== "inspections") return q;
+    const filters: string[] = [];
+    const is = q.is; q.is = (c: string, v: any) => { filters.push(c); return is(c, v); };
+    const then = q.then;
+    q.then = (res: any, rej: any) => {
+      if (!missed && filters.includes("finished_at")) { missed = true; return Promise.resolve({ data: [], error: null }).then(res, rej); }
+      return then(res, rej);
+    };
+    const ins = q.insert;
+    q.insert = (v: any) => {
+      ins(v);
+      return { select: () => ({ single: async () => ({ data: null, error: { code: "23505", message: "uq_inspections_open" } }) }) };
+    };
+    return q;
+  };
+  const r = await startInspection(db, FAIZA, startBody({ idem: "idem-start-other" }), NOW);
+  assertEquals(r.status, 200);
+  assert(missed);
+  assertEquals((r.body as any).inspection.id, id);
+  assertEquals(db.tables.inspections.length, 1);
+});
+
+Deno.test("start : lecture des inspections en erreur, rien de cree", async () => {
+  const db = seed();
+  db.fail["inspections.select"] = { code: "XX", message: "boom" };
+  let threw = false;
+  try { await startInspection(db, FAIZA, startBody(), NOW); } catch { threw = true; }
+  assert(threw);
+  assertEquals(db.tables.inspections?.length ?? 0, 0);
+});

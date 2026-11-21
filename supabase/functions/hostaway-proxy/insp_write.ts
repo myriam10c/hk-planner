@@ -3,7 +3,7 @@ import type { ActionResult, SessionUser } from "./v3.ts";
 import { plusDays, todayDubai, V3_PHOTO_BUCKET, validIdem } from "./v3.ts";
 import { V3_MAX_PHOTO_BYTES, V3_PHOTO_MIME } from "./v3_photos.ts";
 import {
-  FIX_LINE_PREFIX, fixLine, fixOverdue, focusOut, INSP_DET_ITEMS, INSP_DET_KEYS, INSP_ZONE_KEYS, INSP_ZONES, listingLabel,
+  dubaiDay, FIX_LINE_PREFIX, fixLine, fixOverdue, focusOut, INSP_DET_ITEMS, INSP_DET_KEYS, INSP_ZONE_KEYS, INSP_ZONES, listingLabel,
 } from "./insp_rules.ts";
 
 const ELIGIBILITIES = new Set(["checkout", "vacant", "adhoc"]);
@@ -55,6 +55,11 @@ const detLabels = (keys: string[]) => keys.map((k) => INSP_DET_ITEMS.find((i) =>
 // Memes statuts clos que insp_read.
 const TICKET_CLOSED = new Set(["resolved", "cancelled", "closed"]);
 
+// Ligne la plus recente selon l'horodatage `col` (id en second), ou null.
+const stamp = (v: unknown) => { const t = Date.parse(String(v ?? "")); return Number.isFinite(t) ? t : 0; };
+const latest = (rows: any[] | null, col: string) => (rows ?? []).slice()
+  .sort((a: any, b: any) => stamp(b[col]) - stamp(a[col]) || Number(b.id) - Number(a.id))[0] ?? null;
+
 async function loadOwned(sb: any, me: SessionUser, inspectionId: unknown) {
   const id = Number(inspectionId);
   if (!Number.isInteger(id) || id <= 0) return { err: bad(400, "inspectionId required") };
@@ -70,7 +75,8 @@ async function snapshot(sb: any, insp: any) {
   const { data: listing } = await sb.from("listing_config").select("internal_name, listing_name").eq("listing_id", insp.listing_id).maybeSingle();
   const { data: focus } = await sb.from("inspection_focus").select("*").eq("listing_id", insp.listing_id).eq("active", true);
   return {
-    inspection: { id: insp.id, listingId: insp.listing_id, name: listingLabel(listing ?? {}), eligibility: insp.eligibility, startedAt: insp.started_at },
+    inspection: { id: insp.id, listingId: insp.listing_id, name: listingLabel(listing ?? {}), eligibility: insp.eligibility, startedAt: insp.started_at,
+      finishedAt: insp.finished_at ?? null },
     items: (items ?? []).map(itemOut),
     photos: (photos ?? []).map((p: any) => ({ id: p.id, zone: p.zone, kind: p.kind })),
     detItems: INSP_DET_ITEMS,
@@ -86,15 +92,32 @@ export async function startInspection(sb: any, me: SessionUser, body: any, now =
   const { data: listing } = await sb.from("listing_config").select("listing_id").eq("listing_id", listingId).maybeSingle();
   if (!listing) return bad(404, "Apartment not found.");
   const day = todayDubai(now);
-  // Rejeu de la meme cle, ou reprise de l'inspection ouverte du jour.
+  // 1. Rejeu de la meme cle (terminee ou non).
   const { data: byIdem } = await sb.from("inspections").select("*").eq("idem_key", body.idem)
     .eq("inspector_id", me.cleaner_id).maybeSingle();
   if (byIdem) return { status: 200, body: await snapshot(sb, byIdem) };
-  const findOpen = async () => (await sb.from("inspections").select("*")
-    .eq("listing_id", listingId).eq("inspector_id", me.cleaner_id).eq("inspection_date", day).is("finished_at", null)
-    .maybeSingle()).data;
+  // 2. Inspection non terminee de ce logement par cet inspecteur, quel que soit son jour : reprise, date gardee.
+  // Pas de maybeSingle : d'anciennes inspections restees ouvertes peuvent etre plusieurs, la plus recente gagne.
+  const findOpen = async () => {
+    const { data, error } = await sb.from("inspections").select("*")
+      .eq("listing_id", listingId).eq("inspector_id", me.cleaner_id).is("finished_at", null);
+    if (error) throw error;
+    return latest(data, "started_at");
+  };
   const open = await findOpen();
   if (open) return { status: 200, body: await snapshot(sb, open) };
+  // 3. Deja terminee aujourd'hui (jour de Dubai) : rien de cree, la plus recente rendue (finishedAt pose).
+  // Seul again === true (bouton Inspect again) cree une nouvelle inspection.
+  // finished_at est en UTC : fenetre elargie d'un jour, jour exact en JS (comme inspReports).
+  if (body?.again !== true) {
+    const { data: fin, error: finErr } = await sb.from("inspections").select("*")
+      .eq("listing_id", listingId).eq("inspector_id", me.cleaner_id)
+      .not("finished_at", "is", null).gte("finished_at", plusDays(day, -1) + "T00:00:00Z");
+    if (finErr) throw finErr;
+    const done = latest((fin ?? []).filter((r: any) => r.finished_at && dubaiDay(r.finished_at) === day), "finished_at");
+    if (done) return { status: 200, body: await snapshot(sb, done) };
+  }
+  // 4. Creation.
   const { data, error } = await sb.from("inspections").insert({
     listing_id: listingId, inspector_id: me.cleaner_id, inspection_date: day,
     eligibility: body.eligibility, idem_key: body.idem, started_at: new Date(now).toISOString(),
