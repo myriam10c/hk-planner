@@ -19,7 +19,12 @@ function toast(msg) {
   host.appendChild(el);
   setTimeout(() => el.remove(), 3500);
 }
-function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
+// swap : l'entree d'historique est remplacee au lieu d'en ajouter une (ctx.replace).
+function go(hash, swap) {
+  if (location.hash === hash) route();
+  else if (swap) location.replace(hash);
+  else location.hash = hash;
+}
 
 function signIn() {
   render('<main class="wrap"><h1>Please sign in</h1><p class="mute">Sign in to HK Planner first, then come back here.</p>'
@@ -36,7 +41,7 @@ async function route() {
   const old = leaving; leaving = [];
   for (const fn of old) { try { fn(); } catch (e) { /* nettoyage best effort */ } }
   const hash = location.hash || '#/';
-  const ctx = { me, go, toast, render, esc, isCurrent: () => mine === seq, onLeave: (fn) => { leaving.push(fn); } };
+  const ctx = { me, go, replace: (h) => go(h, true), toast, render, esc, isCurrent: () => mine === seq, onLeave: (fn) => { leaving.push(fn); } };
   view.onclick = null; view.oninput = null; view.onchange = null;
   const [path, query] = hash.slice(2).split('?');
   const parts = path.split('/');

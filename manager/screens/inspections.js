@@ -37,10 +37,12 @@ export function toShellHash(h) {
   return s ? '#/inspections/' + s : '#/inspections';
 }
 
-function go(h) {
+// swap : l'entree d'historique est remplacee au lieu d'en ajouter une (ctx.replace).
+function go(h, swap) {
   const t = toShellHash(h);
   // Meme hash : pas de hashchange natif, on relance la route a la main.
   if (location.hash === t) window.dispatchEvent(new HashChangeEvent('hashchange'));
+  else if (swap) location.replace(t);
   else location.hash = t;
 }
 
@@ -71,7 +73,8 @@ export async function renderInspections(ctx) {
   // go garde par isCurrent : une navigation tardive (fin d inspection lente apres changement d onglet) est ignoree.
   await mod[fn]({
     me: { cleaner_id: ctx.me.id, name: ctx.me.name, role: 'manager' },
-    go: (h) => { if (ctx.isCurrent()) go(h); }, toast: (m) => toast(m), render, esc,
+    go: (h) => { if (ctx.isCurrent()) go(h); }, replace: (h) => { if (ctx.isCurrent()) go(h, true); },
+    toast: (m) => toast(m), render, esc,
     isCurrent: ctx.isCurrent, onLeave: ctx.onLeave, embedded: true,
     listingId: r.id, entry: r.entry || 'adhoc',
   });

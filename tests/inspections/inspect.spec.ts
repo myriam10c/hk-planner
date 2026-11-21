@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { bootInsp, fetchLog } from './helpers';
+import { bootInsp, fetchLog, liberer, noHorizontalScroll } from './helpers';
 
 const ZONES = ['Entrance, door & lock','Living room','Kitchen & appliances','Bedroom(s) & bedding','Bathroom(s) & plumbing','AC','Wi-Fi & TV','Balcony & windows','Inventory & consumables','General cleanliness','DET equipment'];
 const KEYS = ['entrance','living','kitchen','bedrooms','bathrooms','ac','wifi_tv','balcony','inventory','cleanliness','det'];
@@ -172,4 +172,71 @@ test('miniatures : object URL revoquee a la suppression d une photo en echec et 
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.getByText("Today's inspections")).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__rev.length)).toBe(2);
+});
+
+// ---- Apres Finish, et logement deja inspecte aujourd'hui (tache 10) ----
+
+const FINISH = { status: 200, match: 'action=insp.finish', body: { inspection: { id: 41, finishedAt: '2026-10-06T07:10:00Z' } } };
+const TODAY_EMPTY = { status: 200, match: 'action=insp.today', body: { day: '2026-10-06', target: 4, cachedAt: null, today: [], also: [] } };
+// insp.start rend l'inspection deja terminee aujourd'hui (10:05 UTC = 14:05 a Dubai).
+const DONE_TODAY = { status: 200, match: 'action=insp.start', once: true, body: {
+  inspection: { id: 40, listingId: 'A', name: 'Apt 101 · Tower A', eligibility: 'checkout', startedAt: '2026-10-06T09:30:00Z', finishedAt: '2026-10-06T10:05:00Z' },
+  items: KEYS.map((k) => ({ zone: k, status: 'ok' })), photos: [] } };
+const startBodies = async (page: any) => (await fetchLog(page)).filter((l) => l.url.includes('action=insp.start')).map((l) => JSON.parse(l.body));
+
+test('apres Finish, retour arriere : ni ecran d inspection ni second insp.start', async ({ page }) => {
+  const items = KEYS.map((k) => ({ zone: k, status: 'ok' }));
+  await bootInsp(page, [ME, START(items), FINISH, TODAY_EMPTY], { pinToken: 'tok', hash: '#/' });
+  await expect(page.getByText("Today's inspections")).toBeVisible();
+  // Appui sur un logement de Today : nouvelle entree d'historique, comme go().
+  await page.evaluate(() => { location.hash = '#/inspect/A?e=checkout'; });
+  await expect(page.getByText('11 / 11 zones')).toBeVisible();
+  await page.getByRole('button', { name: 'Finish inspection' }).click();
+  await expect(page.getByText('Inspection saved')).toBeVisible();
+  await expect(page).toHaveURL(/\/inspections\/#\/$/);
+  await expect(page.getByText("Today's inspections")).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/inspections\/#\/$/);
+  await expect(page.getByText("Today's inspections")).toBeVisible();
+  expect((await startBodies(page)).length).toBe(1);
+});
+
+test('logement deja inspecte aujourd hui : lecture seule, Inspect again ouvre une inspection vierge', async ({ page }) => {
+  await bootInsp(page, [ME, DONE_TODAY, START()], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
+  await expect(page.getByText('Inspection saved today at 14:05', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Apt 101 · Tower A' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(page.locator('#view [data-testid^="zone-"]')).toHaveCount(0);
+  await expect(page.locator('#view textarea, #view input')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Finish inspection' })).toHaveCount(0);
+  const s = await noHorizontalScroll(page);
+  expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
+  await page.getByRole('button', { name: 'Inspect again' }).click();
+  await expect(page.getByText('0 / 11 zones')).toBeVisible();
+  await expect(page.getByTestId('zone-ac').getByRole('button', { name: 'OK: AC', exact: true })).toBeVisible();
+  await expect(page.getByText('Inspection saved today', { exact: false })).toHaveCount(0);
+  const starts = await startBodies(page);
+  expect(starts.length).toBe(2);
+  expect(starts[0].again).toBeUndefined();
+  expect(starts[1]).toMatchObject({ listingId: 'A', eligibility: 'checkout', again: true });
+  expect(starts[1].idem).not.toBe(starts[0].idem);
+});
+
+test('Inspect again : echec reseau, message, bouton utilisable, meme cle ; double appui = une requete', async ({ page }) => {
+  await bootInsp(page, [ME, DONE_TODAY, { status: 0, match: 'action=insp.start', once: true, fail: true, body: {} }, { ...START(), hold: 'again' }],
+    { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
+  await page.getByRole('button', { name: 'Inspect again' }).click();
+  await expect(page.getByText('No connection. Try again.')).toBeVisible();
+  await expect(page.getByText('Inspection saved today at 14:05', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Inspect again' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Inspect again' }).dblclick();
+  await expect(page.getByRole('button', { name: 'Inspect again' })).toBeDisabled();
+  await expect.poll(async () => (await startBodies(page)).length).toBe(3);
+  await liberer(page, 'again');
+  await expect(page.getByText('0 / 11 zones')).toBeVisible();
+  const starts = await startBodies(page);
+  expect(starts.length).toBe(3);
+  expect([starts[1].again, starts[2].again]).toEqual([true, true]);
+  expect(starts[2].idem).toBe(starts[1].idem);
+  expect(starts[1].idem).not.toBe(starts[0].idem);
 });

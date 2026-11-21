@@ -23,9 +23,13 @@ const clock = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digi
 
 export async function renderInspect(ctx) {
   const { go, toast, render, esc } = ctx;
+  // Sortie apres Finish : meme destination que go, l'entree d'historique est remplacee
+  // (le retour arriere ne rouvre pas l'inspection et ne rappelle pas insp.start).
+  const goReplace = ctx.replace || go;
   const isCurrent = ctx.isCurrent || (() => true);
   const eligibility = ['checkout', 'vacant', 'adhoc'].includes(ctx.entry) ? ctx.entry : 'adhoc';
   const startIdem = newIdem('istart'); // gardee jusqu'au succes : un nouvel essai la reutilise
+  let againIdem = null; // Inspect again : nouvelle cle, gardee jusqu'au succes comme startIdem
   let busy = false;
   const st = { done: false, insp: null, z: {}, open: null, general: '', finishError: '', loadError: '', detItems: [], focus: [] };
   const view = document.getElementById('view');
@@ -42,6 +46,8 @@ export async function renderInspect(ctx) {
 
   function load(snap) {
     st.insp = snap.inspection;
+    // Deja terminee aujourd'hui : ecran en lecture seule, zones non chargees.
+    if (st.insp && st.insp.finishedAt) return;
     st.detItems = Array.isArray(snap.detItems) ? snap.detItems : [];
     st.focus = Array.isArray(snap.focus) ? snap.focus : [];
     for (const it of snap.items || []) zoneOf(it.zone).saved = it;
@@ -192,6 +198,12 @@ export async function renderInspect(ctx) {
       return;
     }
     if (!st.insp) { render('<main class="wrap"><h1>Inspection</h1><p class="mute">Loading…</p></main>'); return; }
+    if (st.insp.finishedAt) {
+      render('<main class="wrap"><header class="top"><div><h1>' + esc(st.insp.name || 'Apartment') + '</h1><p class="mute">Inspection saved today at '
+        + esc(clock(st.insp.finishedAt)) + '</p></div><button class="btn ghost" data-act="home">Back</button></header>'
+        + '<button class="btn primary block" data-act="again"' + (busy ? ' disabled' : '') + '>Inspect again</button></main>');
+      return;
+    }
     const n = doneCount();
     render('<main class="wrap"><header class="top"><div><h1>' + esc(st.insp.name || 'Apartment') + '</h1><p class="mute">Started '
       + esc(clock(st.insp.startedAt)) + '</p></div><button class="btn ghost" data-act="home">Back</button></header>'
@@ -272,6 +284,12 @@ export async function renderInspect(ctx) {
     const a = b.dataset.act, k = b.dataset.z;
     if (a === 'home') return go('#/');
     if (a === 'retry-start') { st.insp = null; paint(); return start(); }
+    if (a === 'again') return run(async () => {
+      if (!againIdem) againIdem = newIdem('istart');
+      const snap = await post('insp.start', { listingId: ctx.listingId, eligibility, idem: againIdem, again: true });
+      againIdem = null;
+      load(snap);
+    });
     if (a === 'notok') {
       const z = zoneOf(k), s = z.saved;
       if (!z.draft) {
@@ -309,7 +327,7 @@ export async function renderInspect(ctx) {
     if (a === 'finish') return run(async () => {
       st.finishError = '';
       await post('insp.finish', { inspectionId: st.insp.id, generalNote: st.general.trim() || undefined });
-      st.done = true; releaseAll(); toast('Inspection saved'); go('#/');
+      st.done = true; releaseAll(); toast('Inspection saved'); goReplace('#/');
     }, (m) => { st.finishError = m; });
   };
   // Saisie : on garde le brouillon en memoire sans repeindre (le focus reste en place).

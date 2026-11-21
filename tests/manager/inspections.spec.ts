@@ -69,6 +69,23 @@ test('Finish : toast, retour sur Today inspections', async ({ page }) => {
   await expect(page.getByText("Today's inspections")).toBeVisible();
 });
 
+test('Finish puis retour arriere : accueil des inspections du manager, pas de second insp.start', async ({ page }) => {
+  const items = KEYS.map((k) => ({ zone: k, status: 'ok' }));
+  await bootMgr(page, [me(MANAGER), INSP_TODAY(8), START(items), { status: 200, match: 'action=insp.finish', body: { inspection: { id: 41, finishedAt: '2026-10-06T07:10:00Z' } } }],
+    { email: true, hash: '#/inspections', clock: NOW });
+  await page.getByRole('button', { name: 'Start inspection' }).click();
+  await expect(page).toHaveURL(/#\/inspections\/inspect\/A\?e=checkout$/);
+  await expect(page.getByText('11 / 11 zones')).toBeVisible();
+  await page.getByRole('button', { name: 'Finish inspection' }).click();
+  await expect(page.getByText('Inspection saved')).toBeVisible();
+  await expect(page).toHaveURL(/#\/inspections$/);
+  await expect(page.getByText("Today's inspections")).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/inspections$/);
+  await expect(page.getByText("Today's inspections")).toBeVisible();
+  expect((await fetchLog(page)).filter((l) => l.url.includes('action=insp.start')).length).toBe(1);
+});
+
 test('Finish lent puis changement d onglet : pas de retour force sur Inspections', async ({ page }, info) => {
   const items = KEYS.map((k) => ({ zone: k, status: 'ok' }));
   await boot(page, [START(items), { status: 200, match: 'action=insp.finish', delay: 1500, body: { inspection: { id: 41, finishedAt: '2026-10-06T07:10:00Z' } } }, { match: 'action=mgr.today', status: 200, body: todayBody() }],

@@ -2,7 +2,9 @@ import type { Page } from '@playwright/test';
 
 // Meme principe que tests/v3/helpers.ts (non importe) : window.fetch est
 // bouchonne avant le chargement des modules, journal dans localStorage.
-export type FakeRoute = { match: string; status: number; body: any; delay?: number; once?: boolean };
+// `hold` : la reponse est retenue jusqu'a ce que le test la libere (liberer(page, nom)),
+// comme tests/v3/helpers.ts, au lieu d'un delai fixe.
+export type FakeRoute = { match: string; status: number; body: any; delay?: number; once?: boolean; fail?: boolean; hold?: string };
 
 export async function bootInsp(
   page: Page,
@@ -26,6 +28,14 @@ export async function bootInsp(
       };
       const real = window.fetch.bind(window);
       const servies = new Set<FakeRoute>();
+      // Reponses retenues (option `hold`), par nom : liberee une fois, la route repond ensuite tout de suite.
+      const tenues: Record<string, { libre: boolean; attente: Array<() => void> }> = {};
+      const tenue = (nom: string) => tenues[nom] || (tenues[nom] = { libre: false, attente: [] });
+      (window as any).__liberer = (nom: string) => {
+        const t = tenue(nom);
+        t.libre = true;
+        t.attente.splice(0).forEach((f) => f());
+      };
       window.fetch = ((input: any, init: any) => {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         if (url.indexOf('hostaway-proxy') === -1) return real(input, init);
@@ -39,6 +49,8 @@ export async function bootInsp(
         for (const r of cfg.routes) {
           if (url.indexOf(r.match) === -1 || servies.has(r)) continue;
           if (r.once) servies.add(r);
+          // fail : panne reseau (fetch rejete), comme tests/manager/helpers.ts.
+          if (r.fail) return new Promise((_res, rej) => setTimeout(() => rej(new TypeError('Failed to fetch')), r.delay || 0));
           // Reponse rendue (meme tardive) : notee a part dans inspFetchDone, pour attendre sans delai fixe.
           const make = () => {
             try {
@@ -50,6 +62,10 @@ export async function bootInsp(
               status: r.status, headers: { 'Content-Type': 'application/json' },
             });
           };
+          if (r.hold && !tenue(r.hold).libre) {
+            const t = tenue(r.hold);
+            return new Promise((res) => { t.attente.push(() => res(make())); });
+          }
           if (r.delay) return new Promise((res) => setTimeout(() => res(make()), r.delay));
           return Promise.resolve(make());
         }
@@ -62,6 +78,11 @@ export async function bootInsp(
   );
   await page.goto('/inspections/' + (opts.hash || ''), { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__inspReady === true, null, { timeout: 10_000 });
+}
+
+// Libere les reponses retenues sous ce nom (route `hold`).
+export async function liberer(page: Page, nom: string) {
+  await page.evaluate((n) => (window as any).__liberer(n), nom);
 }
 
 export async function fetchLog(page: Page) {
