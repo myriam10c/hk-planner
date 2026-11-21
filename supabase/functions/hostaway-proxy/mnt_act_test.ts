@@ -224,7 +224,7 @@ Deno.test("ticket.waiting_parts : note en commentaire si donnee", async () => {
 Deno.test("ticket.done : resolved, note, photo, cout et ligne de cout ; journal mnt_ticket.done lu par mnt_read", async () => {
   const sb = seed();
   const r = await act(sb, { op: "ticket.done", ticketId: 431, note: "Replaced compressor", photoPath: "tickets/431/a.jpg", cost: 450.5 });
-  assertEquals(r, { status: 200, body: { ok: true, ticketId: 431, status: "resolved" } });
+  assertEquals(r, { status: 200, body: { ok: true, ticketId: 431, status: "resolved", resolutionNotes: "Replaced compressor" } });
   const t = ticket(sb, 431);
   assertEquals([t.status, t.resolved_at, t.resolution_notes, t.resolution_photo_path, t.actual_cost, t.last_update],
     ["resolved", NOW_ISO, "Replaced compressor", "tickets/431/a.jpg", 450.5, NOW_ISO]);
@@ -240,12 +240,13 @@ Deno.test("Review Focus 3 : cout vide = null sans ligne ; 0 est un vrai cout ; n
     const s = seed();
     const r = await mntAct(s, ME, { idem: "idem-cost-" + (++n), op: "ticket.done", ticketId: 429, cost, photoPath: "" }, { nowMs: NOW });
     assertEquals(r.status, 200);
-    assertEquals([ticket(s, 429).status, ticket(s, 429).actual_cost ?? null, ticket(s, 429).resolution_photo_path, ticket(s, 429).resolution_notes],
-      ["resolved", null, null, null]);
+    // Rien n'est ecrit dans la note ni la photo d'un ticket qui n'en a pas : elles restent nulles.
+    assertEquals([ticket(s, 429).status, ticket(s, 429).actual_cost ?? null, ticket(s, 429).resolution_photo_path ?? null,
+      ticket(s, 429).resolution_notes ?? null], ["resolved", null, null, null]);
     assertEquals(s.tables.maintenance_costs.length, 0);
   }
   await act(sb, { op: "ticket.done", ticketId: 429, cost: 0, photoPath: "x".repeat(300) });
-  assertEquals([ticket(sb, 429).actual_cost, ticket(sb, 429).resolution_photo_path], [0, null]);
+  assertEquals([ticket(sb, 429).actual_cost, ticket(sb, 429).resolution_photo_path ?? null], [0, null]);
   assertEquals(sb.tables.maintenance_costs.map((c: any) => [c.ticket_id, c.amount, c.vendor_id]), [[429, 0, null]]);
   await act(sb, { op: "ticket.done", ticketId: 430, cost: "120" });
   assertEquals(ticket(sb, 430).actual_cost, 120);
@@ -515,7 +516,7 @@ Deno.test("S1 ruling A : done ferme les copies Hermes ouvertes maint:<id>, reope
   const s2 = seed();
   s2.tables.team_tasks.push({ id: 5, source_ref: "maint:430", status: "open", completed_at: null });
   s2.fail["team_tasks.update"] = { message: "db down" };
-  assertEquals(await act(s2, { op: "ticket.done", ticketId: 430 }), { status: 200, body: { ok: true, ticketId: 430, status: "resolved" } });
+  assertEquals(await act(s2, { op: "ticket.done", ticketId: 430 }), { status: 200, body: { ok: true, ticketId: 430, status: "resolved", resolutionNotes: null } });
   assertEquals([ticket(s2, 430).status, s2.tables.team_tasks[0].status], ["resolved", "open"]);
 });
 
@@ -701,4 +702,72 @@ Deno.test("edit_closed : le cout remplace est date du jour de cloture (Dubai), d
   // done : toujours aujourd'hui.
   await act(sb, { op: "ticket.done", ticketId: 429, cost: 5 });
   assertEquals(sb.tables.maintenance_costs.find((c: any) => c.ticket_id === 429).date, "2026-10-12");
+});
+
+// ---------- Reopen puis Done : la cloture d'avant n'est pas perdue (lot 1, tache 11) ----------
+// 431 clos avec note et photo, rouvert (prestataire assigne = assigned), journal vide,
+// actor_hint efface pour voir la nouvelle cloture le poser. Seconde photo deposee sur 431.
+const reopened431 = async () => {
+  const sb = seed();
+  await act(sb, { op: "ticket.done", ticketId: 431, note: "Replaced compressor", photoPath: "tickets/431/a.jpg" });
+  await act(sb, { op: "ticket.reopen", ticketId: 431 });
+  sb.tables.photos.push({ id: 3, storage_path: "tickets/431/b.jpg", ticket_id: 431, cleaner_id: 7, kind: "photo" });
+  sb.tables.cleaning_log.length = 0;
+  ticket(sb, 431).actor_hint = null;
+  return sb;
+};
+const closingOf = (sb: any, id: number) => {
+  const t = ticket(sb, id);
+  return [t.status, t.resolution_notes ?? null, t.resolution_photo_path ?? null, t.actor_hint ?? null, t.last_update];
+};
+const doneDetails = (sb: any) => sb.tables.cleaning_log.filter((l: any) => l.action === "mnt_ticket.done").map((l: any) => l.details);
+
+Deno.test("tache 11 : done, reopen, done sans note ni photo = note et photo de la premiere cloture gardees ; reponse et journal disent la note gardee", async () => {
+  for (const extra of [{}, { note: "   ", photoPath: "" }, { note: null, photoPath: null }]) {
+    const sb = await reopened431();
+    assertEquals(ticket(sb, 431).status, "assigned");
+    const r = await act(sb, { op: "ticket.done", ticketId: 431, ...extra });
+    assertEquals(closingOf(sb, 431), ["resolved", "Replaced compressor", "tickets/431/a.jpg", "Semax", NOW_ISO]);
+    assertEquals(r, { status: 200, body: { ok: true, ticketId: 431, status: "resolved", resolutionNotes: "Replaced compressor" } });
+    assertEquals(doneDetails(sb), [{ from: "assigned", note: "Replaced compressor", cost: null }]);
+  }
+});
+
+Deno.test("tache 11 : nouvelle note seule = note remplacee, photo gardee ; nouvelle photo seule = photo remplacee, note gardee", async () => {
+  const sb = await reopened431();
+  const r = await act(sb, { op: "ticket.done", ticketId: 431, note: "  New seal fitted " });
+  assertEquals(closingOf(sb, 431), ["resolved", "New seal fitted", "tickets/431/a.jpg", "Semax", NOW_ISO]);
+  assertEquals(r.body, { ok: true, ticketId: 431, status: "resolved", resolutionNotes: "New seal fitted" });
+  assertEquals(doneDetails(sb), [{ from: "assigned", note: "New seal fitted", cost: null }]);
+
+  const s2 = await reopened431();
+  const r2 = await act(s2, { op: "ticket.done", ticketId: 431, photoPath: "tickets/431/b.jpg" });
+  assertEquals(closingOf(s2, 431), ["resolved", "Replaced compressor", "tickets/431/b.jpg", "Semax", NOW_ISO]);
+  assertEquals(r2.body, { ok: true, ticketId: 431, status: "resolved", resolutionNotes: "Replaced compressor" });
+  assertEquals(doneDetails(s2), [{ from: "assigned", note: "Replaced compressor", cost: null }]);
+
+  // Les deux donnees : les deux remplacees.
+  const s3 = await reopened431();
+  await act(s3, { op: "ticket.done", ticketId: 431, note: "Both new", photoPath: "tickets/431/b.jpg" });
+  assertEquals(closingOf(s3, 431), ["resolved", "Both new", "tickets/431/b.jpg", "Semax", NOW_ISO]);
+});
+
+Deno.test("tache 11 : premiere cloture sans note ni photo (ticket jamais clos) = rien d'invente, note nulle dans la reponse et le journal", async () => {
+  const sb = seed();
+  const r = await act(sb, { op: "ticket.done", ticketId: 429 });
+  assertEquals(closingOf(sb, 429), ["resolved", null, null, "Semax", NOW_ISO]);
+  assertEquals(r, { status: 200, body: { ok: true, ticketId: 429, status: "resolved", resolutionNotes: null } });
+  assertEquals(doneDetails(sb), [{ from: "open", note: null, cost: null }]);
+});
+
+Deno.test("tache 11 : cout de la nouvelle cloture rate = note et photo de la premiere cloture remises avec le ticket", async () => {
+  const sb = await reopened431();
+  sb.fail["maintenance_costs.insert"] = { message: "db down" };
+  let msg = "";
+  try { await act(sb, { op: "ticket.done", ticketId: 431, cost: 10 }); } catch (e) { msg = (e as any).message; }
+  assertEquals(msg, "db down");
+  const t = ticket(sb, 431);
+  assertEquals([t.status, t.resolved_at, t.resolution_notes, t.resolution_photo_path], ["assigned", null, "Replaced compressor", "tickets/431/a.jpg"]);
+  // Cle liberee : seules restent celles de la premiere cloture et de Reopen.
+  assertEquals(sb.tables.job_events.length, 2);
 });

@@ -411,11 +411,14 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
     // Cloture gardee : seul un ticket pas clos (meme notion que isClosed, statut nul
     // compris) passe a resolved. Deux telephones en meme temps donnent une seule
     // cloture ; l'autre recoit 409 (cle liberee). actual_cost n'est pas touche ici :
-    // sans cout, le cout precedent reste (lignes et actual_cost).
-    const hit = await mustWrite(c.sb.from("maintenance_tickets").update({
-      status: "resolved", resolved_at: c.nowIso, resolution_notes: a.note || null,
-      resolution_photo_path: a.photoPath, last_update: c.nowIso, actor_hint: c.me.name,
-    }).eq("id", id).or("status.is.null,status.not.in.(" + MGR_CLOSED_TICKET_STATUSES.join(",") + ")").select("id"));
+    // sans cout, le cout precedent reste (lignes et actual_cost). Meme lecture pour la note
+    // et la photo : vide ou absente, celle deja sur le ticket reste (Reopen puis Done ne
+    // perd pas la cloture d'avant) ; donnee, elle remplace l'ancienne.
+    const values: Record<string, unknown> = { status: "resolved", resolved_at: c.nowIso, last_update: c.nowIso, actor_hint: c.me.name };
+    if (a.note) values.resolution_notes = a.note;
+    if (a.photoPath !== null) values.resolution_photo_path = a.photoPath;
+    const hit = await mustWrite(c.sb.from("maintenance_tickets").update(values)
+      .eq("id", id).or("status.is.null,status.not.in.(" + MGR_CLOSED_TICKET_STATUSES.join(",") + ")").select("id"));
     if (!hit.length) throw new Refused(CLOSED);
     // Avec un cout, il remplace celui du ticket (Reopen puis Done corrige un cout sans le compter deux fois) :
     // nouvelle ligne, puis retrait des anciennes, puis actual_cost. Si une etape rate, les anciennes lignes
@@ -427,8 +430,11 @@ async function doTicket(c: Ctx, a: Exclude<Op, { op: `proposal.${string}` } | { 
         last_update: tk.last_update ?? c.nowIso, actor_hint: c.me.name + " (undo)",
       }).eq("id", id)));
     }
+    // Note reellement gardee sur le ticket (l'ancienne quand aucune n'est donnee).
+    const notes = a.note || (tk.resolution_notes ?? null);
     result.status = "resolved";
-    details = { from: tk.status ?? null, cost: a.cost };
+    result.resolutionNotes = notes;
+    details = { from: tk.status ?? null, note: notes, cost: a.cost };
     // Copies Hermes encore ouvertes (taches d'equipe maint:<id>) : fermees apres coup,
     // jamais une cause d'echec ; Reopen ne les recree pas (ruling A).
     after.push(["copies Hermes de MNT-" + id, () => mustWrite(c.sb.from("team_tasks")
