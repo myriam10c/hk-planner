@@ -178,6 +178,66 @@ test.describe('minuit a Dubai', () => {
     expect(await calls(page, 'insp.today')).toBe(2);
   });
 
+  test('"Release" sur la liste de la veille : aucune ecriture, Today relu', async ({ page }) => {
+    await page.clock.setFixedTime(LATE);
+    await bootInsp(page, [ME, TODAY(DAY6({ today: [card({ claimedBy: 3, claimedByName: 'Faiza' })] }), { once: true }), TODAY(DAY7()),
+      { status: 200, match: 'action=insp.unclaim', body: { proposal: { listingId: 'A', claimedBy: null, claimedByName: null } } }], { pinToken: 'tok' });
+    await expect(dateLine(page)).toContainText('6 October');
+    await page.clock.setFixedTime(AFTER_MIDNIGHT);
+    await page.getByRole('button', { name: 'Release' }).click();
+    await expect(page.getByText('Apt 707 · Tower N')).toBeVisible();
+    expect(await calls(page, 'insp.today')).toBe(2);
+    expect(await calls(page, 'insp.unclaim')).toBe(0);
+  });
+
+  test('"Assign" sur la liste de la veille : pas d ecran de choix, Today relu', async ({ page }) => {
+    await page.clock.setFixedTime(LATE);
+    await bootInsp(page, [MGR, TODAY(DAY6(), { once: true }), TODAY(DAY7()), CLEANERS], { pinToken: 'tok' });
+    await expect(dateLine(page)).toContainText('6 October');
+    await page.clock.setFixedTime(AFTER_MIDNIGHT);
+    await page.getByRole('button', { name: 'Assign' }).click();
+    await expect(page.getByText('Apt 707 · Tower N')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Assign to' })).toHaveCount(0);
+    expect(await calls(page, 'insp.today')).toBe(2);
+    expect(await calls(page, 'getCleaners')).toBe(0);
+  });
+
+  // « Assign to » ouvert sur la liste du 6 : le logement choisi n'est jamais ecrit sur le 7,
+  // meme une fois Today relu (la relecture laisse l'ecran de choix ouvert).
+  const ASSIGN = { status: 200, match: 'action=insp.assign', body: { proposal: { listingId: 'A', claimedBy: 3, claimedByName: 'Faiza' } } };
+  test('"Assign to" ouvert avant minuit, Today relu au retour au premier plan, puis un nom : aucune ecriture, liste du 7', async ({ page }) => {
+    await page.clock.setFixedTime(LATE);
+    await bootInsp(page, [MGR, TODAY(DAY6(), { once: true }), TODAY(DAY7()), CLEANERS, ASSIGN], { pinToken: 'tok' });
+    await page.getByRole('button', { name: 'Assign' }).click();
+    await expect(page.getByRole('heading', { name: 'Assign to' })).toBeVisible();
+    await page.clock.setFixedTime(AFTER_MIDNIGHT);
+    await backToTab(page);
+    await expect.poll(() => todayDone(page)).toBe(2);
+    await frame(page);
+    await expect(page.getByRole('heading', { name: 'Assign to' })).toBeVisible();
+    await page.getByRole('button', { name: 'Faiza' }).click();
+    await expect(page.getByText('Apt 707 · Tower N')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Assign to' })).toHaveCount(0);
+    expect(await calls(page, 'insp.assign')).toBe(0);
+  });
+
+  test('"Assign to" ouvert avant minuit, un nom puis un second appui : aucune ecriture, liste du 7', async ({ page }) => {
+    await page.clock.setFixedTime(LATE);
+    await bootInsp(page, [MGR, TODAY(DAY6(), { once: true }), TODAY(DAY7()), CLEANERS, ASSIGN], { pinToken: 'tok' });
+    await page.getByRole('button', { name: 'Assign' }).click();
+    await expect(page.getByRole('heading', { name: 'Assign to' })).toBeVisible();
+    await page.clock.setFixedTime(AFTER_MIDNIGHT);
+    const faiza = page.getByRole('button', { name: 'Faiza' });
+    await faiza.click();
+    await expect.poll(() => todayDone(page)).toBe(2);
+    await frame(page);
+    // Second appui sur le meme nom, s'il est encore a l'ecran.
+    if (await faiza.count()) await faiza.click();
+    await expect(page.getByText('Apt 707 · Tower N')).toBeVisible();
+    await frame(page);
+    expect(await calls(page, 'insp.assign')).toBe(0);
+  });
+
   test('une seule relecture a la fois : appui et retour au premier plan pendant une relecture lente', async ({ page }) => {
     await page.clock.setFixedTime(LATE);
     await bootInsp(page, [ME, TODAY(DAY6(), { once: true }), TODAY(DAY7(), { delay: 2000 }), CLAIM], { pinToken: 'tok' });

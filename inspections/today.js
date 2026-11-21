@@ -43,7 +43,8 @@ export async function renderToday(ctx) {
   const isMgr = me.role === 'manager';
   // okAt : heure de la derniere reponse reussie de insp.today. triedOn : jour de Dubai de la
   // derniere lecture tentee (une seule tentative automatique par jour). status : code de l'erreur.
-  const st = { data: null, error: null, status: 0, okAt: 0, triedOn: null, picker: null, assign: null, cleaners: null, q: '' };
+  // assignDay : jour de la liste sur laquelle le logement de « Assign to » a ete choisi.
+  const st = { data: null, error: null, status: 0, okAt: 0, triedOn: null, picker: null, assign: null, assignDay: null, cleaners: null, q: '' };
   // Une seule lecture de insp.today a la fois (reading) : un appel pendant une lecture en cours
   // la rejoint. gen compte les reponses de gestes appliquees a la liste : une lecture partie
   // avant l'une d'elles est ecartee (elle ne remplace pas une reponse plus recente).
@@ -189,6 +190,15 @@ export async function renderToday(ctx) {
     if (a === 'fleet') return go('#/fleet');
     if (a === 'reports') return go('#/reports');
     if (a === 'retry') { load(); return; }
+    // « Assign to » ouvert sur la liste d'un autre jour de Dubai (meme relue depuis, l'ecran
+    // reste ouvert pendant une relecture) : le logement choisi n'est pas ecrit, l'ecran se
+    // ferme sur la liste et Today est relu.
+    if (a === 'assign-to' && st.assignDay !== todayDubai()) {
+      st.assign = null;
+      paint();
+      if (!busy) load();
+      return;
+    }
     // Liste d'un autre jour de Dubai (ou plus de liste) : un geste du jour n'ecrit rien et
     // n'ouvre rien, il relit Today (une lecture deja en cours n'est pas doublee).
     if (DAY_ACTS.includes(a) && !isToday()) { if (!busy) load(); return; }
@@ -201,13 +211,17 @@ export async function renderToday(ctx) {
       if (!st.overview) st.overview = await get('insp.overview');
       st.picker = st.overview.rows || [];
     }, b);
-    if (a === 'assign') return act(async () => {
-      if (!st.cleaners) {
-        const r = await get('getCleaners');
-        st.cleaners = (r.cleaners || []).filter((c) => c.is_active !== false && c.role !== 'subcontractor');
-      }
-      st.assign = id;
-    }, b);
+    if (a === 'assign') {
+      // Jour de la liste ou le logement est choisi, retenu a l'appui (avant toute lecture).
+      const day = st.data.day;
+      return act(async () => {
+        if (!st.cleaners) {
+          const r = await get('getCleaners');
+          st.cleaners = (r.cleaners || []).filter((c) => c.is_active !== false && c.role !== 'subcontractor');
+        }
+        st.assign = id; st.assignDay = day;
+      }, b);
+    }
     if (a === 'assign-to') return act(async () => {
       const p = (await post('insp.assign', { listingId: st.assign, cleanerId: Number(b.dataset.cid) })).proposal;
       patch(p); st.assign = null;
