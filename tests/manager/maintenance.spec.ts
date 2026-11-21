@@ -248,7 +248,7 @@ test('Open : groupes, ligne priorite et origine, filtres un a la fois, recherche
   await expect.poll(() => hashOf(page)).toBe('#/maintenance?tab=open');
 });
 
-test('Done : compte, fait par, cout seulement s il existe, note en texte, Reopen', async ({ page }) => {
+test('Done : compte, fait par, cout seulement s il existe, note en texte, Reopen confirme', async ({ page }) => {
   await bootMgr(page, [...ALL(), { match: 'action=mnt.act', status: 200, body: { ok: true, ticketId: 7, status: 'open' } }],
     { email: true, clock: NOW_MNT, hash: '#/maintenance?tab=done' });
   await expect(page.locator('.mt-help')).toHaveText('Last 30 days · 2 tickets');
@@ -259,11 +259,69 @@ test('Done : compte, fait par, cout seulement s il existe, note en texte, Reopen
   await expect(d.nth(1).locator('.mt-meta')).toHaveText('Done by Ismael, Wed 7');
   await expect(d.nth(1)).not.toContainText('AED');
   await expect(d.nth(1).getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
-  await d.nth(0).getByRole('button', { name: 'Reopen' }).click();
+  // Un appui sur Reopen n'ecrit rien : la confirmation s'ouvre.
+  const reopen = d.nth(0).getByRole('button', { name: 'Reopen' });
+  await reopen.click();
+  const s = sheet(page);
+  await expect(s.getByRole('heading', { name: 'Reopen MNT-7?' })).toBeVisible();
+  await expect(s.locator('.mt-confirm')).toHaveText('It goes back to the open list. Its closing note and photo are kept.');
+  await expect(s.locator('.sheet-f button')).toHaveText(['Reopen', 'Cancel']);
+  // Bouton d'action, pas le style danger : rien n'est detruit.
+  await expect(s.locator('[data-mact="reopen-send"]')).toHaveClass(/\bprimary\b/);
+  await expect(s.locator('[data-mact="reopen-send"]')).not.toHaveClass(/\bdanger\b/);
+  expect(await acts(page)).toHaveLength(0);
+  await s.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('#sheet.on')).toHaveCount(0);
+  expect(await acts(page)).toHaveLength(0);
+  // Cancel, Echap et le fond ferment sans rien ecrire et rendent le focus au bouton Reopen de la
+  // carte. Ouverture au clavier : WebKit (mgr-mobile) ne donne pas le focus a un bouton touche.
+  const closers = [
+    () => s.getByRole('button', { name: 'Cancel' }).click(),
+    () => page.keyboard.press('Escape'),
+    () => page.locator('#scrim').click({ position: { x: 5, y: 5 } }),
+  ];
+  for (const close of closers) {
+    await reopen.focus();
+    await page.keyboard.press('Enter');
+    await expect(s.getByRole('heading', { name: 'Reopen MNT-7?' })).toBeVisible();
+    await close();
+    await expect(page.locator('#sheet.on')).toHaveCount(0);
+    await expect(reopen).toBeFocused();
+  }
+  expect(await acts(page)).toHaveLength(0);
+  // Reopen confirme : une seule ecriture ticket.reopen, toast, feuille fermee.
+  await reopen.click();
+  await s.locator('[data-mact="reopen-send"]').click();
   await expect(page.locator('#toast')).toContainText('MNT-7 reopened');
+  await expect(page.locator('#sheet.on')).toHaveCount(0);
   const a = await acts(page);
   expect(a).toHaveLength(1);
   expect(a[0]).toMatchObject({ op: 'ticket.reopen', ticketId: 7 });
+});
+
+test('Done : double appui sur Reopen dans la confirmation = une seule ecriture ; refus du serveur dans la feuille', async ({ page }) => {
+  await bootMgr(page, [...ALL(),
+    { match: 'action=mnt.act', status: 200, body: { ok: true, ticketId: 7, status: 'open' }, once: true, delay: 600 },
+    { match: 'action=mnt.act', status: 409, body: { error: 'This ticket is not closed.' } },
+  ], { email: true, clock: NOW_MNT, hash: '#/maintenance?tab=done' });
+  const d = page.locator('.mt-done');
+  await d.nth(0).getByRole('button', { name: 'Reopen' }).click();
+  const send = sheet(page).locator('[data-mact="reopen-send"]');
+  await send.dblclick();
+  await expect(page.locator('#toast')).toContainText('MNT-7 reopened');
+  await expect(page.locator('#sheet.on')).toHaveCount(0);
+  const a = await acts(page);
+  expect(a).toHaveLength(1);
+  expect(a[0]).toMatchObject({ op: 'ticket.reopen', ticketId: 7 });
+  // Refus (ticket deja rouvert ailleurs) : erreur dans la confirmation, liste relue.
+  const before = (await lists(page)).length;
+  await d.nth(1).getByRole('button', { name: 'Reopen' }).click();
+  await expect(sheet(page).getByRole('heading', { name: 'Reopen MNT-4?' })).toBeVisible();
+  await send.click();
+  await expect(sheet(page).locator('.sheet-err')).toHaveText('This ticket is not closed.');
+  await expect(page.locator('#sheet.on')).toHaveCount(1);
+  await expect.poll(async () => (await lists(page)).length).toBeGreaterThan(before);
+  expect((await acts(page)).map((x) => x.ticketId)).toEqual([7, 4]);
 });
 
 test('See rejected : rejetees et fusionnees en lecture seule, raison et auteur', async ({ page }) => {

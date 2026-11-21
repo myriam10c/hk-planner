@@ -110,6 +110,7 @@ select.mt-input{height:44px}
 /* Ticket ferme : libelles longs (Edit closing details) sur deux lignes plutot que tronques */
 .mt-tkclosed .btn{white-space:normal;text-align:center;line-height:1.2;padding:4px 6px}
 .mt-hint{margin:4px 0 0;font-size:13px;color:var(--ink-3)}
+.mt-confirm{margin:0;font-size:17px}
 .mt-photorow{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;min-width:0}
 .mt-filebtn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
 .mt-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0)}

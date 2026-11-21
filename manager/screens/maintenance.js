@@ -31,7 +31,7 @@ export async function renderMaintenance(ctx) {
   const st = {
     view: hashTab || 'proposals', tabInHash: !!hashTab, filter: 'all', q: '', lists: {}, meta: null,
     loading: false, error: null, seq: 0, busy: false, typing: null, prp: null, from: 'card',
-    tk: null, tkSeq: 0, photo: null,
+    tk: null, tkSeq: 0, photo: null, reopen: null,
   };
   const gestures = createGestures();
   // Cles des envois de photo, a part : une photo deja deposee n'est pas renvoyee.
@@ -342,6 +342,24 @@ export async function renderMaintenance(ctx) {
   }
   const tkBody = (t, op, extra) => ({ op, ticketId: t.id, ...(extra || {}) });
 
+  // Reopen en deux temps (carte Done, fiche ticket) : la confirmation d'abord, ticket.reopen
+  // ensuite. Cancel n'ecrit rien : feuille fermee depuis la carte (focus rendu au bouton),
+  // retour a la fiche depuis la fiche du ticket.
+  function askReopen(ref, id, from) {
+    if (readOnly()) { toast(V.RO_LINE); return; }
+    st.reopen = { ref, id, from };
+    openSheet(V.reopenSheet(ref));
+  }
+  function onReopenClick(k, ref) {
+    const r = st.reopen;
+    if (!r || r.ref !== ref) return;
+    if (k === 'reopen-send') { write(ref, { op: 'ticket.reopen', ticketId: r.id }, ref + ' reopened'); return; }
+    if (r.from !== 'ticket' || !st.tk || st.tk.ref !== ref) { closeSheet(); return; }
+    showTicket();
+    const b = document.querySelector('#sheet [data-mact="tk-reopen"]');
+    if (b) b.focus();
+  }
+
   // Cloture : la photo d'abord (mnt.photo, sa propre cle), puis ticket.done avec le
   // chemin rendu. Envoi de photo rate : la feuille reste, aucun ticket.done.
   async function sendDone(t) {
@@ -459,7 +477,7 @@ export async function renderMaintenance(ctx) {
     if (k === 'tk-back') { showTicket(); return; }
     if (k === 'tk-start') { write(ref, tkBody(t, 'ticket.start'), ref + ' started'); return; }
     if (k === 'tk-broken') { write(ref, tkBody(t, 'ticket.start'), ref + ' reopened'); return; }
-    if (k === 'tk-reopen') { write(ref, tkBody(t, 'ticket.reopen'), ref + ' reopened'); return; }
+    if (k === 'tk-reopen') { askReopen(ref, t.id, 'ticket'); return; }
     if (k === 'tk-done') { tkSub(V.doneSheet(t)); return; }
     if (k === 'tk-waiting') { tkSub(V.waitingSheet(t)); return; }
     if (k === 'tk-comment') { tkSub(V.commentSheet(t)); return; }
@@ -522,6 +540,7 @@ export async function renderMaintenance(ctx) {
     }
     if (k === 'asg') { press(el, 'data-asg'); return; }
     if (k === 'new-send') { sendNew(); return; }
+    if (k === 'reopen-send' || k === 'reopen-cancel') { onReopenClick(k, ref); return; }
     if (k && k.startsWith('tk-')) {
       if (st.tk && ref === st.tk.ref) onTicketClick(k, el, st.tk);
       else if (k === 'tk-retry' && ref) openTicket(ref);
@@ -566,10 +585,7 @@ export async function renderMaintenance(ctx) {
     if (el.hasAttribute('data-new')) { showNew(); return; }
     if (el.hasAttribute('data-ticket')) { openTicket(el.getAttribute('data-ticket')); return; }
     const ref = el.getAttribute('data-ref');
-    if (el.hasAttribute('data-reopen')) {
-      write(null, { op: 'ticket.reopen', ticketId: Number(el.getAttribute('data-id')) }, ref + ' reopened');
-      return;
-    }
+    if (el.hasAttribute('data-reopen')) { askReopen(ref, Number(el.getAttribute('data-id')), 'card'); return; }
     const p = prpOf(ref, false);
     if (!p) return;
     if (el.hasAttribute('data-create')) { showCreate(p, 'card'); return; }

@@ -471,7 +471,7 @@ test('T5 #6 : upload() envoie les en-tetes de session sans Content-Type, delai d
   expect(await acts(page)).toHaveLength(0);
 });
 
-test('T5 #6 : Confirm fixed ouvre la feuille Mark done ; Reopen sur un ticket clos envoie ticket.reopen', async ({ page }) => {
+test('T5 #6 : Confirm fixed ouvre la feuille Mark done ; Reopen sur un ticket clos demande confirmation puis envoie ticket.reopen', async ({ page }) => {
   await bootMgr(page, ALL(
     GET('MNT-33', DETAIL({ id: 33, ref: 'MNT-33', stage: 'to_confirm', status: 'to_confirm' })),
     GET('MNT-34', DETAIL({ id: 34, ref: 'MNT-34', stage: 'done', status: 'resolved', resolvedAt: '2026-10-08T08:00:00Z', resolvedBy: 'Semax' })),
@@ -484,8 +484,34 @@ test('T5 #6 : Confirm fixed ouvre la feuille Mark done ; Reopen sur un ticket cl
   expect(await acts(page)).toHaveLength(0);
   await page.evaluate(() => { location.hash = '#/maintenance?ref=MNT-34'; });
   await expect(s.locator('[data-mref="MNT-34"]')).toBeVisible();
-  await s.locator('[data-mact="tk-reopen"]').click();
+  // Un appui sur Reopen n'ecrit rien : la confirmation s'ouvre ; Cancel revient a la fiche du ticket.
+  const reopen = s.locator('[data-mact="tk-reopen"]');
+  await reopen.click();
+  await expect(s.getByRole('heading', { name: 'Reopen MNT-34?' })).toBeVisible();
+  await expect(s.locator('[data-mref="MNT-34"]')).toBeVisible();
+  await expect(s.locator('.mt-confirm')).toHaveText('It goes back to the open list. Its closing note and photo are kept.');
+  await expect(s.locator('.sheet-f button')).toHaveText(['Reopen', 'Cancel']);
+  expect(await hashOf(page)).toBe('#/maintenance?ref=MNT-34');
+  expect(await acts(page)).toHaveLength(0);
+  await s.getByRole('button', { name: 'Cancel' }).click();
+  await expect(s.getByRole('heading', { name: 'Reopen MNT-34?' })).toHaveCount(0);
+  await expect(reopen).toBeVisible();
+  await expect(reopen).toBeFocused();
+  await expect(s.locator('.mt-tkdone')).toBeVisible();
+  expect(await acts(page)).toHaveLength(0);
+  // Echap ferme la feuille sans rien ecrire, comme les autres feuilles de la fiche.
+  await reopen.click();
+  await expect(s.getByRole('heading', { name: 'Reopen MNT-34?' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#sheet.on')).toHaveCount(0);
+  expect(await acts(page)).toHaveLength(0);
+  // Reopen confirme : une seule ecriture ticket.reopen.
+  await page.evaluate(() => { location.hash = '#/maintenance?ref=MNT-34'; });
+  await expect(reopen).toBeVisible();
+  await reopen.click();
+  await s.locator('[data-mact="reopen-send"]').click();
   await expect(page.locator('#toast')).toContainText('MNT-34 reopened');
+  await expect(page.locator('#sheet.on')).toHaveCount(0);
   const a = await acts(page);
   expect(a.map(({ idem, ...x }) => x)).toEqual([{ op: 'ticket.reopen', ticketId: 34 }]);
 });

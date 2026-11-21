@@ -506,6 +506,15 @@ export function ticketSheet(t, ro, nowMs) {
   return tkHead(t) + '<div class="sheet-b">' + b + '</div>' + f;
 }
 
+// Confirmation de Reopen (carte Done, fiche ticket), meme motif que les confirmations
+// de More : rien n'est detruit, donc bouton d'action et non danger.
+export function reopenSheet(ref) {
+  return head(ref, 'Reopen ' + ref + '?', '')
+    + '<div class="sheet-b"><p class="mt-confirm" role="status">It goes back to the open list. Its closing note and photo are kept.</p></div>'
+    + '<div class="sheet-f"><button class="btn primary mt-btn mt-grow" type="button" data-mact="reopen-send">Reopen</button>'
+    + '<button class="btn mt-btn" type="button" data-mact="reopen-cancel">Cancel</button></div>';
+}
+
 function subHead(t, title) { return head(t.ref, title, t.ref + ' · ' + t.title); }
 const subFoot = (send, label) => '<div class="sheet-f"><button class="btn primary mt-btn mt-grow" type="button" data-mact="' + send + '">' + label + '</button>'
   + '<button class="btn mt-btn" type="button" data-mact="tk-back">Back</button></div>';
