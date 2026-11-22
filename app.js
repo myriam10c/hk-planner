@@ -635,9 +635,8 @@ async function v3BootCheck(setupCheck){
 // n'accepte que les sessions email. Une session PIN manager reste ici et voit un
 // bandeau qui l'invite a se connecter par email. Meme echappatoire que pour les
 // cleaners : `?legacy=1` (V3_LEGACY_KEY) garde l'ancienne app pour l'onglet,
-// `?legacy=0` rend la bascule. Ancienne app retiree le MGR_LEGACY_UNTIL.
+// `?legacy=0` rend la bascule.
 const MGR_CUTOVER_DATE='2026-10-11';
-const MGR_LEGACY_UNTIL='2026-11-10';
 const MGR_CUTOVER_PATH='/manager/';
 const MGR_REDIRECT_KEY='hkMgrRedirectAt';
 const MGR_BANNER_HIDDEN_KEY='hkMgrBannerHidden';
@@ -721,9 +720,6 @@ function mgrBannerKind(){
   if(cleanerToken) return 'pin';
   return null;
 }
-function mgrLegacyUntilLabel(){
-  return new Date(MGR_LEGACY_UNTIL+'T00:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric',timeZone:'UTC'});
-}
 function renderMgrBanner(){
   const kind=mgrBannerKind();
   let el=document.getElementById('mgrBanner');
@@ -732,7 +728,7 @@ function renderMgrBanner(){
   let text, btns;
   const btn='min-height:36px;padding:0 14px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;border:0;background:#0a6fd6;color:#fff;';
   if(kind==='legacy'){
-    text='You are using the old manager app. It will be removed on '+mgrLegacyUntilLabel()+'.';
+    text='You are using the old manager app. It will be removed.';
     btns='<button type="button" data-action="mgrOpenNewApp" style="'+btn+'">Open the new app</button>';
   }else{
     // Adresse deja posee : linkEmail refuserait un compte deja utilise, le
@@ -3464,12 +3460,28 @@ function changeWeek(dir){weekOffset+=dir;selectedDate='all';pendingKey=null;fetc
 function setFilterCleaner(id){filterCleaner=filterCleaner===id?null:id;render();}
 function toggleSearch(){searchOpen=!searchOpen;search='';render();if(searchOpen)setTimeout(()=>{const el=document.getElementById('headerSearchInput');if(el)el.focus();},100);}
 
+// Message sous le champ PIN apres un echec. `res` vaut null quand l'appel n'a pas
+// abouti (sans reseau, delai depasse, reponse illisible). Mauvais PIN (401, que
+// api() peut rendre en 'Session expired') : message inchange. Toute autre reponse
+// est une panne cote serveur : on peut retenter tout de suite.
+function pinLoginError(res){
+  const err=res&&res.error;
+  if(err==='Too many attempts. Try again in 1 minute.') return 'Too many attempts. Wait 1 minute.';
+  if(err==='Invalid PIN'||err==='Session expired') return 'Invalid PIN';
+  return 'No connection. Try again.';
+}
 // #6 Cleaner PIN login (Phase 1: hashed PIN + session token)
 async function cleanerLogin(){
-  const pin=document.getElementById('pinInput').value;
+  const pinEl=document.getElementById('pinInput');
+  const pin=pinEl.value;
   if(pin.length!==4)return;
-  const res=await api('cleanerLogin',{body:{pin}});
-  if(res.status==='success'){
+  // Pendant l'appel : champ verrouille (pas de second envoi), « Checking... » dessous.
+  const checkEl=document.getElementById('pinError');
+  pinEl.readOnly=true;
+  if(checkEl){ checkEl.style.color='var(--text2)'; checkEl.textContent='Checking...'; }
+  let res=null;
+  try{ res=await api('cleanerLogin',{body:{pin}}); }catch(e){ /* res reste null */ }
+  if(res&&res.status==='success'){
     v3ConfirmedRole=res.cleaner?res.cleaner.role:null;
     cleanerToken=res.token||null;
     if(cleanerToken) localStorage.setItem('cleanerToken',cleanerToken);
@@ -3509,10 +3521,11 @@ async function cleanerLogin(){
     }
     fetchAll();
   } else {
+    // Elements relus : api() a pu repeindre l'ecran PIN pendant l'appel.
     const errEl=document.getElementById('pinError');
-    if(errEl) errEl.textContent=res.error==='Too many attempts. Try again in 1 minute.'?'Trop de tentatives — patientez 1 minute':'Invalid PIN';
+    if(errEl){ errEl.style.color=''; errEl.textContent=pinLoginError(res); }
     const inEl=document.getElementById('pinInput');
-    if(inEl) inEl.value='';
+    if(inEl){ inEl.readOnly=false; inEl.value=''; }
   }
 }
 async function cleanerLogout(){

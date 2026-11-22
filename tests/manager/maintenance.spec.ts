@@ -456,7 +456,7 @@ test('cout : vide ou absent ne montre rien, 0 est un vrai cout', async ({ page }
 test('F2 : Semax a une ligne Links en bas (Inspections, Field app, Old app)', async ({ page }) => {
   await bootMgr(page, [me(SEMAX), L.rejected(), L.proposals(), L.open(), L.done()], { email: true, clock: NOW_MNT, hash: '#/maintenance' });
   const links = page.locator('#main nav.mt-links a');
-  await expect(links).toHaveText(['Inspections', 'Field app', 'Old app (until 10 Nov)']);
+  await expect(links).toHaveText(['Inspections', 'Field app', 'Old app']);
   expect(await links.evaluateAll((as: any[]) => as.map((a) => a.getAttribute('href')))).toEqual(['/inspections/', '/v3/', '/?legacy=1']);
   expect(await links.evaluateAll((as: any[]) => as.map((a) => a.getBoundingClientRect().height >= 44))).toEqual([true, true, true]);
   await expect(page.locator('#main nav.mt-links')).toHaveAttribute('aria-labelledby', 'mtLinksH');

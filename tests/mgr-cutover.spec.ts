@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 // 00:00 Dubai, une session EMAIL role=manager qui ouvre la racine est renvoyee
 // vers /manager/. Une session PIN manager reste et voit un bandeau qui demande la
 // connexion par email. ?legacy=1 garde l'ancienne app pour l'onglet (meme drapeau
-// que la bascule des cleaners), avec un bandeau jusqu'au 10/11.
+// que la bascule des cleaners), avec un bandeau.
 //
 // Tourne contre l'arbre de travail :
 //   HK_PLANNER_URL=http://localhost:8890 npx playwright test tests/mgr-cutover.spec.ts --project=desktop --project=mobile
@@ -106,7 +106,7 @@ test('decision pure : manager ou maintenance en session email seulement, a parti
     const w = window as any;
     const roles = ['manager', 'cleaner', 'subcontractor', 'maintenance', 'system', null];
     return {
-      consts: [(0, eval)('MGR_CUTOVER_DATE'), (0, eval)('MGR_LEGACY_UNTIL'), (0, eval)('MGR_CUTOVER_PATH'), (0, eval)('MGR_REDIRECT_KEY')],
+      consts: [(0, eval)('MGR_CUTOVER_DATE'), (0, eval)('MGR_CUTOVER_PATH'), (0, eval)('MGR_REDIRECT_KEY')],
       le10: roles.map((x) => w.mgrCutoverDue(x, true, '2026-10-10', false)),
       le11: roles.map((x) => w.mgrCutoverDue(x, true, '2026-10-11', false)),
       le12: roles.map((x) => w.mgrCutoverDue(x, true, '2026-10-12', false)),
@@ -114,7 +114,7 @@ test('decision pure : manager ou maintenance en session email seulement, a parti
       legacy: w.mgrCutoverDue('manager', true, '2026-10-11', true),
     };
   });
-  expect(r.consts).toEqual(['2026-10-11', '2026-11-10', '/manager/', 'hkMgrRedirectAt']);
+  expect(r.consts).toEqual(['2026-10-11', '/manager/', 'hkMgrRedirectAt']);
   expect(r.le10).toEqual([false, false, false, false, false, false]);
   expect(r.le11).toEqual([true, false, false, true, false, false]);
   expect(r.le12).toEqual([true, false, false, true, false, false]);
@@ -193,7 +193,7 @@ test('?legacy=1 garde l ancienne app avec le bandeau, meme apres rechargement ; 
   await expect(page.locator('.bottom-nav')).toBeVisible({ timeout: 10_000 });
   await reste(page);
   await expect(banner(page)).toBeVisible();
-  await expect(banner(page)).toContainText('You are using the old manager app. It will be removed on 10 November 2026.');
+  await expect(banner(page)).toContainText('You are using the old manager app. It will be removed.');
   await expect(banner(page).getByRole('button', { name: 'Open the new app' })).toBeVisible();
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await reste(page);

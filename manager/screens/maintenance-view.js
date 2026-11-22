@@ -81,7 +81,7 @@ const UA = typeof navigator !== 'undefined' ? navigator.userAgent : '';
 function placeCat(p) { return [placeLabel(p), p.categoryLabel || CATEGORY[p.category] || ''].filter(Boolean).join(' · '); }
 
 // Liens de sortie du role maintenance (Semax), en bas de l'ecran : ses autres apps.
-const LINKS = [['/inspections/', 'Inspections'], ['/v3/', 'Field app'], ['/?legacy=1', 'Old app (until 10 Nov)']];
+const LINKS = [['/inspections/', 'Inspections'], ['/v3/', 'Field app'], ['/?legacy=1', 'Old app']];
 export function linksHtml() {
   return '<nav class="mt-links" aria-labelledby="mtLinksH"><h2 class="mt-label" id="mtLinksH">Links</h2><div class="mt-linkrow">'
     + LINKS.map(([href, label]) => '<a class="mt-outlink" href="' + esc(href) + '">' + esc(label) + '</a>').join('') + '</div></nav>';
