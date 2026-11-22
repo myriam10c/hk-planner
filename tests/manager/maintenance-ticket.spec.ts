@@ -57,6 +57,11 @@ const PNG = { name: 'leak.png', mimeType: 'image/png', buffer: Buffer.from('iVBO
 const WORKING = { stage: 'in_progress', status: 'in_progress' };
 async function openFromOpen(page: any, extra: any[] = [], detail: any = {}) {
   await bootMgr(page, ALL(GET('MNT-14', DETAIL(detail)), ...extra), { email: true, clock: NOW_MNT, hash: '#/maintenance?tab=open' });
+  // Le bouton « Location » (loc-pill.js, charge apres le premier rendu) se pose sous l'en-tete
+  // et pousse la liste vers le bas. Un clic lance pendant ce decalage se perd : mousedown sur la
+  // ligne, mouseup ailleurs, le click part sur un ancetre. On attend la mise en page finale
+  // (MANAGER partage sa position par defaut : le bouton est toujours la).
+  await expect(page.locator('#main > [data-loc-pill]')).toBeVisible();
   await page.locator('.mt-row').nth(0).click();
   await expect(sheet(page).locator('.mt-steps')).toBeVisible();
 }
