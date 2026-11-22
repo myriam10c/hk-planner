@@ -78,6 +78,35 @@ test('Clean again : confirmation en deux temps, puis un menage neuf dont le dema
   expect(d[0]).toEqual({ jobId: FINI.jobId, idem: d[0].idem, again: true });
 });
 
+// Revue finale du lot 1 : « Clean again » confirme est enregistre tout de suite. Avant, rien
+// n'etait garde avant « I'm here » : l'app tuee puis rouverte hors ligne perdait l'indicateur.
+const copieConvs = (page: Page) => page.evaluate(async () => {
+  const blob = await (await import('/v3/offline.js')).getState('v3Convs');
+  const c = blob && blob.convs ? blob.convs['job_0000000000000blm1011'] : null;
+  return blob ? { activeId: blob.activeId, screen: blob.screen, again: c ? c.again === true : null } : null;
+});
+
+test('Clean again confirme : la conversation est enregistree avant tout autre geste et survit a un rechargement hors ligne', async ({ page }) => {
+  await demarrer(page, ROUTES_FINI);
+  await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
+  await page.locator('[data-act="again-ask"]').click();
+  await page.locator('[data-act="again-yes"]').click();
+  await expect(page.locator('[data-reply="here"]')).toBeVisible();
+  await expect.poll(() => copieConvs(page)).toEqual({ activeId: BLOOM.jobId, screen: 'conv', again: true });
+  expect(await demarrages(page)).toEqual([]);
+
+  await page.evaluate(() => localStorage.setItem('v3TestOffline', '1'));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__v3ready === true);
+  await expect(page.locator('[data-reply="here"]')).toBeVisible();
+  await expect(page.locator('[data-act="again-ask"]')).toHaveCount(0);
+  expect(await page.evaluate((id) => (window as any).__hk.convs[id].again, BLOOM.jobId)).toBe(true);
+  // Le demarrage mis en file porte l'indicateur.
+  await page.locator('[data-reply="here"]').click();
+  await expect.poll(async () => page.evaluate(async () => (await (await import('/v3/offline.js')).pendingEntries())
+    .filter((e: any) => e.action === 'v3.startJob').map((e: any) => e.body.again))).toEqual([true]);
+});
+
 test('un demarrage ordinaire ne porte pas l indicateur', async ({ page }) => {
   await demarrer(page);
   await page.getByRole('button', { name: /1011C Bloom Towers/ }).click();
