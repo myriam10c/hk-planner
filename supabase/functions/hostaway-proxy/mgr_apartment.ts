@@ -1,7 +1,7 @@
 // Fiche logement de l'app manager (More > Apartment, phase 5a) : actions
 // mgr.apartments (liste) et mgr.apartment (fiche). Lecture seule.
 // Tout est repris des sources existantes, rien n'est recalcule a part :
-//   - menages : memes tables et aides que mgr.planning (reservationKey, reports,
+//   - menages : memes tables et aides que mgr.planning (checkoutKeys, reports,
 //     assignations, fait, annule, laundryRow), departs via loadCheckouts injecte
 //     par index.ts (cache serveur des checkouts) ;
 //   - tickets : reference MNT-<id> de ticketRow (mgr_inbox.ts) ;
@@ -17,7 +17,7 @@ import { dubaiDay, INSP_VALID_STATUSES } from "./insp_rules.ts";
 import { getSecurityContacts } from "./security_contacts.ts";
 import { MGR_OPEN_TICKET_STATUSES, normPriority, ticketRow, type RawTicket } from "./mgr_inbox.ts";
 import { MGR_TICKET_COLS, vendorNames } from "./mgr_problems.ts";
-import { reservationKey, splitListing } from "./mgr_rules.ts";
+import { checkoutKeys, splitListing } from "./mgr_rules.ts";
 import { byKeys, listingMap, peopleMap, readAllRows } from "./mgr_today.ts";
 import { LAUNDRY_FIELDS, laundryRow, type LaundryRow } from "./mgr_planning_rules.ts";
 import type { CheckoutRow } from "./mgr_planning.ts";
@@ -149,10 +149,14 @@ async function loadCleanings(sb: any, o: {
   loadCheckouts: (start: string, end: string) => Promise<{ reservations: CheckoutRow[]; cachedAt: string | null }>;
 }): Promise<{ rows: AptCleaning[]; bookingsFailed: boolean }> {
   let bookingsFailed = false;
-  let res: CheckoutRow[] = [];
+  let res: Array<{ r: CheckoutRow; key: string }> = [];
   try {
     const loaded = await o.loadCheckouts(o.from, o.to);
-    res = (loaded.reservations ?? []).filter((r) => r && String(r.listingId ?? "") === o.listingId && r.checkOut &&
+    // Cle de chaque menage (lot 1, tache 7) : calculee sur le payload entier, avant
+    // le filtre par logement, comme Planning et Today (checkoutKeys).
+    const raw = loaded.reservations ?? [];
+    const rawKeys = checkoutKeys(raw);
+    res = raw.map((r, i) => ({ r, key: rawKeys[i] })).filter(({ r }) => r && String(r.listingId ?? "") === o.listingId && r.checkOut &&
       INSP_VALID_STATUSES.includes(String(r.status ?? "")));
   } catch (e) {
     console.error("[mgr.apartment] checkouts failed:", e);
@@ -164,7 +168,7 @@ async function loadCleanings(sb: any, o: {
     .eq("listing_id", o.listingId).order("id").range(a, b), "extra_cleanings"))
     .filter((e: any) => e.reservation_key && e.status !== "cancelled");
   const keys = [...new Set([
-    ...res.map((r) => reservationKey({ departure: String(r.checkOut), guest: String(r.guest ?? "") })),
+    ...res.map((x) => x.key),
     ...extras.map((e: any) => String(e.reservation_key)),
   ])];
   const [post, asg, done, canc, linen] = await Promise.all([
@@ -199,7 +203,7 @@ async function loadCleanings(sb: any, o: {
       linen: linenMap[key] ?? null, extra,
     });
   };
-  for (const r of res) add(reservationKey({ departure: String(r.checkOut), guest: String(r.guest ?? "") }), String(r.checkOut), txt(r.guest), null);
+  for (const { r, key } of res) add(key, String(r.checkOut), txt(r.guest), null);
   for (const e of extras) add(String(e.reservation_key), String(e.cleaning_date), txt(e.guest_name), String(e.label ?? "Extra cleaning"));
   out.sort((a, b) => b.date.localeCompare(a.date) || a.key.localeCompare(b.key));
   return { rows: out.map(({ key: _k, ...c }) => c), bookingsFailed };

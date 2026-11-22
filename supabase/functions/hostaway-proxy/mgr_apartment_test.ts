@@ -178,6 +178,47 @@ Deno.test("mgr.apartment : fiche complete (menages, tickets, inspections, contac
   assertEquals(b.generatedAt, new Date(NOW).toISOString());
 });
 
+// Lot 1, tache 7 : deux logements, meme depart, meme voyageur. La reservation la plus
+// ancienne (id 100, L2) garde la cle nue ; L1 lit sous « cleNue~L1 », comme Today et Planning.
+const TWIN = "2026-10-06_Sam Twin";
+const twinSeed = () => {
+  const db = seed();
+  db.tables.cleaning_assignments.push(
+    { reservation_key: TWIN, cleaner_id: 4, service_type: "CHC" },
+    { reservation_key: TWIN + "~L1", cleaner_id: 10, service_type: "CHC" },
+  );
+  db.tables.menage_done.push({ reservation_key: TWIN, done: true });
+  db.tables.cleaning_cancelled.push({ reservation_key: TWIN + "~L1", reason: "Owner stay", cancelled_by: "Walter" });
+  db.tables.laundry_counts.push(
+    { reservation_key: TWIN, pillowcases: 2, bed_sheets: 1, duvet_covers: 1, small_towels: 2, face_towels: 2, large_towels: 2, bath_mats: 1 },
+    { reservation_key: TWIN + "~L1", pillowcases: 4, bed_sheets: 2, duvet_covers: 2, small_towels: 4, face_towels: 4, large_towels: 4, bath_mats: 2 },
+  );
+  return db;
+};
+const twinRow = async (listingId: string, reservations: CheckoutRow[]) => {
+  const { r } = await runCleanings(listingId, twinSeed(), async () => ({ reservations, cachedAt: null }));
+  assertEquals(r.status, 200);
+  const c = (r.body as MgrApartmentCleanings).cleanings.filter((x) => x.guest === "Sam Twin");
+  assertEquals(c.length, 1);
+  return [c[0].date, c[0].by, c[0].done, c[0].cancelled, c[0].linen?.total ?? null];
+};
+
+Deno.test("mgr.apartment?part=cleanings : deux logements meme depart meme voyageur, chaque fiche lit son menage (cle de Today et Planning)", async () => {
+  const l1 = C("L1", "Sam Twin", "2026-10-06", { id: 200 });
+  const l2 = C("L2", "Sam Twin", "2026-10-06", { id: 100 });
+  const suffixe = ["2026-10-06", ["Pionah"], false, true, 22];
+  const gardien = ["2026-10-06", ["Faiza"], true, false, 11];
+  // Logement suffixe (L1) : affectation, fait, annulation, linge sous TWIN~L1 ; gardien (L2) sous la cle nue.
+  // L'ordre des reservations dans le payload ne change rien.
+  for (const list of [[l1, l2], [l2, l1]]) {
+    assertEquals(await twinRow("L1", [...CHECKOUTS, ...list]), suffixe);
+    assertEquals(await twinRow("L2", [...CHECKOUTS, ...list]), gardien);
+  }
+  // Sans collision (l'autre reservation absente, ou d'un statut non valide) : la cle nue, comme aujourd'hui.
+  assertEquals(await twinRow("L1", [...CHECKOUTS, l1]), gardien);
+  assertEquals(await twinRow("L1", [...CHECKOUTS, l1, { ...l2, status: "cancelled" }]), gardien);
+});
+
 Deno.test("mgr.apartment : logement neuf sans donnees, chaque section vide, sante 100", async () => {
   const r = await run("L3");
   assertEquals(r.status, 200);
