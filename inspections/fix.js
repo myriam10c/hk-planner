@@ -2,10 +2,17 @@
 // Le serveur valide (jour valide, pas dans le passe, creneau <= 40 caracteres) et calcule le retard.
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-export function todayDubai() {
+// Jour de Dubai (AAAA-MM-JJ) d'un instant, jamais celui du fuseau du navigateur. '' si l'instant est illisible.
+export function dayDubai(at) {
+  const d = new Date(at);
+  if (isNaN(d.getTime())) return '';
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Dubai' })
-    .formatToParts(new Date()).map((x) => [x.type, x.value]));
+    .formatToParts(d).map((x) => [x.type, x.value]));
   return p.year + '-' + p.month + '-' + p.day;
+}
+
+export function todayDubai() {
+  return dayDubai(Date.now());
 }
 
 // "12 Oct" ou "12 Oct, morning".

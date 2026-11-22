@@ -1,6 +1,6 @@
 import { post, upload, newIdem } from '/inspections/api.js';
 import { shrink } from '/inspections/photo.js';
-import { fixFields, fixText } from '/inspections/fix.js';
+import { dayDubai, fixFields, fixText, todayDubai } from '/inspections/fix.js';
 
 // Jumeau volontaire de INSP_ZONES dans supabase/functions/hostaway-proxy/insp_rules.ts :
 // memes cles, memes libelles, meme ordre. A modifier des deux cotes.
@@ -20,6 +20,8 @@ const ZONES = [
 // Zone det : la liste des equipements vient du serveur (snapshot detItems), jamais dupliquee ici.
 const WHO = { owner: 'Owner', medini: 'Medini', both: 'Owner + Medini' };
 const clock = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Dubai' });
+// Debut d'une inspection : "09:12" le jour meme a Dubai, "4 Nov, 09:12" pour une inspection reprise d'un autre jour.
+const startedText = (iso) => { const d = dayDubai(iso); return (d && d !== todayDubai() ? fixText(d) + ', ' : '') + clock(iso); };
 
 export async function renderInspect(ctx) {
   const { go, toast, render, esc } = ctx;
@@ -206,7 +208,7 @@ export async function renderInspect(ctx) {
     }
     const n = doneCount();
     render('<main class="wrap"><header class="top"><div><h1>' + esc(st.insp.name || 'Apartment') + '</h1><p class="mute">Started '
-      + esc(clock(st.insp.startedAt)) + '</p></div><button class="btn ghost" data-act="home">Back</button></header>'
+      + esc(startedText(st.insp.startedAt)) + '</p></div><button class="btn ghost" data-act="home">Back</button></header>'
       + '<span data-slot="count"></span>'
       + focusSummary()
       + ZONES.map(zoneHtml).join('')

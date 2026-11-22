@@ -240,3 +240,33 @@ test('Inspect again : echec reseau, message, bouton utilisable, meme cle ; doubl
   expect(starts[2].idem).toBe(starts[1].idem);
   expect(starts[1].idem).not.toBe(starts[0].idem);
 });
+
+// ---- Inspection reprise : le jour de debut s'affiche quand ce n'est pas aujourd'hui a Dubai ----
+
+const RESUMED = (startedAt: string) => ({ status: 200, match: 'action=insp.start', body: {
+  inspection: { id: 42, listingId: 'A', name: 'Apt 101 · Tower A', eligibility: 'checkout', startedAt },
+  items: [{ zone: 'entrance', status: 'ok' }], photos: [] } });
+
+// New York : 4 Nov 16:00 au navigateur, deja 5 Nov 01:00 a Dubai. Commencee le 4 Nov a 09:12 (Dubai).
+test.describe('reprise, navigateur a New York', () => {
+  test.use({ timezoneId: 'America/New_York' });
+
+  test('inspection commencee un autre jour a Dubai : Started avec le jour', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-11-04T21:00:00Z'));
+    await bootInsp(page, [ME, RESUMED('2026-11-04T05:12:00Z')], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
+    await expect(page.getByText('1 / 11 zones')).toBeVisible();
+    await expect(page.getByText('Started 4 Nov, 09:12', { exact: true })).toBeVisible();
+  });
+});
+
+// Tokyo : deja 5 Nov 01:00 au navigateur, encore 4 Nov 20:00 a Dubai. Commencee le 4 Nov a 09:12 (Dubai).
+test.describe('reprise, navigateur a Tokyo', () => {
+  test.use({ timezoneId: 'Asia/Tokyo' });
+
+  test('inspection commencee le jour meme a Dubai : Started avec l heure seule', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-11-04T16:00:00Z'));
+    await bootInsp(page, [ME, RESUMED('2026-11-04T05:12:00Z')], { pinToken: 'tok', hash: '#/inspect/A?e=checkout' });
+    await expect(page.getByText('1 / 11 zones')).toBeVisible();
+    await expect(page.getByText('Started 09:12', { exact: true })).toBeVisible();
+  });
+});
