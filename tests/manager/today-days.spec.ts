@@ -41,12 +41,19 @@ const writes = async (page: Page, action: string) =>
   (await fetchLog(page)).filter((l) => l.url.endsWith('action=' + action)).map((l) => JSON.parse(l.body));
 const who = (page: Page) => page.locator('section[aria-labelledby="h-who"]');
 const chip = (page: Page, day: string) => page.locator('[data-wday="' + day + '"]');
+// Bande de sept jours (lot 4a) : au-dessus de la journee, plus dans le bloc « Who does what ».
+const chips = (page: Page) => page.locator('[data-wday]');
+// Journee du jour des donnees affichee : sa premiere carte.
+const todayBoard = (page: Page) => page.locator('[data-td-moment]').first();
 
 test('jours : Today, Tomorrow puis 5 jours, Today choisi, aucun appel mgr.planning au demarrage', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), TODAY()], { email: true, clock: NOW });
-  await expect(page.getByRole('heading', { name: 'Who does what today', exact: true })).toBeVisible();
-  const chips = who(page).locator('[data-wday]');
-  await expect(chips).toHaveText(['Today', 'Tomorrow', 'Sun 11', 'Mon 12', 'Tue 13', 'Wed 14', 'Thu 15']);
+  await expect(todayBoard(page)).toBeVisible();
+  const days = ['2026-10-09', '2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15'];
+  expect(await chips(page).evaluateAll((l) => l.map((b) => b.getAttribute('data-wday')))).toEqual(days);
+  await expect(chips(page).locator('.td-wl')).toHaveText(['Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu']);
+  await expect(chips(page).locator('.td-wn')).toHaveText(['9', '10', '11', '12', '13', '14', '15']);
+  await expect(page.locator('.td-date')).toContainText('9 October · today');
   await expect(chip(page, '2026-10-09')).toHaveAttribute('aria-pressed', 'true');
   await expect(chip(page, '2026-10-10')).toHaveAttribute('aria-pressed', 'false');
   expect(await plCalls(page)).toEqual([]);
@@ -72,8 +79,8 @@ test('Tomorrow : mgr.planning de la semaine, menage sans personne avec Assign, a
   await expect(elite).toContainText('Subcontractor');
   await expect(elite).toContainText('Apt 505 · Tower E');
   // Le reste de Today reste sur aujourd'hui.
-  await expect(page.getByRole('heading', { name: 'Ready for today’s arrivals' })).toBeVisible();
-  await expect(page.locator('.strip')).toContainText('cleanings today');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Friday');
+  await expect(page.locator('.td-sum')).toContainText('4 guests arrive today.');
   const s = await noHorizontalScroll(page);
   expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
 });
@@ -81,7 +88,7 @@ test('Tomorrow : mgr.planning de la semaine, menage sans personne avec Assign, a
 test('Tomorrow dans la semaine suivante : start du lundi suivant', async ({ page }) => {
   const sunday = new Date('2026-10-11T07:00:00Z');
   await bootMgr(page, [me(MANAGER), TODAY(todayBody({ day: '2026-10-11' })), WEEK2()], { email: true, clock: sunday });
-  await expect(who(page).locator('[data-wday]').nth(1)).toHaveAttribute('data-wday', '2026-10-12');
+  await expect(chips(page).nth(1)).toHaveAttribute('data-wday', '2026-10-12');
   await chip(page, '2026-10-12').click();
   await expect(page.getByRole('heading', { name: 'Who does what, Mon 12', exact: true })).toBeVisible();
   await expect(who(page).locator('.person.unassigned')).toContainText('Apt 1301 · Monday Heights');
@@ -126,10 +133,11 @@ test('retour sur Today : le bloc du jour tel quel, sans nouvel appel mgr.today',
   await chip(page, '2026-10-10').click();
   await expect(page.getByRole('heading', { name: 'Who does what, Sat 10', exact: true })).toBeVisible();
   await chip(page, '2026-10-09').click();
-  await expect(page.getByRole('heading', { name: 'Who does what today', exact: true })).toBeVisible();
+  await expect(todayBoard(page)).toBeVisible();
+  await expect(who(page)).toHaveCount(0);
   await expect(chip(page, '2026-10-09')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('.person.unassigned')).toContainText('Apt 308');
-  await expect(page.locator('.person.unassigned')).toContainText('Same-day arrivals first');
+  await expect(page.locator('.td-blocked')).toContainText('Apt 308');
+  await expect(page.locator('.td-blocked')).toContainText('No cleaner assigned');
   expect((await fetchLog(page)).filter((l) => l.url.includes('action=mgr.today')).length).toBe(1);
   // Semaine gardee en memoire : revenir sur Sat 10 ne relit pas mgr.planning.
   await chip(page, '2026-10-10').click();
@@ -225,9 +233,11 @@ test('apres minuit : les puces partent du jour des donnees, le bloc d hier n est
   // Horloge au samedi 10 (Dubai), donnees du vendredi 9 encore a l'ecran.
   const sat = new Date('2026-10-10T07:00:00Z');
   await bootMgr(page, [me(MANAGER), TODAY(), WEEK1()], { email: true, clock: sat });
-  const chips = who(page).locator('[data-wday]');
-  await expect(chips).toHaveText(['Fri 9', 'Today', 'Tomorrow', 'Mon 12', 'Tue 13', 'Wed 14', 'Thu 15']);
+  await expect(chips(page).first()).toHaveAttribute('data-wday', '2026-10-09');
+  await expect(chips(page).locator('.td-wl')).toHaveText(['Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu']);
   await expect(chip(page, '2026-10-09')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.td-date')).toContainText('9 October · as of');
+  await expect(page.locator('.td-date')).not.toContainText('today');
   // La puce Today (samedi) montre bien samedi, lu dans mgr.planning.
   await chip(page, '2026-10-10').click();
   await expect(page.getByRole('heading', { name: 'Who does what, Sat 10', exact: true })).toBeVisible();
@@ -244,7 +254,7 @@ test('clavier : apres un toucher sur une puce, le focus reste sur la puce', asyn
   await expect(chip(page, '2026-10-10')).toBeFocused();
   await chip(page, '2026-10-09').focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('heading', { name: 'Who does what today', exact: true })).toBeVisible();
+  await expect(todayBoard(page)).toBeVisible();
   await expect(chip(page, '2026-10-09')).toBeFocused();
 });
 

@@ -28,7 +28,7 @@ main{padding:0 16px calc(112px + env(safe-area-inset-bottom));max-width:1240px;m
   .navlink svg{width:20px;height:20px;flex:none}
   .navlink:hover{background:var(--surface-2);color:var(--ink)}
   .navlink[aria-current="page"]{background:var(--accent-tint);color:var(--accent)}
-  .side-foot{margin-top:auto;padding:var(--s3);font-size:13px;color:var(--ink-3)}
+  .side-foot{margin-top:auto;padding:var(--s3);font-size:14px;color:var(--ink-3)}
   main{padding:0 var(--s8) var(--s10)}
 }
 
@@ -126,7 +126,7 @@ section.card{background:var(--surface);border:1px solid var(--line);border-radiu
 .locpill:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .locpill:disabled{opacity:.7;cursor:default}
 .locpill-t{font-size:16px;font-weight:700;line-height:1.2}
-.locpill-s{font-size:13px;font-weight:500;line-height:1.25;opacity:.9}
+.locpill-s{font-size:14px;font-weight:500;line-height:1.25;opacity:.9}
 .locpill[data-state="on"]{border-color:var(--ok);background:var(--ok-tint);color:var(--ok-ink)}
 .locpill[data-state="blocked"]{border-color:var(--bad);background:var(--bad-tint);color:var(--bad-ink)}
 .locpill[data-state="sleeps"]{border-style:dashed;border-color:var(--line-2);background:var(--surface-2);color:var(--ink-3)}

@@ -4,9 +4,12 @@ import { NOW, todayBody } from './fixtures';
 
 const TODAY = (body: any = todayBody()) => ({ match: 'action=mgr.today', status: 200, body });
 const block = (page: any) => page.locator('section', { has: page.getByRole('heading', { name: 'Maintenance', exact: true }) });
+// Le bloc Maintenance vit sous « Not for today », replie par defaut.
+const openMore = (page: any) => page.locator('[data-td-more]').click();
 
 test('bloc Maintenance : compteurs, lignes vers la fiche, lien de pied', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), TODAY()], { email: true, clock: NOW });
+  await openMore(page);
   const b = block(page);
   await expect(b).toBeVisible();
   await expect(b.locator('a[href="#/maintenance"]', { hasText: '3 proposals to check' })).toBeVisible();
@@ -34,6 +37,7 @@ test('bloc Maintenance : compteurs, lignes vers la fiche, lien de pied', async (
 
 test('une ligne ouvre l ecran Maintenance sur le ticket, sans appel mgr.problem', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), TODAY()], { email: true, clock: NOW });
+  await openMore(page);
   await block(page).locator('a.prob').first().click();
   await expect(page).toHaveURL(/#\/maintenance\?ref=MNT-429/);
   // T6 #2 : aucun appel a l'ancienne fiche Problems.
@@ -43,14 +47,19 @@ test('une ligne ouvre l ecran Maintenance sur le ticket, sans appel mgr.problem'
 test('rien d ouvert : message vide', async ({ page }) => {
   const body = todayBody({ maintenance: { counts: { proposals: 0, proposalsUrgent: 0, open: 0, urgent: 0, unassigned: 0 }, top: [] } });
   await bootMgr(page, [me(MANAGER), TODAY(body)], { email: true, clock: NOW });
+  await expect(page.locator('[data-td-more]')).toContainText('0 urgent tickets');
+  await openMore(page);
   await expect(block(page)).toContainText('Nothing open.');
   await expect(block(page).locator('a.prob')).toHaveCount(0);
 });
 
 test('maintenance null : message d indisponibilite, Today reste affiche', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), TODAY(todayBody({ maintenance: null }))], { email: true, clock: NOW });
+  await expect(page.locator('[data-td-more]')).toHaveAttribute('aria-label', 'Not for today');
+  await openMore(page);
   await expect(block(page)).toContainText('Maintenance is unavailable right now.');
-  await expect(page.getByRole('heading', { name: 'Who does what today' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Friday');
+  await expect(page.getByRole('heading', { name: 'Team control', exact: true })).toBeVisible();
 });
 
 test('pastille Maintenance : propositions de Today annoncees', async ({ page }, info) => {
@@ -63,6 +72,8 @@ test('F5 : compteurs au singulier pour 1', async ({ page }) => {
   const body = todayBody();
   body.maintenance.counts = { proposals: 1, proposalsUrgent: 0, open: 1, urgent: 1, unassigned: 1 };
   await bootMgr(page, [me(MANAGER), TODAY(body)], { email: true, clock: NOW });
+  await expect(page.locator('[data-td-more]')).toContainText('1 urgent ticket');
+  await openMore(page);
   const c = block(page).locator('.count');
   await expect(c.nth(0)).toHaveText('1 proposal to check');
   await expect(c.nth(1)).toHaveText('1 urgent ticket');

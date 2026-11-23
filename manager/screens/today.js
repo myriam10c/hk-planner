@@ -4,9 +4,10 @@ import { get, post } from '/manager/api.js';
 import { clearToday, loadToday, saveToday } from '/manager/today-cache.js';
 import { createGestures } from '/manager/gesture.js';
 import { createFreshGate, isStale } from '/manager/fresh.js';
-import { addDays, announceMntBadge, closeSheet, dubaiTime, esc, focusBack, focusMark, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
+import { addDays, announceMntBadge, closeSheet, dubaiTime, esc, focusMark, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { fillPhotos } from '/manager/ui/job-photos.js';
 import { aheadPickerSheet, arrivalSheet, boardHtml, jobSheet, pickerSheet } from '/manager/screens/today-view.js';
+import { buildToday, visible } from '/manager/screens/today-model.js';
 import { namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
 
 function dubaiParts(ms) {
@@ -19,6 +20,9 @@ function dubaiDay(ms) { const p = dubaiParts(ms); return p.year + '-' + p.month 
 
 // Ecran ouvert : le jour de Dubai est verifie toutes les 30 s (Today relu quand il change).
 const DAY_CHECK_MS = 30000;
+// Repeint : le focus revient sur l'element affiche qui porte le meme attribut (carte, disque,
+// puce de filtre, pastille d'un moment, Not for today), sinon sur ceux de focusMark.
+const TD_FOCUS = ['data-td-open', 'data-td-who', 'data-td-filter', 'data-td-moment', 'data-td-more'];
 
 function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div></header>' + inner; }
 
@@ -26,7 +30,16 @@ export async function renderToday(ctx) {
   const main = ctx.main;
   // day : jour choisi dans « Who does what » (null = aujourd'hui). triedOn : jour de Dubai
   // de la derniere relecture tentee.
-  const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null, day: null, triedOn: null };
+  // ui : filtre (id d'une personne, 'none' ou null), moments replies (Not for today replie
+  // par defaut), choix ouvert (tache 4) ; garde d'un rendu a l'autre.
+  const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null, day: null, triedOn: null,
+    ui: { filter: null, collapsed: { more: true }, pick: null } };
+  // Journee du modele, calculee une fois par reponse mgr.today.
+  let memo = { data: null, day: null };
+  function model() {
+    if (memo.data !== st.data) memo = { data: st.data, day: buildToday(st.data) };
+    return memo.day;
+  }
   // Semaines mgr.planning lues pour les autres jours, en memoire pour la vie de l'ecran :
   // start -> { data, fresh, loading, error, seq, at }. wseq : garde contre une reponse tardive.
   // at : heure de la derniere reponse fraiche.
@@ -78,12 +91,33 @@ export async function renderToday(ctx) {
   }
   function otherDay() { const a = aheadState(); return a.sel === a.days[0] ? null : a.sel; }
 
+  function tdMark() {
+    const a = document.activeElement;
+    if (!a || a === main || !main.contains(a)) return null;
+    for (const k of TD_FOCUS) if (a.hasAttribute(k)) return '[' + k + '="' + CSS.escape(a.getAttribute(k)) + '"]';
+    return focusMark(main);
+  }
+  // Premier element affiche : la puce d'une personne existe aussi dans le panneau du grand ecran.
+  function tdBack(mark) {
+    if (!mark) return;
+    const el = Array.from(main.querySelectorAll(mark)).find((x) => x.getClientRects().length);
+    if (el && document.activeElement !== el) el.focus({ preventScroll: true });
+  }
+  const wdShort = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+
   function paint() {
     if (!ctx.isCurrent()) return;
-    const mark = focusMark(main);
+    const mark = tdMark();
     if (st.data) {
-      main.innerHTML = boardHtml(st.data, Date.now(), banner(), !st.fresh, readOnly(), aheadState());
-      focusBack(main, mark);
+      const a = aheadState();
+      const day = model();
+      main.innerHTML = boardHtml({
+        data: st.data, day, moments: visible(day, st.ui.filter), ui: st.ui, banner: banner(), stale: !st.fresh, ro: readOnly(),
+        // Compte des autres jours : pas encore lu (tache 5).
+        strip: a.days.map((d, i) => ({ date: d, label: wdShort(d), num: Number(d.slice(8)), n: i === 0 ? day.counts.none : null, selected: d === a.sel })),
+        nowMs: Date.now(), ahead: a.sel === a.days[0] ? null : { sel: a.sel, week: a.week },
+      });
+      tdBack(mark);
       return;
     }
     if (st.loading) { main.innerHTML = shellHtml('<p class="boot" role="status">Loading today…</p>'); return; }
@@ -328,13 +362,70 @@ export async function renderToday(ctx) {
     setDone(key, el.getAttribute('data-val') === '1');
   }
 
+  // Filtre et repli d'un moment : affichage seul, applique tout de suite ; un tableau de plus
+  // de 60 s est relu en arriere-plan (filtre et replis gardes). Apres minuit, une relecture
+  // par jour (comme dayCheck). Derniere lecture ratee : rien, le bandeau garde Retry.
+  function touchRefresh() {
+    if (st.loading || st.busy || !st.data) return;
+    const day = dubaiDay(Date.now());
+    if (st.data.day !== day) { if (st.triedOn !== day) refresh(); return; }
+    if (st.fresh && due()) refresh();
+  }
+  // Corps d'une carte : la fiche actuelle (jobSheet ou arrivalSheet). Tableau d'un autre jour
+  // de Dubai : Today relu avant toute fiche (relecture en cours : appui ignore ; relecture du
+  // jour deja tentee, en echec : fiche en lecture seule). Tableau de plus de 60 s : relu
+  // d'abord, puis la fiche du tableau relu (en lecture seule si la relecture a echoue).
+  let openingCard = false;
+  async function openCard(id) {
+    const day = dubaiDay(Date.now());
+    if (st.data.day !== day) {
+      if (st.loading) return;
+      if (st.triedOn !== day) { refresh(); return; }
+    } else if (st.fresh && due()) {
+      if (st.loading || openingCard) return;
+      openingCard = true;
+      await refresh();
+      openingCard = false;
+      if (!ctx.isCurrent() || !st.data || st.data.day !== dubaiDay(Date.now())) return;
+    }
+    const u = model().units.find((x) => x.id === id);
+    if (!u) return;
+    const now = Date.now();
+    if (u.opens.type === 'job') {
+      const j = st.data.who.jobs.find((x) => x.key === u.opens.ref);
+      if (j) { st.sheetKey = j.key; openSheet(jobSheet(st.data, j, now, readOnly())); fillPhotos(j.key); }
+    } else {
+      const a = st.data.arrivals.rows.find((x) => x.id === u.opens.ref);
+      if (a) { st.sheetKey = a.prevKey || null; openSheet(arrivalSheet(st.data, a, now, readOnly())); fillPhotos(a.prevKey); }
+    }
+  }
+
   function onClick(e) {
     const el = e.target && e.target.closest
-      ? e.target.closest('[data-retry],[data-open],[data-assign],[data-pick],[data-done],[data-wday],[data-wretry],[data-wassign],[data-wpick]') : null;
+      ? e.target.closest('[data-retry],[data-td-open],[data-td-filter],[data-td-moment],[data-td-more],[data-assign],[data-pick],[data-done],[data-wday],[data-wretry],[data-wassign],[data-wpick]') : null;
     if (!el) return;
     if (el.hasAttribute('data-retry')) { refresh(); return; }
     if (!st.data) return;
     if (el.hasAttribute('data-wday')) { pickDay(el.getAttribute('data-wday')); return; }
+    // Safari ne donne pas le focus a un bouton touche : le focus est pose ici pour qu'il reste
+    // sur la puce ou la pastille apres le nouveau rendu.
+    if (el.hasAttribute('data-td-filter') || el.hasAttribute('data-td-moment') || el.hasAttribute('data-td-more')) {
+      if (document.activeElement !== el) el.focus({ preventScroll: true });
+    }
+    if (el.hasAttribute('data-td-filter')) {
+      const v = el.getAttribute('data-td-filter');
+      st.ui.filter = st.ui.filter === v ? null : v;
+      paint();
+      touchRefresh();
+      return;
+    }
+    if (el.hasAttribute('data-td-moment') || el.hasAttribute('data-td-more')) {
+      const id = el.hasAttribute('data-td-more') ? 'more' : el.getAttribute('data-td-moment');
+      if (st.ui.collapsed[id]) delete st.ui.collapsed[id]; else st.ui.collapsed[id] = true;
+      paint();
+      touchRefresh();
+      return;
+    }
     if (el.hasAttribute('data-wretry')) { const d = otherDay(); if (d) loadWeek(weekStartOf(d)); return; }
     if (el.hasAttribute('data-wassign') || el.hasAttribute('data-wpick')) {
       if (el.disabled) return;
@@ -346,36 +437,30 @@ export async function renderToday(ctx) {
       openAhead(t.j.key);
       return;
     }
+    // Disque d'une carte et Assign someone : data-assign, feuille actuelle « Assign a cleaner »
+    // derriere la garde de fraicheur (tache 4 : choix dans la carte).
     if (el.hasAttribute('data-pick') || el.hasAttribute('data-assign') || el.hasAttribute('data-done')) {
       if (st.busy) { busyToast(); return; }
       todayGesture(el);
       return;
     }
-    const op = el.getAttribute('data-open');
-    // Tableau d'un autre jour de Dubai : Today relu avant toute fiche. Relecture en cours :
-    // appui ignore. Relecture du jour deja tentee (en echec) : fiche en lecture seule.
-    const day = dubaiDay(Date.now());
-    if (op && st.data.day !== day) {
-      if (st.loading) return;
-      if (st.triedOn !== day) { refresh(); return; }
-    }
-    const now = Date.now();
-    if (op === 'job') {
-      const j = st.data.who.jobs.find((x) => x.key === el.getAttribute('data-key'));
-      if (j) { st.sheetKey = j.key; openSheet(jobSheet(st.data, j, now, readOnly())); fillPhotos(j.key); }
-    } else if (op === 'arr') {
-      const a = st.data.arrivals.rows.find((x) => x.id === el.getAttribute('data-id'));
-      if (a) { st.sheetKey = a.prevKey || null; openSheet(arrivalSheet(st.data, a, now, readOnly())); fillPhotos(a.prevKey); }
-    }
+    if (el.hasAttribute('data-td-open')) openCard(el.getAttribute('data-td-open'));
   }
 
-  // Fleches haut / bas entre les lignes d'un meme bloc (maintenance, arrivees).
+  // Fleches haut / bas entre les cartes d'un meme moment, et entre les lignes d'un meme bloc
+  // (tickets de Maintenance).
   function onKey(e) {
     if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || sheetIsOpen()) return;
-    const row = document.activeElement && document.activeElement.closest ? document.activeElement.closest('[data-nav-row]') : null;
-    if (!row) return;
-    const all = Array.from(row.closest('section').querySelectorAll('[data-nav-row]'));
-    const next = all[all.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)];
+    const a = document.activeElement && document.activeElement.closest ? document.activeElement : null;
+    if (!a) return;
+    const card = a.closest('[data-td-open]');
+    const row = card ? null : a.closest('[data-nav-row]');
+    if (!card && !row) return;
+    const box = card ? card.closest('.td-moment') : row.closest('section');
+    if (!box) return;
+    const all = Array.from(box.querySelectorAll(card ? '[data-td-open]' : '[data-nav-row]'));
+    const cur = card || row;
+    const next = all[all.indexOf(cur) + (e.key === 'ArrowDown' ? 1 : -1)];
     if (next) { e.preventDefault(); next.focus(); }
   }
 

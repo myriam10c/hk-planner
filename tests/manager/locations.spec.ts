@@ -4,7 +4,7 @@ import { NOW, todayBody } from './fixtures';
 import { LOCS, PEOPLE, tiles } from './locations-fixtures';
 
 // Position de l'equipe (plan 2026-10-29, tache 3) : ecran More > Where is everyone,
-// ligne de position du bloc « Who does what » de Today, avertissement et envoi
+// ligne de position des personnes de Today (panneau ou personne filtree), avertissement et envoi
 // depuis /manager/. NOW = 11:00 Dubai : la fenetre 07:00-23:00 est ouverte.
 const calls = async (page: any, action: string) => (await fetchLog(page)).filter((l) => l.url.includes('action=' + action)).length;
 
@@ -138,27 +138,40 @@ test('Where is everyone : erreur du serveur, Retry', async ({ page }) => {
   await expect(page.locator('main .loc-list .loc-row')).toHaveCount(4);
 });
 
-test('Today : ligne de position sous le nom, rien sans position, lien Map', async ({ page }) => {
+test('Today : ligne de position sous le nom, rien sans position, lien Map', async ({ page }, info) => {
   const body = todayBody({ locations: PEOPLE });
   await bootMgr(page, [me(MANAGER), { match: 'action=mgr.today', status: 200, body }], { email: true, clock: NOW });
-  const who = page.locator('section[aria-labelledby="h-who"]');
-  await expect(who.getByRole('link', { name: 'Map' })).toHaveAttribute('href', '#/more/locations');
-  const faiza = who.locator('.person', { hasText: 'Faiza' }).first();
-  await expect(faiza.locator('.loc-ln')).toHaveText('At 103 · Damac Reva · 4 min ago');
-  await expect(faiza.locator('.loc-ln')).not.toHaveClass(/stale/);
-  const semax = who.locator('.person', { hasText: 'Semax' }).first();
+  const map = page.getByRole('link', { name: 'Map' });
+  await expect(map).toHaveAttribute('href', '#/more/locations');
+  if (info.project.name === 'mgr-desktop') {
+    // Grand ecran : la ligne de chaque personne dans le panneau « Who is where today ».
+    const faiza = page.locator('.td-tp', { hasText: 'Faiza' });
+    await expect(faiza.locator('.loc-ln')).toHaveText('At 103 · Damac Reva · 4 min ago');
+    await expect(faiza.locator('.loc-ln')).not.toHaveClass(/stale/);
+    await expect(page.locator('.td-tp', { hasText: 'Pionah' }).locator('.loc-ln')).toHaveCount(0);
+  } else {
+    // Telephone : la ligne de la personne filtree, sous la rangee des personnes.
+    await expect(page.locator('.td-people .loc-ln')).toHaveCount(0);
+    await page.locator('.td-fchips [data-td-filter="4"]').click();
+    await expect(page.locator('.td-people .loc-ln')).toHaveText('At 103 · Damac Reva · 4 min ago');
+    await expect(page.locator('.td-people .loc-ln')).not.toHaveClass(/stale/);
+    await page.locator('.td-fchips [data-td-filter="10"]').click();
+    await expect(page.locator('.td-people .loc-ln')).toHaveCount(0);
+  }
+  // Technicien : sous « Not for today ».
+  await page.locator('[data-td-more]').click();
+  const semax = page.locator('.person', { hasText: 'Semax' }).first();
   await expect(semax.locator('.loc-ln')).toHaveText('1.2 km from 1205 · Marina Gate · 2 h ago');
   await expect(semax.locator('.loc-ln')).toHaveClass(/stale/);
-  await expect(who.locator('.person', { hasText: 'Pionah' }).locator('.loc-ln')).toHaveCount(0);
   const s = await noHorizontalScroll(page);
   expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
-  await who.getByRole('link', { name: 'Map' }).click();
+  await map.click();
   await expect(page).toHaveURL(/#\/more\/locations$/);
 });
 
 test('Today : locations absent ou null, aucune ligne', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), { match: 'action=mgr.today', status: 200, body: todayBody({ locations: null }) }], { email: true, clock: NOW });
-  await expect(page.getByRole('heading', { name: 'Who does what today' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Friday' })).toBeVisible();
   await expect(page.locator('.loc-ln')).toHaveCount(0);
 });
 
@@ -218,7 +231,7 @@ test.describe('envoi depuis /manager/', () => {
     const SETTINGS = { autopilot: true, inspectionTarget: 4, excludedCount: 0, templates: [], push: { vapidPublicKey: 'BKEY' } };
     await bootMgr(page, [me({ ...MANAGER, shareLocation: false }), TODAY, SAVE, { match: 'action=mgr.settings', status: 200, body: SETTINGS }],
       { email: true, clock: NOW, locNotice: null });
-    await expect(page.getByRole('heading', { name: 'Who does what today' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Friday' })).toBeVisible();
     await page.waitForTimeout(800);
     await expect(page.locator('#locPrompt')).toHaveCount(0);
     // Meme avec un OK garde : rien n'est envoye.
@@ -332,7 +345,7 @@ test.describe('envoi depuis /manager/', () => {
 
   test('bouton d en-tete : absent si shareLocation false', async ({ page }) => {
     await bootMgr(page, [me({ ...MANAGER, shareLocation: false }), TODAY, SAVE], { email: true, clock: NOW });
-    await expect(page.getByRole('heading', { name: 'Who does what today' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Friday' })).toBeVisible();
     await page.waitForTimeout(800);
     await expect(page.locator('[data-loc-pill]:visible')).toHaveCount(0);
   });

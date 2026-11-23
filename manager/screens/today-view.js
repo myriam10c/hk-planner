@@ -1,8 +1,10 @@
-// Ecran Today : HTML pur construit a partir de la reponse mgr.today. Aucun appel
-// reseau ici, aucun calcul de statut : le proxy les rend deja faits.
-import { addDays, aptLabel, dubaiTime, esc, I, placeLabel } from '/manager/ui/dom.js';
+// Ecran Today (lot 4a, direction Tiimo validee le 20/11/2026) : HTML pur. La journee du
+// jour des donnees vient du modele (today-model.js), rangee par heure d'arrivee des guests.
+// Aucun appel reseau ici, aucun statut recalcule : tone, word et cause viennent du proxy.
+import { dubaiTime, dubaiToday, esc, I, placeLabel } from '/manager/ui/dom.js';
 import { photosBlk } from '/manager/ui/job-photos.js';
 import { isStale, locLine } from '/manager/ui/location-text.js';
+import { sentence } from '/manager/screens/today-model.js';
 import { dayShort, jobsOn, namesOf as plNamesOf, nextLine as plNextLine } from '/manager/screens/planning-rules.js';
 
 const ROLE = { cleaner: 'Cleaner', subcontractor: 'Subcontractor', manager: 'Manager', maintenance: 'Maintenance' };
@@ -10,13 +12,11 @@ const ROLE = { cleaner: 'Cleaner', subcontractor: 'Subcontractor', manager: 'Man
 export function fmtDur(ms) {
   const m = Math.max(0, Math.round(ms / 60000));
   const h = Math.floor(m / 60), r = m % 60;
-  return h ? h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : '') : r + ' min';
+  return h ? h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : '') : r + ' min';
 }
 export function arrivalMs(day, time) { return Date.parse(day + 'T' + time + ':00+04:00'); }
 function ddmm(day) { return day ? day.slice(8, 10) + '/' + day.slice(5, 7) : ''; }
-function longDate(day) {
-  return new Date(day + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
-}
+function fmtDay(day, o) { return new Date(day + 'T00:00:00Z').toLocaleDateString('en-GB', { ...o, timeZone: 'UTC' }); }
 function initials(n) {
   return String(n || '?').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 }
@@ -24,15 +24,9 @@ function nameOf(data, id) {
   const p = data.assignable.find((x) => x.id === id) || data.who.people.find((x) => x.id === id);
   return p ? p.name : 'Member ' + id;
 }
-function namesOf(data, ids) {
-  const n = ids.map((id) => nameOf(data, id));
-  return n.length <= 1 ? (n[0] || '') : n.slice(0, -1).join(', ') + ' and ' + n[n.length - 1];
-}
-function jobsByKey(data) {
-  const m = {};
-  for (const j of data.who.jobs) m[j.key] = j;
-  return m;
-}
+function listNames(n) { return n.length <= 1 ? (n[0] || '') : n.slice(0, -1).join(', ') + ' and ' + n[n.length - 1]; }
+function namesOf(data, ids) { return listNames(ids.map((id) => nameOf(data, id))); }
+const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
 
 // Actions reelles (assignCleaner, setDone) : branchees dans today.js.
 const RO_LINE = 'Reconnect to make changes.';
@@ -42,38 +36,200 @@ function actionsFoot(key, assigned, done, ro) {
     + '<button class="btn" type="button" data-done="' + esc(key) + '" data-val="' + (done ? '0' : '1') + '">' + (done ? 'Undo done' : 'Mark done') + '</button>'
     + '<button class="btn" type="button" data-close>Close</button></div>';
 }
-function assignBtn(j, ro) {
-  return ro || j.state === 'done' ? '' : '<button class="btn sm primary" type="button" data-assign="' + esc(j.key) + '">Assign</button>';
+
+// ---------- Pictogrammes (classes td- seulement : la liste n'emprunte rien aux autres ecrans) ----------
+const DONE = '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-fl-ok" cx="14" cy="14" r="13"/><path class="td-ln-onok" d="M8.6 14.6l3.5 3.5 7.3-7.9"/></svg>';
+const SVG = {
+  blocked: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-fl-bad" cx="14" cy="14" r="13"/><path class="td-ln-onbad" d="M14 7.6v7.6"/><circle class="td-fl-onbad" cx="14" cy="19.8" r="1.7"/></svg>',
+  risk: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-rg-warn" cx="14" cy="14" r="11.5"/><path class="td-ln-warn" d="M14 8.4v6.6"/><circle class="td-fl-warn" cx="14" cy="19.4" r="1.6"/></svg>',
+  none: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-rg-dash" cx="14" cy="14" r="11.5" stroke-dasharray="3.6 3.6"/></svg>',
+  elite: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-rg-wdash" cx="14" cy="14" r="11.5" stroke-dasharray="3.6 3.6"/></svg>',
+  prog: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-rg-ink" cx="14" cy="14" r="11.5"/><circle class="td-fl-ink" cx="14" cy="14" r="4.6"/></svg>',
+  todo: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-rg-ring" cx="14" cy="14" r="11.5"/></svg>',
+  planned: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-fl-ring" cx="14" cy="14" r="12"/></svg>',
+  ready: DONE, done: DONE,
+};
+const PLUS = '<svg viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="19" stroke-dasharray="4.2 4.2"/><path class="td-plus" d="M22 15.5v13M15.5 22h13"/></svg>';
+const BANG = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle class="td-bf" cx="10" cy="10" r="9"/><path class="td-bk" d="M10 5.2v5.6"/><circle class="td-bd" cx="10" cy="14.2" r="1.3"/></svg>';
+const CHEV = '<svg class="td-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9.5l6 6 6-6"/></svg>';
+
+const ELITE_NOTE = 'Usually done by Elite Cleaning, who log their jobs the next day around 14:00.';
+// Mot d'etat d'un logement : celui du proxy, sauf les deux cas « sans personne » de la spec.
+function wordOf(u) { return u.k === 'none' ? 'No cleaner yet' : u.k === 'elite' ? 'Not logged yet' : u.word; }
+
+// ---------- Tete, bande des jours ----------
+// Sous-ligne : « 9 October · today, as of 11:00 », jamais « today » pour des donnees d'un
+// autre jour que celui de l'horloge. Classe stale gardee sur l'heure.
+function header(data, isToday, stale) {
+  return '<header class="top td-head"><div><h1>' + esc(fmtDay(data.day, { weekday: 'long' })) + '</h1>'
+    + '<p class="date td-date"><span class="asof td-asof' + (stale ? ' stale' : '') + '">'
+    + esc(fmtDay(data.day, { day: 'numeric', month: 'long' }) + ' · ' + (isToday ? 'today, ' : '') + 'as of ' + dubaiTime(data.generatedAt)) + '</span></p></div>'
+    + '<button class="iconbtn" type="button" data-theme-toggle aria-label="Switch light or dark theme" title="Theme">' + I.theme + '</button></header>';
+}
+// strip : { date, label, num, n, selected }[] ; n = menages sans cleaner, null si pas encore lu.
+function weekHtml(strip) {
+  return '<nav class="td-week" aria-label="Next seven days">' + strip.map((s) => {
+    const known = s.n != null;
+    return '<button class="td-wd" type="button" data-wday="' + esc(s.date) + '" aria-pressed="' + (s.selected ? 'true' : 'false') + '" aria-label="'
+      + esc(s.label + ' ' + s.num + (known ? ', ' + s.n + ' with no cleaner' : '')) + '"><span class="td-wl">' + esc(s.label) + '</span><span class="td-wn">' + s.num
+      + '</span><span class="td-wc' + (known && s.n ? '' : ' td-zero') + '">' + (known ? s.n : '·') + '</span></button>';
+  }).join('') + '</nav><p class="td-weeknote">Under each day: cleanings with no cleaner yet.</p>';
 }
 
-function header(data, banner, stale) {
-  return '<header class="top"><div><h1>Today</h1><div class="date">' + esc(longDate(data.day)) + '</div>'
-    + '<div class="asof' + (stale ? ' stale' : '') + '">Data as of ' + esc(dubaiTime(data.generatedAt)) + '</div></div>'
-    + '<button class="iconbtn" type="button" data-theme-toggle aria-label="Switch light or dark theme" title="Theme">' + I.theme + '</button></header>'
-    + (banner || '');
+// ---------- Personnes ----------
+function disc(p) { return '<span class="td-disc td-' + esc(p.slot) + '">' + esc(p.ini) + '</span>'; }
+function discs(people, ids, max) {
+  return '<span class="td-discs">' + ids.slice(0, max || ids.length).map((id) => disc(people[id] || { slot: 'other', ini: '?' })).join('') + '</span>';
+}
+// Position de la personne (data.locations, plan 2026-10-29) : petite ligne, rien si la
+// position est absente ou si le proxy n'a pas pu la lire (null).
+function locHtml(data, id, nowMs) {
+  const p = Array.isArray(data.locations) ? data.locations.find((x) => Number(x.id) === Number(id)) : null;
+  const line = p && p.location ? locLine(p.location, nowMs) : '';
+  if (!line) return '';
+  return '<div class="loc-ln' + (isStale(p.location, nowMs) ? ' stale' : '') + '">' + esc(line) + '</div>';
+}
+const MAP = '<a class="td-map" href="#/more/locations">Map</a>';
+const pressed = (ui, v) => (ui.filter != null && String(ui.filter) === String(v) ? 'true' : 'false');
+// Rangee des personnes (telephone) : une puce par personne affectable, puis « sans cleaner »,
+// puis Map ; la ligne de position de la personne filtree dessous.
+function peopleHtml(day, ui, data, nowMs) {
+  let h = '<div class="td-people"><div class="td-fchips" role="group" aria-label="Show one person">';
+  for (const p of day.people) {
+    if (!p.assignable) continue;
+    h += '<button class="td-fchip" type="button" data-td-filter="' + esc(p.id) + '" aria-pressed="' + pressed(ui, p.id) + '" aria-label="'
+      + esc(p.name + ', ' + plural(p.count, 'cleaning')) + '">' + disc(p) + '<span class="td-nm">' + esc(p.name) + '</span><span class="td-n">' + p.count + '</span></button>';
+  }
+  const n = day.counts.none;
+  if (n || ui.filter === 'none') {
+    h += '<button class="td-fchip" type="button" data-td-filter="none" aria-pressed="' + pressed(ui, 'none') + '" aria-label="No cleaner yet, ' + plural(n, 'cleaning')
+      + '"><span class="td-nd">' + SVG.none + '</span><span class="td-nm">No cleaner</span><span class="td-n">' + n + '</span></button>';
+  }
+  h += MAP + '</div>';
+  if (ui.filter != null && ui.filter !== 'none') h += locHtml(data, ui.filter, nowMs);
+  return h + '</div>';
 }
 
-function alertHtml(data, nowMs) {
-  const blocked = data.arrivals.rows.filter((a) => a.tone === 'bad');
-  if (!blocked.length) return '';
-  const first = blocked[0].time;
-  const left = arrivalMs(data.day, first) - nowMs;
-  return '<div class="alert" role="alert"><div class="clock">' + esc(first) + '</div><p><b>' + blocked.length + ' arrival'
-    + (blocked.length > 1 ? 's' : '') + ' blocked</b>, first guest due at ' + esc(first) + (left > 0 ? ', in ' + fmtDur(left) : '') + '. '
-    + esc(blocked.map((a) => placeLabel(a)).join(', ')) + '.</p></div>';
+// ---------- Moments et cartes ----------
+function title(u) {
+  if (!u.apt) return esc(u.bld || 'Apartment');
+  return 'Apt ' + esc(u.apt) + (u.bld ? ' <span class="td-b">· ' + esc(u.bld) + '</span>' : '');
+}
+function cardHtml(u, c) {
+  if (u.shape === 'blocked') return blockedHtml(u, c);
+  const names = u.assigned.length ? listNames(u.assigned.map((id) => (c.people[id] ? c.people[id].name : 'Member ' + id))) : '';
+  const line = u.shape === 'line';
+  const tk = u.tickets.length ? plural(u.tickets.length, 'open ticket') : '';
+  let left;
+  if (u.canAssign && !c.ro) {
+    left = '<button class="td-who' + (u.assigned.length ? '' : ' td-empty') + '" type="button" data-td-who="' + esc(u.id) + '" data-assign="' + esc(u.key) + '" aria-label="'
+      + esc((u.assigned.length ? 'Change the cleaner of ' : 'Assign a cleaner to ') + placeLabel(u)) + '">' + (u.assigned.length ? discs(c.people, u.assigned, 3) : PLUS) + '</button>';
+  } else {
+    left = '<span class="td-whostatic" aria-hidden="true">' + (u.assigned.length ? discs(c.people, u.assigned, 3) : '<span class="td-dash"></span>') + '</span>';
+  }
+  const body = '<button class="td-body" type="button" data-td-open="' + esc(u.id) + '"><span class="td-t">' + title(u) + '</span>'
+    + '<span class="td-st td-k-' + u.k + '">' + esc(wordOf(u)) + (names ? '<span class="td-names"> · ' + esc(names) + '</span>' : '')
+    + (line && tk ? '<span class="td-names"> · ' + tk + '</span>' : '') + '</span>'
+    + (!line && u.arrival && u.cause ? '<span class="td-cause">' + esc(u.cause) + '</span>' : '')
+    + (!line && u.timesLine ? '<span class="td-ti">' + esc(u.timesLine) + '</span>' : '')
+    + (u.k === 'elite' ? '<span class="td-cause">' + ELITE_NOTE + '</span>' : '')
+    + (!line && tk ? '<span class="td-tk">' + tk + '</span>' : '') + '</button>';
+  const g = { ready: 1, done: 1, prog: 1, todo: 1 }[u.k] ? SVG[u.k] : '';
+  return '<article class="td-card' + (line ? ' td-line' : '') + '">' + left + body + '<span class="td-glyph" aria-hidden="true">' + g + '</span></article>';
+}
+// Carte Blocked (spec section 4) : une ligne par raison, chacune avec son bouton.
+function blockedHtml(u, c) {
+  const why = u.reasons.map((r) => {
+    if (r.type === 'ticket') {
+      return '<li><div class="td-w"><strong>Urgent ticket open since ' + esc(r.since) + (r.tech ? ', with ' + esc(r.tech) : ', nobody on it') + '</strong><span>'
+        + esc(r.title) + ' (' + esc(r.ref) + ')</span></div><a class="td-btn td-ghost" href="#/maintenance?ref=' + encodeURIComponent(r.ref) + '">See ticket</a></li>';
+    }
+    if (r.type === 'cleaning') {
+      const sub = r.elite ? ELITE_NOTE : u.timesLine;
+      return '<li><div class="td-w"><strong>' + (r.elite ? 'Cleaning not logged yet' : 'No cleaner assigned') + '</strong>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div>'
+        + (u.canAssign && !c.ro ? '<button class="td-btn" type="button" data-td-who="' + esc(u.id) + '" data-assign="' + esc(u.key) + '">Assign someone</button>' : '') + '</li>';
+    }
+    return '<li><div class="td-w"><span>' + esc(r.text) + '</span></div></li>';
+  }).join('');
+  const who = u.arrival.owner ? 'Owner' : 'Guest';
+  return '<article class="td-card td-blocked"><div class="td-bhead"><span class="td-tag">' + BANG + 'Blocked</span><span class="td-due">'
+    + who + ' due ' + (c.isToday ? 'today ' : '') + 'at ' + esc(u.arrival.time) + '</span></div>'
+    + '<h3 class="td-bt"><button class="td-btitle" type="button" data-td-open="' + esc(u.id) + '">' + esc(placeLabel(u) || 'Apartment') + '</button></h3>'
+    + '<ul class="td-why">' + why + '</ul></article>';
+}
+function tallyHtml(m) {
+  return m.tally.map((t) => '<span class="td-mc">' + SVG[t.k] + t.n + '</span>').join('');
+}
+function momentHtml(m, c) {
+  const open = !c.ui.collapsed[m.id];
+  let h = '<section class="td-moment"><button class="td-mh td-t-' + esc(m.tint) + '" type="button" data-td-moment="' + esc(m.id) + '" aria-expanded="' + open
+    + '" aria-label="' + esc(m.label + ': ' + m.tally.map((t) => t.n + ' ' + t.w).join(', ')) + '"><span class="td-dot"></span><span class="td-ml">' + esc(m.label)
+    + '</span><span class="td-mm" aria-hidden="true">' + tallyHtml(m) + '</span>' + CHEV + '</button>';
+  if (!open) return h + '</section>';
+  h += '<div class="td-mbody">';
+  let run = '';
+  for (const id of m.unitIds) {
+    const u = c.byId[id];
+    if (!u) continue;
+    if (u.shape === 'line') { run += cardHtml(u, c); continue; }
+    if (run) { h += '<div class="td-rows">' + run + '</div>'; run = ''; }
+    h += cardHtml(u, c);
+  }
+  if (run) h += '<div class="td-rows">' + run + '</div>';
+  return h + '</div></section>';
 }
 
-function tile(n, label, bad) {
-  return '<div class="s' + (bad ? ' bad' : '') + '"><b>' + n + '</b><span>' + esc(label) + '</span></div>';
+// ---------- Not for today : Maintenance, techniciens, Team control (contenu inchange) ----------
+function elseHtml(data, ui, nowMs) {
+  const open = !ui.collapsed.more;
+  const m = data.maintenance;
+  const sum = m ? plural(Number(m.counts.urgent) || 0, 'urgent ticket') : '';
+  // div et pas section : les blocs Maintenance et Team control restent les seules sections de leur titre.
+  return '<div class="td-moment td-elsewhere"><button class="td-mh td-t-any" type="button" data-td-more aria-expanded="' + open + '" aria-label="Not for today'
+    + (sum ? ': ' + sum : '') + '"><span class="td-dot"></span><span class="td-ml">Not for today</span><span class="td-mm" aria-hidden="true">' + sum + '</span>' + CHEV + '</button>'
+    + (open ? '<div class="td-else">' + maintenanceHtml(data) + techsHtml(data, nowMs) + controlHtml(data) + '</div>' : '') + '</div>';
 }
-function stripHtml(data) {
-  const s = data.strip;
-  return '<div class="strip" aria-label="Today in numbers">' + tile(s.cleanings, 'cleanings today', false)
-    + tile(s.unassigned, 'without a cleaner', s.unassigned > 0) + tile(s.arrivals, 'arrivals today', false)
-    + tile(s.notReady, 'arrivals not ready yet', s.notReady > 0) + '</div>';
+function techsHtml(data, nowMs) {
+  const list = (data.who && data.who.technicians) || [];
+  if (!list.length) return '';
+  let h = '<section class="card" aria-labelledby="h-tech"><div class="sec-head"><h2 id="h-tech">Technicians</h2></div>';
+  for (const t of list) {
+    h += '<div class="person"><div class="person-h"><span class="av" aria-hidden="true">' + esc(initials(t.name)) + '</span><div><div class="nm">' + esc(t.name)
+      + '</div><div class="rl">Maintenance tickets</div>' + locHtml(data, t.id, nowMs) + '</div><span class="cnt">' + t.open + '</span></div>'
+      + (t.oldest ? '<div class="empty">Oldest: <span class="mono">MNT-' + t.oldest.id + '</span> ' + esc(t.oldest.title) + ', since ' + esc(t.oldest.since) + '.</div>' : '')
+      + '</div>';
+  }
+  return h + '</section>';
 }
 
-// Heure dediee d'un extra : extraTime (mgr.today) ou extra.cleaningTime (mgr.planning), null sinon.
+// ---------- Panneau des personnes (960 px et plus) ----------
+function sideHtml(day, c, data, nowMs) {
+  const elite = day.units.filter((u) => u.k === 'elite');
+  const expected = elite.length ? '<p class="td-exp">Expected, not logged yet: ' + esc(elite.map((u) => placeLabel(u)).join(', ')) + '.</p>' : '';
+  const sub = day.people.find((p) => p.role === 'subcontractor' && (p.assignable || p.count));
+  let h = '<aside class="td-side" aria-label="Team"><div class="td-team"><div class="td-teamh"><h2>' + (c.isToday ? 'Who is where today' : 'Who is where, ' + esc(dayShort(day.date)))
+    + '</h2>' + MAP + '</div>';
+  for (const p of day.people) {
+    if (!p.assignable && !p.count) continue;
+    const mine = day.units.filter((u) => u.job && u.assigned.indexOf(p.id) >= 0);
+    h += '<section class="td-tp"><button class="td-tph" type="button" data-td-filter="' + esc(p.id) + '" aria-pressed="' + pressed(c.ui, p.id) + '">' + disc(p)
+      + '<span class="td-tn">' + esc(p.name) + '</span><span class="td-tk2">' + plural(p.count, 'cleaning') + '</span></button>' + locHtml(data, p.id, nowMs)
+      + (mine.length ? '<ul>' + mine.map((u) => '<li><span>' + esc(placeLabel(u)) + '</span><span class="td-st td-k-' + u.k + '">' + esc(wordOf(u)) + '</span></li>').join('') + '</ul>' : '')
+      + (sub && p.id === sub.id ? expected : '') + '</section>';
+  }
+  if (!sub && expected) h += '<section class="td-tp">' + expected + '</section>';
+  if (day.counts.none) {
+    h += '<section class="td-tp"><button class="td-tph" type="button" data-td-filter="none" aria-pressed="' + pressed(c.ui, 'none') + '"><span class="td-nd">' + SVG.none
+      + '</span><span class="td-tn">No cleaner yet</span><span class="td-tk2">' + plural(day.counts.none, 'cleaning') + '</span></button></section>';
+  }
+  return h + '</div></aside>';
+}
+
+// Un autre jour (a.sel), lu dans mgr.planning (a.week : { data, fresh, loading, error }).
+// Annules jamais montres ; un menage fait n'est jamais propose a l'assignation.
+// o.unassigned : ligne du groupe Not assigned, ou seul un statut warn est repete (comme pour
+// aujourd'hui). o.btn : bouton Assign ou Reassign, vide en lecture seule.
+// (Rendu actuel garde jusqu'a la tache 5 du lot 4a.)
 function xTime(j) { return j.kind === 'extra' ? (j.extraTime || (j.extra && j.extra.cleaningTime) || null) : null; }
 function coTime(j) { return j.kind === 'extra' ? (xTime(j) || 'Extra') : (j.checkout || '--:--'); }
 function coSmall(j) { return j.kind === 'extra' ? (xTime(j) ? 'extra' : 'clean') : 'out'; }
@@ -83,82 +239,6 @@ function nextLine(j) {
   if (j.next.sameDay) return who + ' arrives ' + (j.next.time || 'today');
   return 'Next ' + who.toLowerCase() + ' ' + ddmm(j.next.date);
 }
-function jobNotes(j) {
-  if (j.postponedFrom) return ' · postponed from ' + ddmm(j.postponedFrom);
-  if (j.kind === 'checkout' && !j.checkout) return ' · checkout time not set';
-  return '';
-}
-function jobBtn(j) {
-  return '<button class="job" type="button" data-open="job" data-key="' + esc(j.key) + '"><span class="tm">' + esc(coTime(j)) + '<small>' + coSmall(j) + '</small></span>'
-    + '<span class="ap"><b>' + esc(placeLabel(j)) + '</b><span><span class="st ' + (j.tone === 'idle' ? '' : j.tone) + '">' + esc(j.word) + '</span> · '
-    + esc(nextLine(j) + jobNotes(j)) + '</span></span></button>';
-}
-
-// Jours du bloc (a.days, a partir du jour des donnees), a.sel le jour choisi. Libelles
-// Today et Tomorrow selon l'horloge (a.clock) : le bloc d'hier n'est jamais appele Today.
-function chipLabel(d, clock) {
-  if (clock && d === clock) return 'Today';
-  if (clock && d === addDays(clock, 1)) return 'Tomorrow';
-  return dayShort(d);
-}
-function dayChips(a) {
-  if (!a) return '';
-  return '<div class="chiprow wdays" role="group" aria-label="Day">' + a.days.map((d) => '<button type="button" class="chip" data-wday="' + esc(d) + '" aria-pressed="'
-    + (d === a.sel ? 'true' : 'false') + '">' + esc(chipLabel(d, a.clock)) + '</button>').join('') + '</div>';
-}
-const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
-
-// Position de la personne (data.locations, plan 2026-10-29) : petite ligne sous le role,
-// rien si la position est absente ou si le proxy n'a pas pu la lire (null).
-function locHtml(data, id, nowMs) {
-  const p = Array.isArray(data.locations) ? data.locations.find((x) => Number(x.id) === Number(id)) : null;
-  const line = p && p.location ? locLine(p.location, nowMs) : '';
-  if (!line) return '';
-  return '<div class="loc-ln' + (isStale(p.location, nowMs) ? ' stale' : '') + '">' + esc(line) + '</div>';
-}
-
-function whoHtml(data, ro, ahead, nowMs) {
-  if (ahead && ahead.sel !== ahead.days[0]) return aheadHtml(ahead);
-  const byKey = jobsByKey(data);
-  const w = data.who;
-  let h = '<section class="card o1" aria-labelledby="h-who"><div class="sec-head"><h2 id="h-who">Who does what today</h2><span class="sec-side"><span class="meta tnum">'
-    + w.jobs.length + ' cleaning' + (w.jobs.length === 1 ? '' : 's') + '</span><a class="sec-link" href="#/more/locations">Map</a></span></div>' + dayChips(ahead);
-  const list = w.unassigned.map((k) => byKey[k]).filter(Boolean);
-  if (list.length) {
-    h += '<div class="person unassigned"><div class="person-h"><span class="av" aria-hidden="true">!</span><div><div class="nm">Not assigned</div>'
-      + '<div class="rl">Same-day arrivals first</div></div><span class="cnt">' + list.length + '</span></div><div class="jobs">';
-    for (const j of list) {
-      const lead = j.tone === 'warn' ? '<span class="st warn">' + esc(j.word) + '</span> · '
-        : j.state === 'done' ? '<span class="st ok">Done</span> · ' : '';
-      h += '<div class="job static"><span class="tm">' + esc(coTime(j)) + '<small>' + coSmall(j) + '</small></span>'
-        + '<button class="ap linklike" type="button" data-open="job" data-key="' + esc(j.key) + '"><b>' + esc(placeLabel(j)) + '</b><span>'
-        + lead + esc(nextLine(j) + jobNotes(j)) + '</span></button>' + assignBtn(j, ro) + '</div>';
-    }
-    h += '</div>';
-    if (list.some((j) => j.tone === 'warn')) {
-      h += '<div class="note">Elite Cleaning logs its jobs the next day around 14:00. Lines marked "Not logged yet" may already be done by Elite: confirm with Elite before reassigning.</div>';
-    }
-    h += '</div>';
-  }
-  for (const p of w.people) {
-    const jobs = p.keys.map((k) => byKey[k]).filter(Boolean);
-    h += '<div class="person"><div class="person-h"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><div><div class="nm">' + esc(p.name)
-      + '</div><div class="rl">' + esc(ROLE[p.role] || p.role) + '</div>' + locHtml(data, p.id, nowMs) + '</div><span class="cnt">' + jobs.length + '</span></div><div class="jobs">'
-      + (jobs.length ? jobs.map(jobBtn).join('') : '<div class="empty">Nothing recorded for today in HK Planner.</div>') + '</div></div>';
-  }
-  for (const t of w.technicians) {
-    h += '<div class="person"><div class="person-h"><span class="av" aria-hidden="true">' + esc(initials(t.name)) + '</span><div><div class="nm">' + esc(t.name)
-      + '</div><div class="rl">Maintenance tickets</div>' + locHtml(data, t.id, nowMs) + '</div><span class="cnt">' + t.open + '</span></div>'
-      + (t.oldest ? '<div class="empty">Oldest: <span class="mono">MNT-' + t.oldest.id + '</span> ' + esc(t.oldest.title) + ', since ' + esc(t.oldest.since) + '.</div>' : '')
-      + '</div>';
-  }
-  return h + '</section>';
-}
-
-// Un autre jour (a.sel), lu dans mgr.planning (a.week : { data, fresh, loading, error }).
-// Annules jamais montres ; un menage fait n'est jamais propose a l'assignation.
-// o.unassigned : ligne du groupe Not assigned, ou seul un statut warn est repete (comme pour
-// aujourd'hui). o.btn : bouton Assign ou Reassign, vide en lecture seule.
 function aheadRow(j, o) {
   const extra = j.kind === 'extra';
   const btn = o.btn || '';
@@ -173,8 +253,8 @@ function aheadHtml(a) {
   const w = a.week;
   const d = w && w.data;
   const jobs = d ? jobsOn(d, a.sel).filter((j) => !j.cancelled) : [];
-  let h = '<section class="card o1" aria-labelledby="h-who"><div class="sec-head"><h2 id="h-who">Who does what, ' + esc(label) + '</h2>'
-    + (d ? '<span class="meta tnum">' + plural(jobs.length, 'cleaning') + '</span>' : '') + '</div>' + dayChips(a);
+  let h = '<section class="card" aria-labelledby="h-who"><div class="sec-head"><h2 id="h-who">Who does what, ' + esc(label) + '</h2>'
+    + (d ? '<span class="meta tnum">' + plural(jobs.length, 'cleaning') + '</span>' : '') + '</div>';
   if (!d) {
     if (!w || !w.error) return h + '<p class="empty pad" role="status">Loading ' + esc(label) + '…</p></section>';
     return h + '<div class="wpad"><div class="err-card" role="alert"><p>' + esc(w.error.message)
@@ -210,7 +290,7 @@ function aheadHtml(a) {
 const MNT_TONE = { urgent: 'bad', high: 'warn' };
 const MNT_STAGE = { todo: 'To do', in_progress: 'In progress', waiting_parts: 'Waiting parts', to_confirm: 'To confirm' };
 function maintenanceHtml(data) {
-  let h = '<section class="card o2" aria-labelledby="h-prob"><div class="sec-head"><h2 id="h-prob">Maintenance</h2><span class="meta">Top 5 by urgency</span></div>';
+  let h = '<section class="card" aria-labelledby="h-prob"><div class="sec-head"><h2 id="h-prob">Maintenance</h2><span class="meta">Top 5 by urgency</span></div>';
   const m = data.maintenance;
   if (!m) return h + '<div class="empty pad">Maintenance is unavailable right now.</div></section>';
   const c = m.counts;
@@ -231,7 +311,7 @@ function maintenanceHtml(data) {
 
 function controlHtml(data) {
   const c = data.control, ins = c.inspections;
-  let h = '<section class="card o3" aria-labelledby="h-ctl"><div class="sec-head"><h2 id="h-ctl">Team control</h2><span class="meta">Yesterday and today</span></div>';
+  let h = '<section class="card" aria-labelledby="h-ctl"><div class="sec-head"><h2 id="h-ctl">Team control</h2><span class="meta">Yesterday and today</span></div>';
   h += '<div class="ctl"><h3>Inspections today</h3><div class="kv"><span class="k">Proposed</span><span class="v">' + ins.proposed
     + '</span><span class="k">Claimed</span><span class="v">' + ins.claimed + '</span><span class="k">Done</span><span class="v">' + ins.done + '</span></div>';
   if (ins.unfinished.length) {
@@ -253,31 +333,34 @@ function controlHtml(data) {
   return h + '</section>';
 }
 
-function arrivalsHtml(data) {
-  const a = data.arrivals, n = a.counts;
-  let h = '<section class="card o4" aria-labelledby="h-arr"><div class="sec-head"><h2 id="h-arr">Ready for today’s arrivals</h2><span class="meta tnum">'
-    + a.rows.length + ' arrival' + (a.rows.length === 1 ? '' : 's') + '</span></div>'
-    + '<div class="legend"><span><i class="ok"></i>' + n.ok + ' ready</span><span><i class="warn"></i>' + n.warn + ' at risk</span><span><i class="bad"></i>'
-    + n.bad + ' blocked</span>' + (n.idle ? '<span><i class="idle"></i>' + n.idle + ' scheduled</span>' : '') + '</div>';
-  if (!a.rows.length) h += '<div class="empty pad">No arrival today.</div>';
-  h += a.rows.map((r) => '<button class="arr" type="button" data-open="arr" data-id="' + esc(r.id) + '" data-nav-row><span class="bar ' + r.tone + '"></span>'
-    + '<span class="when"><b>' + esc(r.time) + '</b><span>' + esc(r.kind + (r.timeSet ? '' : ', time not set')) + '</span></span>'
-    + '<span class="body"><span class="apt">' + esc(aptLabel(r) || r.bld) + '</span><span class="bld">' + esc(r.apt ? r.bld : '') + '</span>'
-    + '<span class="stline"><span class="st ' + r.tone + '">' + esc(r.word) + '</span> <span class="cause">' + esc(r.cause) + '</span></span></span></button>').join('');
-  h += '<details class="rules"><summary>How status is computed</summary><ul>'
+// Le <details> actuel, garde tel quel en bas de la liste.
+function rulesHtml(data) {
+  return '<details class="rules td-rules"><summary>How status is computed</summary><ul>'
     + '<li><b>Ready</b>: a cleaning was marked done in HK Planner after the previous checkout, and no urgent ticket is open on the apartment.</li>'
     + '<li><b>At risk</b>: a cleaner is assigned but the cleaning is not marked done, and the guest arrives within ' + data.riskHours + ' hours. Also an unassigned cleaning that Elite may have done but not logged yet (Elite logs the next day around 14:00).</li>'
     + '<li><b>Blocked</b>: no cleaner is assigned, or an urgent maintenance ticket is open on the apartment.</li>'
     + '<li><b>Scheduled</b>: a cleaner is assigned and the guest arrives in more than ' + data.riskHours + ' hours.</li>'
     + '<li>Owner stays count as arrivals. Without a checkout in the last 14 days, there is no cleaning to check.</li></ul></details>';
-  return h + '</section>';
 }
 
-// ahead : { days, sel, week } pour les jours du bloc « Who does what » (sel = days[0] : aujourd'hui).
-export function boardHtml(data, nowMs, banner, stale, ro, ahead) {
-  return header(data, banner, stale) + alertHtml(data, nowMs) + stripHtml(data)
-    + '<div class="board"><div class="col">' + whoHtml(data, ro, ahead, nowMs) + controlHtml(data) + '</div><div class="col">'
-    + maintenanceHtml(data) + arrivalsHtml(data) + '</div></div>';
+// view : { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead }.
+// day : buildToday(data) ; moments : visible(day, ui.filter) ; ui : { filter, collapsed, pick } ;
+// ahead : { sel, week } quand un autre jour de la bande est choisi (rendu actuel), sinon null.
+export function boardHtml(view) {
+  const { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead } = view;
+  const isToday = dubaiToday(nowMs) === data.day;
+  const head = header(data, isToday, stale) + (banner || '') + '<p class="td-sum">' + esc(sentence(day)) + '</p>' + weekHtml(strip);
+  if (ahead) return head + '<div class="td-cols"><div class="td-main">' + aheadHtml(ahead) + '</div></div>';
+  const people = {};
+  for (const p of day.people) people[p.id] = p;
+  const byId = {};
+  for (const u of day.units) byId[u.id] = u;
+  const c = { ui, ro, isToday, people, byId };
+  const list = moments.length ? moments.map((m) => momentHtml(m, c)).join('')
+    : '<p class="td-empty">' + (ui.filter == null ? 'No cleaning planned for today.' : 'Nothing for this choice on that day.') + '</p>';
+  return head + '<div class="td-cols"><div class="td-main">' + peopleHtml(day, ui, data, nowMs)
+    + '<div class="td-moments">' + list + '</div>' + elseHtml(data, ui, nowMs) + rulesHtml(data) + '</div>'
+    + sideHtml(day, c, data, nowMs) + '</div>';
 }
 
 function sheetHead(title, sub) {

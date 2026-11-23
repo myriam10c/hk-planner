@@ -55,7 +55,8 @@ test('Start inspection puis retour sur Today manager sans erreur de page', async
   await expect(page).toHaveURL(/#\/inspections\/inspect\/A\?e=checkout$/);
   await expect(page.getByText('0 / 11 zones')).toBeVisible();
   await navOf(page, info).locator('a[href="#/today"]').click();
-  await expect(page.getByRole('heading', { name: 'Team control', exact: true })).toBeVisible();
+  // Today affiche (Team control vit sous « Not for today », replie par defaut).
+  await expect(page.getByRole('heading', { level: 1, name: 'Friday', exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -95,7 +96,8 @@ test('Finish lent puis changement d onglet : pas de retour force sur Inspections
   await expect(page).toHaveURL(/#\/today$/);
   await page.waitForTimeout(2200);
   await expect(page).toHaveURL(/#\/today$/);
-  await expect(page.getByRole('heading', { name: 'Team control', exact: true })).toBeVisible();
+  // Today affiche (Team control vit sous « Not for today », replie par defaut).
+  await expect(page.getByRole('heading', { level: 1, name: 'Friday', exact: true })).toBeVisible();
 });
 
 test('module introuvable : message, Retry et lien vers /inspections/', async ({ page }) => {
@@ -136,6 +138,8 @@ test('parseInspHash et toShellHash', async ({ page }) => {
 
 test('Today manager : lien Open inspections dans Team control', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), { match: 'action=mgr.today', status: 200, body: todayBody() }], { email: true, clock: NOW });
+  // Team control vit sous « Not for today », replie par defaut.
+  await page.locator('[data-td-more]').click();
   await expect(page.getByRole('link', { name: 'Open inspections' })).toHaveAttribute('href', '#/inspections');
 });
 

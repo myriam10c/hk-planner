@@ -74,3 +74,19 @@ export function todayBody(over: any = {}) {
   };
   return { ...JSON.parse(JSON.stringify(base)), ...over };
 }
+
+// Jeu long (lisibilite de Today) : un immeuble de 40 caracteres (carte bloquee) et un
+// menage a trois personnes (Apt 103). Noms inventes.
+export const LONG_BLD = 'Seaview Garden Residences Tower Twelve B';
+export function longTodayBody() {
+  const b = todayBody();
+  b.who.jobs[0].bld = LONG_BLD;
+  b.arrivals.rows[0].bld = LONG_BLD;
+  b.maintenance.top[0].bld = LONG_BLD;
+  b.who.jobs[2].assigned = [4, 10, 12];
+  b.arrivals.rows[1].assigned = [4, 10, 12];
+  b.arrivals.rows[1].cleaners = ['Faiza', 'Pionah', 'Elite Cleaning'];
+  b.who.people[1].keys = ['2026-10-09_Cy Doe'];
+  b.who.people[2].keys = ['2026-10-09_Cy Doe'];
+  return b;
+}
