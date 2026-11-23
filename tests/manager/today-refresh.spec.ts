@@ -430,3 +430,23 @@ test('filtre et moment touches apres plus de 60 s : appliques tout de suite, Tod
   await expect(page.locator('[data-td-moment="arr-1500"]')).toHaveAttribute('aria-expanded', 'false');
   expect(await todayCalls(page)).toBe(2);
 });
+
+// Garde de fraicheur partagee (manager/fresh.js, Today et Planning) : une relecture qui lance une
+// exception (un repeint qui plante) ne laisse pas le verrou pose ; le geste suivant relit encore.
+test('fresh.js : une relecture en exception ne bloque pas les gestes suivants', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY()], { email: true, clock: NOW });
+  await expect(page.locator('.td-blocked')).toBeVisible();
+  const r = await page.evaluate(async () => {
+    const { createFreshGate } = await import('/manager/fresh.js');
+    let reads = 0;
+    const gate = createFreshGate({
+      blocked: () => false, stale: () => true, readOnly: () => false, refuse: () => {}, isCurrent: () => true,
+      refresh: async () => { reads++; if (reads === 1) throw new Error('paint failed'); },
+    });
+    let first = '';
+    try { first = String(await gate()); } catch (e) { first = 'threw: ' + (e as Error).message; }
+    const second = await gate();
+    return { first, second, reads };
+  });
+  expect(r).toEqual({ first: 'threw: paint failed', second: true, reads: 2 });
+});

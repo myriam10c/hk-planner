@@ -238,9 +238,10 @@ export async function renderToday(ctx) {
     blocked: () => !st.fresh || !st.data, stale: due, refresh, readOnly, refuse: refuseRo, isCurrent: ctx.isCurrent,
   });
   // Geste d'ecriture du jour (disque, tuile, bouton d'une fiche, Undo) : une relecture deja en
-  // cours (retour sur l'onglet, apres une ecriture) est attendue au lieu d'en lancer une
-  // seconde, puis freshEnough. Un seul geste attend a la fois : un autre arrive pendant
-  // l'attente est abandonne (meme regle que freshEnough).
+  // cours est attendue au lieu d'en lancer une seconde, puis freshEnough. Cela vaut pour toute
+  // relecture, celle que freshEnough lance pour un autre geste comprise (refresh pose
+  // st.pending) : un geste arrive pendant elle l'attend, il n'est pas abandonne. Un seul geste
+  // attend ainsi a la fois : un autre arrive pendant cette attente est abandonne.
   let gating = false;
   async function gate() {
     if (st.loading && st.pending) {

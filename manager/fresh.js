@@ -13,7 +13,8 @@ export function isStale(at, now) { return now - at > STALE_MS; }
 // relecture ; o.refuse() : le dire ; o.isCurrent() : ecran toujours affiche ;
 // o.scope() (facultatif) : ce que lit la relecture (la semaine de Planning), geste
 // abandonne s'il a change pendant la relecture. Une relecture a la fois : un geste
-// arrive pendant celle-ci est abandonne.
+// arrive pendant celle-ci est abandonne. Une exception pendant la relecture (un repeint
+// qui plante) leve le verrou quand meme : les gestes suivants relisent encore.
 export function createFreshGate(o) {
   let reloading = false;
   return async function freshEnough() {
@@ -22,8 +23,7 @@ export function createFreshGate(o) {
     if (reloading) return false;
     const scope = o.scope ? o.scope() : null;
     reloading = true;
-    await o.refresh();
-    reloading = false;
+    try { await o.refresh(); } finally { reloading = false; }
     if (!o.isCurrent() || (o.scope && o.scope() !== scope)) return false;
     if (o.readOnly()) { o.refuse(); return false; }
     return true;
