@@ -142,8 +142,9 @@ test('la journée est rangée par heure d arrivée', async ({ page }) => {
   await expect(moments.nth(2)).toHaveAttribute('aria-label', 'No guest today: 1 not logged yet');
   // Ordre dans le moment : bloque, a risque, puis l'ordre du proxy.
   await expect(page.locator('.td-moment').first().locator('[data-td-open]')).toHaveText([/Apt 308/, /Apt 103/, /Apt 404/]);
-  // Le menage sans arrivee : un disque en pointilles pour affecter (feuille actuelle).
-  await expect(page.locator('[data-td-who="2026-10-09_Lu Mo"]')).toHaveAttribute('data-assign', '2026-10-09_Lu Mo');
+  // Le menage sans arrivee : un disque en pointilles pour affecter (choix dans la carte, ferme).
+  await expect(page.locator('[data-td-who="2026-10-09_Lu Mo"]')).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('[data-td-who="2026-10-09_Lu Mo"]')).toHaveClass(/\btd-who-empty\b/);
   await expect(page.locator('[data-td-who="2026-10-09_Lu Mo"]')).toHaveAttribute('aria-label', 'Assign a cleaner to Apt 909 · Bloom Height');
   // Bande de sept jours : le jour des donnees choisi, son compte sans cleaner ; les autres jours pas encore lus.
   const days = page.locator('[data-wday]');
@@ -166,9 +167,41 @@ test('le logement bloqué est une grande carte avec ses raisons', async ({ page 
   await expect(b).toContainText('No cleaner assigned');
   expect((await b.boundingBox())!.y).toBeLessThan(844);
   await expect(b).toContainText('Gas not working (MNT-429)');
-  // Assign someone : la feuille actuelle « Assign a cleaner » (remplacee par le choix dans la carte en tache 4).
+  // Assign someone : le choix s'ouvre dans la carte bloquee, sous ses raisons.
   await b.getByRole('button', { name: 'Assign someone' }).click();
-  await expect(page.locator('#sheet').getByRole('heading', { name: 'Assign a cleaner' })).toBeVisible();
+  await expect(b.locator('.td-pick')).toContainText('Who cleans it?');
+  await expect(b.getByRole('button', { name: 'Assign someone' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
+});
+
+// Decision du controleur (tache 4) : un menage qui a deja une personne ajoute a la carte Blocked
+// la ligne de la page de test, « Cleaner: … », son etat et la ligne des heures, et Change.
+test('carte bloquee dont le menage a une personne : ligne Cleaner, Change ouvre le choix', async ({ page }) => {
+  const body = todayBody();
+  body.who.jobs[0] = { ...body.who.jobs[0], assigned: [4, 10], serviceType: 'CHC', state: 'in_progress', tone: 'warn', word: 'In progress' };
+  body.who.jobs[2] = { ...body.who.jobs[2], state: 'done', tone: 'ok', word: 'Done' };
+  body.arrivals.rows[0] = { ...body.arrivals.rows[0], cause: 'Urgent ticket open: Gas not working (MNT-429).', assigned: [4, 10], cleaners: ['Faiza', 'Pionah'] };
+  body.arrivals.rows[1] = { ...body.arrivals.rows[1], tone: 'bad', word: 'Blocked', cause: 'Clean, but urgent ticket open: Leak under sink (MNT-431).', done: true };
+  body.ticketsByListing.L2 = [{ id: 431, title: 'Leak under sink', priority: 'urgent', since: '08/10', tech: 'Semax' }];
+  await bootMgr(page, [me(MANAGER), TODAY(body)], { email: true, clock: NOW });
+  const b = page.locator('.td-blocked', { hasText: 'Apt 308' });
+  const lines = b.locator('.td-why li');
+  await expect(lines).toHaveCount(2);
+  await expect(lines.first()).toContainText('Urgent ticket open since 09/07, nobody on it');
+  await expect(lines.nth(1).locator('strong')).toHaveText('Cleaner: Faiza and Pionah');
+  await expect(lines.nth(1).locator('.td-w span')).toHaveText('In progress. Out 12:00.');
+  await expect(b).not.toContainText('No cleaner assigned');
+  // Menage fait : la ligne dit Done., sans bouton Change.
+  const done = page.locator('.td-blocked', { hasText: 'Apt 103' });
+  await expect(done.locator('.td-why li').nth(1).locator('strong')).toHaveText('Cleaner: Faiza');
+  await expect(done.locator('.td-why li').nth(1).locator('.td-w span')).toHaveText(/^Done\./);
+  await expect(done.getByRole('button', { name: 'Change' })).toHaveCount(0);
+  // Change ouvre le choix dans la carte ; deux personnes : aucune tuile marquee (mode set, une seule personne).
+  await lines.nth(1).getByRole('button', { name: 'Change' }).click();
+  await expect(b.locator('.td-pick')).toContainText('Who cleans it?');
+  await expect(b.locator('.td-pick [aria-current]')).toHaveCount(0);
+  await expect(b.locator('.td-pick [data-td-pick]').first()).toBeFocused();
+  await expect(lines.nth(1).getByRole('button', { name: 'Change' })).toHaveAttribute('aria-expanded', 'true');
 });
 
 // Panneau des personnes (grand ecran) : un logement bloque montre l'etat de son menage en

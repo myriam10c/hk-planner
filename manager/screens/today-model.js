@@ -40,7 +40,7 @@ export function slotsOf(people) {
 }
 
 // Logement sans cleaner : un menage du jour, pas fait, personne dessus, pas attendu chez Elite.
-function isNone(u) { return !!u && !!u.job && u.job.state !== 'done' && !u.assigned.length && !u.job.elite; }
+export function isNone(u) { return !!u && !!u.job && u.job.state !== 'done' && !u.assigned.length && !u.job.elite; }
 function matches(u, filter) {
   if (filter == null) return true;
   if (filter === 'none') return isNone(u);
@@ -104,13 +104,17 @@ function timesLine(u, date, today) {
   return out.join(' ');
 }
 
-// Raisons d'une carte Blocked : tickets urgents, menage sans personne, sinon la cause du proxy.
+// Etat d'un menage dit sur la ligne Cleaner d'une carte Blocked (page de test, blocked()).
+const JOB_WORD = { done: 'Done', in_progress: 'In progress' };
+// Raisons d'une carte Blocked : tickets urgents, menage sans personne, sinon la cause du proxy ;
+// puis, quand le menage du jour a deja une personne, la ligne Cleaner (son etat).
 function reasonsOf(u) {
   if (u.k !== 'blocked') return [];
   const out = u.tickets.filter((t) => t.priority === 'urgent')
     .map((t) => ({ type: 'ticket', ref: t.ref, title: t.title, since: t.since, tech: t.tech }));
   if (u.job && u.job.state !== 'done' && !u.assigned.length) out.push({ type: 'cleaning', elite: u.job.elite });
   if (!out.length) out.push({ type: 'cause', text: u.cause });
+  if (u.job && u.assigned.length) out.push({ type: 'cleaner', word: JOB_WORD[u.job.state] || 'Not started' });
   return out;
 }
 

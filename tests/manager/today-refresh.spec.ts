@@ -31,9 +31,13 @@ const backToTab = (page: Page) => page.evaluate(() => {
 const frame = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
 const chip = (page: Page, day: string) => page.locator('[data-wday="' + day + '"]');
 const dateLine = (page: Page) => page.locator('#main .top .date');
-// Corps d'une carte (fiche) et disque ou « Assign someone » (feuille « Assign a cleaner »), par logement.
+// Corps d'une carte (fiche) et disque ou « Assign someone » (choix dans la carte), par logement.
 const cardOpen = (page: Page, id: string) => page.locator('[data-td-open="' + id + '"]');
 const assignBtn = (page: Page, id: string) => page.locator('[data-td-who="' + id + '"]');
+// Choix ouvert dans la carte d'un logement, et la tuile d'une personne (un seul choix a la fois).
+const cardOf = (page: Page, id: string) => page.locator('.td-card', { has: page.locator('[data-td-open="' + id + '"]') });
+const choice = (page: Page) => page.locator('.td-pick');
+const tile = (page: Page, pid: string) => page.locator('.td-pick [data-td-pick="' + pid + '"]');
 const ANN = '2026-10-09_Ann Lee'; // Apt 308, arrivee bloquee et son menage sans personne
 const CY = '2026-10-09_Cy Doe';   // Apt 103, arrivee a risque
 const LU = '2026-10-09_Lu Mo';    // Apt 909, menage sans arrivee
@@ -85,7 +89,7 @@ test.describe('minuit a Dubai', () => {
     await expect(chip(page, '2026-10-09')).toHaveCount(0);
     // Les gestes du jour sont ouverts : aucune lecture seule apres une relecture reussie.
     await assignBtn(page, ANN).click();
-    await expect(page.locator('#sheet [data-pick="10"]')).toBeVisible();
+    await expect(cardOf(page, ANN).locator('[data-td-pick="10"]')).toBeVisible();
     await expect(page.getByText('Reconnect to make changes.')).toHaveCount(0);
   });
 
@@ -170,10 +174,9 @@ test('geste apres plus de 60 s : Today relu avant l ecriture, Undo vers la liste
   await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { match: 'action=assignCleaner', status: 200, body: OK }, TODAY(later)],
     { email: true, clock: NOW });
   await assignBtn(page, ANN).click();
-  const sheet = page.locator('#sheet');
-  await expect(sheet.locator('[data-pick="10"]')).toBeVisible();
+  await expect(tile(page, '10')).toBeVisible();
   await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
-  await sheet.locator('[data-pick="10"]').click();
+  await tile(page, '10').click();
   await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender assigned to Pionah');
   expect((await sequence(page)).slice(0, 3)).toEqual(['today', 'today', 'write']);
   // Relecture d'apres l'ecriture rendue, puis Undo plus d'une minute apres : relu d'abord.
@@ -204,27 +207,25 @@ test('geste apres plus de 60 s, relecture en echec : Reconnect, aucune ecriture,
   await expect(page.locator('.td-blocked')).toContainText('Apt 308');
 });
 
-test('geste apres plus de 60 s, fiche fermee pendant la relecture : aucune ecriture', async ({ page }) => {
+test('geste apres plus de 60 s, choix ferme pendant la relecture : aucune ecriture', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { ...TODAY(LATER()), delay: 1000 },
     { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
   await assignBtn(page, ANN).click();
-  const sheet = page.locator('#sheet');
   await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
-  await sheet.locator('[data-pick="10"]').click();
-  await sheet.getByRole('button', { name: 'Cancel' }).click();
-  await expect(sheet).toHaveAttribute('aria-hidden', 'true');
+  await tile(page, '10').click();
+  await choice(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(choice(page)).toHaveCount(0);
   await expect.poll(async () => (await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(2);
   await expect(page.locator('.asof')).toContainText('as of 11:01');
   await frame(page);
   expect(await writes(page, 'assignCleaner')).toHaveLength(0);
-  await expect(sheet).toHaveAttribute('aria-hidden', 'true');
+  await expect(choice(page)).toHaveCount(0);
 });
 
 // Toute fiche de Today reste ouverte pendant et apres une relecture, avec ce qui y est saisi.
 const SHEETS = [
   { name: 'menage', title: /Apt 909/, open: (page: Page) => cardOpen(page, LU).click() },
   { name: 'arrivee', title: /Apt 103/, open: (page: Page) => cardOpen(page, CY).click() },
-  { name: 'choix d une personne', title: /Assign a cleaner/, open: (page: Page) => assignBtn(page, ANN).click() },
 ];
 for (const s of SHEETS) {
   test('relecture avec une fiche ouverte (' + s.name + ') : la fiche reste ouverte, la saisie aussi', async ({ page }) => {
@@ -251,6 +252,22 @@ for (const s of SHEETS) {
     await expect(page.locator('#probe')).toBeFocused();
   });
 }
+
+// Le choix d'une personne (dans la carte depuis la tache 4) reste ouvert pendant et apres une
+// relecture, le focus sur la meme tuile.
+test('relecture avec le choix ouvert dans la carte : le choix reste ouvert, le focus aussi', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(LATER())], { email: true, clock: NOW });
+  await assignBtn(page, ANN).click();
+  await expect(tile(page, '10')).toBeVisible();
+  await tile(page, '10').focus();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await backToTab(page);
+  await expect(page.locator('.asof')).toContainText('as of 11:01');
+  expect(await todayCalls(page)).toBe(2);
+  await expect(cardOf(page, ANN).locator('.td-pick')).toBeVisible();
+  await expect(tile(page, '10')).toBeFocused();
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+});
 
 // Gestes de la nouvelle structure (lot 4a) : la carte ouvre une fiche, le disque mene a une
 // ecriture ; tous deux relisent d'abord un tableau de plus de 60 s.
@@ -322,17 +339,17 @@ test('carte touchee pendant une relecture en cours qui echoue : fiche en lecture
   expect(await todayCalls(page)).toBe(2);
 });
 
-// Carte touchee pendant une ecriture (choix envoye, feuille fermee) : la fiche s'ouvre tout de
+// Carte touchee pendant une ecriture (choix envoye, puis ferme) : la fiche s'ouvre tout de
 // suite sur le tableau affiche, sans relire ; la relecture suit l'ecriture et ne ferme pas la fiche.
 test('carte touchee pendant une ecriture : fiche ouverte tout de suite, Today relu une fois apres l ecriture', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(LATER()),
     { match: 'action=assignCleaner', status: 200, body: OK, delay: 2000 }], { email: true, clock: NOW });
   await assignBtn(page, LU).click();
   const sheet = page.locator('#sheet');
-  await expect(sheet.locator('#sheetTitle')).toHaveText('Assign a cleaner');
-  await sheet.locator('[data-pick="4"]').click();
-  await sheet.getByRole('button', { name: 'Cancel' }).click();
-  await expect(sheet).toHaveAttribute('aria-hidden', 'true');
+  await expect(cardOf(page, LU).locator('.td-pick')).toBeVisible();
+  await tile(page, '4').click();
+  await choice(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(choice(page)).toHaveCount(0);
   await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
   await cardOpen(page, CY).click();
   await expect(sheet).toHaveAttribute('aria-hidden', 'false');
@@ -347,14 +364,48 @@ test('carte touchee pendant une ecriture : fiche ouverte tout de suite, Today re
   await expect(sheet.locator('#sheetTitle')).toHaveText('Apt 103 · Damac Reva');
 });
 
-test('disque touche apres plus de 60 s : Today relu avant la feuille Assign a cleaner', async ({ page }) => {
+test('disque touche apres plus de 60 s : Today relu avant le choix dans la carte', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(LATER())], { email: true, clock: NOW });
   await expect(assignBtn(page, LU)).toBeVisible();
   await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
   await assignBtn(page, LU).click();
-  await expect(page.locator('#sheet #sheetTitle')).toHaveText('Assign a cleaner');
+  await expect(cardOf(page, LU).locator('.td-pick')).toBeVisible();
   expect(await todayCalls(page)).toBe(2);
   await expect(page.locator('.asof')).toContainText('as of 11:01');
+  await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'true');
+});
+
+// Disque ou « Assign someone » touche pendant une relecture deja en cours (retour sur l'onglet,
+// Today lent) : le geste attend cette relecture au lieu d'en lancer une seconde.
+test('disque touche pendant une relecture en cours : le choix attend la relecture, un seul appel de plus', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { ...TODAY(LATER()), delay: 2000 }], { email: true, clock: NOW });
+  await expect(assignBtn(page, LU)).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await backToTab(page);
+  await expect.poll(() => todayCalls(page)).toBe(2);
+  await assignBtn(page, LU).click();
+  await frame(page);
+  // Relecture encore en cours : pas encore de choix, aucune seconde relecture.
+  expect((await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(1);
+  await expect(choice(page)).toHaveCount(0);
+  await expect(cardOf(page, LU).locator('.td-pick')).toBeVisible();
+  await expect(page.locator('.asof')).toContainText('as of 11:01');
+  expect(await todayCalls(page)).toBe(2);
+});
+
+test('Assign someone touche pendant une relecture en cours qui echoue : aucun choix, Reconnect, un seul appel de plus', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { match: 'action=mgr.today', status: 0, body: {}, fail: true, delay: 2000 }],
+    { email: true, clock: NOW });
+  await expect(assignBtn(page, ANN)).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await backToTab(page);
+  await expect.poll(() => todayCalls(page)).toBe(2);
+  await page.locator('.td-blocked').getByRole('button', { name: 'Assign someone' }).click();
+  await expect(page.locator('#toast')).toContainText('Reconnect to make changes.');
+  await expect(page.locator('.banner.warn')).toContainText('No connection. Try again.');
+  await expect(choice(page)).toHaveCount(0);
+  await expect(page.locator('[data-td-who]')).toHaveCount(0);
+  expect(await todayCalls(page)).toBe(2);
 });
 
 // Filtre et repli d'un moment : affichage seul (ni fiche ni ecriture), applique tout de suite ;

@@ -77,7 +77,8 @@ function weekHtml(strip) {
 }
 
 // ---------- Personnes ----------
-function disc(p) { return '<span class="td-disc td-' + esc(p.slot) + '">' + esc(p.ini) + '</span>'; }
+// hidden : disque decoratif (le nom est ecrit a cote, tuile du choix).
+function disc(p, hidden) { return '<span class="td-disc td-' + esc(p.slot) + '"' + (hidden ? ' aria-hidden="true"' : '') + '>' + esc(p.ini) + '</span>'; }
 function discs(people, ids, max) {
   return '<span class="td-discs">' + ids.slice(0, max || ids.length).map((id) => disc(people[id] || { slot: 'other', ini: '?' })).join('') + '</span>';
 }
@@ -115,14 +116,20 @@ function title(u) {
   if (!u.apt) return esc(u.bld || 'Apartment');
   return 'Apt ' + esc(u.apt) + (u.bld ? ' <span class="td-b">· ' + esc(u.bld) + '</span>' : '');
 }
+function namesIn(u, c) {
+  return listNames(u.assigned.map((id) => (c.people[id] ? c.people[id].name : 'Member ' + id)));
+}
+// Choix ouvert sur ce logement (c.pick : { id, state }, jamais en lecture seule).
+function picking(u, c) { return !!(c.pick && c.pick.id === u.id && u.key); }
 function cardHtml(u, c) {
   if (u.shape === 'blocked') return blockedHtml(u, c);
-  const names = u.assigned.length ? listNames(u.assigned.map((id) => (c.people[id] ? c.people[id].name : 'Member ' + id))) : '';
+  const names = u.assigned.length ? namesIn(u, c) : '';
   const line = u.shape === 'line';
+  const open = picking(u, c);
   const tk = u.tickets.length ? plural(u.tickets.length, 'open ticket') : '';
   let left;
   if (u.canAssign && !c.ro) {
-    left = '<button class="td-who' + (u.assigned.length ? '' : ' td-empty') + '" type="button" data-td-who="' + esc(u.id) + '" data-assign="' + esc(u.key) + '" aria-label="'
+    left = '<button class="td-who' + (u.assigned.length ? '' : ' td-who-empty') + '" type="button" data-td-who="' + esc(u.id) + '" aria-expanded="' + open + '" aria-label="'
       + esc((u.assigned.length ? 'Change the cleaner of ' : 'Assign a cleaner to ') + placeLabel(u)) + '">' + (u.assigned.length ? discs(c.people, u.assigned, 3) : PLUS) + '</button>';
   } else {
     left = '<span class="td-whostatic" aria-hidden="true">' + (u.assigned.length ? discs(c.people, u.assigned, 3) : '<span class="td-dash"></span>') + '</span>';
@@ -135,10 +142,14 @@ function cardHtml(u, c) {
     + (u.k === 'elite' ? '<span class="td-cause">' + ELITE_NOTE + '</span>' : '')
     + (!line && tk ? '<span class="td-tk">' + tk + '</span>' : '') + '</button>';
   const g = { ready: 1, done: 1, prog: 1, todo: 1 }[u.k] ? SVG[u.k] : '';
-  return '<article class="td-card' + (line ? ' td-line' : '') + '">' + left + body + '<span class="td-glyph" aria-hidden="true">' + g + '</span></article>';
+  return '<article class="td-card' + (line ? ' td-line' : '') + '">' + left + body + '<span class="td-glyph" aria-hidden="true">' + g + '</span>'
+    + (open ? pickHtml(c.day, u, c.pick.state) : '') + '</article>';
 }
-// Carte Blocked (spec section 4) : une ligne par raison, chacune avec son bouton.
+// Carte Blocked (spec section 4) : une ligne par raison, chacune avec son bouton. Le menage qui a
+// deja une personne ajoute la ligne « Cleaner: … » de la page de test, avec Change.
 function blockedHtml(u, c) {
+  const open = picking(u, c);
+  const canPick = u.canAssign && !c.ro;
   const why = u.reasons.map((r) => {
     if (r.type === 'ticket') {
       return '<li><div class="td-w"><strong>Urgent ticket open since ' + esc(r.since) + (r.tech ? ', with ' + esc(r.tech) : ', nobody on it') + '</strong><span>'
@@ -147,7 +158,11 @@ function blockedHtml(u, c) {
     if (r.type === 'cleaning') {
       const sub = r.elite ? ELITE_NOTE : u.timesLine;
       return '<li><div class="td-w"><strong>' + (r.elite ? 'Cleaning not logged yet' : 'No cleaner assigned') + '</strong>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div>'
-        + (u.canAssign && !c.ro ? '<button class="td-btn" type="button" data-td-who="' + esc(u.id) + '" data-assign="' + esc(u.key) + '">Assign someone</button>' : '') + '</li>';
+        + (canPick ? '<button class="td-btn" type="button" data-td-who="' + esc(u.id) + '" aria-expanded="' + open + '">Assign someone</button>' : '') + '</li>';
+    }
+    if (r.type === 'cleaner') {
+      return '<li><div class="td-w"><strong>Cleaner: ' + esc(namesIn(u, c)) + '</strong><span>' + esc(r.word + '.' + (u.timesLine ? ' ' + u.timesLine : '')) + '</span></div>'
+        + (canPick ? '<button class="td-btn td-ghost" type="button" data-td-who="' + esc(u.id) + '" aria-expanded="' + open + '">Change</button>' : '') + '</li>';
     }
     return '<li><div class="td-w"><span>' + esc(r.text) + '</span></div></li>';
   }).join('');
@@ -155,7 +170,24 @@ function blockedHtml(u, c) {
   return '<article class="td-card td-blocked"><div class="td-bhead"><span class="td-tag">' + BANG + 'Blocked</span><span class="td-due">'
     + who + ' due ' + (c.isToday ? 'today ' : '') + 'at ' + esc(u.arrival.time) + '</span></div>'
     + '<h3 class="td-bt"><button class="td-btitle" type="button" data-td-open="' + esc(u.id) + '">' + esc(placeLabel(u) || 'Apartment') + '</button></h3>'
-    + '<ul class="td-why">' + why + '</ul></article>';
+    + '<ul class="td-why">' + why + '</ul>' + (open ? pickHtml(c.day, u, c.pick.state) : '') + '</article>';
+}
+
+// Choix dans la carte (spec section 5, page de test : picker) : « Who cleans it? », une tuile
+// par personne affectable (disque, nom, menages du jour) ; la tuile de la personne deja seule
+// sur le menage porte aria-current. state : { busy, error, ro } ; busy : tuiles desactivees
+// pendant une ecriture ; error : refus du serveur, tel quel ; ro : aucune tuile.
+export function pickHtml(day, u, state) {
+  const s = state || {};
+  const cancel = '<button class="td-btn td-ghost" type="button" data-td-cancel>Cancel</button>';
+  const h = '<div class="td-pick" role="group" aria-label="' + esc('Who cleans ' + (placeLabel(u) || 'it') + '?') + '"><span class="td-pl">Who cleans it?</span>';
+  if (s.ro) return h + '<p class="ro-note" role="status">' + RO_LINE + '</p>' + cancel + '</div>';
+  const tiles = day.people.filter((p) => p.assignable).map((p) => {
+    const current = u.assigned.length === 1 && u.assigned[0] === p.id;
+    return '<button class="td-tile" type="button" data-td-pick="' + esc(p.id) + '" data-key="' + esc(u.key) + '"' + (current ? ' aria-current="true"' : '')
+      + (s.busy ? ' aria-disabled="true"' : '') + '>' + disc(p, true) + '<span class="td-pn">' + esc(p.name) + '<small>' + plural(p.count, 'job') + '</small></span></button>';
+  }).join('');
+  return h + (s.error ? '<p class="td-perr" role="alert">' + esc(s.error) + '</p>' : '') + '<div class="td-tiles">' + tiles + '</div>' + cancel + '</div>';
 }
 function tallyHtml(m) {
   return m.tally.map((t) => '<span class="td-mc">' + SVG[t.k] + t.n + '</span>').join('');
@@ -171,7 +203,8 @@ function momentHtml(m, c) {
   for (const id of m.unitIds) {
     const u = c.byId[id];
     if (!u) continue;
-    if (u.shape === 'line') { run += cardHtml(u, c); continue; }
+    // Une ligne fine dont le choix est ouvert sort du groupe : elle devient une carte.
+    if (u.shape === 'line' && !picking(u, c)) { run += cardHtml(u, c); continue; }
     if (run) { h += '<div class="td-rows">' + run + '</div>'; run = ''; }
     h += cardHtml(u, c);
   }
@@ -352,11 +385,12 @@ function rulesHtml(data) {
     + '<li>Owner stays count as arrivals. Without a checkout in the last 14 days, there is no cleaning to check.</li></ul></details>';
 }
 
-// view : { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead }.
+// view : { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead, busy, pickError }.
 // day : buildToday(data) ; moments : visible(day, ui.filter) ; ui : { filter, collapsed, pick } ;
-// ahead : { sel, week } quand un autre jour de la bande est choisi (rendu actuel), sinon null.
+// ahead : { sel, week } quand un autre jour de la bande est choisi (rendu actuel), sinon null ;
+// busy : une ecriture est en cours ; pickError : refus du serveur dans le choix ouvert.
 export function boardHtml(view) {
-  const { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead } = view;
+  const { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead, busy, pickError } = view;
   const isToday = dubaiToday(nowMs) === data.day;
   const head = header(data, isToday, stale) + (banner || '') + '<p class="td-sum">' + esc(sentence(day, { today: isToday })) + '</p>' + weekHtml(strip);
   if (ahead) return head + '<div class="td-cols"><div class="td-main">' + aheadHtml(ahead) + '</div></div>';
@@ -364,7 +398,9 @@ export function boardHtml(view) {
   for (const p of day.people) people[p.id] = p;
   const byId = {};
   for (const u of day.units) byId[u.id] = u;
-  const c = { ui, ro, isToday, people, byId };
+  // Lecture seule : aucun choix.
+  const pick = ui.pick != null && !ro ? { id: ui.pick, state: { busy: !!busy, error: pickError || null, ro: false } } : null;
+  const c = { ui, ro, isToday, people, byId, day, pick };
   const list = moments.length ? moments.map((m) => momentHtml(m, c)).join('')
     : '<p class="td-empty">' + (ui.filter == null ? 'No cleaning planned for today.' : 'Nothing for this choice on that day.') + '</p>';
   return head + '<div class="td-cols"><div class="td-main">' + peopleHtml(day, ui, data, nowMs)
@@ -427,21 +463,6 @@ export function arrivalSheet(data, a, nowMs, ro) {
     + (a.prevKey ? photosBlk(a.prevKey) : '')
     + ticketsBlk(data.ticketsByListing[a.listingId]) + '</div>'
     + (a.prevKey ? actionsFoot(a.prevKey, a.assigned, a.done, ro) : '<div class="sheet-f"><button class="btn" type="button" data-close>Close</button></div>');
-}
-
-export function pickerSheet(data, t, ro) {
-  const count = {};
-  for (const p of data.who.people) count[p.id] = p.keys.length;
-  const opts = ro ? '<p class="ro-note" role="status">' + RO_LINE + '</p>' : data.assignable.map((p) => {
-    const n = count[p.id] || 0;
-    const current = t.assigned.length === 1 && t.assigned[0] === p.id;
-    return '<button type="button" data-pick="' + p.id + '" data-key="' + esc(t.key) + '"' + (current ? ' aria-current="true"' : '') + '>'
-      + '<span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><span><b>' + esc(p.name) + '</b><small>'
-      + esc(ROLE[p.role] || p.role) + ' · ' + n + ' job' + (n === 1 ? '' : 's') + ' today</small></span></button>';
-  }).join('');
-  return sheetHead('Assign a cleaner', placeLabel(t) + (t.sub ? ' · ' + t.sub : ''))
-    + '<div class="sheet-b"><div class="pick">' + opts + '</div></div>'
-    + '<div class="sheet-f"><button class="btn" type="button" data-close>Cancel</button></div>';
 }
 
 // Choix d'une personne pour un menage d'un autre jour (donnees mgr.planning) : un tap = assigne

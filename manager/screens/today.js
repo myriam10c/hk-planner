@@ -6,8 +6,8 @@ import { createGestures } from '/manager/gesture.js';
 import { createFreshGate, isStale } from '/manager/fresh.js';
 import { addDays, announceMntBadge, closeSheet, dubaiTime, esc, focusMark, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { fillPhotos } from '/manager/ui/job-photos.js';
-import { aheadPickerSheet, arrivalSheet, boardHtml, jobSheet, pickerSheet } from '/manager/screens/today-view.js';
-import { buildToday, visible } from '/manager/screens/today-model.js';
+import { aheadPickerSheet, arrivalSheet, boardHtml, jobSheet } from '/manager/screens/today-view.js';
+import { buildToday, isNone, nextNone, visible } from '/manager/screens/today-model.js';
 import { namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
 
 function dubaiParts(ms) {
@@ -21,8 +21,9 @@ function dubaiDay(ms) { const p = dubaiParts(ms); return p.year + '-' + p.month 
 // Ecran ouvert : le jour de Dubai est verifie toutes les 30 s (Today relu quand il change).
 const DAY_CHECK_MS = 30000;
 // Repeint : le focus revient sur l'element affiche qui porte le meme attribut (carte, disque,
-// puce de filtre, pastille d'un moment, Not for today), sinon sur ceux de focusMark.
-const TD_FOCUS = ['data-td-open', 'data-td-who', 'data-td-filter', 'data-td-moment', 'data-td-more'];
+// tuile ou Cancel du choix ouvert, puce de filtre, pastille d'un moment, Not for today), sinon
+// sur ceux de focusMark.
+const TD_FOCUS = ['data-td-open', 'data-td-who', 'data-td-pick', 'data-td-cancel', 'data-td-filter', 'data-td-moment', 'data-td-more'];
 
 function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div></header>' + inner; }
 
@@ -31,9 +32,11 @@ export async function renderToday(ctx) {
   // day : jour choisi dans « Who does what » (null = aujourd'hui). triedOn : jour de Dubai
   // de la derniere relecture tentee.
   // ui : filtre (id d'une personne, 'none' ou null), moments replies (Not for today replie
-  // par defaut), choix ouvert (tache 4) ; garde d'un rendu a l'autre.
+  // par defaut), choix ouvert dans une carte (id du logement, un seul a la fois) ; garde d'un
+  // rendu a l'autre. pickErr : refus du serveur affiche dans le choix ouvert. chain : logement
+  // qui n'avait personne et vient d'etre affecte, le choix du suivant s'ouvre apres la relecture.
   const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null, day: null, triedOn: null,
-    pending: null, ui: { filter: null, collapsed: { more: true }, pick: null } };
+    pending: null, ui: { filter: null, collapsed: { more: true }, pick: null }, pickErr: null, chain: null };
   // Journee du modele, calculee une fois par reponse mgr.today.
   let memo = { data: null, day: null };
   function model() {
@@ -115,7 +118,7 @@ export async function renderToday(ctx) {
         data: st.data, day, moments: visible(day, st.ui.filter), ui: st.ui, banner: banner(), stale: !st.fresh, ro: readOnly(),
         // Compte des autres jours : pas encore lu (tache 5).
         strip: a.days.map((d, i) => ({ date: d, label: wdShort(d), num: Number(d.slice(8)), n: i === 0 ? day.counts.none : null, selected: d === a.sel })),
-        nowMs: Date.now(), ahead: a.sel === a.days[0] ? null : { sel: a.sel, week: a.week },
+        nowMs: Date.now(), ahead: a.sel === a.days[0] ? null : { sel: a.sel, week: a.week }, busy: st.busy, pickError: st.pickErr,
       });
       tdBack(mark);
       return;
@@ -145,6 +148,8 @@ export async function renderToday(ctx) {
     return p;
   }
   async function reload() {
+    // Journee affichee avant la relecture : un filtre qui s'y appliquait et ne s'applique plus est enleve.
+    const before = st.data ? model() : null;
     st.loading = true;
     st.error = null;
     st.triedOn = dubaiDay(Date.now());
@@ -162,7 +167,29 @@ export async function renderToday(ctx) {
       st.fresh = false;
     }
     st.loading = false;
-    paint();
+    const next = settle(before);
+    if (next) showPick(next); else paint();
+  }
+
+  // Apres une relecture (reussie ou non). Filtre : enleve quand la personne ou le groupe filtre
+  // avait des logements et n'en a plus, ou quand la personne filtree n'est plus affectable (sa
+  // puce disparait). Choix ouvert : ferme en lecture seule ou si son logement n'est plus dans
+  // Today. Rend le logement dont le choix s'ouvre ensuite (enchainement), sinon null.
+  function settle(before) {
+    const from = st.chain;
+    st.chain = null;
+    if (!st.data) return null;
+    const ui = st.ui;
+    const day = model();
+    if (ui.filter != null && before) {
+      const f = String(ui.filter);
+      const left = (d) => (f === 'none' ? d.counts.none : (d.people.find((p) => String(p.id) === f) || { count: 0 }).count);
+      const able = (d) => d.people.some((p) => String(p.id) === f && p.assignable);
+      if ((left(before) > 0 && left(day) === 0) || (f !== 'none' && able(before) && !able(day))) ui.filter = null;
+    }
+    if (ui.pick != null && (readOnly() || !day.units.some((u) => u.id === ui.pick && u.key))) { ui.pick = null; st.pickErr = null; }
+    if (from == null || ui.pick != null || readOnly()) return null;
+    return nextNone(day, from, ui.filter);
   }
 
   // Relecture due : donnees de plus d'une minute ou d'un autre jour de Dubai.
@@ -172,6 +199,20 @@ export async function renderToday(ctx) {
   const freshEnough = createFreshGate({
     blocked: () => !st.fresh || !st.data, stale: due, refresh, readOnly, refuse: refuseRo, isCurrent: ctx.isCurrent,
   });
+  // Geste d'ecriture du jour (disque, tuile, bouton d'une fiche, Undo) : une relecture deja en
+  // cours (retour sur l'onglet, apres une ecriture) est attendue au lieu d'en lancer une
+  // seconde, puis freshEnough. Un seul geste attend a la fois : un autre arrive pendant
+  // l'attente est abandonne (meme regle que freshEnough).
+  let gating = false;
+  async function gate() {
+    if (st.loading && st.pending) {
+      if (gating) return false;
+      gating = true;
+      try { await st.pending; } finally { gating = false; }
+      if (!ctx.isCurrent()) return false;
+    }
+    return freshEnough();
+  }
 
   // Semaine d'un autre jour : seule la derniere demande pour cette semaine compte, et
   // l'ecran n'est repeint que si le jour choisi est encore dans cette semaine.
@@ -202,7 +243,10 @@ export async function renderToday(ctx) {
     if (d && weekStartOf(d) === start) paint();
   }
   function pickDay(day) {
+    const was = aheadState().sel;
     st.day = day;
+    // Un seul choix ouvert : celui d'aujourd'hui se ferme quand un autre jour est montre.
+    if (aheadState().sel !== was) { st.ui.pick = null; st.pickErr = null; }
     const d = otherDay();
     if (d) {
       const w = weeks[weekStartOf(d)];
@@ -304,7 +348,7 @@ export async function renderToday(ctx) {
   function busyToast() { toast('Saving, wait a second.'); }
   async function undo(fn) {
     if (st.busy) { busyToast(); return; }
-    if (!(await freshEnough())) return;
+    if (!(await gate())) return;
     if (st.busy) { busyToast(); return; }
     st.busy = true;
     try { await fn(); } catch (e) { if (!handleAccess(e)) toast(e.message); }
@@ -314,28 +358,47 @@ export async function renderToday(ctx) {
   // Ecriture du jour : cle d'idempotence par geste (reprise au reessai incertain), jamais d'auteur.
   const send = (action, body) => () => gestures.run(action + '|' + JSON.stringify(body), (idem) => post(action, { ...body, idem }));
 
-  async function write(t, call, okMsg, undoCall) {
+  // Ou une ecriture rend compte. place.held() : le geste est encore a l'ecran ; busy(on) :
+  // boutons desactives ou rendus ; error(msg) : refus du serveur affiche tel quel ; done() :
+  // reussite. Par defaut la fiche du menage (Mark done, Undo done).
+  function sheetPlace(key) {
+    return { held: () => heldHere(key), busy: sheetBusy, error: sheetError, done: closeSheet };
+  }
+  // Choix dans la carte : tuiles desactivees pendant l'ecriture, refus dans le choix (role
+  // alert) ; reussite : choix ferme, et si le logement n'avait personne, le choix du logement
+  // suivant sans cleaner s'ouvre apres la relecture (settle). Choix ferme pendant l'ecriture :
+  // refus en toast, aucun enchainement.
+  function pickPlace(id, wasNone) {
+    return {
+      held: () => st.ui.pick === id,
+      busy: () => { st.pickErr = null; paint(); },
+      error: (msg) => { st.pickErr = msg; paint(); },
+      done: () => { closePick(false); if (wasNone) st.chain = id; },
+    };
+  }
+
+  async function write(t, call, okMsg, undoCall, at) {
     if (st.busy) { busyToast(); return; }
     if (readOnly()) { refuseRo(); return; }
-    const key = t.key;
+    const place = at || sheetPlace(t.key);
     st.busy = true;
-    sheetBusy(true);
+    place.busy(true);
     try {
       await call();
     } catch (e) {
       st.busy = false;
-      sheetBusy(false);
+      place.busy(false);
       if (handleAccess(e)) return;
-      if (heldHere(key)) sheetError(e.message); else toast(e.message);
+      if (place.held()) place.error(e.message); else toast(e.message);
       return;
     }
     st.busy = false;
-    if (heldHere(key)) closeSheet();
+    if (place.held()) place.done();
     toast(okMsg, () => undo(undoCall));
     refresh();
   }
 
-  function assign(key, id) {
+  function assign(key, id, at) {
     const t = targetFor(key);
     if (!t) return;
     const prev = t.assigned.slice();
@@ -343,7 +406,8 @@ export async function renderToday(ctx) {
     return write(t,
       send('assignCleaner', { reservation_key: key, cleaner_ids: [Number(id)], mode: 'set', service_type: service }),
       placeLabel(t) + ' assigned to ' + nameOf(id),
-      send('assignCleaner', { reservation_key: key, cleaner_ids: prev, mode: 'set', service_type: service }));
+      send('assignCleaner', { reservation_key: key, cleaner_ids: prev, mode: 'set', service_type: service }),
+      at);
   }
 
   function setDone(key, val) {
@@ -355,19 +419,75 @@ export async function renderToday(ctx) {
       send('setDone', { key, done: !val }));
   }
 
-  // Geste du jour (choix d'une personne, Assign, Mark done) : Today relu d'abord si la
-  // relecture est due. Geste lance depuis une fiche : abandonne si la fiche a ete fermee
-  // pendant la relecture ; fiche fermee si son menage n'est plus dans Today relu.
+  // Bouton d'une fiche (Assign cleaner, Reassign, Mark done, Undo done) : Today relu d'abord si
+  // la relecture est due (gate). Geste abandonne si la fiche a ete fermee pendant la relecture ;
+  // fiche fermee si son menage n'est plus dans Today relu. Assign cleaner et Reassign ferment la
+  // fiche et ouvrent le choix dans la carte du logement.
   async function todayGesture(el) {
-    const key = el.getAttribute(el.hasAttribute('data-done') ? 'data-done' : el.hasAttribute('data-assign') ? 'data-assign' : 'data-key');
+    const toPick = el.hasAttribute('data-assign');
+    const key = el.getAttribute(toPick ? 'data-assign' : 'data-done');
     const fromSheet = !!el.closest('#sheet');
-    if (!(await freshEnough())) return;
+    if (!(await gate())) return;
     if (fromSheet && !heldHere(key)) return;
     const t = targetFor(key);
     if (!t) { if (fromSheet) closeSheet(); return; }
-    if (el.hasAttribute('data-pick')) { assign(key, el.getAttribute('data-pick')); return; }
-    if (el.hasAttribute('data-assign')) { st.sheetKey = t.key; openSheet(pickerSheet(st.data, t, readOnly())); return; }
+    if (toPick) {
+      const u = model().units.find((x) => x.key === key);
+      if (fromSheet) closeSheet();
+      if (u) showPick(u.id);
+      return;
+    }
     setDone(key, el.getAttribute('data-val') === '1');
+  }
+
+  // ---------- Choix dans la carte ----------
+  // Ouvre le choix d'un logement (un seul a la fois), deplie son moment ; la carte defile dans le
+  // champ et le focus va a la premiere tuile (jamais sous une fiche ouverte).
+  function showPick(id) {
+    st.ui.pick = id;
+    st.pickErr = null;
+    const m = model().moments.find((x) => x.unitIds.indexOf(id) >= 0);
+    if (m) delete st.ui.collapsed[m.id];
+    paint();
+    const box = main.querySelector('.td-pick');
+    if (!box) return;
+    box.classList.add('td-fresh');
+    if (sheetIsOpen()) return;
+    const card = box.closest('.td-card') || box;
+    card.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    const first = box.querySelector('[data-td-pick]');
+    if (first) first.focus({ preventScroll: true });
+  }
+  // Ferme le choix ouvert. Le focus revient au disque de la carte (ou a Assign someone, Change)
+  // quand il etait dans le choix, ou toujours avec force (Echap, Cancel).
+  function closePick(force) {
+    const id = st.ui.pick;
+    if (id == null) return;
+    const a = document.activeElement;
+    const inside = force || !a || a === document.body || !!(a.closest && a.closest('.td-pick'));
+    st.ui.pick = null;
+    st.pickErr = null;
+    paint();
+    if (!inside || sheetIsOpen()) return;
+    const who = Array.from(main.querySelectorAll('[data-td-who="' + CSS.escape(id) + '"]')).find((x) => x.getClientRects().length);
+    if (who) who.focus({ preventScroll: true });
+  }
+  // Disque d'une carte, Assign someone, Change : le choix s'ouvre derriere la garde de fraicheur.
+  async function openWho(id) {
+    if (!(await gate())) return;
+    const u = model().units.find((x) => x.id === id);
+    if (!u || !u.canAssign || readOnly()) return;
+    showPick(id);
+  }
+  // Tuile d'une personne : l'ecriture de assign() derriere la meme garde ; abandonnee si le
+  // choix a ete ferme (ou a change) pendant la relecture.
+  async function pickPerson(key, pid) {
+    const id = st.ui.pick;
+    if (!(await gate())) return;
+    if (id == null || st.ui.pick !== id) return;
+    const u = model().units.find((x) => x.id === id);
+    if (!u || u.key !== key) return;
+    assign(key, pid, pickPlace(id, isNone(u)));
   }
 
   // Filtre et repli d'un moment : affichage seul, applique tout de suite ; un tableau de plus
@@ -412,7 +532,7 @@ export async function renderToday(ctx) {
 
   function onClick(e) {
     const el = e.target && e.target.closest
-      ? e.target.closest('[data-retry],[data-td-open],[data-td-filter],[data-td-moment],[data-td-more],[data-assign],[data-pick],[data-done],[data-wday],[data-wretry],[data-wassign],[data-wpick]') : null;
+      ? e.target.closest('[data-retry],[data-td-open],[data-td-filter],[data-td-moment],[data-td-more],[data-td-who],[data-td-pick],[data-td-cancel],[data-assign],[data-done],[data-wday],[data-wretry],[data-wassign],[data-wpick]') : null;
     if (!el) return;
     if (el.hasAttribute('data-retry')) { refresh(); return; }
     if (!st.data) return;
@@ -447,9 +567,23 @@ export async function renderToday(ctx) {
       openAhead(t.j.key);
       return;
     }
-    // Disque d'une carte et Assign someone : data-assign, feuille actuelle « Assign a cleaner »
-    // derriere la garde de fraicheur (tache 4 : choix dans la carte).
-    if (el.hasAttribute('data-pick') || el.hasAttribute('data-assign') || el.hasAttribute('data-done')) {
+    // Choix dans la carte. Cancel le ferme, meme pendant une ecriture (elle continue, le
+    // resultat vient en toast). Pendant une ecriture, toucher une tuile, un disque ou un bouton
+    // d'ecriture d'une fiche : « Saving, wait a second. ».
+    if (el.hasAttribute('data-td-cancel')) { closePick(true); return; }
+    if (el.hasAttribute('data-td-pick')) {
+      if (st.busy || el.getAttribute('aria-disabled') === 'true') { busyToast(); return; }
+      pickPerson(el.getAttribute('data-key'), el.getAttribute('data-td-pick'));
+      return;
+    }
+    if (el.hasAttribute('data-td-who')) {
+      if (st.busy) { busyToast(); return; }
+      const id = el.getAttribute('data-td-who');
+      if (st.ui.pick === id) { closePick(true); return; }
+      openWho(id);
+      return;
+    }
+    if (el.hasAttribute('data-assign') || el.hasAttribute('data-done')) {
       if (st.busy) { busyToast(); return; }
       todayGesture(el);
       return;
@@ -457,9 +591,16 @@ export async function renderToday(ctx) {
     if (el.hasAttribute('data-td-open')) openCard(el.getAttribute('data-td-open'));
   }
 
-  // Fleches haut / bas entre les cartes d'un meme moment, et entre les lignes d'un meme bloc
-  // (tickets de Maintenance).
+  // Echap ferme le choix ouvert et rend le focus au disque (une fiche ouverte se ferme d'abord,
+  // seule : dom.js a deja traite la touche). Fleches haut / bas entre les cartes d'un meme
+  // moment, et entre les lignes d'un meme bloc (tickets de Maintenance).
   function onKey(e) {
+    if (e.key === 'Escape') {
+      if (e.defaultPrevented || sheetIsOpen() || st.ui.pick == null) return;
+      e.preventDefault();
+      closePick(true);
+      return;
+    }
     if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || sheetIsOpen()) return;
     const a = document.activeElement && document.activeElement.closest ? document.activeElement : null;
     if (!a) return;

@@ -3,7 +3,7 @@
 // et de mgr.planning (tests/manager/planning-fixtures.ts). Aucun vrai nom de guest.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAhead, buildToday, countNone, nextNone, sentence, slotsOf, visible } from '../../manager/screens/today-model.js';
+import { buildAhead, buildToday, countNone, isNone, nextNone, sentence, slotsOf, visible } from '../../manager/screens/today-model.js';
 
 const DAY = '2026-11-20'; // vendredi
 const SAT = '2026-11-21';
@@ -417,7 +417,11 @@ test('reasons : ticket urgent sans technicien, menage Elite, repli sur la cause'
     { type: 'cleaning', elite: true },
   ]);
   assert.deepEqual(unit(d, 'K2').reasons, [{ type: 'cleaning', elite: false }]);
-  assert.deepEqual(unit(d, 'K3').reasons, [{ type: 'ticket', ref: 'MNT-600', title: 'AC leaking', since: '01/11', tech: 'Semax' }]);
+  // Menage avec une personne : la ligne Cleaner s'ajoute au ticket (tache 4, decision du controleur).
+  assert.deepEqual(unit(d, 'K3').reasons, [
+    { type: 'ticket', ref: 'MNT-600', title: 'AC leaking', since: '01/11', tech: 'Semax' },
+    { type: 'cleaner', word: 'Not started' },
+  ]);
   assert.deepEqual(unit(d, 'arr:4').reasons, [{ type: 'cause', text: 'Cleaning postponed to 22/11.' }]);
   assert.deepEqual(unit(d, 'K5').reasons, []); // pas bloque
   // Tous les tickets ouverts du logement restent sur l'unite, urgents ou non.
@@ -527,4 +531,50 @@ test('ligne des heures : pas de Checkout time not set. quand la cause affichee l
   assert.equal(unit(blocked, 'K1').timesLine, 'Checkout time not set.');
   // Menage sans arrivee : rien ne change.
   assert.equal(unit(buildToday(today({ jobs: [J({ key: 'K1', checkout: null })] })), 'K1').timesLine, 'Checkout time not set. No guest in the next 14 days.');
+});
+
+// 19 (tache 4, decision du controleur) : sur un logement bloque, un menage qui a deja une
+// personne ajoute la ligne de la page de test (« Cleaner: … », puis l'etat du menage) aux
+// lignes des tickets urgents ; la cause du proxy reste quand ni ticket ni menage sans
+// personne n'expliquent le blocage. isNone : logement « sans cleaner » de l'enchainement.
+test('reasons : ligne Cleaner d un logement bloque dont le menage a une personne', () => {
+  const tickets = { L1: [{ id: 585, title: 'Gas not working', priority: 'urgent', since: '31/10', tech: null }] };
+  const blockedWith = (o, a = {}) => buildToday(today({
+    tickets,
+    jobs: [J({ key: 'K1', listingId: 'L1', assigned: [4], tone: 'warn', word: 'Not started', next: nextOn(DAY), ...o })],
+    arrivals: [A({ prevKey: 'K1', listingId: 'L1', tone: 'bad', word: 'Blocked', cause: 'Urgent ticket open: Gas not working (MNT-585).', assigned: [4], ...a })],
+  }));
+  const ticket = { type: 'ticket', ref: 'MNT-585', title: 'Gas not working', since: '31/10', tech: null };
+  assert.deepEqual(unit(blockedWith({}), 'K1').reasons, [ticket, { type: 'cleaner', word: 'Not started' }]);
+  assert.deepEqual(unit(blockedWith({ state: 'in_progress' }), 'K1').reasons, [ticket, { type: 'cleaner', word: 'In progress' }]);
+  assert.deepEqual(unit(blockedWith({ state: 'done', tone: 'ok', word: 'Done' }), 'K1').reasons, [ticket, { type: 'cleaner', word: 'Done' }]);
+  // Ligne des heures inchangee (elle suit la ligne Cleaner dans la vue).
+  assert.equal(unit(blockedWith({}), 'K1').timesLine, 'Out 11:00.');
+  // Ni ticket urgent ni menage sans personne : la cause du proxy, puis la ligne Cleaner.
+  const cancelled = buildToday(today({
+    jobs: [J({ key: 'K2', listingId: 'L2', assigned: [10], tone: 'idle', word: 'Not started', next: nextOn(DAY) })],
+    arrivals: [A({ prevKey: 'K2', listingId: 'L2', tone: 'bad', word: 'Blocked', cause: 'Cleaning cancelled in HK Planner after the 20/11 checkout.', assigned: [10] })],
+  }));
+  assert.deepEqual(unit(cancelled, 'K2').reasons, [
+    { type: 'cause', text: 'Cleaning cancelled in HK Planner after the 20/11 checkout.' },
+    { type: 'cleaner', word: 'Not started' },
+  ]);
+  // Menage sans personne : toujours « No cleaner assigned », jamais de ligne Cleaner.
+  const none = buildToday(today({
+    tickets,
+    jobs: [J({ key: 'K1', listingId: 'L1', next: nextOn(DAY) })],
+    arrivals: [A({ prevKey: 'K1', listingId: 'L1', tone: 'bad', word: 'Blocked', cause: 'No cleaner assigned.' })],
+  }));
+  assert.deepEqual(unit(none, 'K1').reasons, [ticket, { type: 'cleaning', elite: false }]);
+  // Arrivee seule (aucun menage du jour) : la cause seule.
+  const alone = buildToday(today({ arrivals: [A({ id: '4', prevKey: '2026-11-18_Ed Gu', tone: 'bad', word: 'Blocked', cause: 'Cleaning postponed to 22/11.', assigned: [4] })] }));
+  assert.deepEqual(unit(alone, 'arr:4').reasons, [{ type: 'cause', text: 'Cleaning postponed to 22/11.' }]);
+  // Pas bloque : aucune raison, meme avec une personne.
+  assert.deepEqual(unit(blockedWith({}, { tone: 'warn', word: 'At risk' }), 'K1').reasons, []);
+  // isNone : menage du jour pas fait, personne dessus, pas attendu chez Elite.
+  assert.equal(isNone(unit(none, 'K1')), true);
+  assert.equal(isNone(unit(blockedWith({}), 'K1')), false);
+  assert.equal(isNone(unit(alone, 'arr:4')), false);
+  assert.equal(isNone(unit(buildToday(today({ jobs: [J({ key: 'K5', tone: 'warn', word: 'Not logged yet' })] })), 'K5')), false);
+  assert.equal(isNone(unit(buildToday(today({ jobs: [J({ key: 'K6', state: 'done', tone: 'ok', word: 'Done' })] })), 'K6')), false);
 });

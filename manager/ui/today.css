@@ -157,13 +157,13 @@ a.count{text-decoration:none;color:inherit}
 .td-empty{color:var(--ink-2);margin:0}
 
 /* Cartes : seul ce qui demande une decision ou avance a une carte ; le reste est une ligne. */
-.td-card{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:14px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:12px;row-gap:12px;align-items:start;min-width:0}
+.td-card{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:14px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:12px;row-gap:12px;align-items:start;min-width:0;scroll-margin:24px 0 140px}
 .td-rows{background:var(--surface);border-radius:var(--r-lg);padding:2px 14px;display:grid}
 .td-rows .td-card{background:transparent;box-shadow:none;border-radius:0;padding:12px 0}
 .td-rows .td-card+.td-card{border-top:1px solid var(--line)}
 .td-who{border:0;background:transparent;padding:0;min-width:44px;min-height:44px;display:inline-grid;place-items:center;border-radius:var(--r-pill);cursor:pointer;color:inherit}
 .td-who svg{width:44px;height:44px;fill:none;stroke:var(--ring);stroke-width:1.8;stroke-linecap:round}
-.td-who svg .td-plus{stroke:var(--ink);stroke-width:2.2}
+.td-who-empty svg .td-plus{stroke:var(--ink);stroke-width:2.2}
 .td-whostatic{min-width:44px;min-height:44px;display:inline-grid;place-items:center}
 .td-dash{width:14px;height:2px;border-radius:2px;background:var(--ring)}
 .td-body{border:0;background:transparent;padding:0;text-align:left;display:grid;gap:2px;min-width:0;width:100%;min-height:44px;align-content:center;border-radius:10px;cursor:pointer;color:var(--ink)}
@@ -202,6 +202,20 @@ a.count{text-decoration:none;color:inherit}
 .td-btn{border:0;min-height:44px;padding:0 18px;border-radius:var(--r-pill);background:var(--accent);color:var(--accent-ink);font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;cursor:pointer;text-decoration:none}
 .td-btn.td-ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ring)}
 
+/* Choix dans la carte (page de test : picker) : la liste ne disparait jamais derriere une feuille. */
+.td-card>.td-pick{grid-column:1/-1}
+.td-pick{display:grid;gap:10px;padding-top:2px;min-width:0}
+.td-pl{font-weight:600}
+.td-perr{margin:0;color:var(--bad-ink);font-weight:600;overflow-wrap:anywhere}
+.td-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.td-tile{border:0;background:var(--sunk);color:var(--ink);border-radius:16px;min-height:56px;padding:8px 12px 8px 8px;display:flex;align-items:center;gap:10px;text-align:left;min-width:0;cursor:pointer}
+.td-pn{display:grid;min-width:0;font-weight:700;line-height:1.25;overflow-wrap:anywhere}
+.td-pn small{font-size:14px;font-weight:500;color:var(--ink-2)}
+.td-tile[aria-current="true"]{background:var(--accent);color:var(--accent-ink)}
+.td-tile[aria-current="true"] .td-pn small{color:var(--accent-ink)}
+.td-tile[aria-disabled="true"]{opacity:.55;cursor:default}
+.td-pick .td-btn{justify-self:start}
+
 /* Not for today : les blocs actuels, inchanges, sous une pastille repliee. */
 .td-else{display:grid;gap:var(--s5)}
 .td-else .link{display:inline-flex;align-items:center;min-height:44px}
@@ -235,4 +249,6 @@ a.count{text-decoration:none;color:inherit}
 }
 @media (prefers-reduced-motion: no-preference){
   .td-chev{transition:transform .2s ease}
+  .td-pick.td-fresh{animation:td-rise .22s cubic-bezier(.2,.8,.2,1) both}
+  @keyframes td-rise{from{opacity:0;translate:0 6px}}
 }
