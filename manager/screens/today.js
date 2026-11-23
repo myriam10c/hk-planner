@@ -315,13 +315,23 @@ export async function renderToday(ctx) {
       p = w.p;
     }
   }
-  // Bande : chaque semaine que touchent les six jours suivants, lue une fois (sans attendre).
+  // Bande, a chaque Today lu (sans attendre, sans bandeau d'erreur) : chaque semaine que touchent
+  // les six jours suivants est lue si elle ne l'est pas, relue si sa derniere lecture a echoue ou
+  // a plus de STRIP_MS. Jamais une semaine en cours de lecture, ni celle du jour affiche (sa
+  // relecture repeindrait #main et pourrait fermer son choix ; ses gestes la relisent deja) :
+  // la reponse ne change que les puces, sur place (paintStrip).
+  const STRIP_MS = 5 * 60000;
   function loadStrip() {
     const seen = {};
+    const shown = otherDay();
     for (const d of aheadState().days.slice(1)) {
       const s = weekStartOf(d);
-      if (!seen[s] && !weeks[s]) loadWeek(s);
+      if (seen[s]) continue;
       seen[s] = true;
+      const w = weeks[s];
+      if (!w) { loadWeek(s); continue; }
+      if (w.loading || (shown && weekStartOf(shown) === s)) continue;
+      if (!w.fresh || Date.now() - w.at > STRIP_MS) loadWeek(s);
     }
   }
   // Apres la lecture de la semaine de l'autre jour affiche d (filtre : seulement si d etait deja

@@ -135,6 +135,63 @@ test('semaine en echec en arriere-plan : aucun message, toucher le jour relance 
   await expect(counts(page)).toHaveText(['1', '1', '0', '1', '0', '0', '0']);
 });
 
+// Comptes de la bande relus pendant une longue session (revue finale, Important 2) : quand Today
+// est relu, une semaine lue il y a plus de 5 min, ou en echec, est relue en arriere-plan ; seules
+// les puces changent, sur place (#main n'est pas repeint).
+test('comptes de la bande : Today relu plus de 5 min apres la lecture des semaines, puces relues sur place', async ({ page }) => {
+  const sat = weekBody();
+  sat.jobs.push(PJ({ key: '2026-10-10_Ky Lo', listingId: 'L17', apt: '717', bld: 'Marina Gate', date: '2026-10-10', guest: 'Ky Lo',
+    tone: 'bad', word: 'Unassigned' }));
+  const mon = nextWeekBody();
+  Object.assign(mon.jobs[0], { assigned: [10], serviceType: 'CHC', tone: 'idle', word: 'Scheduled' });
+  await boot(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(todayBody({ generatedAt: '2026-10-09T07:05:01.000Z' })),
+    { ...WEEK1(), once: true }, WEEK1(sat, { delay: 1500 }), { ...WEEK2(), once: true }, WEEK2(mon, { delay: 1500 })], { email: true, clock: NOW });
+  await expect(counts(page)).toHaveText(['1', '1', '0', '1', '0', '0', '0']);
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 301_000));
+  await backToTab(page);
+  await expect(page.locator('.asof')).toContainText('as of 11:05');
+  // Today relu et repeint : marque posee sur une puce, elle doit survivre a la mise a jour des comptes.
+  await chip(page, '2026-10-10').evaluate((b) => b.setAttribute('data-probe', '1'));
+  expect(await weekCalls(page, '2026-10-05')).toBe(2);
+  expect(await weekCalls(page, '2026-10-12')).toBe(2);
+  await expect(counts(page)).toHaveText(['1', '2', '0', '0', '0', '0', '0']);
+  await expect(chip(page, '2026-10-10')).toHaveAttribute('aria-label', 'Sat 10, 4 cleanings, 2 with no cleaner');
+  await expect(chip(page, '2026-10-10')).toHaveAttribute('data-probe', '1');
+  // Aucun bandeau, toujours Today.
+  await expect(h1(page)).toHaveText('Friday');
+  await expect(page.locator('.banner, .err-card')).toHaveCount(0);
+});
+
+test('comptes de la bande : Today relu moins de 5 min apres, aucun appel mgr.planning de plus', async ({ page }) => {
+  await boot(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(todayBody({ generatedAt: '2026-10-09T07:04:00.000Z' })), WEEK1(), WEEK2()],
+    { email: true, clock: NOW });
+  await expect(counts(page)).toHaveText(['1', '1', '0', '1', '0', '0', '0']);
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 240_000));
+  await backToTab(page);
+  await expect(page.locator('.asof')).toContainText('as of 11:04');
+  await frame(page);
+  expect(await todayCalls(page)).toBe(2);
+  expect((await plCalls(page)).length).toBe(2);
+});
+
+test('comptes de la bande : semaine en echec relue au Today suivant, sans message', async ({ page }) => {
+  await boot(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(todayBody({ generatedAt: '2026-10-09T07:01:01.000Z' })),
+    { match: 'action=mgr.planning&start=2026-10-05', status: 500, body: { error: 'Internal error' }, once: true }, WEEK1(), WEEK2()],
+    { email: true, clock: NOW });
+  await expect(chip(page, '2026-10-12')).toHaveAttribute('aria-label', 'Mon 12, 1 cleaning, 1 with no cleaner');
+  await expect.poll(() => weekDone(page, '2026-10-05')).toBe(1);
+  await expect(counts(page)).toHaveText(['1', '·', '·', '1', '0', '0', '0']);
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await backToTab(page);
+  await expect(page.locator('.asof')).toContainText('as of 11:01');
+  // Semaine en echec relue ; la semaine lue il y a 61 s ne l'est pas.
+  await expect(counts(page)).toHaveText(['1', '1', '0', '1', '0', '0', '0']);
+  expect(await weekCalls(page, '2026-10-05')).toBe(2);
+  expect(await weekCalls(page, '2026-10-12')).toBe(1);
+  await expect(page.locator('.banner, .err-card, [role="alert"]')).toHaveCount(0);
+  await expect(page.locator('#toast')).toHaveText('');
+});
+
 test('Tomorrow : meme gabarit que Today, menage sans personne a affecter, annules et faits jamais proposes', async ({ page }) => {
   await boot(page, [me(MANAGER), TODAY(), WEEK1(), WEEK2()], { email: true, clock: NOW });
   await expect(counts(page)).toHaveText(['1', '1', '0', '1', '0', '0', '0']);
