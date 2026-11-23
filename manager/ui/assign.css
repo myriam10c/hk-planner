@@ -56,8 +56,9 @@
 @media (max-width:419px){ .qa-what{flex-basis:100%} }
 .qa-empty{margin:0;font-size:17px;color:var(--ink-2)}
 
-/* Initiale : cercle de 44 px ; pas sur le menage = contour, sur le menage = disque plein. */
-.qa-p{position:relative;flex:none;width:44px;height:44px;padding:0;border:0;border-radius:50%;display:inline-grid;place-items:center;background:transparent;color:var(--ink-2);box-shadow:inset 0 0 0 1.5px var(--line);font-size:14px;font-weight:700;letter-spacing:.01em;line-height:1;cursor:pointer;touch-action:manipulation}
+/* Initiale : cercle de 44 px ; pas sur le menage = contour --ring (3:1 et plus, clair et
+   sombre : la cible se lit comme un bouton), sur le menage = disque plein. */
+.qa-p{position:relative;flex:none;width:44px;height:44px;padding:0;border:0;border-radius:50%;display:inline-grid;place-items:center;background:transparent;color:var(--ink-2);box-shadow:inset 0 0 0 1.5px var(--ring);font-size:14px;font-weight:700;letter-spacing:.01em;line-height:1;cursor:pointer;touch-action:manipulation}
 .qa-p[aria-pressed="true"]{background:var(--qa-bg);color:var(--qa-fg);box-shadow:none}
 .qa-p[aria-disabled="true"]{cursor:not-allowed}
 /* Off ce jour-la : grisee et barree, refusee ; reste pleine si elle est deja sur le menage. */
@@ -66,7 +67,7 @@
 .qa-p.qa-off::after{content:"";position:absolute;left:8px;right:8px;top:calc(50% - 1px);height:2px;border-radius:2px;background:var(--ring);transform:rotate(-45deg)}
 .qa-row[aria-busy="true"] .qa-p{cursor:progress}
 @media (hover:hover){
-  .qa-p[aria-pressed="false"]:not([aria-disabled="true"]):hover{color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ring)}
+  .qa-p[aria-pressed="false"]:not([aria-disabled="true"]):hover{color:var(--ink);box-shadow:inset 0 0 0 2px var(--ink-2)}
 }
 
 /* Couleurs des personnes (slot) : p1 a p4, sous-traitant, autre. */

@@ -1,7 +1,7 @@
 // Ecran Assign (lot 4b, spec-quick-assign section 3) : HTML pur, teste sous node. Une ligne
 // par menage, une initiale par personne affectable ; un toucher affecte ou retire (assign.js).
 // vm = { strip, sel, people, rows: {todo, assigned, elite}, eliteOpen, busy: Set<cle>,
-// ro: { [date]: boolean }, empty } ; strip, people et rows viennent de assign-model.js.
+// ro: { [date]: boolean }, empty, nothingLeft } ; strip, people et rows viennent de assign-model.js.
 // Aucun import : node doit charger ce fichier (les modules du manager importent des chemins
 // absolus). Classes qa- seulement, styles dans manager/ui/assign.css.
 
@@ -82,10 +82,14 @@ function groups(vm, day, ro) {
   return h;
 }
 
+// empty : aucun menage non annule ce jour-la (ni charge ni groupes). nothingLeft : des menages,
+// tous faits ; la charge du jour reste.
+const line = (text) => '<p class="qa-empty">' + esc(text) + '</p>';
 export function assignHtml(vm) {
   const day = dayOf(vm);
   const ro = !!(vm.ro && vm.ro[vm.sel]);
   return '<div class="qa">' + head() + week(vm) + (ro ? roBox() : '')
-    + (vm.empty ? '<p class="qa-empty">' + esc('No cleaning planned for ' + day + '.') + '</p>' : loads(vm, day) + groups(vm, day, ro))
+    + (vm.empty ? line('No cleaning planned for ' + day + '.')
+      : loads(vm, day) + (vm.nothingLeft ? line('Nothing left to assign on ' + day + '.') : '') + groups(vm, day, ro))
     + '</div>';
 }

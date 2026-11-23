@@ -167,6 +167,21 @@ test('empty day line', () => {
   assert.equal(assignHtml(VM()).includes('No cleaning planned'), false);
 });
 
+test('nothing left line when every cleaning is done', () => {
+  const NONE = { todo: [], assigned: [], elite: [] };
+  const h = assignHtml(VM({ rows: NONE, nothingLeft: true }));
+  assert.deepEqual(texts(h, 'p', 'qa-empty'), ['Nothing left to assign on Wed 25.']);
+  assert.equal(h.includes('No cleaning planned'), false);
+  // La charge du jour reste : les menages faits comptent.
+  assert.equal(texts(h, 'li', 'qa-load').length, 4);
+  assert.equal(tagsWithClass(h, 'qa-row').length, 0);
+  // empty l'emporte : un jour sans menage non annule.
+  const empty = assignHtml(VM({ rows: NONE, nothingLeft: true, empty: true }));
+  assert.deepEqual(texts(empty, 'p', 'qa-empty'), ['No cleaning planned for Wed 25.']);
+  assert.equal(texts(empty, 'li', 'qa-load').length, 0);
+  assert.equal(assignHtml(VM()).includes('Nothing left to assign'), false);
+});
+
 test('escapes building names', () => {
   const evil = ROW({ key: '2026-11-25_O"Neil <x>', place: 'Apt 7 · Tower <b>A</b> & "Sons"', line: "Out 11:00 · It's <i>late</i>" });
   const h = assignHtml(VM({
