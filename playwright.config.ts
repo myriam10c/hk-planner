@@ -43,14 +43,14 @@ export default defineConfig({
   projects: [
     {
       name: 'desktop',
-      // tests/v3-node : tests node:test des modules purs de la v3, lances par
-      // `npm run test:v3-node`, jamais par Playwright.
-      testIgnore: [/v3\//, /v3-node\//, /inspections\//, /manager\//],
+      // tests/v3-node et tests/mgr-node : tests node:test des modules purs de la v3
+      // et du manager, lances par `node --test`, jamais par Playwright.
+      testIgnore: [/v3\//, /v3-node\//, /mgr-node\//, /inspections\//, /manager\//],
       use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
     },
     {
       name: 'mobile',
-      testIgnore: [/v3\//, /v3-node\//, /inspections\//, /manager\//],
+      testIgnore: [/v3\//, /v3-node\//, /mgr-node\//, /inspections\//, /manager\//],
       use: { ...devices['iPhone 13'] },
     },
     {
