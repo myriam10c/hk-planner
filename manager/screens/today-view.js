@@ -349,7 +349,7 @@ function rulesHtml(data) {
 export function boardHtml(view) {
   const { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead } = view;
   const isToday = dubaiToday(nowMs) === data.day;
-  const head = header(data, isToday, stale) + (banner || '') + '<p class="td-sum">' + esc(sentence(day)) + '</p>' + weekHtml(strip);
+  const head = header(data, isToday, stale) + (banner || '') + '<p class="td-sum">' + esc(sentence(day, { today: isToday })) + '</p>' + weekHtml(strip);
   if (ahead) return head + '<div class="td-cols"><div class="td-main">' + aheadHtml(ahead) + '</div></div>';
   const people = {};
   for (const p of day.people) people[p.id] = p;

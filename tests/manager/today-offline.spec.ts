@@ -101,6 +101,8 @@ test('cache de la veille : date dans le bandeau et Not today\'s data', async ({ 
   // Jamais « today » pour le jour d'hier.
   await expect(page.locator('.td-date')).toContainText('8 October · as of');
   await expect(page.locator('.td-date')).not.toContainText('today');
+  await expect(page.locator('.td-sum')).toContainText('4 guests arrive on Thursday.');
+  await expect(page.locator('.td-sum')).not.toContainText('today');
   await expect(page.locator('.banner.warn')).toContainText('Data from Thu 08/10 18:40. No connection. Try again. Not today\'s data.');
 });
 

@@ -24,7 +24,9 @@ for (const scheme of ['light', 'dark'] as const) {
       const risk = card(page, '2026-10-09_Cy Doe');
       await expect(risk).toContainText('At risk');
       await expect(risk).toContainText('Not started yet, Faiza. Guest in 4 h, checkout time not set.');
-      await expect(risk).toContainText('Checkout time not set.');
+      // La cause dit deja « checkout time not set » : la ligne des heures ne le repete pas.
+      await expect(risk.locator('.td-ti')).toHaveCount(0);
+      expect(((await risk.textContent()) || '').match(/checkout time not set/gi)).toHaveLength(1);
       await expect(card(page, 'arr:6')).toContainText('Not logged yet. Elite logs its jobs the next day around 14:00.');
       const elite = card(page, '2026-10-09_Lu Mo');
       await expect(elite).toContainText('Not logged yet');

@@ -103,6 +103,8 @@ test.describe('minuit a Dubai', () => {
     // La veille n'est plus jamais appelee « today ».
     await expect(dateLine(page)).toContainText('9 October · as of');
     await expect(dateLine(page)).not.toContainText('today');
+    await expect(page.locator('.td-sum')).toHaveText(
+      '4 guests arrive on Friday. 1 apartment is ready, 2 are at risk, 1 is blocked. 3 cleanings, 1 with no cleaner, 1 expected with Elite.');
     // Relecture du jour deja tentee : la fiche s'ouvre, en lecture seule, avec la ligne.
     await cardOpen(page, ANN).click();
     await expect(page.locator('#sheet')).toHaveAttribute('aria-hidden', 'false');

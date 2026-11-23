@@ -6,6 +6,7 @@
 // proxy (YYYY-MM-DD, HH:MM), jamais relues au fuseau de la machine.
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WD_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 // Ordre du decompte d'un moment, et mots de son aria-label.
 const TALLY = ['blocked', 'risk', 'none', 'elite', 'prog', 'todo', 'planned', 'ready', 'done'];
 const WORDS = {
@@ -20,6 +21,7 @@ const RANK = { blocked: 0, risk: 1 };
 function parts(day) { return String(day).split('-').map(Number); }
 function addDays(day, n) { const p = parts(day); return new Date(Date.UTC(p[0], p[1] - 1, p[2] + n)).toISOString().slice(0, 10); }
 function shortDay(day) { const p = parts(day); return WD[new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay()] + ' ' + p[2]; }
+function longDay(day) { const p = parts(day); return WD_LONG[new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay()]; }
 function ddmm(day) { return day ? day.slice(8, 10) + '/' + day.slice(5, 7) : ''; }
 function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 function initials(name) {
@@ -67,16 +69,22 @@ function kOf(a, j, today) {
 }
 function shapeOf(k) { return k === 'blocked' ? 'blocked' : k === 'ready' || k === 'done' ? 'line' : 'card'; }
 
+// Cause du proxy affichee sur la carte : carte pleine d'une arrivee, ou carte Blocked qui
+// n'a que la cause pour raison.
+function causeShown(u) {
+  return !!(u.arrival && u.cause && (u.shape === 'card' || u.reasons.some((r) => r.type === 'cause')));
+}
 // Ligne des heures (gabarit timesLine de la page de test). Un logement avec arrivee ne dit
 // que son depart : l'heure d'arrivee est celle du moment. Un report remplace « Checkout
 // time not set. » (le depart a eu lieu un autre jour, le proxy ne rend pas son heure).
+// « Checkout time not set. » n'est pas repete quand la cause affichee le dit deja.
 function timesLine(u, date, today) {
   const j = u.job;
   const out = [];
   if (j) {
     if (j.extra) out.push(j.extraTime ? 'Extra cleaning at ' + j.extraTime + '.' : 'Extra cleaning.');
     else if (j.checkout) out.push('Out ' + j.checkout + '.');
-    else if (!j.postponedFrom) out.push('Checkout time not set.');
+    else if (!j.postponedFrom && !(causeShown(u) && u.cause.toLowerCase().indexOf('checkout time not set') >= 0)) out.push('Checkout time not set.');
     if (j.postponedFrom) out.push('Postponed from ' + ddmm(j.postponedFrom) + '.');
   }
   if (u.arrival || !j) return out.join(' ');
@@ -123,8 +131,9 @@ function unitOf(a, j, date, today, tickets) {
     opens: a ? { type: 'arr', ref: a.id } : { type: 'job', ref: j.key },
     timesLine: '', tickets, reasons: [],
   };
-  u.timesLine = timesLine(u, date, today);
+  // Raisons d'abord : la ligne des heures regarde si la cause est affichee.
   u.reasons = reasonsOf(u);
+  u.timesLine = timesLine(u, date, today);
   return u;
 }
 
@@ -276,9 +285,12 @@ export function nextNone(day, afterId, filter) {
   return null;
 }
 
-// Phrase du jour (gabarits de renderHead dans la page de test).
-export function sentence(day) {
+// Phrase du jour (gabarits de renderHead dans la page de test). opts.today (true par defaut) :
+// le jour des donnees est celui de l'horloge ; sinon (apres minuit) « on Friday » au lieu de
+// « today », d'apres day.date.
+export function sentence(day, opts) {
   const c = day.counts;
+  const when = opts && opts.today === false ? 'on ' + longDay(day.date) : 'today';
   const isAre = (n) => n + (n === 1 ? ' is' : ' are');
   if (day.source !== 'today') {
     if (!c.cleanings) return 'No cleaning planned.';
@@ -289,10 +301,10 @@ export function sentence(day) {
       + (same ? ' ' + plural(same, 'guest arrives', 'guests arrive') + ' the same day.' : '');
   }
   const guests = c.arrivals
-    ? plural(c.arrivals, 'guest arrives', 'guests arrive') + ' today. ' + c.ready + (c.ready === 1 ? ' apartment is' : ' apartments are') + ' ready'
+    ? plural(c.arrivals, 'guest arrives', 'guests arrive') + ' ' + when + '. ' + c.ready + (c.ready === 1 ? ' apartment is' : ' apartments are') + ' ready'
       + (c.scheduled ? ', ' + isAre(c.scheduled) + ' scheduled' : '') + (c.risk ? ', ' + isAre(c.risk) + ' at risk' : '')
       + (c.blocked ? ', ' + isAre(c.blocked) + ' blocked' : '') + '.'
-    : 'No guest arrives today.';
+    : 'No guest arrives ' + when + '.';
   const cleanings = c.cleanings
     ? plural(c.cleanings, 'cleaning', 'cleanings') + (c.none ? ', ' + c.none + ' with no cleaner' : '')
       + (c.elite ? ', ' + c.elite + ' expected with Elite' : '') + (!c.none && !c.elite ? ', all with a cleaner' : '') + '.'

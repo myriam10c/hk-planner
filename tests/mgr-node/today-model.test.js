@@ -475,3 +475,56 @@ test('timesLine : gabarits de la page de test et ecarts voulus', () => {
   ]);
   assert.equal(unit(ahead, 'P3').job.extraTime, '10:00');
 });
+
+// 17 (reprise avant revue) : donnees d'un autre jour que l'horloge (apres minuit), jamais
+// « today » : « on Friday » d'apres day.date. Sans option, ou today: true, rien ne change.
+test('phrase d une journee qui n est plus aujourd hui : on Friday au lieu de today', () => {
+  const d = buildToday(D7());
+  assert.equal(sentence(d, { today: false }), '7 guests arrive on Friday. 6 apartments are ready, 1 is blocked. 6 cleanings, 1 expected with Elite.');
+  assert.equal(sentence(d, { today: true }), sentence(d));
+  const one = buildToday(today({
+    jobs: [J({ key: 'K1', assigned: [4], state: 'done', tone: 'ok', word: 'Done', next: nextOn(DAY) })],
+    arrivals: [A({ id: '1', prevKey: 'K1', assigned: [4], done: true })],
+  }));
+  assert.equal(sentence(one, { today: false }), '1 guest arrives on Friday. 1 apartment is ready. 1 cleaning, all with a cleaner.');
+  assert.equal(sentence(buildToday(today()), { today: false }), 'No guest arrives on Friday. No cleaning planned.');
+  // Nom du jour lu sur la chaine YYYY-MM-DD : un samedi reste Saturday quel que soit le fuseau.
+  const sat = today();
+  sat.day = SAT;
+  assert.equal(sentence(buildToday(sat), { today: false }), 'No guest arrives on Saturday. No cleaning planned.');
+  // Autre jour de la bande (mgr.planning) : branche inchangee.
+  assert.equal(sentence(buildAhead(week([]), SAT), { today: false }), 'No cleaning planned.');
+});
+
+// 18 (reprise avant revue) : la ligne des heures ne repete pas « Checkout time not set. »
+// quand la cause du proxy, affichee sur la meme carte, le dit deja (sans tenir compte de la casse).
+test('ligne des heures : pas de Checkout time not set. quand la cause affichee le dit deja', () => {
+  const cause = 'Not started yet, Faiza. Guest in 4 h, checkout time not set.'; // forme reelle du proxy
+  const risk = buildToday(today({
+    jobs: [J({ key: 'K1', checkout: null, assigned: [4], tone: 'warn', word: 'Not started', next: nextOn(DAY) })],
+    arrivals: [A({ prevKey: 'K1', tone: 'warn', word: 'At risk', cause, assigned: [4], cleaners: ['Faiza'] })],
+  }));
+  assert.equal(unit(risk, 'K1').cause, cause);
+  assert.equal(unit(risk, 'K1').timesLine, '');
+  // Scheduled, cause en majuscules : meme regle.
+  const sched = buildToday(today({
+    jobs: [J({ key: 'K1', checkout: null, assigned: [4], tone: 'idle', word: 'Not started', next: nextOn(DAY, '20:00') })],
+    arrivals: [A({ prevKey: 'K1', time: '20:00', tone: 'idle', word: 'Scheduled', cause: 'Faiza assigned. CHECKOUT TIME NOT SET.', assigned: [4] })],
+  }));
+  assert.equal(unit(sched, 'K1').timesLine, '');
+  // Cause qui ne le dit pas : la ligne le dit.
+  const other = buildToday(today({
+    jobs: [J({ key: 'K1', checkout: null, assigned: [4], tone: 'warn', word: 'Not started', next: nextOn(DAY) })],
+    arrivals: [A({ prevKey: 'K1', tone: 'warn', word: 'At risk', cause: 'Not started yet, Faiza. Guest in 4 h.', assigned: [4] })],
+  }));
+  assert.equal(unit(other, 'K1').timesLine, 'Checkout time not set.');
+  // Carte Blocked avec un menage sans personne : la cause n'est pas affichee, la raison garde la ligne.
+  const blocked = buildToday(today({
+    jobs: [J({ key: 'K1', checkout: null, next: nextOn(DAY) })],
+    arrivals: [A({ prevKey: 'K1', tone: 'bad', word: 'Blocked', cause: 'No cleaner assigned, checkout time not set.' })],
+  }));
+  assert.equal(unit(blocked, 'K1').reasons[0].type, 'cleaning');
+  assert.equal(unit(blocked, 'K1').timesLine, 'Checkout time not set.');
+  // Menage sans arrivee : rien ne change.
+  assert.equal(unit(buildToday(today({ jobs: [J({ key: 'K1', checkout: null })] })), 'K1').timesLine, 'Checkout time not set. No guest in the next 14 days.');
+});
