@@ -1,13 +1,12 @@
 // Ecran Today (lot 4a, direction Tiimo validee le 20/11/2026) : HTML pur. La journee du
-// jour des donnees vient du modele (today-model.js), rangee par heure d'arrivee des guests.
+// jour des donnees vient du modele (today-model.js), rangee par heure d'arrivee des guests ;
+// un autre jour de la bande, du meme modele (buildAhead, donnees mgr.planning).
 // Aucun appel reseau ici, aucun statut recalcule : tone, word et cause viennent du proxy.
-import { dubaiTime, dubaiToday, esc, I, placeLabel } from '/manager/ui/dom.js';
+import { addDays, dubaiTime, dubaiToday, esc, I, placeLabel } from '/manager/ui/dom.js';
 import { photosBlk } from '/manager/ui/job-photos.js';
 import { isStale, locLine } from '/manager/ui/location-text.js';
-import { sentence } from '/manager/screens/today-model.js';
-import { dayShort, jobsOn, namesOf as plNamesOf, nextLine as plNextLine } from '/manager/screens/planning-rules.js';
-
-const ROLE = { cleaner: 'Cleaner', subcontractor: 'Subcontractor', manager: 'Manager', maintenance: 'Maintenance' };
+import { emptyLine, momentLabel, sentence } from '/manager/screens/today-model.js';
+import { dayShort } from '/manager/screens/planning-rules.js';
 
 export function fmtDur(ms) {
   const m = Math.max(0, Math.round(ms / 60000));
@@ -39,8 +38,10 @@ function actionsFoot(key, assigned, done, ro) {
 
 // ---------- Pictogrammes (classes td- seulement : la liste n'emprunte rien aux autres ecrans) ----------
 const DONE = '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-fl-ok" cx="14" cy="14" r="13"/><path class="td-ln-onok" d="M8.6 14.6l3.5 3.5 7.3-7.9"/></svg>';
+const BAD = '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-fl-bad" cx="14" cy="14" r="13"/><path class="td-ln-onbad" d="M14 7.6v7.6"/><circle class="td-fl-onbad" cx="14" cy="19.8" r="1.7"/></svg>';
 const SVG = {
-  blocked: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-fl-bad" cx="14" cy="14" r="13"/><path class="td-ln-onbad" d="M14 7.6v7.6"/><circle class="td-fl-onbad" cx="14" cy="19.8" r="1.7"/></svg>',
+  // first : menage d'un autre jour qui passe apres l'arrivee du guest (meme pictogramme que bloque).
+  blocked: BAD, first: BAD,
   risk: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-rg-warn" cx="14" cy="14" r="11.5"/><path class="td-ln-warn" d="M14 8.4v6.6"/><circle class="td-fl-warn" cx="14" cy="19.4" r="1.6"/></svg>',
   none: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-rg-dash" cx="14" cy="14" r="11.5" stroke-dasharray="3.6 3.6"/></svg>',
   elite: '<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="td-rg-wdash" cx="14" cy="14" r="11.5" stroke-dasharray="3.6 3.6"/></svg>',
@@ -58,22 +59,45 @@ const ELITE_NOTE = 'Usually done by Elite Cleaning, who log their jobs the next 
 function wordOf(u) { return u.k === 'none' ? 'No cleaner yet' : u.k === 'elite' ? 'Not logged yet' : u.word; }
 
 // ---------- Tete, bande des jours ----------
+const THEME = '<button class="iconbtn" type="button" data-theme-toggle aria-label="Switch light or dark theme" title="Theme">' + I.theme + '</button>';
 // Sous-ligne : « 9 October · today, as of 11:00 », jamais « today » pour des donnees d'un
 // autre jour que celui de l'horloge. Classe stale gardee sur l'heure.
 function header(data, isToday, stale) {
   return '<header class="top td-head"><div><h1>' + esc(fmtDay(data.day, { weekday: 'long' })) + '</h1>'
     + '<p class="date td-date"><span class="asof td-asof' + (stale ? ' stale' : '') + '">'
     + esc(fmtDay(data.day, { day: 'numeric', month: 'long' }) + ' · ' + (isToday ? 'today, ' : '') + 'as of ' + dubaiTime(data.generatedAt)) + '</span></p></div>'
-    + '<button class="iconbtn" type="button" data-theme-toggle aria-label="Switch light or dark theme" title="Theme">' + I.theme + '</button></header>';
+    + THEME + '</header>';
 }
-// strip : { date, label, num, n, selected }[] ; n = menages sans cleaner, null si pas encore lu.
+// Un autre jour : « 21 November · tomorrow » (le lendemain du jour de l'horloge) ou « 21 November ».
+function aheadHeader(sel, clock) {
+  return '<header class="top td-head"><div><h1>' + esc(fmtDay(sel, { weekday: 'long' })) + '</h1>'
+    + '<p class="date td-date">' + esc(fmtDay(sel, { day: 'numeric', month: 'long' }) + (sel === addDays(clock, 1) ? ' · tomorrow' : '')) + '</p></div>'
+    + THEME + '</header>';
+}
+// strip : { date, label, num, n, total, selected }[] ; n = menages sans cleaner, total = menages
+// du jour, null tant que le jour n'est pas lu (point median, aria-label sans compte).
+function wdayParts(s) {
+  const known = s.n != null && s.total != null;
+  return { aria: s.label + ' ' + s.num + (known ? ', ' + plural(s.total, 'cleaning') + ', ' + s.n + ' with no cleaner' : ''),
+    count: known ? String(s.n) : '·', zero: !(known && s.n) };
+}
 function weekHtml(strip) {
   return '<nav class="td-week" aria-label="Next seven days">' + strip.map((s) => {
-    const known = s.n != null;
+    const p = wdayParts(s);
     return '<button class="td-wd" type="button" data-wday="' + esc(s.date) + '" aria-pressed="' + (s.selected ? 'true' : 'false') + '" aria-label="'
-      + esc(s.label + ' ' + s.num + (known ? ', ' + s.n + ' with no cleaner' : '')) + '"><span class="td-wl">' + esc(s.label) + '</span><span class="td-wn">' + s.num
-      + '</span><span class="td-wc' + (known && s.n ? '' : ' td-zero') + '">' + (known ? s.n : '·') + '</span></button>';
+      + esc(p.aria) + '"><span class="td-wl">' + esc(s.label) + '</span><span class="td-wn">' + s.num
+      + '</span><span class="td-wc' + (p.zero ? ' td-zero' : '') + '">' + p.count + '</span></button>';
   }).join('') + '</nav><p class="td-weeknote">Under each day: cleanings with no cleaner yet.</p>';
+}
+// Comptes d'une puce deja affichee, mis a jour sur place (reponse d'une semaine qui ne touche
+// pas la journee affichee) : rien d'autre n'est rendu, un toucher en cours n'est jamais perdu.
+export function patchWday(b, s) {
+  const p = wdayParts(s);
+  b.setAttribute('aria-label', p.aria);
+  const c = b.querySelector('.td-wc');
+  if (!c) return;
+  c.textContent = p.count;
+  c.classList.toggle('td-zero', p.zero);
 }
 
 // ---------- Personnes ----------
@@ -92,8 +116,9 @@ function locHtml(data, id, nowMs) {
 }
 const MAP = '<a class="td-map" href="#/more/locations">Map</a>';
 const pressed = (ui, v) => (ui.filter != null && String(ui.filter) === String(v) ? 'true' : 'false');
-// Rangee des personnes (telephone) : une puce par personne affectable, puis « sans cleaner »,
-// puis Map ; la ligne de position de la personne filtree dessous.
+// Rangee des personnes (telephone ; toute largeur sur un autre jour) : une puce par personne
+// affectable, puis « sans cleaner », puis Map ; la ligne de position de la personne filtree
+// dessous (jour des donnees seulement : c'est la position de maintenant).
 function peopleHtml(day, ui, data, nowMs) {
   let h = '<div class="td-people"><div class="td-fchips" role="group" aria-label="Show one person">';
   for (const p of day.people) {
@@ -107,7 +132,7 @@ function peopleHtml(day, ui, data, nowMs) {
       + '"><span class="td-nd">' + SVG.none + '</span><span class="td-nm">No cleaner</span><span class="td-n">' + n + '</span></button>';
   }
   h += MAP + '</div>';
-  if (ui.filter != null && ui.filter !== 'none') h += locHtml(data, ui.filter, nowMs);
+  if (ui.filter != null && ui.filter !== 'none' && day.source === 'today') h += locHtml(data, ui.filter, nowMs);
   return h + '</div>';
 }
 
@@ -134,13 +159,16 @@ function cardHtml(u, c) {
   } else {
     left = '<span class="td-whostatic" aria-hidden="true">' + (u.assigned.length ? discs(c.people, u.assigned, 3) : '<span class="td-dash"></span>') + '</span>';
   }
-  const body = '<button class="td-body" type="button" data-td-open="' + esc(u.id) + '"><span class="td-t">' + title(u) + '</span>'
+  const inner = '<span class="td-t">' + title(u) + '</span>'
     + '<span class="td-st td-k-' + u.k + '">' + esc(wordOf(u)) + (names ? '<span class="td-names"> · ' + esc(names) + '</span>' : '')
     + (line && tk ? '<span class="td-names"> · ' + tk + '</span>' : '') + '</span>'
     + (!line && u.arrival && u.cause ? '<span class="td-cause">' + esc(u.cause) + '</span>' : '')
     + (!line && u.timesLine ? '<span class="td-ti">' + esc(u.timesLine) + '</span>' : '')
     + (u.k === 'elite' ? '<span class="td-cause">' + ELITE_NOTE + '</span>' : '')
-    + (!line && tk ? '<span class="td-tk">' + tk + '</span>' : '') + '</button>';
+    + (!line && tk ? '<span class="td-tk">' + tk + '</span>' : '');
+  // Autre jour (donnees mgr.planning) : aucune fiche a ouvrir, le corps n'est pas un bouton.
+  const body = c.ahead ? '<div class="td-body td-still">' + inner + '</div>'
+    : '<button class="td-body" type="button" data-td-open="' + esc(u.id) + '">' + inner + '</button>';
   const g = { ready: 1, done: 1, prog: 1, todo: 1 }[u.k] ? SVG[u.k] : '';
   return '<article class="td-card' + (line ? ' td-line' : '') + '">' + left + body + '<span class="td-glyph" aria-hidden="true">' + g + '</span>'
     + (open ? pickHtml(c.day, u, c.pick.state) : '') + '</article>';
@@ -177,15 +205,19 @@ function blockedHtml(u, c) {
 // par personne affectable (disque, nom, menages du jour) ; la tuile de la personne deja seule
 // sur le menage porte aria-current. state : { busy, error, ro } ; busy : tuiles desactivees
 // pendant une ecriture ; error : refus du serveur, tel quel ; ro : aucune tuile.
+// Autre jour (day.source 'ahead') : tuiles data-td-wpick ; une personne en conge ce jour-la
+// (Person.off) a sa tuile desactivee, avec « On leave ».
 export function pickHtml(day, u, state) {
   const s = state || {};
   const cancel = '<button class="td-btn td-ghost" type="button" data-td-cancel>Cancel</button>';
   const h = '<div class="td-pick" role="group" aria-label="' + esc('Who cleans ' + (placeLabel(u) || 'it') + '?') + '"><span class="td-pl">Who cleans it?</span>';
   if (s.ro) return h + '<p class="ro-note" role="status">' + RO_LINE + '</p>' + cancel + '</div>';
+  const attr = day.source === 'ahead' ? 'data-td-wpick' : 'data-td-pick';
   const tiles = day.people.filter((p) => p.assignable).map((p) => {
     const current = u.assigned.length === 1 && u.assigned[0] === p.id;
-    return '<button class="td-tile" type="button" data-td-pick="' + esc(p.id) + '" data-key="' + esc(u.key) + '"' + (current ? ' aria-current="true"' : '')
-      + (s.busy ? ' aria-disabled="true"' : '') + '>' + disc(p, true) + '<span class="td-pn">' + esc(p.name) + '<small>' + plural(p.count, 'job') + '</small></span></button>';
+    return '<button class="td-tile" type="button" ' + attr + '="' + esc(p.id) + '" data-key="' + esc(u.key) + '"' + (current ? ' aria-current="true"' : '')
+      + (p.off ? ' disabled' : s.busy ? ' aria-disabled="true"' : '') + '>' + disc(p, true) + '<span class="td-pn">' + esc(p.name)
+      + '<small>' + (p.off ? 'On leave' : plural(p.count, 'job')) + '</small></span></button>';
   }).join('');
   return h + (s.error ? '<p class="td-perr" role="alert">' + esc(s.error) + '</p>' : '') + '<div class="td-tiles">' + tiles + '</div>' + cancel + '</div>';
 }
@@ -194,8 +226,9 @@ function tallyHtml(m) {
 }
 function momentHtml(m, c) {
   const open = !c.ui.collapsed[m.id];
+  const label = momentLabel(m, { today: c.isToday });
   let h = '<section class="td-moment"><button class="td-mh td-t-' + esc(m.tint) + '" type="button" data-td-moment="' + esc(m.id) + '" aria-expanded="' + open
-    + '" aria-label="' + esc(m.label + ': ' + m.tally.map((t) => t.n + ' ' + t.w).join(', ')) + '"><span class="td-dot"></span><span class="td-ml">' + esc(m.label)
+    + '" aria-label="' + esc(label + ': ' + m.tally.map((t) => t.n + ' ' + t.w).join(', ')) + '"><span class="td-dot"></span><span class="td-ml">' + esc(label)
     + '</span><span class="td-mm" aria-hidden="true">' + tallyHtml(m) + '</span>' + CHEV + '</button>';
   if (!open) return h + '</section>';
   h += '<div class="td-mbody">';
@@ -267,67 +300,6 @@ function sideHtml(day, c, data, nowMs) {
   return h + '</div></aside>';
 }
 
-// Un autre jour (a.sel), lu dans mgr.planning (a.week : { data, fresh, loading, error }).
-// Annules jamais montres ; un menage fait n'est jamais propose a l'assignation.
-// o.unassigned : ligne du groupe Not assigned, ou seul un statut warn est repete (comme pour
-// aujourd'hui). o.btn : bouton Assign ou Reassign, vide en lecture seule.
-// (Rendu actuel garde jusqu'a la tache 5 du lot 4a.)
-function xTime(j) { return j.kind === 'extra' ? (j.extraTime || (j.extra && j.extra.cleaningTime) || null) : null; }
-function coTime(j) { return j.kind === 'extra' ? (xTime(j) || 'Extra') : (j.checkout || '--:--'); }
-function coSmall(j) { return j.kind === 'extra' ? (xTime(j) ? 'extra' : 'clean') : 'out'; }
-function nextLine(j) {
-  if (!j.next) return 'No guest in the next 14 days';
-  const who = j.next.owner ? 'Owner' : 'Guest';
-  if (j.next.sameDay) return who + ' arrives ' + (j.next.time || 'today');
-  return 'Next ' + who.toLowerCase() + ' ' + ddmm(j.next.date);
-}
-function aheadRow(j, o) {
-  const extra = j.kind === 'extra';
-  const btn = o.btn || '';
-  const lead = j.tone === 'idle' || (o.unassigned && j.tone !== 'warn') ? '' : '<span class="st ' + esc(j.tone) + '">' + esc(j.word) + '</span> · ';
-  const notes = [j.next ? plNextLine(j.next) : '', j.postponedFrom ? 'postponed from ' + ddmm(j.postponedFrom) : '',
-    !extra && !j.checkout ? 'checkout time not set' : ''].filter(Boolean).join(' · ');
-  return '<div class="job static"><span class="tm">' + esc(coTime(j)) + '<small>' + coSmall(j) + '</small></span>'
-    + '<span class="ap"><b>' + esc(placeLabel(j) || 'Apartment') + '</b><span>' + lead + esc(notes) + '</span></span>' + btn + '</div>';
-}
-function aheadHtml(a) {
-  const label = dayShort(a.sel);
-  const w = a.week;
-  const d = w && w.data;
-  const jobs = d ? jobsOn(d, a.sel).filter((j) => !j.cancelled) : [];
-  let h = '<section class="card" aria-labelledby="h-who"><div class="sec-head"><h2 id="h-who">Who does what, ' + esc(label) + '</h2>'
-    + (d ? '<span class="meta tnum">' + plural(jobs.length, 'cleaning') + '</span>' : '') + '</div>';
-  if (!d) {
-    if (!w || !w.error) return h + '<p class="empty pad" role="status">Loading ' + esc(label) + '…</p></section>';
-    return h + '<div class="wpad"><div class="err-card" role="alert"><p>' + esc(w.error.message)
-      + '</p><button class="btn primary" type="button" data-wretry>Retry</button></div></div></section>';
-  }
-  const ro = !w.fresh;
-  if (w.error) {
-    h += '<div class="wpad"><div class="banner warn" role="status"><span>' + esc(w.error.message) + ' ' + RO_LINE
-      + '</span><button class="btn sm" type="button" data-wretry>Retry</button></div></div>';
-  }
-  if (!jobs.length) return h + '<div class="empty pad">No cleaning planned for ' + esc(label) + '.</div></section>';
-  const day = d.days.find((x) => x.date === a.sel);
-  const off = new Set(day ? day.off : []);
-  const un = jobs.filter((j) => !j.assigned.length && j.state !== 'done');
-  if (un.length) {
-    h += '<div class="person unassigned"><div class="person-h"><span class="av" aria-hidden="true">!</span><div><div class="nm">Not assigned</div>'
-      + '<div class="rl">Nobody on these cleanings yet</div></div><span class="cnt">' + un.length + '</span></div><div class="jobs">'
-      + un.map((j) => aheadRow(j, { unassigned: true, btn: ro ? '' : '<button class="btn sm primary" type="button" data-wassign="' + esc(j.key) + '">Assign</button>' })).join('')
-      + '</div></div>';
-  }
-  for (const p of d.people) {
-    const mine = jobs.filter((j) => j.assigned.includes(p.id));
-    if (!p.assignable && !mine.length) continue;
-    h += '<div class="person"><div class="person-h"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><div><div class="nm">' + esc(p.name)
-      + '</div><div class="rl">' + esc((ROLE[p.role] || p.role) + (off.has(p.id) ? ' · On leave' : '')) + '</div></div><span class="cnt">' + mine.length + '</span></div><div class="jobs">'
-      + (mine.length ? mine.map((j) => aheadRow(j, { btn: ro || j.state === 'done' ? '' : '<button class="btn sm" type="button" data-wassign="' + esc(j.key) + '">Reassign</button>' })).join('')
-        : '<div class="empty">Nothing planned for ' + esc(label) + '.</div>') + '</div></div>';
-  }
-  return h + '</section>';
-}
-
 // Bloc Maintenance : compteurs, 5 premiers tickets ouverts (liens vers l'ecran Maintenance).
 const MNT_TONE = { urgent: 'bad', high: 'warn' };
 const MNT_STAGE = { todo: 'To do', in_progress: 'In progress', waiting_parts: 'Waiting parts', to_confirm: 'To confirm' };
@@ -385,27 +357,69 @@ function rulesHtml(data) {
     + '<li>Owner stays count as arrivals. Without a checkout in the last 14 days, there is no cleaning to check.</li></ul></details>';
 }
 
-// view : { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead, busy, pickError }.
-// day : buildToday(data) ; moments : visible(day, ui.filter) ; ui : { filter, collapsed, pick } ;
-// ahead : { sel, week } quand un autre jour de la bande est choisi (rendu actuel), sinon null ;
-// busy : une ecriture est en cours ; pickError : refus du serveur dans le choix ouvert.
-export function boardHtml(view) {
-  const { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead, busy, pickError } = view;
-  const isToday = dubaiToday(nowMs) === data.day;
-  const head = header(data, isToday, stale) + (banner || '') + '<p class="td-sum">' + esc(sentence(day, { today: isToday })) + '</p>' + weekHtml(strip);
-  if (ahead) return head + '<div class="td-cols"><div class="td-main">' + aheadHtml(ahead) + '</div></div>';
+// Ce que les cartes d'une journee partagent : personnes et logements par id, choix ouvert.
+// ahead : un autre jour de la bande (corps des cartes sans fiche).
+function cardsCtx(day, ui, ro, isToday, pick, ahead) {
   const people = {};
   for (const p of day.people) people[p.id] = p;
   const byId = {};
   for (const u of day.units) byId[u.id] = u;
+  return { ui, ro, isToday, people, byId, day, pick, ahead };
+}
+function listHtml(day, moments, c) {
+  if (moments.length) return moments.map((m) => momentHtml(m, c)).join('');
+  return '<p class="td-empty">' + esc(c.ui.filter == null ? emptyLine(day, { today: c.isToday }) : 'Nothing for this choice on that day.') + '</p>';
+}
+
+// view : { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead, busy, pickError }.
+// ui : { filter, collapsed, pick } ; busy : une ecriture est en cours ; pickError : refus du
+// serveur dans le choix ouvert ; strip : bande des jours (weekHtml).
+// Jour des donnees (ahead null) : day = buildToday(data), moments = visible(day, ui.filter).
+// Autre jour de la bande : ahead = { sel, week } (week : { data, fresh, loading, error } ou
+// null), day = buildAhead(week.data, sel) ou null tant que la semaine n'est pas lue, ro = semaine
+// pas fraiche ; banner et stale ne servent pas (ils parlent de mgr.today).
+export function boardHtml(view) {
+  const { data, day, moments, ui, banner, stale, ro, strip, nowMs, ahead, busy, pickError } = view;
+  const clock = dubaiToday(nowMs);
   // Lecture seule : aucun choix.
-  const pick = ui.pick != null && !ro ? { id: ui.pick, state: { busy: !!busy, error: pickError || null, ro: false } } : null;
-  const c = { ui, ro, isToday, people, byId, day, pick };
-  const list = moments.length ? moments.map((m) => momentHtml(m, c)).join('')
-    : '<p class="td-empty">' + (ui.filter == null ? 'No cleaning planned for today.' : 'Nothing for this choice on that day.') + '</p>';
+  const pick = day && ui.pick != null && !ro ? { id: ui.pick, state: { busy: !!busy, error: pickError || null, ro: false } } : null;
+  if (ahead) return aheadBoard(view, clock, pick);
+  const isToday = clock === data.day;
+  const head = header(data, isToday, stale) + (banner || '') + '<p class="td-sum">' + esc(sentence(day, { today: isToday })) + '</p>' + weekHtml(strip);
+  const c = cardsCtx(day, ui, ro, isToday, pick, false);
   return head + '<div class="td-cols"><div class="td-main">' + peopleHtml(day, ui, data, nowMs)
-    + '<div class="td-moments">' + list + '</div>' + elseHtml(data, ui, nowMs) + rulesHtml(data) + '</div>'
+    + '<div class="td-moments">' + listHtml(day, moments, c) + '</div>' + elseHtml(data, ui, nowMs) + rulesHtml(data) + '</div>'
     + sideHtml(day, c, data, nowMs) + '</div>';
+}
+// Un autre jour de la bande (spec section 5) : meme gabarit que Today, sans Not for today, sans
+// regles ni panneau (les puces de personnes restent a toute largeur). Semaine en echec avec
+// d'anciennes donnees : bandeau, lecture seule et Retry ; sans donnees : Loading ou Retry.
+function aheadBoard(view, clock, pick) {
+  const { data, day, moments, ui, ro, strip, nowMs, ahead } = view;
+  const w = ahead.week;
+  let h = aheadHeader(ahead.sel, clock);
+  if (day && w && w.error) {
+    h += '<div class="banner warn" role="status"><span>' + esc(w.error.message) + ' ' + RO_LINE
+      + '</span><button class="btn sm" type="button" data-wretry>Retry</button></div>';
+  }
+  h += (day ? '<p class="td-sum">' + esc(sentence(day)) + '</p>' : '') + weekHtml(strip);
+  let body;
+  if (!day) {
+    body = !w || !w.error ? '<p class="td-empty" role="status">Loading ' + esc(dayShort(ahead.sel)) + '…</p>'
+      : '<div class="err-card" role="alert"><p>' + esc(w.error.message) + '</p><button class="btn primary" type="button" data-wretry>Retry</button></div>';
+  } else {
+    body = peopleHtml(day, ui, data, nowMs) + '<div class="td-moments">' + listHtml(day, moments, cardsCtx(day, ui, ro, false, pick, true)) + '</div>';
+  }
+  return h + '<div class="td-cols td-solo"><div class="td-main">' + body + '</div></div>';
+}
+
+// Fiche d'un menage du jour (donnees mgr.today).
+function xTime(j) { return j.kind === 'extra' ? (j.extraTime || (j.extra && j.extra.cleaningTime) || null) : null; }
+function nextLine(j) {
+  if (!j.next) return 'No guest in the next 14 days';
+  const who = j.next.owner ? 'Owner' : 'Guest';
+  if (j.next.sameDay) return who + ' arrives ' + (j.next.time || 'today');
+  return 'Next ' + who.toLowerCase() + ' ' + ddmm(j.next.date);
 }
 
 function sheetHead(title, sub) {
@@ -463,27 +477,4 @@ export function arrivalSheet(data, a, nowMs, ro) {
     + (a.prevKey ? photosBlk(a.prevKey) : '')
     + ticketsBlk(data.ticketsByListing[a.listingId]) + '</div>'
     + (a.prevKey ? actionsFoot(a.prevKey, a.assigned, a.done, ro) : '<div class="sheet-f"><button class="btn" type="button" data-close>Close</button></div>');
-}
-
-// Choix d'une personne pour un menage d'un autre jour (donnees mgr.planning) : un tap = assigne
-// (Assign ou Reassign, meme panneau).
-// Une personne en conge ce jour-la ne peut pas etre choisie.
-export function aheadPickerSheet(d, j) {
-  const day = d.days.find((x) => x.date === j.date);
-  const off = new Set(day ? day.off : []);
-  const n = {};
-  for (const x of jobsOn(d, j.date)) if (!x.cancelled) for (const id of x.assigned) n[id] = (n[id] || 0) + 1;
-  const opts = d.people.filter((p) => p.assignable).map((p) => {
-    const leave = off.has(p.id);
-    const current = j.assigned.length === 1 && j.assigned[0] === p.id;
-    // Meme lecture que le choix d'aujourd'hui : « Role · N jobs that day ».
-    const sub = (ROLE[p.role] || p.role) + ' · ' + (leave ? 'On leave' : plural(n[p.id] || 0, 'job') + ' that day');
-    return '<button type="button" data-wpick="' + p.id + '" data-key="' + esc(j.key) + '"' + (current ? ' aria-current="true"' : '')
-      + (leave ? ' disabled data-off' : '') + '><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><span><b>' + esc(p.name)
-      + '</b><small>' + esc(sub) + '</small></span></button>';
-  }).join('');
-  const who = j.assigned.length ? '<p class="note">Now: ' + esc(plNamesOf(d, j.assigned)) + '.</p>' : '';
-  return sheetHead('Assign a cleaner', (placeLabel(j) || 'Apartment') + ' · ' + dayShort(j.date) + (j.checkout ? ' · checkout ' + j.checkout : ''))
-    + '<div class="sheet-b">' + who + '<div class="pick">' + opts + '</div></div>'
-    + '<div class="sheet-f"><button class="btn" type="button" data-close>Cancel</button></div>';
 }

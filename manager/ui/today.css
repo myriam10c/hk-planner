@@ -5,20 +5,6 @@
 .person-h .nm{font-weight:600;font-size:17px}
 .person-h .rl{color:var(--ink-3);font-size:14px}
 .person-h .cnt{margin-left:auto;font-weight:700;font-size:22px;font-variant-numeric:tabular-nums}
-.jobs{display:flex;flex-direction:column;gap:6px}
-.job{display:flex;align-items:center;gap:var(--s3);padding:10px var(--s3);border-radius:10px;background:var(--surface-2);border:1px solid var(--line);cursor:pointer;text-align:left;width:100%;min-width:0}
-.job.static{cursor:default}
-.job:hover{border-color:var(--line-2)}
-.job .tm{font-weight:700;font-size:18px;line-height:1.1;font-variant-numeric:tabular-nums;width:56px;flex:none}
-.job .tm small{display:block;font-weight:500;font-size:13px;color:var(--ink-3)}
-.job .ap{flex:1;min-width:0}
-.job .ap b{display:block;font-weight:600;overflow-wrap:anywhere}
-.job .ap span{color:var(--ink-2);font-size:14px}
-.unassigned{background:var(--bad-tint)}
-.unassigned .person-h .nm{color:var(--bad-ink)}
-.unassigned .person-h .cnt{color:var(--bad)}
-.unassigned .av{background:var(--bad);color:var(--on-bad)}
-.unassigned .job{background:var(--surface);border-color:color-mix(in srgb,var(--bad) 30%,var(--line))}
 
 .counts{display:flex;flex-wrap:wrap;gap:var(--s2);padding:0 var(--s4) var(--s3)}
 .count{display:flex;flex-direction:column;padding:var(--s2) var(--s3);border-radius:var(--r-md);background:var(--surface-2);border:1px solid var(--line);min-width:0;flex:1 1 130px}
@@ -167,11 +153,12 @@ a.count{text-decoration:none;color:inherit}
 .td-whostatic{min-width:44px;min-height:44px;display:inline-grid;place-items:center}
 .td-dash{width:14px;height:2px;border-radius:2px;background:var(--ring)}
 .td-body{border:0;background:transparent;padding:0;text-align:left;display:grid;gap:2px;min-width:0;width:100%;min-height:44px;align-content:center;border-radius:10px;cursor:pointer;color:var(--ink)}
+.td-body.td-still{cursor:default}
 .td-t{font-size:17px;font-weight:700;line-height:1.3;overflow-wrap:anywhere}
 .td-b{font-weight:500}
 .td-st{font-weight:600}
 .td-names{font-weight:500;color:var(--ink-2)}
-.td-k-blocked{color:var(--bad-ink)} .td-k-risk,.td-k-elite{color:var(--warn-ink)}
+.td-k-blocked,.td-k-first{color:var(--bad-ink)} .td-k-risk,.td-k-elite{color:var(--warn-ink)}
 .td-k-ready,.td-k-done{color:var(--ok-ink)} .td-k-todo,.td-k-planned{color:var(--ink-2)}
 .td-cause,.td-ti{color:var(--ink-2);overflow-wrap:anywhere}
 .td-tk{color:var(--ink-2);text-decoration:underline;text-decoration-color:var(--ring);text-underline-offset:3px}
@@ -214,6 +201,9 @@ a.count{text-decoration:none;color:inherit}
 .td-tile[aria-current="true"]{background:var(--accent);color:var(--accent-ink)}
 .td-tile[aria-current="true"] .td-pn small{color:var(--accent-ink)}
 .td-tile[aria-disabled="true"]{opacity:.55;cursor:default}
+/* Personne en conge ce jour-la (autre jour) : tuile vide, texte lisible, pas de toucher. */
+.td-tile:disabled{background:transparent;box-shadow:inset 0 0 0 1.5px var(--line);cursor:default}
+.td-tile:disabled .td-disc{opacity:.5}
 .td-pick .td-btn{justify-self:start}
 
 /* Not for today : les blocs actuels, inchanges, sous une pastille repliee. */
@@ -246,6 +236,9 @@ a.count{text-decoration:none;color:inherit}
   .td-cols{grid-template-columns:minmax(0,1fr) minmax(260px,340px);align-items:start}
   .td-side{display:grid;gap:var(--s5);position:sticky;top:calc(16px + env(safe-area-inset-top))}
   .td-people{display:none}
+  /* Autre jour : pas de panneau, une colonne, les puces de personnes restent. */
+  .td-cols.td-solo{grid-template-columns:minmax(0,1fr)}
+  .td-solo .td-people{display:grid}
 }
 @media (prefers-reduced-motion: no-preference){
   .td-chev{transition:transform .2s ease}

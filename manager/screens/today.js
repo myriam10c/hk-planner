@@ -6,8 +6,8 @@ import { createGestures } from '/manager/gesture.js';
 import { createFreshGate, isStale } from '/manager/fresh.js';
 import { addDays, announceMntBadge, closeSheet, dubaiTime, esc, focusMark, openSheet, placeLabel, sheetIsOpen, toast } from '/manager/ui/dom.js';
 import { fillPhotos } from '/manager/ui/job-photos.js';
-import { aheadPickerSheet, arrivalSheet, boardHtml, jobSheet } from '/manager/screens/today-view.js';
-import { buildToday, isNone, nextNone, visible } from '/manager/screens/today-model.js';
+import { arrivalSheet, boardHtml, jobSheet, patchWday } from '/manager/screens/today-view.js';
+import { buildAhead, buildToday, countNone, isNone, nextNone, visible } from '/manager/screens/today-model.js';
 import { namesOf, weekStartOf } from '/manager/screens/planning-rules.js';
 
 function dubaiParts(ms) {
@@ -23,20 +23,23 @@ const DAY_CHECK_MS = 30000;
 // Repeint : le focus revient sur l'element affiche qui porte le meme attribut (carte, disque,
 // tuile ou Cancel du choix ouvert, puce de filtre, pastille d'un moment, Not for today), sinon
 // sur ceux de focusMark.
-const TD_FOCUS = ['data-td-open', 'data-td-who', 'data-td-pick', 'data-td-cancel', 'data-td-filter', 'data-td-moment', 'data-td-more'];
+const TD_FOCUS = ['data-td-open', 'data-td-who', 'data-td-pick', 'data-td-wpick', 'data-td-cancel', 'data-td-filter', 'data-td-moment', 'data-td-more'];
 
 function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div></header>' + inner; }
 
 export async function renderToday(ctx) {
   const main = ctx.main;
-  // day : jour choisi dans « Who does what » (null = aujourd'hui). triedOn : jour de Dubai
+  // day : jour choisi dans la bande des sept jours (null = le jour des donnees). triedOn : jour de Dubai
   // de la derniere relecture tentee.
   // ui : filtre (id d'une personne, 'none' ou null), moments replies (Not for today replie
   // par defaut), choix ouvert dans une carte (id du logement, un seul a la fois) ; garde d'un
   // rendu a l'autre. pickErr : refus du serveur affiche dans le choix ouvert. chain : logement
   // qui n'avait personne et vient d'etre affecte, le choix du suivant s'ouvre apres la relecture.
+  // Autre jour de la bande : arrive = jour qui vient d'etre choisi (son premier menage sans
+  // cleaner s'ouvre des que sa semaine est lue fraiche) ; wchain = { day, from }, l'enchainement
+  // de chain sur ce jour, apres la relecture de sa semaine.
   const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null, day: null, triedOn: null,
-    pending: null, ui: { filter: null, collapsed: { more: true }, pick: null }, pickErr: null, chain: null };
+    pending: null, ui: { filter: null, collapsed: { more: true }, pick: null }, pickErr: null, chain: null, arrive: null, wchain: null };
   // Journee du modele, calculee une fois par reponse mgr.today.
   let memo = { data: null, day: null };
   function model() {
@@ -48,6 +51,15 @@ export async function renderToday(ctx) {
   // at : heure de la derniere reponse fraiche.
   const weeks = {};
   let wseq = 0;
+  // Journee d'un autre jour (buildAhead), calculee une fois par reponse mgr.planning et par jour.
+  const aheadMemo = new WeakMap();
+  function aheadDayOf(w, date) {
+    if (!w || !w.data) return null;
+    let m = aheadMemo.get(w.data);
+    if (!m) { m = new Map(); aheadMemo.set(w.data, m); }
+    if (!m.has(date)) m.set(date, buildAhead(w.data, date));
+    return m.get(date);
+  }
   const gestures = createGestures();
   const cached = loadToday();
   // Hors ligne au demarrage (ctx.me inconnu) : le cache de l'appareil. Sinon,
@@ -93,6 +105,14 @@ export async function renderToday(ctx) {
     return { days, sel, clock, week: sel === base ? null : weeks[weekStartOf(sel)] || null };
   }
   function otherDay() { const a = aheadState(); return a.sel === a.days[0] ? null : a.sel; }
+  // Journee affichee : Today, ou l'autre jour choisi (null tant que sa semaine n'est pas lue).
+  function shownDay() {
+    const d = otherDay();
+    if (!d) return st.data ? model() : null;
+    return aheadDayOf(weeks[weekStartOf(d)], d);
+  }
+  // Autre jour : lecture seule tant que sa semaine n'est pas lue fraiche.
+  function aheadRo(w) { return !(w && w.fresh && w.data); }
 
   function tdMark() {
     const a = document.activeElement;
@@ -107,18 +127,27 @@ export async function renderToday(ctx) {
     if (el && document.activeElement !== el) el.focus({ preventScroll: true });
   }
   const wdShort = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+  // Puce de la bande : menages du jour et menages sans cleaner (counts.none pour le jour des
+  // donnees, countNone pour les autres) ; null tant que la semaine n'est pas lue.
+  function stripDay(d, day, selected) {
+    const known = !!day;
+    const n = !known ? null : day.source === 'today' ? day.counts.none : countNone(weeks[weekStartOf(d)].data, d);
+    return { date: d, label: wdShort(d), num: Number(d.slice(8)), n, total: known ? day.counts.cleanings : null, selected };
+  }
 
   function paint() {
     if (!ctx.isCurrent()) return;
     const mark = tdMark();
     if (st.data) {
       const a = aheadState();
-      const day = model();
+      const today = model();
+      const other = a.sel !== a.days[0];
+      const day = other ? aheadDayOf(a.week, a.sel) : today;
       main.innerHTML = boardHtml({
-        data: st.data, day, moments: visible(day, st.ui.filter), ui: st.ui, banner: banner(), stale: !st.fresh, ro: readOnly(),
-        // Compte des autres jours : pas encore lu (tache 5).
-        strip: a.days.map((d, i) => ({ date: d, label: wdShort(d), num: Number(d.slice(8)), n: i === 0 ? day.counts.none : null, selected: d === a.sel })),
-        nowMs: Date.now(), ahead: a.sel === a.days[0] ? null : { sel: a.sel, week: a.week }, busy: st.busy, pickError: st.pickErr,
+        data: st.data, day, moments: day ? visible(day, st.ui.filter) : [], ui: st.ui, banner: banner(), stale: !st.fresh,
+        ro: other ? aheadRo(a.week) : readOnly(),
+        strip: a.days.map((d, i) => stripDay(d, i === 0 ? today : aheadDayOf(weeks[weekStartOf(d)], d), d === a.sel)),
+        nowMs: Date.now(), ahead: other ? { sel: a.sel, week: a.week } : null, busy: st.busy, pickError: st.pickErr,
       });
       tdBack(mark);
       return;
@@ -169,6 +198,8 @@ export async function renderToday(ctx) {
     st.loading = false;
     const next = settle(before);
     if (next) showPick(next); else paint();
+    // Comptes de la bande : semaines lues en arriere-plan apres le rendu, sans bandeau d'erreur.
+    if (st.fresh) loadStrip();
   }
 
   // Apres une relecture (reussie ou non). Filtre : enleve quand la personne ou le groupe filtre
@@ -178,18 +209,25 @@ export async function renderToday(ctx) {
   function settle(before) {
     const from = st.chain;
     st.chain = null;
-    if (!st.data) return null;
+    // Autre jour affiche : son choix ouvert et son filtre se jugent sur sa semaine (settleWeek).
+    if (!st.data || otherDay()) return null;
     const ui = st.ui;
     const day = model();
-    if (ui.filter != null && before) {
-      const f = String(ui.filter);
-      const left = (d) => (f === 'none' ? d.counts.none : (d.people.find((p) => String(p.id) === f) || { count: 0 }).count);
-      const able = (d) => d.people.some((p) => String(p.id) === f && p.assignable);
-      if ((left(before) > 0 && left(day) === 0) || (f !== 'none' && able(before) && !able(day))) ui.filter = null;
-    }
+    dropFilter(before, day);
     if (ui.pick != null && (readOnly() || !day.units.some((u) => u.id === ui.pick && u.key))) { ui.pick = null; st.pickErr = null; }
     if (from == null || ui.pick != null || readOnly()) return null;
     return nextNone(day, from, ui.filter);
+  }
+
+  // Filtre enleve apres une relecture quand la personne ou le groupe filtre avait des logements
+  // et n'en a plus, ou quand la personne filtree n'est plus affectable (sa puce disparait).
+  function dropFilter(before, day) {
+    const ui = st.ui;
+    if (ui.filter == null || !before || !day) return;
+    const f = String(ui.filter);
+    const left = (d) => (f === 'none' ? d.counts.none : (d.people.find((p) => String(p.id) === f) || { count: 0 }).count);
+    const able = (d) => d.people.some((p) => String(p.id) === f && p.assignable);
+    if ((left(before) > 0 && left(day) === 0) || (f !== 'none' && able(before) && !able(day))) ui.filter = null;
   }
 
   // Relecture due : donnees de plus d'une minute ou d'un autre jour de Dubai.
@@ -214,14 +252,18 @@ export async function renderToday(ctx) {
     return freshEnough();
   }
 
-  // Semaine d'un autre jour : seule la derniere demande pour cette semaine compte, et
-  // l'ecran n'est repeint que si le jour choisi est encore dans cette semaine.
+  // Semaine d'un autre jour : seule la derniere demande pour cette semaine compte. Journee
+  // affichee dans cette semaine : repeinte (paint garde le choix ouvert, les tuiles desactivees
+  // pendant une ecriture et le focus). Sinon seules les puces de la bande changent, sur place :
+  // une reponse en arriere-plan ne remplace jamais une carte qu'on est en train de toucher.
   async function loadWeek(start) {
     const w = weeks[start] || (weeks[start] = { data: null, fresh: false, loading: false, error: null, seq: 0, at: 0 });
     const mine = ++wseq;
     w.seq = mine;
     w.loading = true;
     w.error = null;
+    const d0 = otherDay();
+    const before = d0 && weekStartOf(d0) === start ? aheadDayOf(w, d0) : null;
     paintIfShown(start);
     try {
       const d = await get('mgr.planning', { start });
@@ -236,21 +278,76 @@ export async function renderToday(ctx) {
       w.fresh = false;
     }
     w.loading = false;
-    paintIfShown(start);
+    const d = otherDay();
+    if (!d || weekStartOf(d) !== start) { paintStrip(); return; }
+    const next = settleWeek(d, start, d0, before);
+    if (next != null) showPick(next.id, next.quiet); else paint();
+  }
+  function paintStrip() {
+    if (!ctx.isCurrent() || !st.data) return;
+    const a = aheadState();
+    const today = model();
+    a.days.forEach((d, i) => {
+      const b = main.querySelector('[data-wday="' + d + '"]');
+      if (b) patchWday(b, stripDay(d, i === 0 ? today : aheadDayOf(weeks[weekStartOf(d)], d), d === a.sel));
+    });
   }
   function paintIfShown(start) {
     const d = otherDay();
     if (d && weekStartOf(d) === start) paint();
   }
+  // Bande : chaque semaine que touchent les six jours suivants, lue une fois (sans attendre).
+  function loadStrip() {
+    const seen = {};
+    for (const d of aheadState().days.slice(1)) {
+      const s = weekStartOf(d);
+      if (!seen[s] && !weeks[s]) loadWeek(s);
+      seen[s] = true;
+    }
+  }
+  // Apres la lecture de la semaine de l'autre jour affiche d (filtre : seulement si d etait deja
+  // affiche au depart de la lecture, d0). Choix ouvert : ferme en lecture seule ou si son
+  // logement n'est plus a affecter. Rend { id, quiet } du choix qui s'ouvre ensuite :
+  // enchainement apres une ecriture (focus sur les tuiles), ou arrivee sur le jour (premier
+  // menage sans cleaner, sans prendre le focus) ; sinon null.
+  function settleWeek(d, start, d0, before) {
+    const w = weeks[start];
+    const day = aheadDayOf(w, d);
+    const from = st.wchain && st.wchain.day === d ? st.wchain.from : null;
+    st.wchain = null;
+    if (d === d0) dropFilter(before, day);
+    if (st.ui.pick != null && (aheadRo(w) || !day.units.some((u) => u.id === st.ui.pick && u.canAssign))) { st.ui.pick = null; st.pickErr = null; }
+    if (aheadRo(w)) return null;
+    const arriving = st.arrive === d;
+    st.arrive = null;
+    if (st.ui.pick != null) return null;
+    if (from != null) { const id = nextNone(day, from, st.ui.filter); return id == null ? null : { id, quiet: false }; }
+    if (arriving) { const id = nextNone(day, null, st.ui.filter); return id == null ? null : { id, quiet: true }; }
+    return null;
+  }
+  // Puce de la bande. Autre jour : un seul choix ouvert, filtre enleve ; sa semaine est lue si
+  // elle ne l'est pas (echec en arriere-plan compris), relue si elle a plus de 60 s, et son
+  // premier menage sans cleaner s'ouvre quand elle est fraiche (sans prendre le focus).
   function pickDay(day) {
     const was = aheadState().sel;
     st.day = day;
-    // Un seul choix ouvert : celui d'aujourd'hui se ferme quand un autre jour est montre.
-    if (aheadState().sel !== was) { st.ui.pick = null; st.pickErr = null; }
     const d = otherDay();
+    if (aheadState().sel !== was) {
+      st.ui.pick = null;
+      st.pickErr = null;
+      st.ui.filter = null;
+      st.wchain = null;
+      st.arrive = d;
+    }
     if (d) {
-      const w = weeks[weekStartOf(d)];
-      if (!w || (!w.data && !w.loading)) { loadWeek(weekStartOf(d)); return; }
+      const start = weekStartOf(d);
+      const w = weeks[start];
+      if (!w || (!w.loading && (!w.fresh || isStale(w.at, Date.now())))) { loadWeek(start); return; }
+      if (!w.loading && st.arrive === d) {
+        st.arrive = null;
+        const id = nextNone(aheadDayOf(w, d), null, st.ui.filter);
+        if (id != null) { showPick(id, true); return; }
+      }
     }
     paint();
   }
@@ -258,52 +355,65 @@ export async function renderToday(ctx) {
     const d = otherDay();
     const w = d ? weeks[weekStartOf(d)] : null;
     const j = w && w.data ? w.data.jobs.find((x) => x.key === key) : null;
-    return j && !j.cancelled && j.state !== 'done' ? { j, w, start: weekStartOf(d) } : null;
+    return j && !j.cancelled && j.state !== 'done' ? { j, w, start: weekStartOf(d), day: d } : null;
   }
-  // Ecriture sur un autre jour : semaine fraiche obligatoire, cle d'idempotence par geste,
-  // jamais d'auteur, puis rechargement de cette semaine (le jour choisi reste).
-  // Choix de personne d'un autre jour : semaine relue d'abord si lue il y a plus d'une minute.
-  // Relecture en echec : anciennes donnees gardees, ecriture refusee.
+  // Disque d'une carte d'un autre jour : semaine fraiche obligatoire, relue d'abord si lue il y
+  // a plus d'une minute (opening : une seule relecture attendue a la fois). Relecture en echec :
+  // anciennes donnees gardees, choix refuse.
   let opening = false;
-  async function openAhead(key) {
-    let t = aheadJob(key);
-    if (!t) return;
-    if (!t.w.fresh) { refuseRo(); return; }
-    if (isStale(t.w.at, Date.now())) {
+  async function openAheadPick(id) {
+    const d = otherDay();
+    if (!d) return;
+    const start = weekStartOf(d);
+    let w = weeks[start];
+    if (!w || !w.data) return;
+    if (!w.fresh) { refuseRo(); return; }
+    if (isStale(w.at, Date.now())) {
       if (opening) return;
       opening = true;
-      await loadWeek(t.start);
-      opening = false;
-      if (!ctx.isCurrent()) return;
-      t = aheadJob(key);
-      if (!t) return;
-      if (!t.w.fresh) { refuseRo(); return; }
+      try { await loadWeek(start); } finally { opening = false; }
+      if (!ctx.isCurrent() || otherDay() !== d) return;
+      w = weeks[start];
+      if (!w.fresh) { refuseRo(); return; }
     }
-    st.sheetKey = t.j.key;
-    openSheet(aheadPickerSheet(t.w.data, t.j));
+    const u = aheadDayOf(w, d).units.find((x) => x.id === id);
+    if (!u || !u.canAssign) return;
+    showPick(id);
   }
-  async function aheadWrite(start, key, body, okMsg, undoFn) {
+  // Choix dans une carte d'un autre jour : meme compte rendu que pickPlace ; l'enchainement
+  // vers le menage suivant sans cleaner suit la relecture de la semaine (settleWeek).
+  function aheadPlace(id, wasNone, d) {
+    return {
+      held: () => st.ui.pick === id && otherDay() === d,
+      busy: () => { st.pickErr = null; paint(); },
+      error: (msg) => { st.pickErr = msg; paint(); },
+      done: () => { closePick(false); if (wasNone) st.wchain = { day: d, from: id }; },
+    };
+  }
+  // Ecriture sur un autre jour : semaine fraiche obligatoire, cle d'idempotence par geste,
+  // jamais d'auteur, puis rechargement de cette semaine (le jour choisi reste). at : le choix
+  // ouvert (aheadPlace), absent pour Undo.
+  async function aheadWrite(start, body, okMsg, undoFn, at) {
     if (st.busy) { busyToast(); return; }
     const w = weeks[start];
     if (!w || !w.fresh || !w.data) { refuseRo(); return; }
     st.busy = true;
-    sheetBusy(true);
+    if (at) at.busy(true);
     try {
       await gestures.run('assignCleaner|' + JSON.stringify(body), (idem) => post('assignCleaner', { ...body, idem }));
     } catch (e) {
       st.busy = false;
-      sheetBusy(false);
-      document.querySelectorAll('#sheet [data-off]').forEach((b) => { b.disabled = true; });
+      if (at) at.busy(false);
       if (handleAccess(e)) return;
-      if (heldHere(key)) sheetError(e.message); else toast(e.message);
+      if (at && at.held()) at.error(e.message); else toast(e.message);
       return;
     }
     st.busy = false;
-    if (heldHere(key)) closeSheet();
+    if (at && at.held()) at.done();
     toast(okMsg, undoFn);
     loadWeek(start);
   }
-  function aheadAssign(key, id) {
+  function aheadAssign(key, id, at) {
     const t = aheadJob(key);
     if (!t) return;
     const { j, w, start } = t;
@@ -313,8 +423,8 @@ export async function renderToday(ctx) {
     const where = placeLabel(j);
     const label = (list) => (list.length ? namesOf(w.data, list) : 'nobody');
     const body = (list) => ({ reservation_key: key, cleaner_ids: list, mode: 'set', service_type: service });
-    aheadWrite(start, key, body(ids), where + ' assigned to ' + label(ids),
-      () => aheadWrite(start, key, body(prev), where + ' back to ' + label(prev)));
+    aheadWrite(start, body(ids), where + ' assigned to ' + label(ids),
+      () => aheadWrite(start, body(prev), where + ' back to ' + label(prev)), at);
   }
 
   // Cible d'une ecriture : un menage du jour, ou le menage precedent d'une arrivee.
@@ -441,21 +551,24 @@ export async function renderToday(ctx) {
   }
 
   // ---------- Choix dans la carte ----------
-  // Ouvre le choix d'un logement (un seul a la fois), deplie son moment ; la carte defile dans le
-  // champ et le focus va a la premiere tuile (jamais sous une fiche ouverte).
-  function showPick(id) {
+  // Ouvre le choix d'un logement de la journee affichee (un seul a la fois), deplie son moment ;
+  // la carte defile dans le champ et le focus va a la premiere personne disponible (jamais sous
+  // une fiche ouverte). quiet : ouvert d'office a l'arrivee sur un autre jour, ni defilement ni
+  // focus (il reste sur la puce du jour).
+  function showPick(id, quiet) {
     st.ui.pick = id;
     st.pickErr = null;
-    const m = model().moments.find((x) => x.unitIds.indexOf(id) >= 0);
+    const day = shownDay();
+    const m = day ? day.moments.find((x) => x.unitIds.indexOf(id) >= 0) : null;
     if (m) delete st.ui.collapsed[m.id];
     paint();
     const box = main.querySelector('.td-pick');
     if (!box) return;
     box.classList.add('td-fresh');
-    if (sheetIsOpen()) return;
+    if (quiet || sheetIsOpen()) return;
     const card = box.closest('.td-card') || box;
     card.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-    const first = box.querySelector('[data-td-pick]');
+    const first = box.querySelector('[data-td-pick]:not([disabled]),[data-td-wpick]:not([disabled])');
     if (first) first.focus({ preventScroll: true });
   }
   // Ferme le choix ouvert. Le focus revient au disque de la carte (ou a Assign someone, Change)
@@ -493,8 +606,9 @@ export async function renderToday(ctx) {
   // Filtre et repli d'un moment : affichage seul, applique tout de suite ; un tableau de plus
   // de 60 s est relu en arriere-plan (filtre et replis gardes). Apres minuit, une relecture
   // par jour (comme dayCheck). Derniere lecture ratee : rien, le bandeau garde Retry.
+  // Autre jour affiche : rien (ses donnees viennent de mgr.planning).
   function touchRefresh() {
-    if (st.loading || st.busy || !st.data) return;
+    if (st.loading || st.busy || !st.data || otherDay()) return;
     const day = dubaiDay(Date.now());
     if (st.data.day !== day) { if (st.triedOn !== day) refresh(); return; }
     if (st.fresh && due()) refresh();
@@ -532,7 +646,7 @@ export async function renderToday(ctx) {
 
   function onClick(e) {
     const el = e.target && e.target.closest
-      ? e.target.closest('[data-retry],[data-td-open],[data-td-filter],[data-td-moment],[data-td-more],[data-td-who],[data-td-pick],[data-td-cancel],[data-assign],[data-done],[data-wday],[data-wretry],[data-wassign],[data-wpick]') : null;
+      ? e.target.closest('[data-retry],[data-td-open],[data-td-filter],[data-td-moment],[data-td-more],[data-td-who],[data-td-pick],[data-td-wpick],[data-td-cancel],[data-assign],[data-done],[data-wday],[data-wretry]') : null;
     if (!el) return;
     if (el.hasAttribute('data-retry')) { refresh(); return; }
     if (!st.data) return;
@@ -557,14 +671,15 @@ export async function renderToday(ctx) {
       return;
     }
     if (el.hasAttribute('data-wretry')) { const d = otherDay(); if (d) loadWeek(weekStartOf(d)); return; }
-    if (el.hasAttribute('data-wassign') || el.hasAttribute('data-wpick')) {
+    // Tuile d'une personne sur un autre jour (personne en conge : tuile desactivee).
+    if (el.hasAttribute('data-td-wpick')) {
       if (el.disabled) return;
-      if (st.busy) { busyToast(); return; }
-      const t = aheadJob(el.getAttribute(el.hasAttribute('data-wassign') ? 'data-wassign' : 'data-key'));
+      if (st.busy || el.getAttribute('aria-disabled') === 'true') { busyToast(); return; }
+      const t = aheadJob(el.getAttribute('data-key'));
       if (!t) return;
       if (!t.w.fresh) { refuseRo(); return; }
-      if (el.hasAttribute('data-wpick')) { aheadAssign(t.j.key, el.getAttribute('data-wpick')); return; }
-      openAhead(t.j.key);
+      const u = aheadDayOf(t.w, t.day).units.find((x) => x.key === t.j.key);
+      aheadAssign(t.j.key, el.getAttribute('data-td-wpick'), u ? aheadPlace(u.id, isNone(u), t.day) : null);
       return;
     }
     // Choix dans la carte. Cancel le ferme, meme pendant une ecriture (elle continue, le
@@ -580,7 +695,7 @@ export async function renderToday(ctx) {
       if (st.busy) { busyToast(); return; }
       const id = el.getAttribute('data-td-who');
       if (st.ui.pick === id) { closePick(true); return; }
-      openWho(id);
+      if (otherDay()) openAheadPick(id); else openWho(id);
       return;
     }
     if (el.hasAttribute('data-assign') || el.hasAttribute('data-done')) {

@@ -103,9 +103,25 @@ test('cache de la veille : date dans le bandeau et Not today\'s data', async ({ 
   await expect(page.locator('.td-date')).not.toContainText('today');
   await expect(page.locator('.td-sum')).toContainText('4 guests arrive on Thursday.');
   await expect(page.locator('.td-sum')).not.toContainText('today');
+  // Pastille du menage sans arrivee (Apt 909) : « No guest that day », jamais « today ».
+  const noGuest = page.locator('[data-td-moment="none"]');
+  await expect(noGuest).toContainText('No guest that day');
+  await expect(noGuest).toHaveAttribute('aria-label', /^No guest that day: /);
   // Panneau des personnes (grand ecran) : titre d'un jour qui n'est pas celui de l'horloge.
   await expect(page.locator('.td-side h2')).toHaveText('Who has what that day');
   await expect(page.locator('.banner.warn')).toContainText('Data from Thu 08/10 18:40. No connection. Try again. Not today\'s data.');
+});
+
+test('cache de la veille sans menage : No cleaning planned for Thu 8., jamais today', async ({ page }) => {
+  const empty = todayBody({ day: '2026-10-08' });
+  empty.who.jobs = [];
+  empty.who.unassigned = [];
+  empty.arrivals.rows = [];
+  const yesterday = { ...CACHE, savedAt: Date.parse('2026-10-08T14:40:00Z'), data: empty };
+  await bootMgr(page, [{ match: 'hostaway-proxy', status: 0, body: null, fail: true }], { email: true, clock: NOW, cache: yesterday });
+  await expect(board(page, 'Thursday')).toBeVisible();
+  await expect(page.locator('.td-empty')).toHaveText('No cleaning planned for Thu 8.');
+  await expect(page.locator('.td-sum')).toHaveText('No guest arrives on Thursday. No cleaning planned.');
 });
 
 test('cache sans version : ignore', async ({ page }) => {

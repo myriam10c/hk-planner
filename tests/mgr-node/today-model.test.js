@@ -3,7 +3,7 @@
 // et de mgr.planning (tests/manager/planning-fixtures.ts). Aucun vrai nom de guest.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAhead, buildToday, countNone, isNone, nextNone, sentence, slotsOf, visible } from '../../manager/screens/today-model.js';
+import { buildAhead, buildToday, countNone, emptyLine, isNone, momentLabel, nextNone, sentence, slotsOf, visible } from '../../manager/screens/today-model.js';
 
 const DAY = '2026-11-20'; // vendredi
 const SAT = '2026-11-21';
@@ -577,4 +577,75 @@ test('reasons : ligne Cleaner d un logement bloque dont le menage a une personne
   assert.equal(isNone(unit(alone, 'arr:4')), false);
   assert.equal(isNone(unit(buildToday(today({ jobs: [J({ key: 'K5', tone: 'warn', word: 'Not logged yet' })] })), 'K5')), false);
   assert.equal(isNone(unit(buildToday(today({ jobs: [J({ key: 'K6', state: 'done', tone: 'ok', word: 'Done' })] })), 'K6')), false);
+});
+
+// 20 (tache 5) : next.before de mgr.planning. Un menage reporte apres l'arrivee du guest
+// suivant (mot « Guest arrives first », ton bad du proxy) est un probleme : k 'first', avec le
+// mot et le ton du proxy, dans un moment a part en tete, et sa ligne des heures ne dit jamais
+// « Next guest » comme si le guest arrivait apres.
+test('next.before : menage reporte apres l arrivee du guest, mot et ton du proxy, moment en tete', () => {
+  const first = { tone: 'bad', word: 'Guest arrives first' };
+  const w = week([
+    PJ({ key: 'P1', listingId: 'L1', postponedFrom: '2026-11-18', checkout: null, assigned: [4], serviceType: 'CHC',
+      next: { date: '2026-11-19', time: '15:00', sameDay: false, before: true }, ...first }),
+    PJ({ key: 'P2', listingId: 'L2', apt: '202', postponedFrom: '2026-11-17', checkout: null,
+      next: { date: DAY, time: null, sameDay: false, before: true }, ...first }),
+    PJ({ key: 'P3', listingId: 'L3', apt: '303', assigned: [10], next: { date: SAT, time: '16:00', sameDay: true, before: false } }),
+    PJ({ key: 'P4', listingId: 'L4', apt: '404', assigned: [10], next: { date: '2026-11-25', time: null, sameDay: false, before: false } }),
+    PJ({ key: 'P5', listingId: 'L5', apt: '505', postponedFrom: '2026-11-18', checkout: null, assigned: [4], state: 'done',
+      next: { date: '2026-11-19', time: '15:00', sameDay: false, before: true }, tone: 'ok', word: 'Done' }),
+  ]);
+  const d = buildAhead(w, SAT);
+  assert.deepEqual(d.moments.map((m) => [m.id, m.label, m.tint, m.unitIds]), [
+    ['first', 'Guest arrives first', 'any', ['P1', 'P2', 'P5']],
+    ['same', 'Guest arrives the same day', 'day', ['P3']],
+    ['later', 'Next guest later', 'any', ['P4']],
+  ]);
+  assert.deepEqual(d.moments[0].tally, [{ k: 'first', n: 2, w: 'late' }, { k: 'done', n: 1, w: 'done' }]);
+  const p1 = unit(d, 'P1');
+  assert.deepEqual([p1.k, p1.shape, p1.tone, p1.word, p1.canAssign], ['first', 'card', 'bad', 'Guest arrives first', true]);
+  assert.equal(p1.timesLine, 'Postponed from 18/11. Guest arrives Thu 19 at 15:00, before this cleaning.');
+  assert.equal(p1.next.before, true);
+  // Sans personne : toujours un probleme d'abord, et compte dans les menages sans cleaner.
+  const p2 = unit(d, 'P2');
+  assert.equal(p2.k, 'first');
+  assert.equal(p2.timesLine, 'Postponed from 17/11. Guest arrives Fri 20, before this cleaning.');
+  assert.equal(isNone(p2), true);
+  assert.equal(d.counts.none, 1);
+  assert.equal(countNone(w, SAT), 1);
+  assert.equal(nextNone(d, null, null), 'P2');
+  // Menage fait : plus un probleme (ligne Done), la ligne des heures ne dit toujours pas « Next guest ».
+  assert.equal(unit(d, 'P5').k, 'done');
+  assert.equal(unit(d, 'P5').timesLine, 'Postponed from 18/11. Guest arrives Thu 19 at 15:00, before this cleaning.');
+  assert.equal(sentence(d), '5 cleanings. 1 has no cleaner yet. 1 guest arrives the same day.');
+  // mgr.today ne rend pas before : le jour des donnees ne change pas.
+  assert.equal(unit(buildToday(today({ jobs: [J({ key: 'K1', assigned: [4], tone: 'idle', word: 'Not started', next: nextOn(SAT) })] })), 'K1').next.before, false);
+});
+
+// 21 (tache 5) : un tableau du jour des donnees qui n'est pas le jour de l'horloge (cache
+// apres minuit) ne dit jamais « today » : pastille « No guest that day », liste vide
+// « No cleaning planned for Fri 20. » ; meme option { today } que sentence.
+test('libelles sans today hors du jour de l horloge : moment et liste vide', () => {
+  const d = buildToday(today({
+    jobs: [J({ key: 'K1', assigned: [4], tone: 'idle', word: 'Not started' }), J({ key: 'K2', listingId: 'L2', apt: '202', assigned: [4], tone: 'idle', word: 'Not started', next: nextOn(DAY) })],
+    arrivals: [A({ prevKey: 'K2', listingId: 'L2', apt: '202', tone: 'idle', word: 'Scheduled', assigned: [4] })],
+  }));
+  const none = d.moments.find((m) => m.id === 'none');
+  const arr = d.moments.find((m) => m.id === 'arr-1500');
+  assert.equal(momentLabel(none), 'No guest today');
+  assert.equal(momentLabel(none, { today: true }), 'No guest today');
+  assert.equal(momentLabel(none, { today: false }), 'No guest that day');
+  assert.equal(momentLabel(arr, { today: false }), 'Arriving at 15:00');
+  // Moment filtre (visible) : meme libelle.
+  assert.equal(momentLabel(visible(d, 4).find((m) => m.id === 'none'), { today: false }), 'No guest that day');
+  // Autre jour de la bande : libelles inchanges.
+  const ahead = buildAhead(week([PJ({ key: 'P1' })]), SAT);
+  assert.equal(momentLabel(ahead.moments[0], { today: false }), 'Next guest later');
+  // Liste vide.
+  const empty = buildToday(today());
+  assert.equal(emptyLine(empty), 'No cleaning planned for today.');
+  assert.equal(emptyLine(empty, { today: true }), 'No cleaning planned for today.');
+  assert.equal(emptyLine(empty, { today: false }), 'No cleaning planned for Fri 20.');
+  assert.equal(emptyLine(buildAhead(week([]), SAT)), 'No cleaning planned for Sat 21.');
+  assert.equal(emptyLine(buildAhead(null, SAT), { today: false }), 'No cleaning planned for Sat 21.');
 });

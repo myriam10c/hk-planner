@@ -146,12 +146,13 @@ test('la journée est rangée par heure d arrivée', async ({ page }) => {
   await expect(page.locator('[data-td-who="2026-10-09_Lu Mo"]')).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('[data-td-who="2026-10-09_Lu Mo"]')).toHaveClass(/\btd-who-empty\b/);
   await expect(page.locator('[data-td-who="2026-10-09_Lu Mo"]')).toHaveAttribute('aria-label', 'Assign a cleaner to Apt 909 · Bloom Height');
-  // Bande de sept jours : le jour des donnees choisi, son compte sans cleaner ; les autres jours pas encore lus.
+  // Bande de sept jours : le jour des donnees choisi, ses menages et son compte sans cleaner ; les
+  // autres jours pas lus (aucune route mgr.planning ici : la lecture en arriere-plan echoue sans bruit).
   const days = page.locator('[data-wday]');
   await expect(days).toHaveCount(7);
   await expect(days.first()).toHaveAttribute('data-wday', '2026-10-09');
   await expect(days.first()).toHaveAttribute('aria-pressed', 'true');
-  await expect(days.first()).toHaveAttribute('aria-label', 'Fri 9, 1 with no cleaner');
+  await expect(days.first()).toHaveAttribute('aria-label', 'Fri 9, 3 cleanings, 1 with no cleaner');
   await expect(days.nth(1)).toHaveAttribute('aria-label', 'Sat 10');
   await expect(days.nth(1)).toContainText('·');
   await expect(page.getByText('Under each day: cleanings with no cleaner yet.')).toBeVisible();

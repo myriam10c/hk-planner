@@ -7,16 +7,17 @@
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WD_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-// Ordre du decompte d'un moment, et mots de son aria-label.
-const TALLY = ['blocked', 'risk', 'none', 'elite', 'prog', 'todo', 'planned', 'ready', 'done'];
+// Ordre du decompte d'un moment, et mots de son aria-label. first : menage d'un autre jour
+// reporte apres l'arrivee du guest suivant (mgr.planning, next.before).
+const TALLY = ['blocked', 'first', 'risk', 'none', 'elite', 'prog', 'todo', 'planned', 'ready', 'done'];
 const WORDS = {
-  blocked: 'blocked', risk: 'at risk', none: 'with no cleaner', elite: 'not logged yet', prog: 'in progress',
+  blocked: 'blocked', first: 'late', risk: 'at risk', none: 'with no cleaner', elite: 'not logged yet', prog: 'in progress',
   todo: 'not started', planned: 'with a cleaner', ready: 'ready', done: 'done',
 };
 const ARRIVAL_K = { bad: 'blocked', warn: 'risk', ok: 'ready', idle: 'planned' };
 // Mot du proxy pour un menage sans personne qu'Elite fait d'habitude et saisit le lendemain.
 const ELITE_WORD = 'Not logged yet';
-const RANK = { blocked: 0, risk: 1 };
+const RANK = { blocked: 0, first: 0, risk: 1 };
 
 function parts(day) { return String(day).split('-').map(Number); }
 function addDays(day, n) { const p = parts(day); return new Date(Date.UTC(p[0], p[1] - 1, p[2] + n)).toISOString().slice(0, 10); }
@@ -57,12 +58,15 @@ function jobPart(j) {
     elite: !assigned.length && j.word === ELITE_WORD,
   };
 }
+// before (mgr.planning seulement) : le guest suivant arrive avant ce menage reporte.
 function nextPart(n) {
-  return n ? { date: n.date, time: n.time || null, sameDay: !!n.sameDay, owner: !!n.owner } : null;
+  return n ? { date: n.date, time: n.time || null, sameDay: !!n.sameDay, owner: !!n.owner, before: !!n.before } : null;
 }
 function kOf(a, j, today) {
   if (a) return ARRIVAL_K[a.tone] || 'planned';
   if (j.state === 'done') return 'done';
+  // Meme ordre que planStatus du proxy (« Guest arrives first », ton bad) : avant la personne.
+  if (j.next && j.next.before) return 'first';
   if (!(j.assigned || []).length) return j.word === ELITE_WORD ? 'elite' : 'none';
   if (j.state === 'in_progress') return 'prog';
   return today ? 'todo' : 'planned';
@@ -96,7 +100,8 @@ function timesLine(u, date, today) {
   }
   const who = n.owner ? 'Owner' : 'Guest';
   const at = n.time ? ' at ' + n.time : '';
-  if (n.sameDay) out.push(who + ' arrives the same day' + at + '.');
+  if (n.before) out.push(who + ' arrives ' + shortDay(n.date) + at + ', before this cleaning.');
+  else if (n.sameDay) out.push(who + ' arrives the same day' + at + '.');
   else {
     const when = n.date === addDays(date, 1) ? (today ? 'tomorrow' : 'the next day') : shortDay(n.date);
     out.push('Next ' + who.toLowerCase() + ' ' + when + at + '.');
@@ -243,9 +248,12 @@ export function buildToday(data) {
 export function buildAhead(week, date) {
   const jobs = ((week && week.jobs) || []).filter((j) => j.date === date && !j.cancelled);
   const units = jobs.map((j) => unitOf(null, j, date, false, []));
+  // Le guest suivant arrive avant le menage reporte : en tete, avant ceux du jour meme.
+  const first = (u) => !!(u.next && u.next.before);
   const moments = [
-    momentOf('same', 'Guest arrives the same day', 'day', units.filter((u) => u.next && u.next.sameDay)),
-    momentOf('later', 'Next guest later', 'any', units.filter((u) => !(u.next && u.next.sameDay))),
+    momentOf('first', 'Guest arrives first', 'any', units.filter(first)),
+    momentOf('same', 'Guest arrives the same day', 'day', units.filter((u) => !first(u) && u.next && u.next.sameDay)),
+    momentOf('later', 'Next guest later', 'any', units.filter((u) => !first(u) && !(u.next && u.next.sameDay))),
   ];
   const day = finish({ date, source: 'ahead', people: [], units: [], moments: [], counts: null }, moments);
   day.counts = countsOf(day.units);
@@ -287,6 +295,18 @@ export function nextNone(day, afterId, filter) {
   const ring = order.slice(i + 1).concat(order.slice(0, Math.max(i, 0)));
   for (const id of ring) if (isNone(byId[id]) && matches(byId[id], filter)) return id;
   return null;
+}
+
+// Libelle d'un moment. opts.today (true par defaut) : comme sentence, le jour des donnees est
+// celui de l'horloge ; sinon « No guest that day » au lieu de « No guest today ».
+export function momentLabel(m, opts) {
+  return m.id === 'none' && opts && opts.today === false ? 'No guest that day' : m.label;
+}
+// Liste vide sans filtre : « No cleaning planned for today. » pour le jour des donnees quand
+// c'est celui de l'horloge (opts.today, true par defaut), sinon le jour court (« for Sat 21. »).
+export function emptyLine(day, opts) {
+  const today = day.source === 'today' && !(opts && opts.today === false);
+  return 'No cleaning planned for ' + (today ? 'today' : shortDay(day.date)) + '.';
 }
 
 // Phrase du jour (gabarits de renderHead dans la page de test). opts.today (true par defaut) :
