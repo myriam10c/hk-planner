@@ -55,7 +55,9 @@ const FRI_JOBS = [
     state: 'done', tone: 'ok', word: 'Done' }),
   PJ({ key: '2026-11-27_Fa Ho', listingId: 'L5', apt: '505', bld: 'Tower E', assigned: [4], serviceType: 'CHC',
     cancelled: { reason: 'Guest extended', by: 'Walter' }, tone: 'idle', word: 'Cancelled' }),
-  PJ({ key: '2026-11-19_Gi Lo', listingId: 'L6', apt: '606', bld: 'Tower F', checkout: null, postponedFrom: '2026-11-19' }),
+  // Reporte au vendredi, le guest suivant arrive des jeudi : en tete de son groupe.
+  PJ({ key: '2026-11-19_Gi Lo', listingId: 'L6', apt: '606', bld: 'Tower F', checkout: null, postponedFrom: '2026-11-19',
+    next: { date: THU, time: '15:00', sameDay: false, before: true }, word: 'Guest arrives first' }),
   PJ({ key: 'extra_2026-11-27_mabc', kind: 'extra', listingId: 'L8', apt: '808', bld: 'Tower H', checkout: null, guest: null,
     extra: { id: 31, label: 'Deep clean', guestName: 'Owner', priceBilled: 250, cleanerPrice: 120, notes: null, cleaningDate: FRI, cleaningTime: null } }),
   PJ({ key: '2026-11-27_Hu Ng', listingId: 'L7', apt: '99', bld: 'Marina Gate', checkout: '10:00',
@@ -130,19 +132,21 @@ test('rowLine pinned copy', () => {
   assert.equal(rowLine(PJ({ date: THU, next: { date: FRI, time: '16:00', sameDay: false, before: false } })), 'Out 11:00 · Next guest Fri 27');
   assert.equal(rowLine(PJ({ checkout: null })), 'Out time not set · No next guest');
   assert.equal(rowLine(PJ({ checkout: null, postponedFrom: '2026-11-19' })), 'Postponed from 19/11 · No next guest');
+  assert.equal(rowLine(FRI_JOBS.find((j) => j.key === '2026-11-19_Gi Lo')), 'Postponed from 19/11 · Guest arrives first');
   assert.equal(rowLine(FRI_JOBS.find((j) => j.kind === 'extra')), 'Deep clean');
 });
 
 test('buildRows groups, order and exclusions', () => {
   const r = buildRows(mergeWeeks([WEEK_A]), FRI, new Map());
-  // Arrivee le jour meme d'abord, puis depart (sans heure en dernier), puis numero d'appartement.
-  assert.deepEqual(keys(r.todo), ['2026-11-27_Bo Ray', '2026-11-27_Hu Ng', '2026-11-27_Ann Lee', '2026-11-19_Gi Lo', 'extra_2026-11-27_mabc']);
+  // Guest arrive avant le menage reporte, puis arrivee le jour meme, puis depart (sans heure en
+  // dernier), puis numero d'appartement.
+  assert.deepEqual(keys(r.todo), ['2026-11-19_Gi Lo', '2026-11-27_Bo Ray', '2026-11-27_Hu Ng', '2026-11-27_Ann Lee', 'extra_2026-11-27_mabc']);
   assert.deepEqual(keys(r.assigned), ['2026-11-27_Di Fox']);
   assert.deepEqual(keys(r.elite), ['2026-11-27_Cy Doe']);
   const all = keys([...r.todo, ...r.assigned, ...r.elite]);
   assert.ok(!all.includes('2026-11-27_Ed Gu'), 'done hidden');
   assert.ok(!all.includes('2026-11-27_Fa Ho'), 'cancelled hidden');
-  assert.deepEqual(r.todo[2], {
+  assert.deepEqual(r.todo[3], {
     key: '2026-11-27_Ann Lee', place: 'Apt 1602 · The Grand Emaar', line: 'Out 10:00 · No next guest',
     ids: [], serviceType: null, group: 'todo',
   });
@@ -151,6 +155,13 @@ test('buildRows groups, order and exclusions', () => {
     ids: [10, 4], serviceType: 'CHC', group: 'assigned',
   });
   assert.equal(r.elite[0].group, 'elite');
+  // Un extra a son heure dediee se range parmi les departs (comme le proxy) : 09:00 avant 11:00.
+  const timed = mergeWeeks([week('2026-11-23', [
+    PJ({ key: '2026-11-27_Ko Li', listingId: 'L12', apt: '101', bld: 'Tower A', checkout: '11:00' }),
+    PJ({ key: 'extra_2026-11-27_mxyz', kind: 'extra', listingId: 'L13', apt: '707', bld: 'Tower G', checkout: null, guest: null,
+      extra: { id: 32, label: 'Window cleaning', guestName: null, priceBilled: null, cleanerPrice: null, notes: null, cleaningDate: FRI, cleaningTime: '09:00' } }),
+  ])]);
+  assert.deepEqual(keys(buildRows(timed, FRI, new Map()).todo), ['extra_2026-11-27_mxyz', '2026-11-27_Ko Li']);
 });
 
 test('pinned keys stay in their group', () => {

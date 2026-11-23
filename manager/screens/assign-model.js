@@ -73,8 +73,9 @@ export function peopleOn(merged, date) {
   }));
 }
 
-// Seconde ligne d'un menage : depart (ou report, ou libelle de l'extra), puis le guest suivant.
-// mgr.planning ne cherche jamais le guest suivant d'un extra : rien a en dire.
+// Seconde ligne d'un menage : depart (ou report, ou libelle de l'extra), puis le guest suivant
+// (Guest arrives first : il arrive avant ce menage reporte). mgr.planning ne cherche jamais le
+// guest suivant d'un extra : rien a en dire.
 export function rowLine(job) {
   const extra = job.kind === 'extra';
   const out = job.checkout ? 'Out ' + job.checkout
@@ -83,18 +84,21 @@ export function rowLine(job) {
         : 'Out time not set';
   const n = job.next;
   const next = !n ? (extra ? '' : 'No next guest')
-    : n.sameDay ? (n.time ? 'Guest arrives ' + n.time : 'Guest arrives the same day')
-      : 'Next guest ' + dayShort(n.date);
+    : n.before ? 'Guest arrives first'
+      : n.sameDay ? (n.time ? 'Guest arrives ' + n.time : 'Guest arrives the same day')
+        : 'Next guest ' + dayShort(n.date);
   return [out, next].filter(Boolean).join(' · ');
 }
 
-// Arrivee le jour meme d'abord, puis heure de depart (sans heure en dernier), puis numero
+// Guest arrive avant le menage reporte d'abord, puis arrivee le jour meme, puis heure (depart,
+// ou heure dediee d'un extra, comme le tri du proxy ; sans heure en dernier), puis numero
 // d'appartement (1602 apres 99), puis cle.
-const sameDay = (j) => (j.next && j.next.sameDay ? 0 : 1);
+const urgency = (j) => (!j.next ? 2 : j.next.before ? 0 : j.next.sameDay ? 1 : 2);
+const timeOf = (j) => j.checkout || (j.extra && j.extra.cleaningTime) || null;
 function order(a, b) {
-  return sameDay(a) - sameDay(b)
-    || Number(a.checkout == null) - Number(b.checkout == null)
-    || String(a.checkout || '').localeCompare(String(b.checkout || ''))
+  return urgency(a) - urgency(b)
+    || Number(timeOf(a) == null) - Number(timeOf(b) == null)
+    || String(timeOf(a) || '').localeCompare(String(timeOf(b) || ''))
     || String(a.apt || '').localeCompare(String(b.apt || ''), 'en', { numeric: true })
     || String(a.key).localeCompare(String(b.key));
 }
