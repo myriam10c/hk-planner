@@ -230,3 +230,49 @@ Deno.test("seuil a risque : app_config.mgr_risk_hours, defaut 6", () => {
   assertEquals(parseRiskHours("2.5"), 2.5);
   for (const v of [null, undefined, "", "abc", "0", "-1", "25"]) assertEquals(parseRiskHours(v), 6);
 });
+
+// Lot 4b : garde « un collegue a change » d'assignCleaner (expect_ids).
+import { assert } from "jsr:@std/assert@1";
+import { assignConflict } from "./mgr_rules.ts";
+
+Deno.test("assignConflict: no expect means no guard", () => {
+  assertEquals(assignConflict([4], undefined), null);
+  assertEquals(assignConflict([4], "x"), null);
+});
+
+Deno.test("assignConflict: same set in any order is no conflict", () => {
+  assertEquals(assignConflict([10, 4], [4, 10]), null);
+  assertEquals(assignConflict([], []), null);
+  // Doublons ignores, valeurs comparees en nombres.
+  assertEquals(assignConflict([4, 10, 4], ["10", 4, 10]), null);
+});
+
+Deno.test("assignConflict: different set returns current sorted", () => {
+  assertEquals(assignConflict([10, 4], []), [4, 10]);
+  assertEquals(assignConflict([], [4]), []);
+  assertEquals(assignConflict([10, 4, 10], [4]), [4, 10]);
+  assertEquals(assignConflict([4], [4, 12]), [4]);
+});
+
+// index.ts n'est pas importable en test (Deno.serve au chargement) : l'ordre des
+// controles d'assignCleaner est verifie sur la source.
+Deno.test("assignCleaner (source) : garde expect_ids avant les conges et toute ecriture, 409 propre", async () => {
+  const src = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  const debut = src.indexOf('if (action === "assignCleaner"');
+  assert(debut >= 0, "handler assignCleaner absent");
+  const b = src.slice(debut, src.indexOf("if (action ===", debut + 10));
+  const garde = b.indexOf("if (Array.isArray(body.expect_ids))");
+  assert(garde > b.indexOf('"reservation_key required"'), "garde absente ou avant le 400");
+  const lecture = b.indexOf('sb.from("cleaning_assignments")', garde);
+  const calcul = b.indexOf("assignConflict(", garde);
+  const refus = b.indexOf('return jsonResp({ error: "Changed by someone else.", current: c }, 409)', garde);
+  assert(lecture > garde && calcul > lecture && refus > calcul, "lecture, comparaison puis 409");
+  assert(b.indexOf('return jsonResp({ error: "Failed to verify the current assignment" }, 500)', garde) > lecture, "echec ferme");
+  // Avant le controle des conges et avant toute ecriture, quel que soit le mode.
+  for (const after of ['sb.from("leave_requests")', ".delete()", ".insert(", ".upsert(", ".update(", "addLog(", "sendPush("]) {
+    const at = b.indexOf(after);
+    assert(at > refus, after + " doit venir apres la garde");
+  }
+  // Le message d'idempotence (traite comme incertain par le front) reste distinct.
+  assert(!b.includes('"Still processing. Retry."'), "aucune reponse du handler ne reprend ce message");
+});

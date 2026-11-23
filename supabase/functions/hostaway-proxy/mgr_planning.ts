@@ -35,6 +35,8 @@ export type PlanJob = {
   next: PlanNext | null; assigned: number[]; serviceType: string | null; state: PlanState;
   cancelled: { reason: string; by: string } | null; laundry: LaundryRow | null; extra: PlanExtra | null;
   tone: Tone; word: string;
+  // Logement habituellement fait par Elite (usuallyEliteListings, ecran Assign du lot 4b).
+  usuallyElite: boolean;
 };
 export type MgrPlanning = {
   start: string; end: string; today: string; generatedAt: string; bookingsAt: string;
@@ -143,9 +145,10 @@ export async function mgrPlanning(sb: any, o: {
     const state: PlanState = doneSet.has(key) ? "done" : startedSet.has(key) ? "in_progress" : "not_started";
     const next = nx ? { date: nx.date, time: hhmm(nx.hour), sameDay: nx.date === date, before: nx.date < date } : null;
     const cancelled = cancMap[key] ?? null;
+    const usuallyElite = elite.has(listingId);
     const st = planStatus({
       date, today: o.today, nowMs: o.nowMs, assigned: rows.length, state,
-      cancelled: !!cancelled, usuallyElite: elite.has(listingId), nextBefore: !!next?.before,
+      cancelled: !!cancelled, usuallyElite, nextBefore: !!next?.before,
     });
     const l = place[listingId] ?? { apt: "", bld: "Listing " + listingId };
     jobs.push({
@@ -154,6 +157,7 @@ export async function mgrPlanning(sb: any, o: {
       checkout: pm ? null : hhmm(hour), guest, next,
       assigned: rows.map((r) => r.id), serviceType: rows[0]?.st ?? null, state, cancelled,
       laundry: linenMap[key] ?? null, extra, tone: st.tone, word: st.word,
+      usuallyElite,
     });
   };
   for (const { r, key } of res) {

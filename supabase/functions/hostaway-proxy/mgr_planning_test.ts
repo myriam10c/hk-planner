@@ -126,6 +126,14 @@ Deno.test("mgr.planning : statuts, heures, reports, linge, extras", async () => 
   assertEquals(fa.next, { date: "2026-10-10", time: "15:00", sameDay: false, before: true });
 });
 
+Deno.test("mgr.planning: usuallyElite flags listings Elite usually does", async () => {
+  const b = await run();
+  // L9 : deux menages Elite en septembre (cleaning_accounting_cache du seed).
+  assertEquals(byKey(b, "2026-10-09_Cy Doe").usuallyElite, true);
+  assertEquals(byKey(b, "2026-10-09_Bo Ray").usuallyElite, false);
+  assertEquals(b.jobs.filter((j) => j.usuallyElite).map((j) => j.key), ["2026-10-09_Cy Doe"]);
+});
+
 Deno.test("mgr.planning : jours (conges approuves, jour ferie), personnes, conges, logements", async () => {
   const b = await run();
   assertEquals(b.days.map((d) => [d.date, d.holiday, d.off]), [

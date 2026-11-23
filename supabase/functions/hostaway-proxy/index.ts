@@ -33,7 +33,7 @@ import {
 } from "./insp_write.ts";
 import { getSecurityContacts, setSecurityContacts } from "./security_contacts.ts";
 import { sessionActor } from "./actor.ts";
-import { checkoutKeys, mgrAccess, MGR_LOOKBACK_DAYS, MGR_PLANNING_ROLES, planningAccess, normalizeMgrReservations, splitListing, withBareKeys, type MgrReservation } from "./mgr_rules.ts";
+import { assignConflict, checkoutKeys, mgrAccess, MGR_LOOKBACK_DAYS, MGR_PLANNING_ROLES, planningAccess, normalizeMgrReservations, splitListing, withBareKeys, type MgrReservation } from "./mgr_rules.ts";
 import { mgrToday } from "./mgr_api.ts";
 import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
@@ -2643,6 +2643,20 @@ Deno.serve(async (req: Request) => {
       // accumule ici et on envoie après l'écriture, pour ne jamais notifier une
       // affectation qui a échoué. Une réaffectation à l'identique ne renotifie pas.
       const pushTargets: number[] = [];
+
+      // Garde « un collegue a change » (lot 4b) : expect_ids = la liste que l'ecran
+      // affiche. Si la liste actuelle differe en tant qu'ensemble, rien n'est ecrit
+      // (ni log ni push) et le 409 rend la liste actuelle. Pour tous les modes,
+      // avant le controle des conges. Sans expect_ids, rien ne change. Message
+      // distinct de « Still processing. Retry. », que le front traite comme incertain.
+      if (Array.isArray(body.expect_ids)) {
+        // Echec ferme : sans la liste actuelle, on n'ecrit pas.
+        const { data: curRows, error: curErr } = await sb.from("cleaning_assignments")
+          .select("cleaner_id").eq("reservation_key", reservation_key);
+        if (curErr) return jsonResp({ error: "Failed to verify the current assignment" }, 500);
+        const c = assignConflict((curRows || []).map((r: any) => Number(r.cleaner_id)), body.expect_ids);
+        if (c !== null) return jsonResp({ error: "Changed by someone else.", current: c }, 409);
+      }
 
       // Blocage strict : on n'assigne pas un menage a quelqu'un dont le conge
       // est approuve ce jour-la. La date de la cle (YYYY-MM-DD_guest, ou

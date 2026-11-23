@@ -204,6 +204,18 @@ export function usuallyEliteListings(rows: Array<{ listing_id: unknown; cleaning
   return new Set(Object.keys(n).filter((k) => n[k] >= MGR_USUALLY_ELITE_MIN_JOBS));
 }
 
+// Garde « un collegue a change » d'assignCleaner (lot 4b). expect = la liste que
+// l'ecran affiche (body.expect_ids). null = pas de garde (expect n'est pas un
+// tableau) ou meme ensemble d'identifiants (ordre et doublons ignores, valeurs
+// comparees en nombres) ; sinon la liste actuelle, sans doublon, triee.
+export function assignConflict(current: number[], expect: unknown): number[] | null {
+  if (!Array.isArray(expect)) return null;
+  const cur = new Set(current.map(Number));
+  const exp = new Set(expect.map(Number));
+  if (cur.size === exp.size && [...cur].every((id) => exp.has(id))) return null;
+  return [...cur].sort((a, b) => a - b);
+}
+
 export function eliteLogDeadlineMs(cleaningDate: string): number {
   return dubaiMs(plusDays(cleaningDate, 1), MGR_ELITE_LOG_HOUR);
 }
