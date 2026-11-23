@@ -1,0 +1,93 @@
+/* Ecran Assign (lot 4b, spec-quick-assign) : une ligne par menage, une initiale par personne.
+ * Meme famille que Today (lot 4a, direction Tiimo) : disques des personnes et bande des jours
+ * reprennent .td-disc et .td-wd. Couleurs : jetons de tokens.css seulement (clair et sombre). */
+.qa{max-width:640px;min-width:0}
+
+/* ---------- Tete ---------- */
+.qa-head{padding:calc(var(--s3) + env(safe-area-inset-top)) 0 var(--s4)}
+.qa-back{display:inline-flex;align-items:center;gap:8px;min-height:44px;min-width:44px;padding:0 12px 0 4px;margin-left:-4px;border-radius:var(--r-pill);color:var(--ink);font-weight:700;text-decoration:none}
+.qa-back::before{content:"";width:9px;height:9px;margin-left:6px;border:solid currentColor;border-width:0 0 2.2px 2.2px;transform:rotate(45deg)}
+.qa-head h1{margin:var(--s1) 0 0;font-family:var(--font-display);font-variation-settings:"SOFT" 100,"WONK" 0;font-weight:340;font-size:clamp(2.6rem,12vw,3.75rem);line-height:1;letter-spacing:-.02em}
+.qa-lede{margin:var(--s2) 0 0;font-size:17px;color:var(--ink-2);max-width:34em;text-wrap:pretty}
+
+/* ---------- Bande des jours (comme .td-week) ---------- */
+.qa-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.qa-day{border:0;background:transparent;color:var(--ink);border-radius:18px;min-height:84px;padding:8px 0;display:grid;justify-items:center;align-content:start;gap:2px;cursor:pointer;min-width:0}
+.qa-dl{font-size:14px;font-weight:600;color:var(--ink-2)}
+.qa-dn{font-family:var(--font-display);font-variation-settings:"SOFT" 100,"WONK" 0;font-weight:340;font-size:24px;line-height:1.1}
+.qa-dc{min-width:24px;height:22px;padding:0 6px;border-radius:var(--r-pill);background:var(--sunk);font-size:14px;font-weight:700;display:grid;place-items:center}
+.qa-dc.qa-zero{background:transparent;color:var(--ink-2);font-weight:600}
+.qa-day[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.qa-day[aria-pressed="true"] .qa-dl{color:var(--accent-ink)}
+.qa-day[aria-pressed="true"] .qa-dc{background:var(--accent-ink);color:var(--accent)}
+.qa-day[aria-pressed="true"] .qa-dc.qa-zero{background:transparent;color:var(--accent-ink)}
+.qa-weeknote{font-size:14px;color:var(--ink-2);margin:var(--s1) 0 var(--s5)}
+/* 320 px : 7 cibles de 44 px tiennent en mangeant une partie de la marge de main. */
+@media (max-width:379px){ .qa-week{margin-inline:-12px;gap:0} }
+
+/* ---------- Lecture seule ---------- */
+.qa-ro{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s2) var(--s3);margin:0 0 var(--s4);padding:var(--s2) var(--s2) var(--s2) var(--s4);border-radius:var(--r-md);background:var(--warn-tint);color:var(--warn-ink)}
+.qa-rol{margin:0;flex:1 1 200px;min-width:0;font-weight:600}
+.qa-btn{border:0;min-height:44px;padding:0 18px;border-radius:var(--r-pill);background:var(--accent);color:var(--accent-ink);font-weight:700;white-space:nowrap;cursor:pointer}
+
+/* ---------- Personnes : la couleur d'un disque est une personne (slot du proxy) ---------- */
+.qa-disc{width:36px;height:36px;border-radius:50%;display:inline-grid;place-items:center;flex:none;font-size:14px;font-weight:700;letter-spacing:.01em;background:var(--qa-bg);color:var(--qa-fg)}
+.qa-loads{list-style:none;margin:0 0 var(--s5);padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.qa-load{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-width:0;min-height:44px;padding:4px 14px 4px 4px;border-radius:var(--r-pill);background:var(--surface);font-size:15px}
+.qa-ln{min-width:0;font-weight:700;overflow-wrap:anywhere}
+.qa-lc{color:var(--ink-2);font-weight:600;white-space:nowrap}
+.qa-load.qa-off .qa-disc{background:transparent;color:var(--ink-2);box-shadow:inset 0 0 0 1.5px var(--line-2)}
+
+/* ---------- Groupes et lignes ---------- */
+.qa-group+.qa-group{margin-top:var(--s5)}
+.qa-gh{margin:0 0 var(--s2);font-size:16px;font-weight:700;line-height:1.3;color:var(--ink)}
+.qa-elite{width:100%;min-height:44px;border:0;border-radius:16px;padding:10px 12px 10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--sunk);color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.qa-chev{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.qa-elite[aria-expanded="false"] .qa-chev{transform:rotate(-90deg)}
+.qa-rows{list-style:none;margin:0;padding:2px 14px;border-radius:var(--r-lg);background:var(--surface)}
+/* Le logement, puis les initiales au bout ; elles passent dessous quand la place manque,
+   toujours sous 420 px. */
+.qa-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:12px 0;min-width:0}
+.qa-row+.qa-row{border-top:1px solid var(--line)}
+.qa-what{flex:1 1 200px;min-width:0;display:grid;gap:2px}
+.qa-place{font-size:17px;font-weight:700;line-height:1.3;overflow-wrap:anywhere}
+.qa-line{font-size:15px;color:var(--ink-2);overflow-wrap:anywhere}
+.qa-ps{display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+@media (max-width:419px){ .qa-what{flex-basis:100%} }
+.qa-empty{margin:0;font-size:17px;color:var(--ink-2)}
+
+/* Initiale : cercle de 44 px ; pas sur le menage = contour, sur le menage = disque plein. */
+.qa-p{position:relative;flex:none;width:44px;height:44px;padding:0;border:0;border-radius:50%;display:inline-grid;place-items:center;background:transparent;color:var(--ink-2);box-shadow:inset 0 0 0 1.5px var(--line);font-size:14px;font-weight:700;letter-spacing:.01em;line-height:1;cursor:pointer;touch-action:manipulation}
+.qa-p[aria-pressed="true"]{background:var(--qa-bg);color:var(--qa-fg);box-shadow:none}
+.qa-p[aria-disabled="true"]{cursor:not-allowed}
+/* Off ce jour-la : grisee et barree, refusee ; reste pleine si elle est deja sur le menage. */
+.qa-p.qa-off{background:var(--sunk);color:var(--ink-3);box-shadow:none}
+.qa-p.qa-off[aria-pressed="true"]{background:var(--qa-bg);color:var(--qa-fg)}
+.qa-p.qa-off::after{content:"";position:absolute;left:8px;right:8px;top:calc(50% - 1px);height:2px;border-radius:2px;background:var(--ring);transform:rotate(-45deg)}
+.qa-row[aria-busy="true"] .qa-p{cursor:progress}
+@media (hover:hover){
+  .qa-p[aria-pressed="false"]:not([aria-disabled="true"]):hover{color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ring)}
+}
+
+/* Couleurs des personnes (slot) : p1 a p4, sous-traitant, autre. */
+.qa-p1{--qa-bg:var(--p1-bg);--qa-fg:var(--p1-fg)} .qa-p2{--qa-bg:var(--p2-bg);--qa-fg:var(--p2-fg)}
+.qa-p3{--qa-bg:var(--p3-bg);--qa-fg:var(--p3-fg)} .qa-p4{--qa-bg:var(--p4-bg);--qa-fg:var(--p4-fg)}
+.qa-sub{--qa-bg:var(--psub-bg);--qa-fg:var(--psub-fg)} .qa-other{--qa-bg:var(--sunk);--qa-fg:var(--ink)}
+
+/* ---------- Focus : anneau visible, a la forme de la cible ---------- */
+.qa-p:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:50%}
+.qa-day:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:18px}
+.qa-elite:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:16px}
+.qa-back:focus-visible,.qa-btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:var(--r-pill)}
+
+/* ---------- Mouvement ---------- */
+@media (prefers-reduced-motion: no-preference){
+  .qa-p{transition:background-color .15s var(--ease-out),box-shadow .15s var(--ease-out),color .15s var(--ease-out),transform .1s var(--ease-out)}
+  .qa-p:active:not([aria-disabled="true"]){transform:scale(.92)}
+  .qa-chev{transition:transform .2s ease}
+  .qa-row[aria-busy="true"] .qa-ps{animation:qa-saving .9s ease-in-out infinite alternate}
+  @keyframes qa-saving{to{opacity:.55}}
+}
+@media (prefers-reduced-motion: reduce){
+  .qa-row[aria-busy="true"] .qa-ps{opacity:.7}
+}
