@@ -103,6 +103,8 @@ test('cache de la veille : date dans le bandeau et Not today\'s data', async ({ 
   await expect(page.locator('.td-date')).not.toContainText('today');
   await expect(page.locator('.td-sum')).toContainText('4 guests arrive on Thursday.');
   await expect(page.locator('.td-sum')).not.toContainText('today');
+  // Panneau des personnes (grand ecran) : titre d'un jour qui n'est pas celui de l'horloge.
+  await expect(page.locator('.td-side h2')).toHaveText('Who has what that day');
   await expect(page.locator('.banner.warn')).toContainText('Data from Thu 08/10 18:40. No connection. Try again. Not today\'s data.');
 });
 

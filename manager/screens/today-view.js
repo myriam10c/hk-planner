@@ -12,7 +12,7 @@ const ROLE = { cleaner: 'Cleaner', subcontractor: 'Subcontractor', manager: 'Man
 export function fmtDur(ms) {
   const m = Math.max(0, Math.round(ms / 60000));
   const h = Math.floor(m / 60), r = m % 60;
-  return h ? h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : '') : r + ' min';
+  return h ? h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : '') : r + ' min';
 }
 export function arrivalMs(day, time) { return Date.parse(day + 'T' + time + ':00+04:00'); }
 function ddmm(day) { return day ? day.slice(8, 10) + '/' + day.slice(5, 7) : ''; }
@@ -202,19 +202,28 @@ function techsHtml(data, nowMs) {
   return h + '</section>';
 }
 
-// ---------- Panneau des personnes (960 px et plus) ----------
+// ---------- Panneau des personnes (1200 px et plus) ----------
+// Ligne d'une personne dans le panneau : un logement bloque montre l'etat de son menage en
+// neutre (page de test), le blocage est deja dit par sa grande carte.
+const JOB_WORD = { done: 'Done', in_progress: 'In progress' };
+function sideRow(u) {
+  const blocked = u.k === 'blocked';
+  const k = blocked ? 'todo' : u.k;
+  const w = blocked ? (JOB_WORD[u.job.state] || 'Not started') : wordOf(u);
+  return '<li><span>' + esc(placeLabel(u)) + '</span><span class="td-st td-k-' + k + '">' + esc(w) + '</span></li>';
+}
 function sideHtml(day, c, data, nowMs) {
   const elite = day.units.filter((u) => u.k === 'elite');
   const expected = elite.length ? '<p class="td-exp">Expected, not logged yet: ' + esc(elite.map((u) => placeLabel(u)).join(', ')) + '.</p>' : '';
   const sub = day.people.find((p) => p.role === 'subcontractor' && (p.assignable || p.count));
-  let h = '<aside class="td-side" aria-label="Team"><div class="td-team"><div class="td-teamh"><h2>' + (c.isToday ? 'Who is where today' : 'Who is where, ' + esc(dayShort(day.date)))
+  let h = '<aside class="td-side" aria-label="Team"><div class="td-team"><div class="td-teamh"><h2>' + (c.isToday ? 'Who is where today' : 'Who has what that day')
     + '</h2>' + MAP + '</div>';
   for (const p of day.people) {
     if (!p.assignable && !p.count) continue;
     const mine = day.units.filter((u) => u.job && u.assigned.indexOf(p.id) >= 0);
     h += '<section class="td-tp"><button class="td-tph" type="button" data-td-filter="' + esc(p.id) + '" aria-pressed="' + pressed(c.ui, p.id) + '">' + disc(p)
       + '<span class="td-tn">' + esc(p.name) + '</span><span class="td-tk2">' + plural(p.count, 'cleaning') + '</span></button>' + locHtml(data, p.id, nowMs)
-      + (mine.length ? '<ul>' + mine.map((u) => '<li><span>' + esc(placeLabel(u)) + '</span><span class="td-st td-k-' + u.k + '">' + esc(wordOf(u)) + '</span></li>').join('') + '</ul>' : '')
+      + (mine.length ? '<ul>' + mine.map(sideRow).join('') + '</ul>' : '')
       + (sub && p.id === sub.id ? expected : '') + '</section>';
   }
   if (!sub && expected) h += '<section class="td-tp">' + expected + '</section>';

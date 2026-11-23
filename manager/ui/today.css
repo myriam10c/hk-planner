@@ -224,11 +224,14 @@ a.count{text-decoration:none;color:inherit}
 .td-exp{margin:6px 0 0;padding-left:46px;color:var(--ink-2)}
 
 @media (min-width:600px){ .td-fchip .td-nm{display:inline} }
-@media (min-width:960px){
+@media (min-width:960px){ .td-head,.td-sum,.td-week,.td-weeknote{max-width:640px} }
+/* Panneau des personnes : la barre laterale (232 px) et les marges de l'appli prennent ~300 px ;
+   a partir de 1200 px seulement, la liste garde plus de 520 px a cote du panneau. En dessous,
+   les puces de personnes filtrent comme sur telephone. */
+@media (min-width:1200px){
   .td-cols{grid-template-columns:minmax(0,1fr) minmax(260px,340px);align-items:start}
   .td-side{display:grid;gap:var(--s5);position:sticky;top:calc(16px + env(safe-area-inset-top))}
   .td-people{display:none}
-  .td-head,.td-sum,.td-week,.td-weeknote{max-width:640px}
 }
 @media (prefers-reduced-motion: no-preference){
   .td-chev{transition:transform .2s ease}

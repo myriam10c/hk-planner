@@ -71,6 +71,8 @@ test('fiche arrivee au clavier : fleches, Entree, Echap rend le focus', async ({
   await expect(sheet).toHaveAttribute('aria-hidden', 'false');
   await expect(sheet.getByRole('heading', { name: 'Apt 103 · Damac Reva' })).toBeVisible();
   await expect(sheet).toContainText('Today, checkout time not set');
+  // Duree insecable (U+00A0) : « 4 h » ne se coupe jamais en fin de ligne.
+  expect(await sheet.textContent()).toContain('4 h from now');
   if (info.project.name === 'mgr-desktop') {
     const box = await sheet.boundingBox();
     expect(Math.round(box!.width)).toBe(460);
@@ -167,6 +169,27 @@ test('le logement bloqué est une grande carte avec ses raisons', async ({ page 
   // Assign someone : la feuille actuelle « Assign a cleaner » (remplacee par le choix dans la carte en tache 4).
   await b.getByRole('button', { name: 'Assign someone' }).click();
   await expect(page.locator('#sheet').getByRole('heading', { name: 'Assign a cleaner' })).toBeVisible();
+});
+
+// Panneau des personnes (grand ecran) : un logement bloque montre l'etat de son menage en
+// neutre (Not started, In progress, Done), jamais un second « Blocked ».
+test('panneau : logement bloque avec l etat neutre de son menage', async ({ page }) => {
+  const body = todayBody();
+  body.who.jobs[0] = { ...body.who.jobs[0], assigned: [4], serviceType: 'CHC', state: 'in_progress', tone: 'warn', word: 'In progress' };
+  body.who.jobs[2] = { ...body.who.jobs[2], state: 'done', tone: 'ok', word: 'Done' };
+  body.who.people[0].keys = ['2026-10-09_Cy Doe', '2026-10-09_Ann Lee'];
+  body.who.unassigned = ['2026-10-09_Lu Mo'];
+  body.arrivals.rows[0] = { ...body.arrivals.rows[0], cause: 'Urgent ticket open: Gas not working (MNT-429).', assigned: [4], cleaners: ['Faiza'] };
+  body.arrivals.rows[1] = { ...body.arrivals.rows[1], tone: 'bad', word: 'Blocked', cause: 'Urgent ticket open: Leak under sink (MNT-431).', done: true };
+  await bootMgr(page, [me(MANAGER), TODAY(body)], { email: true, clock: NOW });
+  await expect(page.locator('.td-blocked')).toHaveCount(2);
+  const faiza = page.locator('.td-side .td-tp', { hasText: 'Faiza' });
+  const st = (apt: string) => faiza.locator('li', { hasText: apt }).locator('.td-st');
+  await expect(st('Apt 308')).toHaveText('In progress');
+  await expect(st('Apt 308')).toHaveClass(/\btd-k-todo\b/);
+  await expect(st('Apt 103')).toHaveText('Done');
+  await expect(st('Apt 103')).toHaveClass(/\btd-k-todo\b/);
+  await expect(faiza.locator('.td-k-blocked')).toHaveCount(0);
 });
 
 test('carte bloquee d un proprietaire : Owner due today, repli sur la cause du proxy', async ({ page }) => {
@@ -276,7 +299,7 @@ test('personne inconnue : disque ?, Member 12', async ({ page }) => {
   await expect(page.locator('.td-fchips [data-td-filter="12"]')).toHaveCount(0);
 });
 
-const WIDTHS = [320, 390, 768, 1440];
+const WIDTHS = [320, 390, 768, 960, 1280, 1440];
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(scheme, () => {
     test.use({ colorScheme: scheme });
@@ -300,3 +323,25 @@ for (const scheme of ['light', 'dark'] as const) {
     });
   });
 }
+
+// Grand ecran : la barre laterale de l'appli (232 px) et les marges prennent ~300 px. Le
+// panneau « Who is where today » ne s'affiche qu'a partir de 1200 px, quand la liste garde au
+// moins 520 px ; en dessous, les puces de personnes filtrent comme sur telephone.
+test('panneau des personnes a partir de 1200 px, puces en dessous', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY()], { email: true, clock: NOW });
+  await expect(h1(page)).toHaveText('Friday');
+  const side = page.locator('.td-side');
+  const chips = page.locator('.td-people');
+  for (const width of [960, 1024, 1199, 1200, 1280, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    if (width < 1200) {
+      await expect(side, width + ' px').toBeHidden();
+      await expect(chips, width + ' px').toBeVisible();
+      await expect(page.locator('.td-fchips [data-td-filter="4"]'), width + ' px').toBeVisible();
+    } else {
+      await expect(side, width + ' px').toBeVisible();
+      await expect(chips, width + ' px').toBeHidden();
+      expect((await page.locator('.td-main').boundingBox())!.width, width + ' px').toBeGreaterThanOrEqual(520);
+    }
+  }
+});
