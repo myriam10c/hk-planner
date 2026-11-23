@@ -192,11 +192,15 @@ function blockedHtml(u, c) {
       return '<li><div class="td-w"><strong>Cleaner: ' + esc(namesIn(u, c)) + '</strong><span>' + esc(r.word + '.' + (u.timesLine ? ' ' + u.timesLine : '')) + '</span></div>'
         + (canPick ? '<button class="td-btn td-ghost" type="button" data-td-who="' + esc(u.id) + '" aria-expanded="' + open + '">Change</button>' : '') + '</li>';
     }
-    return '<li><div class="td-w"><span>' + esc(r.text) + '</span></div></li>';
+    // Cause du proxy ; menage d'avant d'un autre jour sans personne (r.assign) : Assign someone.
+    return '<li><div class="td-w"><span>' + esc(r.text) + '</span></div>'
+      + (r.assign && canPick ? '<button class="td-btn" type="button" data-td-who="' + esc(u.id) + '" aria-expanded="' + open + '">Assign someone</button>' : '') + '</li>';
   }).join('');
   const who = u.arrival.owner ? 'Owner' : 'Guest';
+  // Heure par defaut du proxy (timeSet false) : jamais donnee pour reelle.
+  const due = who + ' due' + (c.isToday ? ' today' : '') + (u.arrival.timeSet ? ' at ' + u.arrival.time : ', time not set');
   return '<article class="td-card td-blocked"><div class="td-bhead"><span class="td-tag">' + BANG + 'Blocked</span><span class="td-due">'
-    + who + ' due ' + (c.isToday ? 'today ' : '') + 'at ' + esc(u.arrival.time) + '</span></div>'
+    + esc(due) + '</span></div>'
     + '<h3 class="td-bt"><button class="td-btitle" type="button" data-td-open="' + esc(u.id) + '">' + esc(placeLabel(u) || 'Apartment') + '</button></h3>'
     + '<ul class="td-why">' + why + '</ul>' + (open ? pickHtml(c.day, u, c.pick.state) : '') + '</article>';
 }

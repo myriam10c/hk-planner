@@ -82,6 +82,8 @@ function causeShown(u) {
 // que son depart : l'heure d'arrivee est celle du moment. Un report remplace « Checkout
 // time not set. » (le depart a eu lieu un autre jour, le proxy ne rend pas son heure).
 // « Checkout time not set. » n'est pas repete quand la cause affichee le dit deja.
+// Heure d'arrivee non fixee (timeSet false, le moment est celui de l'heure par defaut) :
+// « Arrival time not set. », sauf sur une carte Blocked, dont l'en-tete le dit deja.
 function timesLine(u, date, today) {
   const j = u.job;
   const out = [];
@@ -91,7 +93,11 @@ function timesLine(u, date, today) {
     else if (!j.postponedFrom && !(causeShown(u) && u.cause.toLowerCase().indexOf('checkout time not set') >= 0)) out.push('Checkout time not set.');
     if (j.postponedFrom) out.push('Postponed from ' + ddmm(j.postponedFrom) + '.');
   }
-  if (u.arrival || !j) return out.join(' ');
+  if (u.arrival) {
+    if (!u.arrival.timeSet && u.shape !== 'blocked') out.push('Arrival time not set.');
+    return out.join(' ');
+  }
+  if (!j) return out.join(' ');
   const n = u.next;
   if (!n) {
     // mgr.planning ne cherche jamais le prochain guest d'un extra : rien a en dire.
@@ -112,13 +118,15 @@ function timesLine(u, date, today) {
 // Etat d'un menage dit sur la ligne Cleaner d'une carte Blocked (page de test, blocked()).
 const JOB_WORD = { done: 'Done', in_progress: 'In progress' };
 // Raisons d'une carte Blocked : tickets urgents, menage sans personne, sinon la cause du proxy ;
-// puis, quand le menage du jour a deja une personne, la ligne Cleaner (son etat).
+// puis, quand le menage du jour a deja une personne, la ligne Cleaner (son etat). La ligne cause
+// porte Assign someone (assign) quand le logement est affectable et que personne n'est sur son
+// menage (menage d'avant fait un autre jour : aucune ligne « No cleaner assigned »).
 function reasonsOf(u) {
   if (u.k !== 'blocked') return [];
   const out = u.tickets.filter((t) => t.priority === 'urgent')
     .map((t) => ({ type: 'ticket', ref: t.ref, title: t.title, since: t.since, tech: t.tech }));
   if (u.job && u.job.state !== 'done' && !u.assigned.length) out.push({ type: 'cleaning', elite: u.job.elite });
-  if (!out.length) out.push({ type: 'cause', text: u.cause });
+  if (!out.length) out.push({ type: 'cause', text: u.cause, assign: u.canAssign && !u.assigned.length });
   if (u.job && u.assigned.length) out.push({ type: 'cleaner', word: JOB_WORD[u.job.state] || 'Not started' });
   return out;
 }

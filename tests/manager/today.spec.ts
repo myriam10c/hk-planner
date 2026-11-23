@@ -236,6 +236,27 @@ test('carte bloquee d un proprietaire : Owner due today, repli sur la cause du p
   await expect(b.getByRole('button')).toHaveText(['Apt 805 · Azizi Riviera 39']);
 });
 
+// Revue finale (M2) : l'heure d'arrivee par defaut du proxy (timeSet false) n'est jamais donnee
+// pour reelle. Carte Blocked : « Guest due today, time not set » ; autre carte : « Arrival time
+// not set. » dans la ligne des heures. Le logement reste range dans le moment de 15:00.
+test('heure d arrivee non fixee : Guest due today, time not set, Arrival time not set., rangee a 15:00', async ({ page }) => {
+  const body = todayBody();
+  body.arrivals.rows[0] = { ...body.arrivals.rows[0], timeSet: false };
+  body.arrivals.rows[1] = { ...body.arrivals.rows[1], timeSet: false };
+  await bootMgr(page, [me(MANAGER), TODAY(body)], { email: true, clock: NOW });
+  const b = page.locator('.td-blocked', { hasText: 'Apt 308' });
+  await expect(b.locator('.td-due')).toHaveText('Guest due today, time not set');
+  // L'en-tete le dit : la ligne des heures de la carte ne le repete pas.
+  await expect(b.locator('.td-why')).toContainText('Out 12:00.');
+  await expect(b.locator('.td-why')).not.toContainText('Arrival time not set.');
+  const cy = page.locator('.td-card', { has: card(page, '2026-10-09_Cy Doe') });
+  await expect(cy.locator('.td-ti')).toHaveText('Arrival time not set.');
+  const m = page.locator('.td-moment', { has: page.locator('[data-td-moment="arr-1500"]') });
+  await expect(m.locator('.td-mh')).toContainText('Arriving at 15:00');
+  await expect(m).toContainText('Apt 308');
+  await expect(m).toContainText('Apt 103');
+});
+
 test('filtre par personne, puis sans filtre', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), TODAY()], { email: true, clock: NOW });
   await expect(page.locator('[data-td-open]')).toHaveCount(5);

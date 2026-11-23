@@ -73,6 +73,34 @@ test('Assign depuis Today : assignCleaner en mode set, sans actor, Today recharg
   await expect(choice(page)).toHaveCount(0);
 });
 
+// Revue finale (M1) : arrivee bloquee dont le menage d'avant est un autre jour, sans personne.
+// La ligne de la cause du proxy porte Assign someone, qui ouvre le choix dans la carte ; la tuile
+// ecrit sur ce menage d'avant (prevKey), meme ecriture qu'ailleurs.
+test('carte bloquee, menage d un autre jour sans personne : Assign someone sur la cause, ecriture sur prevKey', async ({ page }) => {
+  const body = todayBody();
+  body.arrivals.rows[3] = { ...body.arrivals.rows[3], tone: 'bad', word: 'Blocked', cause: 'No cleaner assigned. The 08/10 checkout.' };
+  await bootMgr(page, [me(MANAGER), TODAY(body), { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
+  // Bouton Location pose avant le premier toucher (il pousse la page : un clic pendant ce decalage se perd).
+  await expect(page.locator('#main > [data-loc-pill]')).toBeVisible();
+  const b = page.locator('.td-blocked', { hasText: 'Apt 805' });
+  const line = b.locator('.td-why li');
+  await expect(line).toHaveCount(1);
+  await expect(line).toContainText('No cleaner assigned. The 08/10 checkout.');
+  const btn = line.getByRole('button', { name: 'Assign someone' });
+  await expect(btn).toHaveAttribute('data-td-who', 'arr:6');
+  await expect(btn).toHaveAttribute('aria-expanded', 'false');
+  await btn.click();
+  const pick = b.locator('.td-pick');
+  await expect(pick).toHaveAttribute('aria-label', 'Who cleans Apt 805 · Azizi Riviera 39?');
+  await expect(btn).toHaveAttribute('aria-expanded', 'true');
+  await expect(pick.locator('[data-td-pick="12"]')).toHaveAttribute('data-key', '2026-10-08_Ed Gu');
+  await pick.locator('[data-td-pick="12"]').click();
+  await expect(page.locator('#toast')).toContainText('Apt 805 · Azizi Riviera 39 assigned to Elite Cleaning');
+  expect(keyed(await writes(page, 'assignCleaner'))).toEqual([
+    { reservation_key: '2026-10-08_Ed Gu', cleaner_ids: [12], mode: 'set', service_type: 'CHC' },
+  ]);
+});
+
 test('double clic sur la personne : une seule ecriture', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK, delay: 400 }], { email: true, clock: NOW });
   await assign308(page).click();

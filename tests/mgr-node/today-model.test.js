@@ -422,7 +422,8 @@ test('reasons : ticket urgent sans technicien, menage Elite, repli sur la cause'
     { type: 'ticket', ref: 'MNT-600', title: 'AC leaking', since: '01/11', tech: 'Semax' },
     { type: 'cleaner', word: 'Not started' },
   ]);
-  assert.deepEqual(unit(d, 'arr:4').reasons, [{ type: 'cause', text: 'Cleaning postponed to 22/11.' }]);
+  // Menage d'avant un autre jour, personne dessus : la cause porte Assign someone (revue finale, M1).
+  assert.deepEqual(unit(d, 'arr:4').reasons, [{ type: 'cause', text: 'Cleaning postponed to 22/11.', assign: true }]);
   assert.deepEqual(unit(d, 'K5').reasons, []); // pas bloque
   // Tous les tickets ouverts du logement restent sur l'unite, urgents ou non.
   assert.deepEqual(unit(d, 'K1').tickets, [
@@ -556,7 +557,7 @@ test('reasons : ligne Cleaner d un logement bloque dont le menage a une personne
     arrivals: [A({ prevKey: 'K2', listingId: 'L2', tone: 'bad', word: 'Blocked', cause: 'Cleaning cancelled in HK Planner after the 20/11 checkout.', assigned: [10] })],
   }));
   assert.deepEqual(unit(cancelled, 'K2').reasons, [
-    { type: 'cause', text: 'Cleaning cancelled in HK Planner after the 20/11 checkout.' },
+    { type: 'cause', text: 'Cleaning cancelled in HK Planner after the 20/11 checkout.', assign: false },
     { type: 'cleaner', word: 'Not started' },
   ]);
   // Menage sans personne : toujours « No cleaner assigned », jamais de ligne Cleaner.
@@ -568,7 +569,7 @@ test('reasons : ligne Cleaner d un logement bloque dont le menage a une personne
   assert.deepEqual(unit(none, 'K1').reasons, [ticket, { type: 'cleaning', elite: false }]);
   // Arrivee seule (aucun menage du jour) : la cause seule.
   const alone = buildToday(today({ arrivals: [A({ id: '4', prevKey: '2026-11-18_Ed Gu', tone: 'bad', word: 'Blocked', cause: 'Cleaning postponed to 22/11.', assigned: [4] })] }));
-  assert.deepEqual(unit(alone, 'arr:4').reasons, [{ type: 'cause', text: 'Cleaning postponed to 22/11.' }]);
+  assert.deepEqual(unit(alone, 'arr:4').reasons, [{ type: 'cause', text: 'Cleaning postponed to 22/11.', assign: false }]);
   // Pas bloque : aucune raison, meme avec une personne.
   assert.deepEqual(unit(blockedWith({}, { tone: 'warn', word: 'At risk' }), 'K1').reasons, []);
   // isNone : menage du jour pas fait, personne dessus, pas attendu chez Elite.
@@ -648,4 +649,55 @@ test('libelles sans today hors du jour de l horloge : moment et liste vide', () 
   assert.equal(emptyLine(empty, { today: false }), 'No cleaning planned for Fri 20.');
   assert.equal(emptyLine(buildAhead(week([]), SAT)), 'No cleaning planned for Sat 21.');
   assert.equal(emptyLine(buildAhead(null, SAT), { today: false }), 'No cleaning planned for Sat 21.');
+});
+
+// 22 (revue finale, M1) : une arrivee bloquee dont le menage precedent est un autre jour (aucun
+// menage du jour a fusionner) et n'a personne n'a que la cause du proxy pour raison. Cette ligne
+// porte « Assign someone » (assign: true) quand le logement est affectable et que personne n'est
+// sur ce menage ; statut et cause du proxy inchanges.
+test('reasons : cause d une arrivee bloquee, menage d un autre jour sans personne, Assign someone', () => {
+  const cause = 'No cleaner assigned. The 18/11 checkout.';
+  const blocked = (o) => unit(buildToday(today({
+    arrivals: [A({ id: '4', listingId: 'L4', prevKey: '2026-11-18_Ed Gu', tone: 'bad', word: 'Blocked', cause, ...o })],
+  })), 'arr:4');
+  const u = blocked({});
+  assert.deepEqual(u.reasons, [{ type: 'cause', text: cause, assign: true }]);
+  assert.deepEqual([u.k, u.tone, u.word, u.cause, u.canAssign, u.key], ['blocked', 'bad', 'Blocked', cause, true, '2026-11-18_Ed Gu']);
+  // Quelqu'un est deja sur ce menage : pas de bouton.
+  assert.deepEqual(blocked({ assigned: [4], cleaners: ['Faiza'] }).reasons, [{ type: 'cause', text: cause, assign: false }]);
+  // Menage d'avant fait : plus affectable, pas de bouton.
+  assert.deepEqual(blocked({ done: true }).reasons, [{ type: 'cause', text: cause, assign: false }]);
+  // Sans menage d'avant : aucune cle d'ecriture, pas de bouton.
+  assert.deepEqual(blocked({ prevKey: null }).reasons, [{ type: 'cause', text: cause, assign: false }]);
+});
+
+// 23 (revue finale, M2) : l'heure d'arrivee par defaut du proxy (15:00, timeSet false) n'est
+// jamais donnee pour reelle. La ligne des heures dit « Arrival time not set. » ; une carte
+// Blocked le dit dans son en-tete (vue), pas dans sa ligne des heures. Le logement reste range
+// dans le moment de 15:00.
+test('heure d arrivee non fixee : Arrival time not set., rangee a 15:00, pas en double sur une carte Blocked', () => {
+  const d = buildToday(today({
+    jobs: [
+      J({ key: 'K1', checkout: '12:00', assigned: [4], tone: 'warn', word: 'Not started', next: nextOn(DAY) }),
+      J({ key: 'K2', listingId: 'L2', apt: '202', next: nextOn(DAY) }),
+    ],
+    arrivals: [
+      A({ id: '1', prevKey: 'K1', timeSet: false, tone: 'warn', word: 'At risk', cause: 'Not started yet, Faiza. Guest in 4 h.', assigned: [4] }),
+      A({ id: '2', listingId: 'L2', apt: '202', prevKey: 'K2', timeSet: false, tone: 'bad', word: 'Blocked', cause: 'No cleaner assigned. Checkout today at 11:00, 4 h turnaround.' }),
+      A({ id: '3', listingId: 'L3', apt: '303', prevKey: '2026-11-18_Fa Ho', timeSet: false, tone: 'warn', word: 'At risk',
+        cause: 'Not logged yet. Elite logs its jobs the next day around 14:00.' }),
+    ],
+  }));
+  assert.equal(unit(d, 'K1').timesLine, 'Out 12:00. Arrival time not set.');
+  assert.equal(unit(d, 'arr:3').timesLine, 'Arrival time not set.');
+  assert.equal(unit(d, 'K2').shape, 'blocked');
+  assert.equal(unit(d, 'K2').arrival.timeSet, false);
+  assert.equal(unit(d, 'K2').timesLine, 'Out 11:00.');
+  assert.deepEqual(d.moments.map((m) => [m.id, m.label, m.unitIds]), [['arr-1500', 'Arriving at 15:00', ['K2', 'K1', 'arr:3']]]);
+  // Heure fixee : rien ne change.
+  const set = buildToday(today({
+    jobs: [J({ key: 'K1', checkout: '12:00', assigned: [4], tone: 'warn', word: 'Not started', next: nextOn(DAY) })],
+    arrivals: [A({ id: '1', prevKey: 'K1', tone: 'warn', word: 'At risk', cause: 'Not started yet, Faiza. Guest in 4 h.', assigned: [4] })],
+  }));
+  assert.equal(unit(set, 'K1').timesLine, 'Out 12:00.');
 });
