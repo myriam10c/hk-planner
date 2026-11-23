@@ -51,12 +51,14 @@ function loads(vm, day) {
 }
 
 // Une initiale par personne : aria-pressed quand elle est sur le menage ; refusee (aria-disabled)
-// quand elle est off ce jour-la ou en lecture seule. Le controleur ignore un toucher refuse.
+// en lecture seule, ou quand elle est off ce jour-la et pas sur le menage (une personne off deja
+// dessus, affectee avant son conge, reste touchable pour la retirer). Le controleur ignore un
+// toucher refuse.
 function personBtn(row, p, day, ro) {
   const on = row.ids.map(Number).includes(Number(p.id));
   return '<button class="qa-p qa-' + slotOf(p) + (p.off ? ' qa-off' : '') + '" type="button" data-qa-key="' + esc(row.key) + '" data-qa-id="' + esc(p.id)
     + '" aria-pressed="' + (on ? 'true' : 'false') + '" aria-label="' + esc(p.name + ', ' + (p.off ? 'off on ' + day : row.place)) + '"'
-    + (p.off || ro ? ' aria-disabled="true"' : '') + '>' + esc(p.ini) + '</button>';
+    + ((p.off && !on) || ro ? ' aria-disabled="true"' : '') + '>' + esc(p.ini) + '</button>';
 }
 function rowHtml(row, vm, day, ro) {
   return '<li class="qa-row" data-qa-row="' + esc(row.key) + '"' + (vm.busy && vm.busy.has(row.key) ? ' aria-busy="true"' : '') + '>'

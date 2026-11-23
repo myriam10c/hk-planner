@@ -81,13 +81,16 @@ function wdayParts(s) {
   return { aria: s.label + ' ' + s.num + (known ? ', ' + plural(s.total, 'cleaning') + ', ' + s.n + ' with no cleaner' : ''),
     count: known ? String(s.n) : '·', zero: !(known && s.n) };
 }
+// Sous la bande, « Assign quickly » ouvre l'ecran Assign (lot 4b) sur le jour choisi.
 function weekHtml(strip) {
+  const sel = strip.find((s) => s.selected);
   return '<nav class="td-week" aria-label="Next seven days">' + strip.map((s) => {
     const p = wdayParts(s);
     return '<button class="td-wd" type="button" data-wday="' + esc(s.date) + '" aria-pressed="' + (s.selected ? 'true' : 'false') + '" aria-label="'
       + esc(p.aria) + '"><span class="td-wl">' + esc(s.label) + '</span><span class="td-wn">' + s.num
       + '</span><span class="td-wc' + (p.zero ? ' td-zero' : '') + '">' + p.count + '</span></button>';
-  }).join('') + '</nav><p class="td-weeknote">Under each day: cleanings with no cleaner yet.</p>';
+  }).join('') + '</nav><p class="td-weeknote">Under each day: cleanings with no cleaner yet.</p>'
+    + (sel ? '<a class="td-qa" href="#/assign?d=' + esc(sel.date) + '">Assign quickly</a>' : '');
 }
 // Comptes d'une puce deja affichee, mis a jour sur place (reponse d'une semaine qui ne touche
 // pas la journee affichee) : rien d'autre n'est rendu, un toucher en cours n'est jamais perdu.

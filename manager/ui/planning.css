@@ -2,6 +2,8 @@
 .pl-top{flex-wrap:wrap}
 .pl-tools{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;justify-content:flex-end;min-width:0}
 .pl-nav{display:flex;align-items:center;gap:6px}
+/* « Assign quickly » (ecran Assign, lot 4b) : raccourci, fond teinte pour le distinguer des outils de la semaine. */
+.pl-qa{background:var(--accent-tint);border-color:var(--ring);font-weight:700}
 .pl-legend{margin-bottom:var(--s3)}
 .pchip .n{color:var(--ink-3);font-variant-numeric:tabular-nums}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;background:var(--pc);flex:none}

@@ -7,8 +7,9 @@ import { getSession } from '/v3/session.js';
 
 export const TIMEOUT_MS = 15000;
 
+// data : corps JSON d'un refus du serveur (ex. 409 de assignCleaner avec current), sinon null.
 export class ApiError extends Error {
-  constructor(message, kind, status) { super(message); this.name = 'ApiError'; this.kind = kind; this.status = status; }
+  constructor(message, kind, status, data) { super(message); this.name = 'ApiError'; this.kind = kind; this.status = status; this.data = data || null; }
 }
 
 // Crochet de test : window.__MGR_TIMEOUT_MS raccourcit le delai.
@@ -60,7 +61,7 @@ async function send(url, init, ms) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) throw new ApiError('Please sign in again.', 'auth', 401);
   if (res.status === 403) throw new ApiError(data.error || 'Not allowed.', 'forbidden', 403);
-  if (!res.ok || data.error) throw new ApiError(data.error || ('Error ' + res.status), 'server', res.status);
+  if (!res.ok || data.error) throw new ApiError(data.error || ('Error ' + res.status), 'server', res.status, data);
   return data;
 }
 

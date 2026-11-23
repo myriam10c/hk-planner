@@ -141,6 +141,28 @@ test('off person aria-disabled', () => {
   assert.ok(on.every((t) => attr(t, 'aria-disabled') === null));
 });
 
+test('off person already on the cleaning can be removed', () => {
+  // Pionah (3) off ce jour-la, deja sur Di Fox (affectee avant son conge) : son bouton reste
+  // actif pour la retirer ; sur les autres lignes, toujours refusee pour l'ajouter.
+  const rows = { ...ROWS, assigned: [ROW({ key: '2026-11-25_Di Fox', place: 'Apt 805 · Azizi Riviera 39', ids: [10, 3], serviceType: 'CHC', group: 'assigned' })] };
+  const h = assignHtml(VM({ rows }));
+  const btns = tagsWithClass(h, 'qa-p').filter((t) => attr(t, 'data-qa-id') === '3');
+  assert.equal(btns.length, 3);
+  const on = btns.filter((t) => attr(t, 'data-qa-key') === '2026-11-25_Di Fox');
+  assert.equal(on.length, 1);
+  assert.equal(attr(on[0], 'aria-pressed'), 'true');
+  assert.equal(attr(on[0], 'aria-disabled'), null);
+  assert.deepEqual(attr(on[0], 'class').split(' '), ['qa-p', 'qa-p3', 'qa-off']);
+  assert.equal(attr(on[0], 'aria-label'), 'Pionah, off on Wed 25');
+  const add = btns.filter((t) => attr(t, 'data-qa-key') !== '2026-11-25_Di Fox');
+  assert.equal(add.length, 2);
+  assert.ok(add.every((t) => attr(t, 'aria-pressed') === 'false' && attr(t, 'aria-disabled') === 'true'));
+  // Lecture seule : refusee, meme pour la retirer.
+  const ro = tagsWithClass(assignHtml(VM({ rows, ro: { [WED]: true } })), 'qa-p')
+    .filter((t) => attr(t, 'data-qa-id') === '3' && attr(t, 'data-qa-key') === '2026-11-25_Di Fox');
+  assert.equal(attr(ro[0], 'aria-disabled'), 'true');
+});
+
 test('read-only line and retry', () => {
   const plain = assignHtml(VM({ ro: { [THU]: true } }));
   assert.equal(plain.includes('Reconnect to make changes.'), false);

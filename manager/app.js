@@ -11,11 +11,11 @@ import { renderPlaceholder } from '/manager/screens/placeholder.js';
 const LABELS = { today: 'Today', planning: 'Planning', maintenance: 'Maintenance', inspections: 'Inspections', more: 'More' };
 // Par role : entrees de navigation, vues permises (Tasks vit sous More), vue d'arrivee.
 const ROLES = {
-  manager: { nav: ['today', 'planning', 'maintenance', 'inspections', 'more'], extra: ['tasks'], landing: 'today' },
+  manager: { nav: ['today', 'planning', 'maintenance', 'inspections', 'more'], extra: ['tasks', 'assign'], landing: 'today' },
   maintenance: { nav: ['maintenance', 'planning'], extra: ['tasks'], landing: 'maintenance' },
 };
-// Vue cachee de la navigation -> entree marquee courante.
-const PARENT = { tasks: 'more' };
+// Vue cachee de la navigation -> entree marquee courante (Assign s'ouvre depuis Today).
+const PARENT = { tasks: 'more', assign: 'today' };
 // Ecrans livres : module et fonction de rendu. Les autres restent provisoires.
 const SCREENS = {
   today: ['/manager/screens/today.js', 'renderToday'],
@@ -24,6 +24,7 @@ const SCREENS = {
   tasks: ['/manager/screens/problems.js', 'renderProblems'],
   inspections: ['/manager/screens/inspections.js', 'renderInspections'],
   more: ['/manager/screens/more.js', 'renderMore'],
+  assign: ['/manager/screens/assign.js', 'renderAssign'],
 };
 const ROLE_KEY = 'mgrRole';
 const main = document.getElementById('main');

@@ -104,6 +104,11 @@ a.count{text-decoration:none;color:inherit}
 .td-wd[aria-pressed="true"] .td-wc.td-zero{background:transparent;color:var(--accent-ink)}
 .td-weeknote{font-size:14px;color:var(--ink-2);margin:var(--s1) 0 var(--s5)}
 @media (max-width:379px){ .td-week{margin-inline:-12px;gap:0} }
+/* « Assign quickly » (ecran Assign, lot 4b) : pastille de 44 px collee a la note (sa marge du bas
+   ramenee a 8 px par la marge negative, qui fusionne avec elle). */
+.td-qa{display:flex;align-items:center;width:max-content;max-width:100%;min-height:44px;margin:calc(var(--s2) - var(--s5)) 0 var(--s5);padding:0 18px;border-radius:var(--r-pill);background:var(--sunk);color:var(--ink);font-size:15px;font-weight:700;text-decoration:none}
+.td-qa:hover{text-decoration:underline;text-underline-offset:3px}
+.td-qa:focus-visible{border-radius:var(--r-pill)}
 
 .td-cols{display:grid;gap:28px}
 .td-main{display:grid;gap:var(--s5);min-width:0;max-width:640px;width:100%}

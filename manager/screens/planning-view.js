@@ -31,12 +31,15 @@ function header(s) {
     : '';
   // Planning du chauffeur (driver.js) : managers seulement, jamais le role maintenance.
   const drv = s.data && s.manager !== false ? '<button class="btn sm" type="button" data-driver>Driver</button>' : '';
+  // Ecran Assign (lot 4b, miroir du lien de Today) : managers seulement ; le jour affiche sur
+  // telephone, le premier jour de la semaine sur la grille.
+  const qa = s.manager !== false ? '<a class="btn sm pl-qa" href="#/assign?d=' + esc(s.wide ? s.start : s.day) + '">Assign quickly</a>' : '';
   return '<header class="top pl-top"><div><h1>Planning</h1><div class="date">' + esc(weekLabel(s.start)) + '</div>' + asof + '</div>'
     + '<div class="pl-tools"><div class="pl-nav" role="group" aria-label="Week">'
     + '<button class="iconbtn" type="button" data-week="-1" aria-label="Previous week" title="Previous week">' + I.prev + '</button>'
     + '<button class="btn sm" type="button" data-week="0">This week</button>'
     + '<button class="iconbtn" type="button" data-week="1" aria-label="Next week" title="Next week">' + I.next + '</button></div>'
-    + sel + drv + add
+    + qa + sel + drv + add
     + '<button class="iconbtn" type="button" data-theme-toggle aria-label="Switch light or dark theme" title="Theme">' + I.theme + '</button></div></header>';
 }
 
