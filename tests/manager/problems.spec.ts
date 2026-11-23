@@ -6,13 +6,15 @@ import { detailTask, listBody, manyRows, TROW } from './problem-fixtures';
 const LIST = (body: any = listBody()) => ({ match: 'action=mgr.problems', status: 200, body });
 const lists = async (page: any) => (await fetchLog(page)).filter((l) => l.url.includes('action=mgr.problems')).map((l) => l.url);
 
-test('liste des taches : titre Tasks, ordre du serveur, ref en Fragment Mono, logement, echeance', async ({ page }) => {
+test('liste des taches : titre Tasks, ordre du serveur, ref a chiffres tabulaires, logement, echeance', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), LIST()], { email: true, clock: NOW, hash: '#/tasks' });
   await expect(page.getByRole('heading', { name: 'Tasks', exact: true })).toBeVisible();
   const rows = page.locator('.prow');
   await expect(rows).toHaveCount(3);
   await expect(rows.locator('.pref')).toHaveText(['TSK-429', 'TSK-13', 'TSK-501']);
-  expect(await rows.first().locator('.pref').evaluate((el) => getComputedStyle(el).fontFamily)).toContain('Fragment Mono');
+  const ref = await rows.first().locator('.pref').evaluate((el) => { const c = getComputedStyle(el); return { font: c.fontFamily, num: c.fontVariantNumeric }; });
+  expect(ref.font).toContain('Manrope');
+  expect(ref.num).toContain('tabular-nums');
   await expect(rows.nth(0)).toContainText('Apt 308 · Binghatti Lavender');
   await expect(rows.nth(0)).toContainText('Unassigned');
   await expect(rows.nth(1)).toContainText('Overdue 15/05');

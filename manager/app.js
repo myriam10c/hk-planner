@@ -83,11 +83,13 @@ function badge(id) {
 function renderNav(view) {
   const cur = PARENT[view] || view;
   const views = ROLES[roleOf()].nav;
-  // Une colonne par entree (2 pour Semax), pas une grille fixe de 5.
-  document.getElementById('tabbar').style.setProperty('--tabs', String(views.length));
-  const link = (cls, id, inner) => '<a class="' + cls + '" href="#/' + id + '"' + (cur === id ? ' aria-current="page"' : '') + '>' + inner + '</a>';
+  const link = (cls, id, inner, attrs) => '<a class="' + cls + '" href="#/' + id + '"' + (attrs || '') + (cur === id ? ' aria-current="page"' : '') + '>' + inner + '</a>';
   document.getElementById('sideNav').innerHTML = views.map((id) => link('navlink', id, I[id] + '<span>' + LABELS[id] + '</span>' + badge(id))).join('');
-  document.getElementById('tabbar').innerHTML = views.map((id) => link('tab', id, '<span class="tab-wrap">' + I[id] + badge(id) + '</span>' + LABELS[id])).join('');
+  // Pilule du telephone (5 entrees, 2 pour Semax) : pictogramme dans une cible de 44 px,
+  // libelle montre par l'onglet courant seul (tous a partir de 600 px), nom porte par aria-label.
+  document.getElementById('tabbar').innerHTML = views.map((id) => link('tab', id,
+    '<span class="tab-wrap">' + I[id] + badge(id) + '</span><span class="tab-l">' + LABELS[id] + '</span>',
+    ' aria-label="' + LABELS[id] + '"')).join('');
   document.getElementById('sideFoot').textContent = me ? 'Signed in as ' + me.name : 'Offline';
 }
 

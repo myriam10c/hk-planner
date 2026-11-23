@@ -18,7 +18,7 @@
 .pinline input{min-height:40px;border:1px solid var(--line-2);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit;font-size:16px;padding:0 var(--s2)}
 .psub{font-size:15px;margin:var(--s3) 0 var(--s2);color:var(--ink-2)}
 
-/* Liste de tri (Linear) : une ligne par probleme, ref en Fragment Mono, ton de priorite. */
+/* Liste de tri (Linear) : une ligne par probleme, ref a chiffres tabulaires, ton de priorite. */
 .asof[hidden]{display:none}
 .psearch{margin:0 0 var(--s3)}
 .psearch input{width:100%;min-height:44px;border:1px solid var(--line-2);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:16px;padding:0 var(--s3)}

@@ -28,7 +28,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await bootMgr(page, [me(MANAGER)], { email: true, hash: '#/more' });
       await expect(page.getByRole('heading', { name: 'More', exact: true })).toBeVisible();
       const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-      expect(bg).toBe(scheme === 'dark' ? 'rgb(10, 11, 14)' : 'rgb(243, 244, 247)');
+      expect(bg).toBe(scheme === 'dark' ? 'rgb(12, 14, 20)' : 'rgb(244, 246, 248)');
       const s = await noHorizontalScroll(page);
       expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
     });
@@ -99,25 +99,32 @@ test('pastille Maintenance : nombre de propositions annonce par mgr:mntbadge', a
 
 // ---------- Revue finale (F3, F8, F10) ----------
 
-test('F3 : barre d onglets, une colonne par entree (2 pour Semax, 5 pour un manager)', async ({ page }, info) => {
+// Pilule flottante : ajustee a ses entrees (2 pour Semax, 5 pour un manager), centree, cibles de 44 px.
+const pill = (page: any) => page.evaluate(() => {
+  const bar = document.getElementById('tabbar')!.getBoundingClientRect();
+  const tabs = Array.from(document.querySelectorAll('#tabbar a')).map((a) => a.getBoundingClientRect());
+  return { left: bar.left, right: bar.right, vw: innerWidth, lastRight: tabs[tabs.length - 1].right, min: Math.min(...tabs.map((r) => Math.min(r.width, r.height))) };
+});
+
+test('F3 : pilule d onglets, 2 entrees pour Semax, ajustee et centree', async ({ page }, info) => {
   test.skip(info.project.name === 'mgr-desktop', 'barre d onglets du telephone');
   await bootMgr(page, [me(SEMAX)], { email: true });
   await expect(page.locator('#tabbar a')).toHaveCount(2);
-  const cols = () => page.evaluate(() => getComputedStyle(document.getElementById('tabbar')!).gridTemplateColumns.split(' ').length);
-  expect(await cols()).toBe(2);
-  const w = await page.evaluate(() => {
-    const bar = document.getElementById('tabbar')!.getBoundingClientRect();
-    const last = document.querySelectorAll('#tabbar a')[1].getBoundingClientRect();
-    return { bar: bar.right, last: last.right };
-  });
-  expect(w.bar - w.last).toBeLessThan(20);
+  const g = await pill(page);
+  expect(g.right - g.lastRight).toBeLessThan(20);
+  expect(Math.abs(g.left - (g.vw - g.right))).toBeLessThan(2);
+  expect(g.min).toBeGreaterThanOrEqual(44);
 });
 
-test('F3 : manager, 5 colonnes', async ({ page }, info) => {
+test('F3 : manager, 5 entrees dans la pilule, sans depasser l ecran', async ({ page }, info) => {
   test.skip(info.project.name === 'mgr-desktop', 'barre d onglets du telephone');
   await bootMgr(page, [me(MANAGER), { match: 'action=mgr.today', status: 200, body: {} }], { email: true, hash: '#/more' });
   await expect(page.locator('#tabbar a')).toHaveCount(5);
-  expect(await page.evaluate(() => getComputedStyle(document.getElementById('tabbar')!).gridTemplateColumns.split(' ').length)).toBe(5);
+  const g = await pill(page);
+  expect(g.left).toBeGreaterThanOrEqual(0);
+  expect(g.right).toBeLessThanOrEqual(g.vw);
+  expect(Math.abs(g.left - (g.vw - g.right))).toBeLessThan(2);
+  expect(g.min).toBeGreaterThanOrEqual(44);
 });
 
 test('F10 : Semax ouvre #/tasks (vue cachee, sans entree de navigation) et une push ?task= y arrive', async ({ page }, info) => {

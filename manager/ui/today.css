@@ -134,5 +134,5 @@ a.count{text-decoration:none;color:inherit}
 .loc-ln{color:var(--ink-2);font-size:14px;overflow-wrap:anywhere}
 .loc-ln.stale{color:var(--ink-3)}
 .sec-side{display:inline-flex;align-items:baseline;gap:var(--s3);flex:none}
-.sec-link{display:inline-flex;align-items:center;min-height:44px;margin:-12px 0;color:var(--accent);font-size:15px;font-weight:600;text-decoration:none}
+.sec-link{display:inline-flex;align-items:center;min-height:44px;margin:-12px 0;color:var(--ink);font-size:15px;font-weight:600;text-decoration:underline;text-underline-offset:3px}
 .sec-link:hover{text-decoration:underline}

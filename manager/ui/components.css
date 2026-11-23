@@ -1,13 +1,21 @@
 /* Coquille, en-tete, cartes, boutons, pastilles, panneau, toast (prototype Today). */
 .app{min-height:100vh;display:block}
 .sidebar{display:none}
-main{padding:0 16px 112px;max-width:1240px;margin:0 auto}
+main{padding:0 16px calc(112px + env(safe-area-inset-bottom));max-width:1240px;margin:0 auto}
 .boot{color:var(--ink-3);padding:var(--s8) 0}
-.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(var(--tabs,5),minmax(0,1fr));padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
-.tab{background:none;border:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;font-size:12px;font-weight:500;color:var(--ink-3);cursor:pointer;border-radius:10px;white-space:nowrap;text-decoration:none;min-width:0}
-.tab svg{width:24px;height:24px}
-.tab[aria-current="page"]{color:var(--accent)}
-.tab-wrap{position:relative}
+/* Barre d'onglets du telephone : pilule flottante centree (page de test du 20/11).
+   Pictogramme dans une cible de 44 px ; libelle de l'onglet courant seul, tous a partir de 600 px. */
+.tabbar{position:fixed;left:0;right:0;margin:0 auto;bottom:calc(12px + env(safe-area-inset-bottom));z-index:20;width:max-content;max-width:calc(100% - 16px);display:flex;gap:2px;padding:6px;background:var(--surface);border-radius:var(--r-pill);box-shadow:var(--shadow),0 0 0 1px var(--line)}
+.tab{position:relative;flex:0 1 auto;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;padding:0 10px;border:0;border-radius:var(--r-pill);background:none;font-size:14px;font-weight:700;line-height:1.2;color:var(--ink-2);cursor:pointer;white-space:nowrap;text-decoration:none}
+.tab svg{width:22px;height:22px;display:block}
+.tab-wrap{position:relative;flex:none}
+.tab-l{display:none;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.tab[aria-current="page"]{background:var(--accent);color:var(--accent-ink);padding:0 12px 0 10px}
+.tab[aria-current="page"] .tab-l{display:block}
+@media (min-width:600px){
+  .tab{padding:0 12px 0 10px}
+  .tab-l{display:block}
+}
 .bare .sidebar,.bare .tabbar{display:none !important}
 @media (min-width:960px){
   .app{display:grid;grid-template-columns:var(--sidebar) minmax(0,1fr)}
@@ -25,7 +33,7 @@ main{padding:0 16px 112px;max-width:1240px;margin:0 auto}
 }
 
 .top{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--s3);padding:calc(var(--s5) + env(safe-area-inset-top)) 0 var(--s4)}
-.top h1{margin:0;font-size:34px;line-height:1.1;font-weight:700;letter-spacing:-.02em}
+.top h1{margin:0;font-family:var(--font-display);font-variation-settings:"SOFT" 100,"WONK" 0;font-size:34px;line-height:1.1;font-weight:380;letter-spacing:-.02em}
 .top .date{color:var(--ink-2);font-size:16px;margin-top:2px}
 .asof{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:13px;color:var(--ink-3);margin-top:6px}
 .asof::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok)}
@@ -53,14 +61,15 @@ section.card{background:var(--surface);border:1px solid var(--line);border-radiu
 .empty.pad{padding:var(--s3) var(--s4)}
 .note{color:var(--ink-3);font-size:14px;margin-top:var(--s2)}
 
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:0 14px;border-radius:10px;border:1px solid var(--line-2);background:var(--surface);font-weight:600;font-size:15px;cursor:pointer;white-space:nowrap;text-decoration:none;color:var(--ink);transition:background-color .15s var(--ease-out),transform .1s var(--ease-out)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 16px;border-radius:var(--r-pill);border:1px solid var(--line-2);background:var(--surface);font-weight:600;font-size:15px;cursor:pointer;white-space:nowrap;text-decoration:none;color:var(--ink);transition:background-color .15s var(--ease-out),transform .1s var(--ease-out)}
 .btn:hover{background:var(--surface-2)}
 .btn:active{transform:translateY(1px)}
 .btn[disabled]{opacity:.55;cursor:default}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.primary:hover{filter:brightness(1.06)}
-.btn.sm{min-height:36px;padding:0 12px;font-size:14px}
-.link{background:none;border:0;padding:0;color:var(--accent);font-weight:600;cursor:pointer;font-size:15px;text-decoration:none}
+.btn.sm{min-height:44px;padding:0 14px;font-size:14px}
+/* Liens : encre soulignee (l'accent n'est plus bleu). */
+.link{background:none;border:0;padding:0;color:var(--ink);font-weight:600;cursor:pointer;font-size:15px;text-decoration:underline;text-underline-offset:3px}
 
 .ph{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s6) var(--s5)}
 .ph h2{margin:0 0 var(--s2);font-size:24px}
@@ -91,14 +100,13 @@ section.card{background:var(--surface);border:1px solid var(--line);border-radiu
 
 .toast{position:fixed;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));transform:translate(-50%,16px);opacity:0;z-index:60;background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:12px;font-size:15px;display:flex;gap:var(--s3);align-items:center;transition:opacity .18s var(--ease-out),transform .18s var(--ease-out);max-width:calc(100vw - 32px);pointer-events:none}
 .toast.on{opacity:1;transform:translate(-50%,0);pointer-events:auto}
-.toast button{background:none;border:0;color:var(--accent);font-weight:700;cursor:pointer;padding:4px}
-:root[data-theme="dark"] .toast button{color:#0a6fd6}
+.toast button{background:none;border:0;color:inherit;font-weight:700;cursor:pointer;padding:4px;text-decoration:underline;text-underline-offset:3px}
 @media (min-width:960px){ .toast{bottom:28px} }
 .ro-note{margin:0;color:var(--muted,inherit);font-weight:500;flex:1}
 
 /* Pastille des problemes urgents dans la navigation. */
-.nbadge{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--bad);color:var(--surface);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;margin-left:auto}
-.tab .nbadge{position:absolute;top:-6px;right:-14px;margin:0}
+.nbadge{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--bad);color:var(--on-bad);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;margin-left:auto}
+.tab .nbadge{position:absolute;top:-8px;right:-6px;margin:0}
 
 /* Ecran plein d'abonnement aux notifications (push-bar.js). */
 .pushprompt{position:fixed;inset:0;z-index:70;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:calc(var(--s6) + env(safe-area-inset-top)) var(--s4) calc(var(--s6) + env(safe-area-inset-bottom));overflow-y:auto}

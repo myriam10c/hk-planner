@@ -1,55 +1,75 @@
-/* HK Planner manager · tokens du prototype Today valide le 09/10/2026 (ADN Flighty).
- * Statuts : vert #039855, ambre #F79009 sur #FEF0C7, rouge #D92D20 sur #FEE4E2. */
+/* HK Planner manager · jetons de la direction Tiimo (page de test validee le 20/11/2026, lot 4a).
+ * Accent = encre bleu nuit ; vert, ambre et rouge restent des couleurs d'etat.
+ * Familles : personnes (p1 a p4, sous-traitant psub), moments (jour, nuit, neutre),
+ * couleur d'une personne au Planning (pc-*). Couleurs en dur seulement ici. */
 :root{
-  --bg:#f3f4f7; --surface:#ffffff; --surface-2:#f7f8fa; --sunk:#eceef2;
-  --ink:#0c0e13; --ink-2:#454c5a; --ink-3:#6b7282; --line:#e2e5ea; --line-2:#d3d7de;
-  --accent:#0a6fd6; --accent-ink:#ffffff; --accent-tint:#e5f1fd;
-  --ok:#039855; --ok-ink:#05603a; --ok-tint:#e2f5ea;
+  --bg:#f4f6f8; --surface:#ffffff; --surface-2:#f4f6f8; --sunk:#ebedf1;
+  --ink:#191f2e; --ink-2:#555b68; --ink-3:#5f6573; --line:#dfe1e6; --line-2:#cfd3da; --ring:#8d929e;
+  --accent:#191f2e; --accent-ink:#f9fafc; --accent-tint:#ebedf1;
+  --ok:#006a3f; --ok-ink:#05603a; --ok-tint:#e2f5ea; --on-ok:#ffffff;
   --warn:#f79009; --warn-ink:#93370d; --warn-tint:#fef0c7;
-  --bad:#d92d20; --bad-ink:#912018; --bad-tint:#fee4e2;
-  --scrim:rgba(10,12,18,.42); --shadow:0 1px 2px rgba(16,20,30,.06),0 8px 28px rgba(16,20,30,.08);
+  --bad:#b7191c; --bad-ink:#912018; --bad-tint:#ffeae7; --on-bad:#ffffff;
+  --scrim:rgba(10,12,18,.42); --shadow:0 1px 2px rgba(25,31,46,.05),0 10px 28px rgba(25,31,46,.07);
   --shadow-sm:0 1px 2px rgba(16,20,30,.08);
-  --focus:#0a6fd6;
-  --font-ui:"Onest",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --font-mono:"Fragment Mono",ui-monospace,"SF Mono",Menlo,monospace;
-  --r-sm:8px; --r-md:12px; --r-lg:18px;
+  --focus:#4163e4;
+  --font-ui:"Manrope",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-display:"Fraunces","Iowan Old Style","Palatino Linotype",Georgia,serif;
+  --font-mono:var(--font-ui);
+  --r-sm:10px; --r-md:14px; --r-lg:22px; --r-pill:999px;
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px;
   --ease-out:cubic-bezier(.16,1,.3,1); --ease-in:cubic-bezier(.7,0,.84,0);
   --sidebar:232px;
+  /* Personnes : disque (fond, texte), cleaners p1 a p4 puis sous-traitant. */
+  --p1-bg:#b1eed5; --p1-fg:#003e2c; --p2-bg:#bee4ff; --p2-fg:#033761;
+  --p3-bg:#ffcee0; --p3-fg:#661e40; --p4-bg:#dfe4aa; --p4-fg:#353d0b;
+  --psub-bg:#d7dbe3; --psub-fg:#272d3d;
+  /* Moments de la journee : teinte de la pastille et son point. */
+  --m-day:#ffe9cc; --m-day-dot:#d28425; --m-night:#efe6ff; --m-night-dot:#8059bb;
+  --m-any:#ebedf1; --m-any-dot:#8d929e;
   /* Une couleur par personne au Planning (cleaners p1 a p4, sous-traitant). */
-  --pc-1:#7a5af8; --pc-2:#dd2590; --pc-3:#0e9384; --pc-4:#6172f3; --pc-sub:#0086c9;
+  --pc-1:#007757; --pc-2:#0b67a9; --pc-3:#a13567; --pc-4:#626a09; --pc-sub:#5c6375;
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --bg:#0a0b0e; --surface:#14161b; --surface-2:#1a1d23; --sunk:#202329;
-    --ink:#f2f4f7; --ink-2:#b4bac5; --ink-3:#8a919e; --line:#252830; --line-2:#323641;
-    --accent:#4ea8ff; --accent-ink:#06121f; --accent-tint:#10243a;
-    --ok:#32d583; --ok-ink:#6ce9a6; --ok-tint:#0d2a1d;
+    --bg:#0c0e14; --surface:#161921; --surface-2:#1b1e26; --sunk:#21242b;
+    --ink:#edeef3; --ink-2:#a6abb5; --ink-3:#9399a5; --line:#2b2e35; --line-2:#3a3e48; --ring:#6f7481;
+    --accent:#edeef3; --accent-ink:#0f1118; --accent-tint:#21242b;
+    --ok:#65d097; --ok-ink:#6ce9a6; --ok-tint:#0d2a1d; --on-ok:#0a140e;
     --warn:#fdb022; --warn-ink:#fec84b; --warn-tint:#2e2109;
-    --bad:#f97066; --bad-ink:#fda29b; --bad-tint:#33130f;
+    --bad:#fe8c80; --bad-ink:#fda29b; --bad-tint:#451e1b; --on-bad:#1a0e0d;
     --scrim:rgba(0,0,0,.6); --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45); --shadow-sm:0 1px 2px rgba(0,0,0,.5);
-    --focus:#4ea8ff; color-scheme:dark;
-    --pc-1:#9b8afb; --pc-2:#f670c7; --pc-3:#2ed3b7; --pc-4:#8098f9; --pc-sub:#36bffa;
+    --focus:#88a9ff; color-scheme:dark;
+    --p1-bg:#164737; --p1-fg:#c2f5e0; --p2-bg:#1d3f60; --p2-fg:#d1ecff;
+    --p3-bg:#632f44; --p3-fg:#ffe1ec; --p4-bg:#3c4119; --p4-fg:#e8edb8;
+    --psub-bg:#343840; --psub-fg:#e5e8ed;
+    --m-day:#3b2a17; --m-day-dot:#eca851; --m-night:#322843; --m-night-dot:#ba9cef;
+    --m-any:#21242b; --m-any-dot:#7b808d;
+    --pc-1:#79d2b2; --pc-2:#7ec4ff; --pc-3:#ff98c2; --pc-4:#bbc67a; --pc-sub:#b6bed0;
   }
 }
 :root[data-theme="dark"]{
-  --bg:#0a0b0e; --surface:#14161b; --surface-2:#1a1d23; --sunk:#202329;
-  --ink:#f2f4f7; --ink-2:#b4bac5; --ink-3:#8a919e; --line:#252830; --line-2:#323641;
-  --accent:#4ea8ff; --accent-ink:#06121f; --accent-tint:#10243a;
-  --ok:#32d583; --ok-ink:#6ce9a6; --ok-tint:#0d2a1d;
+  --bg:#0c0e14; --surface:#161921; --surface-2:#1b1e26; --sunk:#21242b;
+  --ink:#edeef3; --ink-2:#a6abb5; --ink-3:#9399a5; --line:#2b2e35; --line-2:#3a3e48; --ring:#6f7481;
+  --accent:#edeef3; --accent-ink:#0f1118; --accent-tint:#21242b;
+  --ok:#65d097; --ok-ink:#6ce9a6; --ok-tint:#0d2a1d; --on-ok:#0a140e;
   --warn:#fdb022; --warn-ink:#fec84b; --warn-tint:#2e2109;
-  --bad:#f97066; --bad-ink:#fda29b; --bad-tint:#33130f;
+  --bad:#fe8c80; --bad-ink:#fda29b; --bad-tint:#451e1b; --on-bad:#1a0e0d;
   --scrim:rgba(0,0,0,.6); --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45); --shadow-sm:0 1px 2px rgba(0,0,0,.5);
-  --focus:#4ea8ff; color-scheme:dark;
-  --pc-1:#9b8afb; --pc-2:#f670c7; --pc-3:#2ed3b7; --pc-4:#8098f9; --pc-sub:#36bffa;
+  --focus:#88a9ff; color-scheme:dark;
+  --p1-bg:#164737; --p1-fg:#c2f5e0; --p2-bg:#1d3f60; --p2-fg:#d1ecff;
+  --p3-bg:#632f44; --p3-fg:#ffe1ec; --p4-bg:#3c4119; --p4-fg:#e8edb8;
+  --psub-bg:#343840; --psub-fg:#e5e8ed;
+  --m-day:#3b2a17; --m-day-dot:#eca851; --m-night:#322843; --m-night-dot:#ba9cef;
+  --m-any:#21242b; --m-any-dot:#7b808d;
+  --pc-1:#79d2b2; --pc-2:#7ec4ff; --pc-3:#ff98c2; --pc-4:#bbc67a; --pc-sub:#b6bed0;
 }
 *{box-sizing:border-box}
 html,body{margin:0;overflow-x:clip}
-body{background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit}
 .tnum{font-variant-numeric:tabular-nums}
-.mono{font-family:var(--font-mono);font-size:14px;letter-spacing:0}
+.mono{font-family:var(--font-mono);font-size:14px;letter-spacing:0;font-variant-numeric:tabular-nums}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:6px}
 @media (prefers-reduced-motion: reduce){
   *{transition-duration:.01ms !important;animation-duration:.01ms !important}

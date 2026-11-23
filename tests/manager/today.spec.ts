@@ -25,7 +25,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(faiza).toContainText('--:--');
       await expect(faiza).toContainText('checkout time not set');
       const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-      expect(bg).toBe(scheme === 'dark' ? 'rgb(10, 11, 14)' : 'rgb(243, 244, 247)');
+      expect(bg).toBe(scheme === 'dark' ? 'rgb(12, 14, 20)' : 'rgb(244, 246, 248)');
       const s = await noHorizontalScroll(page);
       expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
       const y = async (name: string) => (await h(name).boundingBox())!.y;
