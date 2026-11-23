@@ -47,8 +47,8 @@ export async function renderToday(ctx) {
     return memo.day;
   }
   // Semaines mgr.planning lues pour les autres jours, en memoire pour la vie de l'ecran :
-  // start -> { data, fresh, loading, error, seq, at }. wseq : garde contre une reponse tardive.
-  // at : heure de la derniere reponse fraiche.
+  // start -> { data, fresh, loading, error, seq, at, p }. wseq : garde contre une reponse tardive.
+  // at : heure de la derniere reponse fraiche ; p : la derniere lecture demandee (promesse).
   const weeks = {};
   let wseq = 0;
   // Journee d'un autre jour (buildAhead), calculee une fois par reponse mgr.planning et par jour.
@@ -257,8 +257,13 @@ export async function renderToday(ctx) {
   // affichee dans cette semaine : repeinte (paint garde le choix ouvert, les tuiles desactivees
   // pendant une ecriture et le focus). Sinon seules les puces de la bande changent, sur place :
   // une reponse en arriere-plan ne remplace jamais une carte qu'on est en train de toucher.
-  async function loadWeek(start) {
-    const w = weeks[start] || (weeks[start] = { data: null, fresh: false, loading: false, error: null, seq: 0, at: 0 });
+  function loadWeek(start) {
+    const p = readWeek(start);
+    weeks[start].p = p;
+    return p;
+  }
+  async function readWeek(start) {
+    const w = weeks[start] || (weeks[start] = { data: null, fresh: false, loading: false, error: null, seq: 0, at: 0, p: null });
     const mine = ++wseq;
     w.seq = mine;
     w.loading = true;
@@ -296,6 +301,19 @@ export async function renderToday(ctx) {
   function paintIfShown(start) {
     const d = otherDay();
     if (d && weekStartOf(d) === start) paint();
+  }
+  // Relecture de la semaine attendue avant un geste d'un autre jour : celle deja en cours, sinon
+  // une nouvelle. Une lecture supplantee (retour sur l'onglet, Retry) ne compte pas : la derniere
+  // demandee est attendue a son tour.
+  async function weekRead(start) {
+    const w0 = weeks[start];
+    let p = w0 && w0.loading && w0.p ? w0.p : loadWeek(start);
+    for (;;) {
+      await p;
+      const w = weeks[start];
+      if (!w.loading || w.p === p) return;
+      p = w.p;
+    }
   }
   // Bande : chaque semaine que touchent les six jours suivants, lue une fois (sans attendre).
   function loadStrip() {
@@ -359,8 +377,8 @@ export async function renderToday(ctx) {
     return j && !j.cancelled && j.state !== 'done' ? { j, w, start: weekStartOf(d), day: d } : null;
   }
   // Disque d'une carte d'un autre jour : semaine fraiche obligatoire, relue d'abord si lue il y
-  // a plus d'une minute (opening : une seule relecture attendue a la fois). Relecture en echec :
-  // anciennes donnees gardees, choix refuse.
+  // a plus d'une minute (opening : une seule relecture attendue a la fois, partagee avec la
+  // tuile). Relecture en echec : anciennes donnees gardees, choix refuse.
   let opening = false;
   async function openAheadPick(id) {
     const d = otherDay();
@@ -372,7 +390,7 @@ export async function renderToday(ctx) {
     if (isStale(w.at, Date.now())) {
       if (opening) return;
       opening = true;
-      try { await loadWeek(start); } finally { opening = false; }
+      try { await weekRead(start); } finally { opening = false; }
       if (!ctx.isCurrent() || otherDay() !== d) return;
       w = weeks[start];
       if (!w.fresh) { refuseRo(); return; }
@@ -380,6 +398,31 @@ export async function renderToday(ctx) {
     const u = aheadDayOf(w, d).units.find((x) => x.id === id);
     if (!u || !u.canAssign) return;
     showPick(id);
+  }
+  // Tuile d'une personne sur un autre jour (calquee sur pickPerson) : semaine de plus d'une
+  // minute, ou en cours de lecture, relue d'abord (verrou opening) ; l'ecriture part sur la
+  // semaine relue (Undo compris). Relecture en echec : refus. Abandon si le choix a ete ferme ou
+  // a change, si le jour a change, ou si le menage n'est plus a affecter.
+  async function pickAhead(key, pid) {
+    const id = st.ui.pick;
+    const d = otherDay();
+    if (!d) return;
+    const start = weekStartOf(d);
+    let w = weeks[start];
+    if (!w || !w.data) return;
+    if (!w.fresh) { refuseRo(); return; }
+    if (w.loading || isStale(w.at, Date.now())) {
+      if (opening) return;
+      opening = true;
+      try { await weekRead(start); } finally { opening = false; }
+      if (!ctx.isCurrent() || otherDay() !== d) return;
+      w = weeks[start];
+      if (!w.fresh) { refuseRo(); return; }
+    }
+    if (id == null || st.ui.pick !== id) return;
+    const u = aheadDayOf(w, d).units.find((x) => x.id === id);
+    if (!u || !u.canAssign || u.key !== key) return;
+    aheadAssign(key, pid, aheadPlace(id, isNone(u), d));
   }
   // Choix dans une carte d'un autre jour : meme compte rendu que pickPlace ; l'enchainement
   // vers le menage suivant sans cleaner suit la relecture de la semaine (settleWeek).
@@ -676,11 +719,7 @@ export async function renderToday(ctx) {
     if (el.hasAttribute('data-td-wpick')) {
       if (el.disabled) return;
       if (st.busy || el.getAttribute('aria-disabled') === 'true') { busyToast(); return; }
-      const t = aheadJob(el.getAttribute('data-key'));
-      if (!t) return;
-      if (!t.w.fresh) { refuseRo(); return; }
-      const u = aheadDayOf(t.w, t.day).units.find((x) => x.key === t.j.key);
-      aheadAssign(t.j.key, el.getAttribute('data-td-wpick'), u ? aheadPlace(u.id, isNone(u), t.day) : null);
+      pickAhead(el.getAttribute('data-key'), el.getAttribute('data-td-wpick'));
       return;
     }
     // Choix dans la carte. Cancel le ferme, meme pendant une ecriture (elle continue, le

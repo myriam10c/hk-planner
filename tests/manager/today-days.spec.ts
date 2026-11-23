@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { bootMgr, fetchDone, fetchLog, MANAGER, me, noHorizontalScroll } from './helpers';
 import { lookMetrics } from './look';
 import { NOW, todayBody } from './fixtures';
-import { daysOf, IDEM, OK, planningBody } from './planning-fixtures';
+import { daysOf, IDEM, noIdem, OK, planningBody } from './planning-fixtures';
 
 // Today, bande de sept jours (lot 4a, tache 5) : le jour des donnees puis six jours lus dans
 // mgr.planning, en arriere-plan apres le premier rendu de Today. Un autre jour : meme gabarit
@@ -64,6 +64,15 @@ const card = (page: Page, text: string) => page.locator('.td-card', { hasText: t
 const disc = (page: Page, key: string) => page.locator('[data-td-who="' + key + '"]');
 const choice = (page: Page) => page.locator('.td-pick');
 const wtile = (page: Page, pid: string) => page.locator('.td-pick [data-td-wpick="' + pid + '"]');
+const backToTab = (page: Page) => page.evaluate(() => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  document.dispatchEvent(new Event('visibilitychange'));
+});
+const frame = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
+// Ordre des lectures de la semaine du 5 octobre et des affectations.
+const weekAndWrites = async (page: Page) => (await fetchLog(page))
+  .filter((l) => l.url.includes('start=2026-10-05') || l.url.endsWith('action=assignCleaner'))
+  .map((l) => (l.url.endsWith('action=assignCleaner') ? 'write' : 'week'));
 
 test('Today est affiche avant la reponse de mgr.planning, les comptes de la bande arrivent ensuite', async ({ page }) => {
   await boot(page, [me(MANAGER), TODAY(), WEEK1(weekBody(), { delay: 2500 }), WEEK2(nextWeekBody(), { delay: 2500 })], { email: true, clock: NOW });
@@ -389,6 +398,98 @@ test('semaine de plus de 60 s, relecture en echec : pas de choix, Reconnect, anc
   await expect(page.locator('.banner.warn')).toContainText('Reconnect to make changes.');
   await expect(page.locator('[data-td-who]')).toHaveCount(0);
   expect((await writes(page, 'assignCleaner')).length).toBe(0);
+});
+
+// Tuile d'un autre jour (revue finale, Important 1) : le choix ouvert d'office peut rester ouvert
+// longtemps ; une tuile touchee sur une semaine de plus de 60 s la relit d'abord (meme regle que
+// la tuile de Today). L'Undo remet la liste relue, pas celle de la vieille semaine.
+test('tuile d un autre jour touchee apres plus de 60 s : semaine relue avant l ecriture, Undo vers la liste relue', async ({ page }) => {
+  // Entre-temps, quelqu'un a mis Elite Cleaning sur Apt 707 dans le Planning.
+  const later = weekBody();
+  Object.assign(later.jobs.find((j: any) => j.key === JK), { assigned: [12], serviceType: 'CHC', tone: 'idle', word: 'Scheduled' });
+  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, { ...WEEK1(), once: true }, WEEK1(later), WEEK2()],
+    { email: true, clock: NOW });
+  await expect(counts(page).nth(1)).toHaveText('1');
+  await chip(page, '2026-10-10').click();
+  // Choix ouvert d'office sur Apt 707, laisse ouvert plus d'une minute.
+  await expect(card(page, 'Apt 707').locator('.td-pick')).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await wtile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Apt 707 · Marina Gate assigned to Pionah');
+  expect((await weekAndWrites(page)).slice(0, 3)).toEqual(['week', 'week', 'write']);
+  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([{ reservation_key: JK, cleaner_ids: [10], mode: 'set', service_type: 'CHC' }]);
+  // Undo : la liste lue dans la semaine relue (Elite Cleaning), jamais « nobody ».
+  await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
+  expect(noIdem(await writes(page, 'assignCleaner'))[1]).toEqual({ reservation_key: JK, cleaner_ids: [12], mode: 'set', service_type: 'CHC' });
+  await expect(page.locator('#toast')).toContainText('Apt 707 · Marina Gate back to Elite Cleaning');
+});
+
+test('tuile d un autre jour touchee apres plus de 60 s, relecture en echec : Reconnect, aucune ecriture', async ({ page }) => {
+  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, { ...WEEK1(), once: true },
+    { match: 'action=mgr.planning', status: 0, body: {}, fail: true }], { email: true, clock: NOW });
+  await expect(counts(page).nth(1)).toHaveText('1');
+  await chip(page, '2026-10-10').click();
+  await expect(card(page, 'Apt 707').locator('.td-pick')).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await wtile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Reconnect to make changes.');
+  expect(await weekCalls(page, '2026-10-05')).toBe(2);
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+  // Anciennes donnees gardees, lecture seule : plus de choix, bandeau avec Retry.
+  await expect(card(page, 'Apt 707')).toBeVisible();
+  await expect(choice(page)).toHaveCount(0);
+  await expect(page.locator('.banner.warn')).toContainText('Reconnect to make changes.');
+  await frame(page);
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+});
+
+// Course (revue finale) : la relecture lancee par le disque est supplantee par une autre (retour
+// sur l'onglet) ; sa reponse ne compte pas, le choix attend la derniere et s'ouvre sur elle.
+test('disque d un autre jour, relecture supplantee : le choix attend la derniere reponse de la semaine', async ({ page }) => {
+  const last = weekBody();
+  last.jobs.find((j: any) => j.key === FH).assigned = [10];
+  await boot(page, [me(MANAGER), TODAY(), { ...WEEK1(), once: true }, { ...WEEK1(weekBody(), { delay: 800 }), once: true },
+    WEEK1(last, { delay: 4000 }), WEEK2()], { email: true, clock: NOW });
+  await expect(counts(page).nth(1)).toHaveText('1');
+  await chip(page, '2026-10-10').click();
+  await choice(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(choice(page)).toHaveCount(0);
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await disc(page, JK).click();
+  await backToTab(page);
+  // Reponse supplantee rendue : aucun choix ouvert sur elle.
+  await expect.poll(() => weekDone(page, '2026-10-05'), { intervals: [50] }).toBe(2);
+  await frame(page);
+  await expect(choice(page)).toHaveCount(0);
+  // Derniere reponse : le choix s'ouvre, Pionah a maintenant Apt 505 ce jour-la.
+  await expect(card(page, 'Apt 707').locator('.td-pick')).toBeVisible();
+  await expect(wtile(page, '10')).toContainText('1 job');
+  expect(await weekDone(page, '2026-10-05')).toBe(3);
+});
+
+// Enchainement sur un autre jour (st.wchain) : apres l'affectation d'un menage qui n'avait
+// personne, le choix du menage suivant sans cleaner s'ouvre sur la semaine relue.
+test('enchainement sur un autre jour : apres une affectation, le menage suivant sans cleaner s ouvre', async ({ page }) => {
+  const two = weekBody();
+  two.jobs.push(PJ({ key: '2026-10-10_Ky Lo', listingId: 'L17', apt: '717', bld: 'Marina Gate', date: '2026-10-10', guest: 'Ky Lo',
+    tone: 'bad', word: 'Unassigned' }));
+  const after = JSON.parse(JSON.stringify(two));
+  Object.assign(after.jobs.find((j: any) => j.key === JK), { assigned: [10], serviceType: 'CHC', tone: 'idle', word: 'Scheduled' });
+  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, { ...WEEK1(two), once: true }, WEEK1(after), WEEK2()],
+    { email: true, clock: NOW });
+  await expect(counts(page).nth(1)).toHaveText('2');
+  await chip(page, '2026-10-10').click();
+  await expect(card(page, 'Apt 707').locator('.td-pick')).toBeVisible();
+  await wtile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Apt 707 · Marina Gate assigned to Pionah');
+  const next = card(page, 'Apt 717').locator('.td-pick');
+  await expect(next).toBeVisible();
+  await expect(choice(page)).toHaveCount(1);
+  // Faiza est en conge : le focus va a Pionah, premiere personne disponible.
+  await expect(next.locator('[data-td-wpick="10"]')).toBeFocused();
+  expect(await weekCalls(page, '2026-10-05')).toBe(2);
+  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([{ reservation_key: JK, cleaner_ids: [10], mode: 'set', service_type: 'CHC' }]);
 });
 
 test('Heure d un extra sur un autre jour : Extra cleaning at 09:30, sans heure Extra cleaning', async ({ page }) => {
