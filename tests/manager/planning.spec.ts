@@ -124,5 +124,29 @@ for (const scheme of ['light', 'dark'] as const) {
       const s = await noHorizontalScroll(page);
       expect(s.scrollWidth).toBeLessThanOrEqual(s.clientWidth);
     });
+
+    // L'accent vaut l'encre : le jour courant doit se distinguer par autre chose que la couleur
+    // du texte. Ordinateur : en-tete de colonne ; telephone : case de la bande, un autre jour choisi.
+    test('jour courant distinct d un autre jour : colonne et case de la bande (' + scheme + ')', async ({ page }, info) => {
+      await bootMgr(page, [me(MANAGER), PLAN()], { email: true, hash: HASH, clock: PNOW });
+      await expect(page.locator('.pj').first()).toBeVisible();
+      const look = (sel: string, child: string) => page.locator(sel).evaluate((el, c) => {
+        const of = (e: Element) => { const s = getComputedStyle(e); return [s.color, s.backgroundColor, s.borderTopColor, s.boxShadow, s.textDecorationLine].join(' | '); };
+        return of(el) + ' / ' + of(el.querySelector(c)!);
+      }, child);
+      if (isMobile(info)) {
+        // Le bouton « Location » se pose sous l'en-tete apres le premier rendu et pousse la bande :
+        // on attend la mise en page finale avant de cliquer (meme parade que openFromOpen).
+        await expect(page.locator('#main > [data-loc-pill]')).toBeVisible();
+        await page.locator('.pl-strip [data-day="2026-10-07"]').click();
+        await expect(page.locator('.pl-strip [data-day="2026-10-07"]')).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('.pl-strip [data-day="2026-10-09"]')).toHaveAttribute('aria-pressed', 'false');
+        expect(await look('.pl-strip [data-day="2026-10-09"]', 'b')).not.toBe(await look('.pl-strip [data-day="2026-10-06"]', 'b'));
+      } else {
+        const heads = page.locator('.pl-col .pl-dh');
+        await expect(heads.nth(4)).toHaveClass(/today/);
+        expect(await look('.pl-col:nth-child(5) .pl-dh', 'h2')).not.toBe(await look('.pl-col:nth-child(2) .pl-dh', 'h2'));
+      }
+    });
   });
 }
