@@ -75,10 +75,14 @@ function currentView() {
   return r.landing;
 }
 
+const hasBadge = (id) => id === 'maintenance' && proposals > 0;
+const badgeText = () => (proposals > 99 ? '99+' : String(proposals));
 function badge(id) {
-  if (id !== 'maintenance' || proposals <= 0) return '';
-  return '<span class="nbadge" aria-label="' + proposals + ' to review">' + (proposals > 99 ? '99+' : proposals) + '</span>';
+  if (!hasBadge(id)) return '';
+  return '<span class="nbadge" aria-label="' + proposals + ' to review">' + badgeText() + '</span>';
 }
+// Nom d'un onglet de la pilule : son libelle, plus le compte de la pastille quand elle est la.
+function tabName(id) { return LABELS[id] + (hasBadge(id) ? ', ' + badgeText() + ' to review' : ''); }
 
 function renderNav(view) {
   const cur = PARENT[view] || view;
@@ -89,7 +93,7 @@ function renderNav(view) {
   // libelle montre par l'onglet courant seul (tous a partir de 600 px), nom porte par aria-label.
   document.getElementById('tabbar').innerHTML = views.map((id) => link('tab', id,
     '<span class="tab-wrap">' + I[id] + badge(id) + '</span><span class="tab-l">' + LABELS[id] + '</span>',
-    ' aria-label="' + LABELS[id] + '"')).join('');
+    ' aria-label="' + tabName(id) + '"')).join('');
   document.getElementById('sideFoot').textContent = me ? 'Signed in as ' + me.name : 'Offline';
 }
 

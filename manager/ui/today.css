@@ -38,7 +38,7 @@
 .unassigned{background:var(--bad-tint)}
 .unassigned .person-h .nm{color:var(--bad-ink)}
 .unassigned .person-h .cnt{color:var(--bad)}
-.unassigned .av{background:var(--bad);color:#fff}
+.unassigned .av{background:var(--bad);color:var(--on-bad)}
 .unassigned .job{background:var(--surface);border-color:color-mix(in srgb,var(--bad) 30%,var(--line))}
 
 .counts{display:flex;flex-wrap:wrap;gap:var(--s2);padding:0 var(--s4) var(--s3)}

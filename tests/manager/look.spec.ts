@@ -6,6 +6,7 @@ import { PLAN, PNOW } from './planning-fixtures';
 import { DONE, NOW_MNT, OPEN, PROPOSALS, REJECTED } from './maintenance-fixtures';
 import { listBody as taskList } from './problem-fixtures';
 import { HISTORY, INSP_TODAY, OVERVIEW, REPORTS } from './insp-fixtures';
+import { ago, LOCS, PEOPLE, tiles } from './locations-fixtures';
 
 // Socle visuel du manager (lot 4a, tache 1) : chaque ecran, charge avec les jeux
 // d'essai de son propre fichier de tests, sans defilement horizontal ni texte
@@ -59,6 +60,20 @@ const SCREENS: Array<{ name: string; boot: (page: Page) => Promise<void> }> = [
     boot: async (page) => {
       await bootMgr(page, [me(OWNER)], { email: true, hash: '#/more' });
       await expect(page.locator('main a.more-row')).toHaveCount(13);
+    },
+  },
+  {
+    name: 'locations',
+    boot: async (page) => {
+      await tiles(page);
+      // En plus du jeu de locations.spec.ts, une personne sans couleur : son point
+      // et son disque prennent l'accent (presque blanc en sombre).
+      const people = [...PEOPLE, { id: 12, name: 'Noor Haddad', role: 'cleaner', color: null,
+        location: { lat: 25.08, lng: 55.15, accuracy: 15, recordedAt: ago(10), ageMin: 10,
+          place: { kind: 'at', listingId: 'L4', label: '701 · Bay Square', distanceM: 20 } } }];
+      await bootMgr(page, [me(MANAGER), { ...LOCS, body: { generatedAt: NOW.toISOString(), people } }], { email: true, hash: '#/more/locations', clock: NOW });
+      await expect(page.locator('main .loc-list .loc-row')).toHaveCount(5);
+      await expect(page.locator('[data-loc-map] .loc-pin', { hasText: 'NH' })).toBeVisible();
     },
   },
 ];

@@ -1,6 +1,6 @@
 /* Ecrans Inspections dans la coquille manager : port de inspections/insp.css, tout sous .insp,
- * avec les jetons manager (tokens.css, clair et sombre). Aucun jeton v3, aucune couleur en dur
- * sauf le blanc sur l'accent. #toast-host et body/html abandonnes (toast manager). */
+ * avec les jetons manager (tokens.css, clair et sombre). Aucun jeton v3, aucune couleur en dur.
+ * #toast-host et body/html abandonnes (toast manager). */
 .insp{min-width:0}
 /* #main porte deja le padding lateral et le bas (112px phone) qui degage la barre d'onglets. */
 .insp .wrap{max-width:720px;margin:0 auto;padding:0 0 var(--s4)}
@@ -17,9 +17,7 @@
 .insp .btn{min-height:44px;padding:0 var(--s4);white-space:normal;text-align:center;line-height:1.25}
 .insp .btn.ghost{background:transparent}
 .insp .btn.ghost:hover{background:var(--surface-2)}
-.insp .btn.primary{color:#fff}
-:root[data-theme="dark"] .insp .btn.primary{color:var(--accent-ink)}
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .insp .btn.primary{color:var(--accent-ink)} }
+.insp .btn.primary{color:var(--accent-ink)}
 .insp .btn.block{width:100%;margin-top:var(--s4)}
 .insp .btn.small{min-height:44px;padding:0 var(--s3);font-size:14px}
 

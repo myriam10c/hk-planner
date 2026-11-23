@@ -97,6 +97,23 @@ test('pastille Maintenance : nombre de propositions annonce par mgr:mntbadge', a
   await expect(nav.locator('a[href="#/maintenance"] .nbadge')).toHaveCount(0);
 });
 
+test('onglet Maintenance : le compte de la pastille est dans son nom (99+ au dela de 99)', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER)], { email: true, hash: '#/more' });
+  await expect(page.getByRole('heading', { name: 'More', exact: true })).toBeVisible();
+  const tab = page.locator('#tabbar a[href="#/maintenance"]');
+  const send = (n: number) => page.evaluate((x) => document.dispatchEvent(new CustomEvent('mgr:mntbadge', { detail: { proposals: x } })), n);
+  await expect(tab).toHaveAttribute('aria-label', 'Maintenance');
+  await send(3);
+  await expect(tab).toHaveAttribute('aria-label', 'Maintenance, 3 to review');
+  await expect(tab.locator('.nbadge')).toHaveAttribute('aria-label', '3 to review');
+  await expect(page.locator('#tabbar a[href="#/planning"]')).toHaveAttribute('aria-label', 'Planning');
+  await send(150);
+  await expect(tab).toHaveAttribute('aria-label', 'Maintenance, 99+ to review');
+  await expect(tab.locator('.nbadge')).toHaveText('99+');
+  await send(0);
+  await expect(tab).toHaveAttribute('aria-label', 'Maintenance');
+});
+
 // ---------- Revue finale (F3, F8, F10) ----------
 
 // Pilule flottante : ajustee a ses entrees (2 pour Semax, 5 pour un manager), centree, cibles de 44 px.

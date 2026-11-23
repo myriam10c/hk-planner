@@ -1,32 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { bootMgr, fetchLog, MANAGER, me, noHorizontalScroll, type FakeRoute } from './helpers';
 import { NOW, todayBody } from './fixtures';
+import { LOCS, PEOPLE, tiles } from './locations-fixtures';
 
 // Position de l'equipe (plan 2026-10-29, tache 3) : ecran More > Where is everyone,
 // ligne de position du bloc « Who does what » de Today, avertissement et envoi
 // depuis /manager/. NOW = 11:00 Dubai : la fenetre 07:00-23:00 est ouverte.
-const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-const ago = (min: number) => new Date(NOW.getTime() - min * 60000).toISOString();
-
-// Format de mgrLocations (supabase/functions/hostaway-proxy/team_locations.ts).
-const PEOPLE = [
-  { id: 4, name: 'Faiza', role: 'cleaner', color: '#7a5af8',
-    location: { lat: 25.0805, lng: 55.1403, accuracy: 12, recordedAt: ago(4), ageMin: 4,
-      place: { kind: 'at', listingId: 'L2', label: '103 · Damac Reva', distanceM: 40 } } },
-  { id: 7, name: 'Semax', role: 'maintenance', color: '#0e9384',
-    location: { lat: 25.197, lng: 55.274, accuracy: 30, recordedAt: ago(125), ageMin: 125,
-      place: { kind: 'near', listingId: 'L9', label: '1205 · Marina Gate', distanceM: 1234 } } },
-  // 2026-10-08 18:40 Dubai : hier.
-  { id: 8, name: 'Walter', role: 'manager', color: '#e94560',
-    location: { lat: 25.1, lng: 55.2, accuracy: 20, recordedAt: '2026-10-08T14:40:00.000Z', ageMin: 980,
-      place: { kind: 'near', listingId: 'L3', label: '404 · Elysee', distanceM: 450 } } },
-  { id: 10, name: 'Pionah', role: 'cleaner', color: '#dd2590', location: null },
-];
-const LOCS: FakeRoute = { match: 'action=mgr.locations', status: 200, body: { generatedAt: NOW.toISOString(), people: PEOPLE } };
-
-async function tiles(page: any) {
-  await page.route(/tile\.openstreetmap\.org/, (r: any) => r.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG_1PX, 'base64') }));
-}
 const calls = async (page: any, action: string) => (await fetchLog(page)).filter((l) => l.url.includes('action=' + action)).length;
 
 for (const scheme of ['light', 'dark'] as const) {
