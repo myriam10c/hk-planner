@@ -283,6 +283,70 @@ test('carte touchee apres plus de 60 s, relecture en echec : fiche en lecture se
   expect(await todayCalls(page)).toBe(2);
 });
 
+// Carte touchee pendant une relecture deja en cours (retour sur l onglet, Today lent) : la
+// fiche attend la fin de cette relecture, puis s'ouvre sur le tableau relu, sans autre appel.
+test('carte touchee pendant une relecture en cours : la fiche s ouvre apres, sur le tableau relu', async ({ page }) => {
+  const later = LATER();
+  later.arrivals.rows[1] = { ...later.arrivals.rows[1], cause: 'In progress, Faiza. Guest in 4 h.' };
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { ...TODAY(later), delay: 2000 }], { email: true, clock: NOW });
+  await expect(cardOpen(page, CY)).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await backToTab(page);
+  await expect.poll(() => todayCalls(page)).toBe(2);
+  await cardOpen(page, CY).click();
+  await frame(page);
+  // Relecture encore en cours : pas encore de fiche, aucune seconde relecture.
+  expect((await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(1);
+  const sheet = page.locator('#sheet');
+  await expect(sheet).toHaveAttribute('aria-hidden', 'true');
+  await expect(sheet).toHaveAttribute('aria-hidden', 'false');
+  await expect(sheet.locator('#sheetTitle')).toHaveText('Apt 103 · Damac Reva');
+  await expect(sheet).toContainText('In progress, Faiza. Guest in 4 h.');
+  await expect(page.locator('.asof')).toContainText('as of 11:01');
+  expect(await todayCalls(page)).toBe(2);
+});
+
+test('carte touchee pendant une relecture en cours qui echoue : fiche en lecture seule, un seul appel de plus', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { match: 'action=mgr.today', status: 0, body: {}, fail: true, delay: 2000 }],
+    { email: true, clock: NOW });
+  await expect(cardOpen(page, CY)).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await backToTab(page);
+  await expect.poll(() => todayCalls(page)).toBe(2);
+  await cardOpen(page, CY).click();
+  const sheet = page.locator('#sheet');
+  await expect(sheet).toHaveAttribute('aria-hidden', 'false');
+  await expect(sheet.locator('#sheetTitle')).toHaveText('Apt 103 · Damac Reva');
+  await expect(sheet.getByText('Reconnect to make changes.')).toBeVisible();
+  await expect(sheet.locator('[data-assign], [data-done]')).toHaveCount(0);
+  expect(await todayCalls(page)).toBe(2);
+});
+
+// Carte touchee pendant une ecriture (choix envoye, feuille fermee) : la fiche s'ouvre tout de
+// suite sur le tableau affiche, sans relire ; la relecture suit l'ecriture et ne ferme pas la fiche.
+test('carte touchee pendant une ecriture : fiche ouverte tout de suite, Today relu une fois apres l ecriture', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(LATER()),
+    { match: 'action=assignCleaner', status: 200, body: OK, delay: 2000 }], { email: true, clock: NOW });
+  await assignBtn(page, LU).click();
+  const sheet = page.locator('#sheet');
+  await expect(sheet.locator('#sheetTitle')).toHaveText('Assign a cleaner');
+  await sheet.locator('[data-pick="4"]').click();
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
+  await expect(sheet).toHaveAttribute('aria-hidden', 'true');
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await cardOpen(page, CY).click();
+  await expect(sheet).toHaveAttribute('aria-hidden', 'false');
+  await expect(sheet.locator('#sheetTitle')).toHaveText('Apt 103 · Damac Reva');
+  // Ecriture encore en cours : fiche ouverte sans relecture.
+  expect((await fetchDone(page)).filter((u) => u.includes('action=assignCleaner')).length).toBe(0);
+  expect(await todayCalls(page)).toBe(1);
+  await expect(page.locator('#toast')).toContainText('assigned to Faiza');
+  await expect(page.locator('.asof')).toContainText('as of 11:01');
+  expect(await todayCalls(page)).toBe(2);
+  await expect(sheet).toHaveAttribute('aria-hidden', 'false');
+  await expect(sheet.locator('#sheetTitle')).toHaveText('Apt 103 · Damac Reva');
+});
+
 test('disque touche apres plus de 60 s : Today relu avant la feuille Assign a cleaner', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, TODAY(LATER())], { email: true, clock: NOW });
   await expect(assignBtn(page, LU)).toBeVisible();

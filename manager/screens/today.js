@@ -33,7 +33,7 @@ export async function renderToday(ctx) {
   // ui : filtre (id d'une personne, 'none' ou null), moments replies (Not for today replie
   // par defaut), choix ouvert (tache 4) ; garde d'un rendu a l'autre.
   const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null, day: null, triedOn: null,
-    ui: { filter: null, collapsed: { more: true }, pick: null } };
+    pending: null, ui: { filter: null, collapsed: { more: true }, pick: null } };
   // Journee du modele, calculee une fois par reponse mgr.today.
   let memo = { data: null, day: null };
   function model() {
@@ -136,7 +136,15 @@ export async function renderToday(ctx) {
     return false;
   }
 
-  async function refresh() {
+  // Relecture de Today ; st.pending garde la relecture en cours (une carte touchee l'attend).
+  function refresh() {
+    const p = reload();
+    st.pending = p;
+    const clear = () => { if (st.pending === p) st.pending = null; };
+    p.then(clear, clear);
+    return p;
+  }
+  async function reload() {
     st.loading = true;
     st.error = null;
     st.triedOn = dubaiDay(Date.now());
@@ -373,19 +381,21 @@ export async function renderToday(ctx) {
   }
   // Corps d'une carte : la fiche actuelle (jobSheet ou arrivalSheet). Tableau d'un autre jour
   // de Dubai : Today relu avant toute fiche (relecture en cours : appui ignore ; relecture du
-  // jour deja tentee, en echec : fiche en lecture seule). Tableau de plus de 60 s : relu
-  // d'abord, puis la fiche du tableau relu (en lecture seule si la relecture a echoue).
+  // jour deja tentee, en echec : fiche en lecture seule). Tableau du jour de plus de 60 s, ou
+  // relecture deja en cours : la fiche attend la relecture, puis s'ouvre sur le tableau relu
+  // (en lecture seule si la relecture a echoue). Ecriture en cours : fiche ouverte tout de
+  // suite sur le tableau affiche, sans relire (la relecture suit l'ecriture).
+  // openingCard : un seul appui attendu a la fois (double toucher).
   let openingCard = false;
   async function openCard(id) {
+    if (openingCard) return;
     const day = dubaiDay(Date.now());
     if (st.data.day !== day) {
       if (st.loading) return;
       if (st.triedOn !== day) { refresh(); return; }
-    } else if (st.fresh && due()) {
-      if (st.loading || openingCard) return;
+    } else if (!st.busy && (st.loading || (st.fresh && due()))) {
       openingCard = true;
-      await refresh();
-      openingCard = false;
+      try { await (st.loading && st.pending ? st.pending : refresh()); } finally { openingCard = false; }
       if (!ctx.isCurrent() || !st.data || st.data.day !== dubaiDay(Date.now())) return;
     }
     const u = model().units.find((x) => x.id === id);
