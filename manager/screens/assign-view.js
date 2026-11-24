@@ -17,12 +17,19 @@ function dayOf(vm) {
   const s = vm.strip.find((d) => d.date === vm.sel);
   return s ? s.label + ' ' + s.num : vm.sel;
 }
+// Ligne du jour sous le titre (l'ecran peut ouvrir un autre jour que demande) : « Tue 24 · today »,
+// « Wed 25 · tomorrow », sinon le jour seul. La bande part d'aujourd'hui (stripDays).
+function dayLine(vm, day) {
+  const i = vm.strip.findIndex((d) => d.date === vm.sel);
+  return day + (i === 0 ? ' · today' : i === 1 ? ' · tomorrow' : '');
+}
 
 const RO_LINE = 'Reconnect to make changes.';
 const CHEV = '<svg class="qa-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9.5l6 6 6-6"/></svg>';
 
-function head() {
+function head(when) {
   return '<header class="qa-head"><a class="qa-back" href="#/today">Today</a><h1>Assign</h1>'
+    + '<p class="qa-date">' + esc(when) + '</p>'
     + '<p class="qa-lede">Tap a name to give the cleaning. Tap it again to take it back.</p></header>';
 }
 
@@ -68,17 +75,18 @@ function rowHtml(row, vm, day, ro) {
 const rowList = (rows, vm, day, ro, id) => '<ul class="qa-rows"' + (id ? ' id="' + id + '"' : '') + '>'
   + rows.map((r) => rowHtml(r, vm, day, ro)).join('') + '</ul>';
 
-// Trois groupes dans l'ordre ; un groupe vide n'est pas montre. Usually Elite : replie au
-// depart, son bouton donne le compte, ses lignes ne sont rendues qu'ouvert.
+// Trois groupes dans l'ordre ; un groupe vide n'est pas montre. Often with Elite : ouvert au
+// depart (rien de cache ; eliteOpen false seulement apres son bouton), le bouton donne le compte,
+// ses lignes ne sont rendues qu'ouvert.
 function groups(vm, day, ro) {
   const { todo, assigned, elite } = vm.rows;
   let h = '';
   if (todo.length) h += '<section class="qa-group"><h2 class="qa-gh">No cleaner yet (' + todo.length + ')</h2>' + rowList(todo, vm, day, ro) + '</section>';
   if (assigned.length) h += '<section class="qa-group"><h2 class="qa-gh">Already assigned (' + assigned.length + ')</h2>' + rowList(assigned, vm, day, ro) + '</section>';
   if (elite.length) {
-    const open = !!vm.eliteOpen;
+    const open = vm.eliteOpen !== false;
     h += '<section class="qa-group"><h2 class="qa-gh"><button class="qa-elite" type="button" data-qa-elite aria-expanded="' + (open ? 'true' : 'false') + '"'
-      + (open ? ' aria-controls="qa-elite-rows"' : '') + '>Usually Elite (' + elite.length + ')' + CHEV + '</button></h2>'
+      + (open ? ' aria-controls="qa-elite-rows"' : '') + '>Often with Elite (' + elite.length + ')' + CHEV + '</button></h2>'
       + (open ? rowList(elite, vm, day, ro, 'qa-elite-rows') : '') + '</section>';
   }
   return h;
@@ -90,7 +98,7 @@ const line = (text) => '<p class="qa-empty">' + esc(text) + '</p>';
 export function assignHtml(vm) {
   const day = dayOf(vm);
   const ro = !!(vm.ro && vm.ro[vm.sel]);
-  return '<div class="qa">' + head() + week(vm) + (ro ? roBox() : '')
+  return '<div class="qa">' + head(dayLine(vm, day)) + week(vm) + (ro ? roBox() : '')
     + (vm.empty ? line('No cleaning planned for ' + day + '.')
       : loads(vm, day) + (vm.nothingLeft ? line('Nothing left to assign on ' + day + '.') : '') + groups(vm, day, ro))
     + '</div>';

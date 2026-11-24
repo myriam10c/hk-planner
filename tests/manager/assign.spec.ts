@@ -14,7 +14,7 @@ const PJ = (o: any) => ({
 });
 // planningBody, plus usuallyElite sur deux menages (Cy Doe, Ro Sa) et deux menages du vendredi.
 // Vendredi 9 : No cleaner yet = Bo Ray (guest a 15:00), Ka Lu ; Already assigned = Di Fox, l'extra
-// (Pionah) ; Usually Elite = Cy Doe, Ro Sa. Samedi 10 : Fa Ho (Elite Cleaning), Faiza en conge.
+// (Pionah) ; Often with Elite = Cy Doe, Ro Sa. Samedi 10 : Fa Ho (Elite Cleaning), Faiza en conge.
 function assignBody(over: any = {}) {
   const b = planningBody(over);
   for (const j of b.jobs as any[]) j.usuallyElite = j.key === '2026-10-09_Cy Doe';
@@ -41,7 +41,7 @@ function eveningBody() {
 const KL = '2026-10-09_Ka Lu'; // Apt 1602 · The Grand Emaar, personne, CHC
 const BR = '2026-10-09_Bo Ray'; // Apt 103 · Damac Reva, personne, type inconnu
 const DF = '2026-10-09_Di Fox'; // Apt 805 · Azizi Riviera 39, Pionah dessus
-const CD = '2026-10-09_Cy Doe'; // Apt 909 · Bloom Height, Usually Elite
+const CD = '2026-10-09_Cy Doe'; // Apt 909 · Bloom Height, Often with Elite
 const W1 = (body: any, extra: any = {}) => ({ match: 'action=mgr.planning&start=2026-10-05', status: 200, body, ...extra });
 // Semaine du 12 sans menage : PLAN rend la semaine du 5 pour les deux start, et ses menages, lus
 // en dernier, couvriraient une semaine du 5 relue differente.
@@ -63,8 +63,8 @@ const order = async (page: Page) => (await fetchLog(page))
   .map((l) => (l.url.endsWith('action=assignCleaner') ? 'write' : 'week'));
 const ADD_KL = { reservation_key: KL, cleaner_id: 4, mode: 'add', expect_ids: [], service_type: 'CHC' };
 
-async function boot(page: Page, routes: any[], hash = HASH) {
-  await bootMgr(page, [me(MANAGER), ...routes], { email: true, hash, clock: PNOW });
+async function boot(page: Page, routes: any[], hash = HASH, opts: { timeoutMs?: number } = {}) {
+  await bootMgr(page, [me(MANAGER), ...routes], { email: true, hash, clock: PNOW, ...opts });
   await expect(page.locator('.qa h1')).toHaveText('Assign');
 }
 
@@ -75,8 +75,9 @@ test('opens on d with groups and strip counts', async ({ page }) => {
   await expect(page.locator('.qa-day')).toHaveCount(7);
   await expect(page.locator('.qa-day .qa-dl')).toHaveText(['Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu']);
   await expect(page.locator('.qa-dc')).toHaveText(['3', '0', '0', '·', '·', '·', '·']);
-  // d = samedi 10 : Faiza en conge, Fa Ho deja chez Elite Cleaning.
+  // d = samedi 10 : Faiza en conge, Fa Ho deja chez Elite Cleaning. Le jour est ecrit sous le titre.
   await expect(day(page, '2026-10-10')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.qa-date')).toHaveText('Sat 10 · tomorrow');
   await expect(page.locator('h2.qa-gh')).toHaveText(['Already assigned (1)']);
   await expect(page.locator('.qa-load')).toHaveText(['F Faiza Off', 'P Pionah 0 jobs', 'EC Elite Cleaning 1 job']);
   const fa = btn(page, '2026-10-10_Fa Ho', 4);
@@ -87,7 +88,8 @@ test('opens on d with groups and strip counts', async ({ page }) => {
   // Vendredi : trois groupes, arrivee du jour d'abord, puis heure de depart.
   await day(page, '2026-10-09').click();
   await expect(day(page, '2026-10-09')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('h2.qa-gh')).toHaveText(['No cleaner yet (2)', 'Already assigned (2)', 'Usually Elite (2)']);
+  await expect(page.locator('.qa-date')).toHaveText('Fri 9 · today');
+  await expect(page.locator('h2.qa-gh')).toHaveText(['No cleaner yet (2)', 'Already assigned (2)', 'Often with Elite (2)']);
   await expect(group(page, 'No cleaner yet').locator('.qa-place')).toHaveText(['Apt 103 · Damac Reva', 'Apt 1602 · The Grand Emaar']);
   await expect(group(page, 'No cleaner yet').locator('.qa-line')).toHaveText(['Out 11:00 · Guest arrives 15:00', 'Out 10:00 · No next guest']);
   await expect(group(page, 'Already assigned').locator('.qa-place')).toHaveText(['Apt 805 · Azizi Riviera 39', 'Apt 808 · Tower H']);
@@ -109,11 +111,13 @@ test('d equal to today with nothing to assign opens the next day to assign', asy
   await boot(page, [PLAN(eveningBody())], HASH);
   await expect(page.locator('.qa-dc')).toHaveText(['0', '1', '0', '·', '·', '·', '·']);
   await expect(day(page, '2026-10-10')).toHaveAttribute('aria-pressed', 'true');
+  // Ouvert sur un autre jour que demande : le jour est ecrit en toutes lettres.
+  await expect(page.locator('.qa-date')).toHaveText('Sat 10 · tomorrow');
   await expect(page.locator('h2.qa-gh')).toHaveText(['No cleaner yet (1)', 'Already assigned (1)']);
   await expect(group(page, 'No cleaner yet').locator('.qa-place')).toHaveText(['Apt 402 · Tower D']);
-  // Aujourd'hui reste a un toucher : Elite attendu, replie.
+  // Aujourd'hui reste a un toucher : Elite attendu, groupe ouvert.
   await day(page, '2026-10-09').click();
-  await expect(page.locator('h2.qa-gh')).toHaveText(['Already assigned (4)', 'Usually Elite (2)']);
+  await expect(page.locator('h2.qa-gh')).toHaveText(['Already assigned (4)', 'Often with Elite (2)']);
 });
 
 test('one tap assigns: body is add with expect_ids and service_type, toast with Undo', async ({ page }) => {
@@ -169,7 +173,7 @@ test('row stays in No cleaner yet after assign', async ({ page }) => {
   await expect(toastBox(page)).toContainText('assigned to Faiza');
   // Rien ne bouge sous le doigt : la ligne garde son groupe tant qu'on reste sur ce jour.
   await expect(group(page, 'No cleaner yet').locator('[data-qa-row="' + KL + '"]')).toBeVisible();
-  await expect(page.locator('h2.qa-gh')).toHaveText(['No cleaner yet (2)', 'Already assigned (2)', 'Usually Elite (2)']);
+  await expect(page.locator('h2.qa-gh')).toHaveText(['No cleaner yet (2)', 'Already assigned (2)', 'Often with Elite (2)']);
   // Une ligne d'Already assigned videe y reste aussi.
   await btn(page, DF, 10).click();
   await expect(toastBox(page)).toContainText('Pionah removed from Apt 805');
@@ -179,7 +183,7 @@ test('row stays in No cleaner yet after assign', async ({ page }) => {
   await day(page, '2026-10-09').click();
   await expect(group(page, 'Already assigned').locator('[data-qa-row="' + KL + '"]')).toBeVisible();
   await expect(group(page, 'No cleaner yet').locator('[data-qa-row="' + DF + '"]')).toBeVisible();
-  await expect(page.locator('h2.qa-gh')).toHaveText(['No cleaner yet (2)', 'Already assigned (2)', 'Usually Elite (2)']);
+  await expect(page.locator('h2.qa-gh')).toHaveText(['No cleaner yet (2)', 'Already assigned (2)', 'Often with Elite (2)']);
   expect((await writes(page, 'assignCleaner')).length).toBe(2);
 });
 
@@ -329,6 +333,93 @@ test('stale data re-reads before writing', async ({ page }) => {
   await expect(group(page, 'No cleaner yet').locator('[data-qa-row="' + BR + '"]')).toBeVisible();
 });
 
+test('after a re-read, rows shown but not touched keep their group while on that day', async ({ page }) => {
+  // Relecture (toucher au-dela de 60 s) : Bo Ray a recu Elite Cleaning ailleurs, Cy Doe (Often with
+  // Elite) Pionah, et Di Fox a perdu Pionah. Lignes non touchees : aucune ne change de groupe.
+  const changed = assignBody();
+  const jobs = changed.jobs as any[];
+  jobs.find((j) => j.key === BR).assigned = [12];
+  jobs.find((j) => j.key === CD).assigned = [10];
+  jobs.find((j) => j.key === DF).assigned = [];
+  await boot(page, [AW(), W1(assignBody(), { once: true }), W1(changed), W2()]);
+  const heads = ['No cleaner yet (2)', 'Already assigned (2)', 'Often with Elite (2)'];
+  await expect(page.locator('h2.qa-gh')).toHaveText(heads);
+  await page.clock.setFixedTime(new Date(PNOW.getTime() + 61_000));
+  await btn(page, KL, 4).click();
+  await expect(toastBox(page)).toContainText('Apt 1602 · The Grand Emaar assigned to Faiza');
+  expect(await order(page)).toEqual(['week', 'week', 'week', 'week', 'write']);
+  // La relecture se voit sur les initiales, pas sur les groupes.
+  await expect(btn(page, BR, 12)).toHaveAttribute('aria-pressed', 'true');
+  await expect(btn(page, CD, 10)).toHaveAttribute('aria-pressed', 'true');
+  await expect(btn(page, DF, 10)).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('h2.qa-gh')).toHaveText(heads);
+  await expect(group(page, 'No cleaner yet').locator('[data-qa-row="' + BR + '"]')).toBeVisible();
+  await expect(group(page, 'Often with Elite').locator('[data-qa-row="' + CD + '"]')).toBeVisible();
+  await expect(group(page, 'Already assigned').locator('[data-qa-row="' + DF + '"]')).toBeVisible();
+  // Autre jour puis retour : chaque ligne prend son groupe.
+  await day(page, '2026-10-10').click();
+  await day(page, '2026-10-09').click();
+  await expect(page.locator('h2.qa-gh')).toHaveText(['No cleaner yet (1)', 'Already assigned (4)', 'Often with Elite (1)']);
+  await expect(group(page, 'Already assigned').locator('[data-qa-row="' + BR + '"]')).toBeVisible();
+  await expect(group(page, 'Already assigned').locator('[data-qa-row="' + CD + '"]')).toBeVisible();
+  await expect(group(page, 'No cleaner yet').locator('[data-qa-row="' + DF + '"]')).toBeVisible();
+});
+
+test('5xx on a write re-reads the week at once and shows the server list', async ({ page }) => {
+  // Erreur 5xx : l'ecriture a peut-etre eu lieu. La semaine est relue tout de suite ; le serveur
+  // a bien Faiza sur Ka Lu : la ligne la garde (et ne revient pas a la liste d'avant).
+  const written = assignBody();
+  (written.jobs as any[]).find((j) => j.key === KL).assigned = [4];
+  await boot(page, [AW({ status: 503, body: { error: 'Service unavailable' }, once: true }), AW(),
+    W1(assignBody(), { once: true }), W1(written), W2()]);
+  await expect(row(page, KL)).toBeVisible();
+  await btn(page, KL, 4).click();
+  await expect(toastBox(page)).toHaveText('Service unavailable');
+  await expect.poll(() => order(page)).toEqual(['week', 'week', 'write', 'week', 'week']);
+  await expect(row(page, KL)).not.toHaveAttribute('aria-busy', 'true');
+  await expect(btn(page, KL, 4)).toHaveAttribute('aria-pressed', 'true');
+  await expect(load(page, 'Faiza')).toHaveText('1 job');
+  await expect(toastBox(page)).toHaveText('Service unavailable');
+  // Le toucher suivant part de la liste du serveur : il retire Faiza.
+  await btn(page, KL, 4).click();
+  await expect(toastBox(page)).toContainText('Faiza removed from Apt 1602 · The Grand Emaar');
+  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([ADD_KL, { reservation_key: KL, cleaner_id: 4, mode: 'remove', expect_ids: [4] }]);
+});
+
+test('timed-out write re-reads the week at once and shows the server list', async ({ page }) => {
+  // Delai depasse : l'ecriture n'a pas eu lieu, mais un collegue a mis Pionah entre-temps. La ligne
+  // montre Pionah (le serveur), ni Faiza (le geste) ni la ligne vide d'avant.
+  const other = assignBody();
+  (other.jobs as any[]).find((j) => j.key === KL).assigned = [10];
+  await boot(page, [AW({ delay: 5000, once: true }), W1(assignBody(), { once: true }), W1(other), W2()], HASH, { timeoutMs: 1000 });
+  await expect(row(page, KL)).toBeVisible();
+  await btn(page, KL, 4).click();
+  await expect(toastBox(page)).toHaveText('HK Planner is taking too long to answer. Try again.');
+  await expect.poll(() => order(page)).toEqual(['week', 'week', 'write', 'week', 'week']);
+  await expect(row(page, KL)).not.toHaveAttribute('aria-busy', 'true');
+  await expect(btn(page, KL, 10)).toHaveAttribute('aria-pressed', 'true');
+  await expect(btn(page, KL, 4)).toHaveAttribute('aria-pressed', 'false');
+  await expect(group(page, 'No cleaner yet').locator('[data-qa-row="' + KL + '"]')).toBeVisible();
+});
+
+test('a re-read that starts during a write does not undo it', async ({ page }) => {
+  // Ecriture de Ka Lu en vol (0,8 s) ; un toucher au-dela de 60 s sur Bo Ray lance une relecture
+  // lente (1,6 s) dont la reponse n'a pas encore Faiza sur Ka Lu. L'ecriture, finie pendant la
+  // relecture, reste a l'ecran : la relecture etait partie avant elle (compteur tick).
+  await boot(page, [AW({ delay: 800 }), W1(assignBody(), { once: true }), W1(assignBody(), { delay: 1600 }), W2()]);
+  await expect(row(page, KL)).toBeVisible();
+  await btn(page, KL, 4).click();
+  await expect(row(page, KL)).toHaveAttribute('aria-busy', 'true');
+  await page.clock.setFixedTime(new Date(PNOW.getTime() + 61_000));
+  await btn(page, BR, 10).click();
+  await expect(toastBox(page)).toContainText('Apt 1602 · The Grand Emaar assigned to Faiza');
+  await expect(toastBox(page)).toContainText('Apt 103 · Damac Reva assigned to Pionah');
+  expect(await order(page)).toEqual(['week', 'week', 'write', 'week', 'week', 'write']);
+  await expect(btn(page, KL, 4)).toHaveAttribute('aria-pressed', 'true');
+  await expect(load(page, 'Faiza')).toHaveText('1 job');
+  await expect(btn(page, BR, 10)).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('stale re-read failing turns the day read-only', async ({ page }) => {
   await boot(page, [AW(), W1(assignBody(), { once: true }), W1(null, { status: 503, body: { error: 'Service unavailable' }, once: true }),
     PLAN(assignBody())]);
@@ -380,6 +471,7 @@ test('second week failing shows Retry on its days only', async ({ page }) => {
   await expect(page.locator('.qa-empty')).toHaveCount(0);
   await day(page, '2026-10-11').click();
   await expect(page.locator('.qa-ro')).toHaveCount(0);
+  await expect(page.locator('.qa-date')).toHaveText('Sun 11');
   await expect(page.locator('.qa-empty')).toHaveText('No cleaning planned for Sun 11.');
   await day(page, '2026-10-15').click();
   await expect(page.locator('.qa-rol')).toBeVisible();
@@ -420,7 +512,7 @@ test('a day picked by hand before the first read is kept', async ({ page }) => {
   await expect(page.locator('.qa-ro')).toHaveCount(0);
   await expect(page.locator('.qa-dc').first()).toHaveText('0');
   await expect(day(page, '2026-10-09')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('h2.qa-gh')).toHaveText(['Already assigned (4)', 'Usually Elite (2)']);
+  await expect(page.locator('h2.qa-gh')).toHaveText(['Already assigned (4)', 'Often with Elite (2)']);
 });
 
 test('sign-in lost during the stale re-read writes nothing', async ({ page }) => {
@@ -440,23 +532,26 @@ test('email sign-in refusal keeps the email screen', async ({ page }) => {
   await expect(page.locator('.qa')).toHaveCount(0);
 });
 
-test('Usually Elite collapsed then opens', async ({ page }) => {
+test('Often with Elite open at first, its button folds it', async ({ page }) => {
+  // Rien de cache : trois menages d'equipe sur quatre tombent dans ce groupe (mesure du 24/11).
   await boot(page, [AW(), PLAN(assignBody())]);
   const tog = page.locator('[data-qa-elite]');
-  await expect(tog).toHaveText('Usually Elite (2)');
-  await expect(tog).toHaveAttribute('aria-expanded', 'false');
-  await expect(row(page, CD)).toHaveCount(0);
-  await tog.click();
+  await expect(tog).toHaveText('Often with Elite (2)');
   await expect(tog).toHaveAttribute('aria-expanded', 'true');
-  await expect(tog).toBeFocused();
   await expect(page.locator('#qa-elite-rows .qa-place')).toHaveText(['Apt 909 · Bloom Height', 'Apt 210 · Marina Gate']);
-  // Une ligne d'Elite s'affecte comme les autres et reste dans son groupe.
+  // Une ligne du groupe s'affecte comme les autres et reste dans son groupe.
   await btn(page, CD, 10).click();
   await expect(toastBox(page)).toContainText('Apt 909 · Bloom Height assigned to Pionah');
   await expect(page.locator('#qa-elite-rows [data-qa-row="' + CD + '"]')).toBeVisible();
+  // Son bouton le replie (le compte reste), puis le rouvre.
   await tog.click();
   await expect(tog).toHaveAttribute('aria-expanded', 'false');
+  await expect(tog).toBeFocused();
+  await expect(tog).toHaveText('Often with Elite (2)');
   await expect(row(page, CD)).toHaveCount(0);
+  await tog.click();
+  await expect(tog).toHaveAttribute('aria-expanded', 'true');
+  await expect(row(page, CD)).toBeVisible();
 });
 
 test('Today link opens the selected day', async ({ page }) => {
@@ -512,7 +607,6 @@ test('Planning link absent for the maintenance role', async ({ page }) => {
 
 test('look at 320, 390 and 1280: no horizontal scroll, targets of 44 px, text of 14 px, light and dark', async ({ page }) => {
   await boot(page, [PLAN(assignBody())]);
-  await page.locator('[data-qa-elite]').click();
   await expect(row(page, CD)).toBeVisible();
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });

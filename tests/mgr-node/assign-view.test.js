@@ -56,6 +56,21 @@ test('heading and back link', () => {
   assert.ok(h.includes('<a class="qa-back" href="#/today">Today</a>'));
 });
 
+test('day line under the title: today, tomorrow, then the day alone', () => {
+  // La bande part d'aujourd'hui (mardi 24) : son premier jour est aujourd'hui, le second demain.
+  const strip = [{ date: '2026-11-24', label: 'Tue', num: 24, count: 1 }, ...STRIP];
+  const line = (sel) => texts(assignHtml(VM({ strip, sel })), 'p', 'qa-date');
+  assert.deepEqual(line('2026-11-24'), ['Tue 24 · today']);
+  assert.deepEqual(line(WED), ['Wed 25 · tomorrow']);
+  assert.deepEqual(line(THU), ['Thu 26']);
+  assert.deepEqual(line('2026-11-27'), ['Fri 27']);
+  // Sous le titre, avant la phrase ; aussi pour un jour sans menage.
+  const h = assignHtml(VM({ strip, sel: WED }));
+  assert.ok(h.indexOf('<h1>Assign</h1>') < h.indexOf('class="qa-date"'));
+  assert.ok(h.indexOf('class="qa-date"') < h.indexOf('class="qa-lede"'));
+  assert.deepEqual(texts(assignHtml(VM({ strip, sel: THU, empty: true, rows: { todo: [], assigned: [], elite: [] } })), 'p', 'qa-date'), ['Thu 26']);
+});
+
 test('strip labels with and without count', () => {
   const h = assignHtml(VM());
   const wed = openTag(h, 'data-qa-day="' + WED + '"');
@@ -79,21 +94,27 @@ test('load chips 2 jobs, 1 job, Off', () => {
   assert.ok(attr(disc, 'class').split(' ').includes('qa-p1'));
 });
 
-test('elite group collapsed shows count only', () => {
-  const h = assignHtml(VM());
-  assert.deepEqual(texts(h, 'h2', 'qa-gh').slice(0, 2), ['No cleaner yet (2)', 'Already assigned (1)']);
-  const tog = openTag(h, 'data-qa-elite');
-  assert.ok(tog.startsWith('<button'));
-  assert.equal(attr(tog, 'aria-expanded'), 'false');
-  assert.deepEqual(texts(h, 'button', 'qa-elite'), ['Usually Elite (2)']);
-  assert.equal(h.includes('data-qa-row="2026-11-25_Cy Doe"'), false);
-  assert.equal(tagsWithClass(h, 'qa-row').length, 3);
+test('Often with Elite group open at first display, its button folds it', () => {
+  // Premier affichage : le controleur passe eliteOpen true ; une vue sans le drapeau l'ouvre aussi.
+  for (const h of [assignHtml(VM({ eliteOpen: true })), assignHtml(VM({ eliteOpen: undefined }))]) {
+    assert.deepEqual(texts(h, 'h2', 'qa-gh'), ['No cleaner yet (2)', 'Already assigned (1)', 'Often with Elite (2)']);
+    const tog = openTag(h, 'data-qa-elite');
+    assert.ok(tog.startsWith('<button'));
+    assert.equal(attr(tog, 'aria-expanded'), 'true');
+    assert.equal(attr(tog, 'aria-controls'), 'qa-elite-rows');
+    assert.deepEqual(texts(h, 'button', 'qa-elite'), ['Often with Elite (2)']);
+    assert.ok(h.includes('data-qa-row="2026-11-25_Cy Doe"'));
+    assert.ok(h.includes('data-qa-row="2026-11-25_Ed Gu"'));
+    assert.equal(tagsWithClass(h, 'qa-row').length, 5);
+    assert.equal(h.includes('Usually'), false);
+  }
 
-  const open = assignHtml(VM({ eliteOpen: true }));
-  assert.equal(attr(openTag(open, 'data-qa-elite'), 'aria-expanded'), 'true');
-  assert.ok(open.includes('data-qa-row="2026-11-25_Cy Doe"'));
-  assert.ok(open.includes('data-qa-row="2026-11-25_Ed Gu"'));
-  assert.equal(tagsWithClass(open, 'qa-row').length, 5);
+  // Replie par son bouton : le compte seul.
+  const shut = assignHtml(VM({ eliteOpen: false }));
+  assert.equal(attr(openTag(shut, 'data-qa-elite'), 'aria-expanded'), 'false');
+  assert.deepEqual(texts(shut, 'button', 'qa-elite'), ['Often with Elite (2)']);
+  assert.equal(shut.includes('data-qa-row="2026-11-25_Cy Doe"'), false);
+  assert.equal(tagsWithClass(shut, 'qa-row').length, 3);
 
   // Groupe vide : ni titre ni bouton.
   const none = assignHtml(VM({ rows: { todo: ROWS.todo, assigned: [], elite: [] } }));

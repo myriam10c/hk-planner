@@ -185,6 +185,27 @@ test('off person is disabled', () => {
   assert.equal(peopleOn(mergeWeeks([WEEK_A]), THU)[0].off, false);
 });
 
+test('initials stay distinct: two people on the same letter get two letters', () => {
+  // Aisha et Annet (A) : Ai et An ; une seule personne sur sa lettre garde une lettre ; le
+  // sous-traitant garde ses initiales. Une personne non affectable (Amira) ne compte pas.
+  const people = PEOPLE.concat(
+    { id: 21, name: 'Aisha', role: 'cleaner', slot: 'p4', assignable: true },
+    { id: 22, name: 'Amira', role: 'manager', slot: 'other', assignable: false },
+  );
+  const m = mergeWeeks([week('2026-11-23', WEEK_A.jobs, { people })]);
+  assert.deepEqual(peopleOn(m, FRI).map((p) => [p.name, p.ini]), [
+    ['Aisha', 'Ai'], ['Annet', 'An'], ['Faiza', 'F'], ['Pionah', 'P'], ['Elite Cleaning', 'EC'],
+  ]);
+  // Sans Aisha : Annet reprend une lettre.
+  assert.equal(peopleOn(mergeWeeks([WEEK_A]), FRI)[0].ini, 'A');
+  // Memes lettres que le sous-traitant (EC) : la cleaner prend deux lettres de son prenom, le
+  // sous-traitant garde les siennes.
+  const twin = mergeWeeks([week('2026-11-23', [], { people: PEOPLE.concat({ id: 23, name: 'Emma Clark', role: 'cleaner', slot: 'p4', assignable: true }) })]);
+  assert.deepEqual(peopleOn(twin, FRI).map((p) => [p.name, p.ini]), [
+    ['Annet', 'A'], ['Emma Clark', 'Em'], ['Faiza', 'F'], ['Pionah', 'P'], ['Elite Cleaning', 'EC'],
+  ]);
+});
+
 test('rowLine pinned copy', () => {
   assert.equal(rowLine(PJ({ next: { date: FRI, time: '15:00', sameDay: true, before: false } })), 'Out 11:00 · Guest arrives 15:00');
   assert.equal(rowLine(PJ({ next: { date: FRI, time: null, sameDay: true, before: false } })), 'Out 11:00 · Guest arrives the same day');

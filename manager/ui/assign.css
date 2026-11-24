@@ -8,6 +8,8 @@
 .qa-back{display:inline-flex;align-items:center;gap:8px;min-height:44px;min-width:44px;padding:0 12px 0 4px;margin-left:-4px;border-radius:var(--r-pill);color:var(--ink);font-weight:700;text-decoration:none}
 .qa-back::before{content:"";width:9px;height:9px;margin-left:6px;border:solid currentColor;border-width:0 0 2.2px 2.2px;transform:rotate(45deg)}
 .qa-head h1{margin:var(--s1) 0 0;font-family:var(--font-display);font-variation-settings:"SOFT" 100,"WONK" 0;font-weight:340;font-size:clamp(2.6rem,12vw,3.75rem);line-height:1;letter-spacing:-.02em}
+/* Jour affiche en toutes lettres (« Wed 25 · tomorrow »), sous le titre. */
+.qa-date{margin:6px 0 0;font-size:17px;font-weight:700;color:var(--ink)}
 .qa-lede{margin:var(--s2) 0 0;font-size:17px;color:var(--ink-2);max-width:34em;text-wrap:pretty}
 
 /* ---------- Bande des jours (comme .td-week) ---------- */

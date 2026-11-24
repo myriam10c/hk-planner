@@ -5,7 +5,7 @@
 // d'idempotence par geste et par menage, jamais d'auteur ; donnees de plus de 60 s relues
 // d'abord (regle du lot 1). Modele et vue purs : assign-model.js, assign-view.js.
 import { get, post } from '/manager/api.js';
-import { createGestures } from '/manager/gesture.js';
+import { createGestures, uncertain } from '/manager/gesture.js';
 import { STALE_MS } from '/manager/fresh.js';
 import { addDays, dubaiToday, toast } from '/manager/ui/dom.js';
 import { weekStartOf } from '/manager/screens/planning-rules.js';
@@ -30,11 +30,12 @@ export async function renderAssign(ctx) {
   const main = ctx.main;
   const wanted = wantedDay();
   // sel : jour affiche ; chosen : jour d'arrivee deja tranche sur des donnees lues (firstDay) ;
-  // picked : jour choisi a la main dans la bande ; pinned : cle -> groupe au premier toucher
-  // (vide a chaque changement de jour) ; busy : menages dont l'ecriture (ou la relecture qui la
-  // precede) est en cours ; clock : jour de Dubai de la derniere lecture.
+  // picked : jour choisi a la main dans la bande ; pinned : cle -> groupe au premier affichage de
+  // la ligne (vide a chaque changement de jour) ; eliteOpen : groupe Often with Elite ouvert (au
+  // depart : rien de cache) ; busy : menages dont l'ecriture (ou la relecture qui la precede, ou
+  // celle qui suit un echec incertain) est en cours ; clock : jour de Dubai de la derniere lecture.
   const st = { loaded: false, starts: [], clock: dubaiToday(Date.now()), sel: null, chosen: false, picked: false,
-    pinned: new Map(), eliteOpen: false, busy: new Set() };
+    pinned: new Map(), eliteOpen: true, busy: new Set() };
   // Semaines lues : debut -> { data, ok, at } ; data garde la derniere reponse, ok dit si la
   // derniere lecture a reussi, at son heure (fraicheur).
   const weeks = {};
@@ -111,6 +112,12 @@ export async function renderAssign(ctx) {
     if (!reading) reading = readWeeks().finally(() => { reading = null; });
     return reading;
   }
+  // Lecture partie apres cet instant : une lecture deja en vol (partie avant) est attendue, puis
+  // une neuve part (ou celle qu'un autre geste vient de lancer, partie apres elle aussi).
+  async function readAfter() {
+    if (reading) await reading;
+    return reread();
+  }
 
   // Jour d'arrivee (une fois, sur des donnees lues) : firstDay (d s'il est dans la bande, sauf
   // aujourd'hui a 0 dans la bande ; sinon le premier jour que la bande compte ; sinon aujourd'hui).
@@ -136,6 +143,9 @@ export async function renderAssign(ctx) {
     const w = weekOf(sel);
     const has = !!(w && w.data);
     const rows = has ? buildRows(m, sel, st.pinned) : { todo: [], assigned: [], elite: [] };
+    // Chaque ligne garde le groupe de son premier affichage tant qu'on reste sur ce jour, touchee
+    // ou non : une relecture ne deplace rien sous le doigt (une ligne faite ou annulee part).
+    for (const r of rows.todo.concat(rows.assigned, rows.elite)) if (!st.pinned.has(r.key)) st.pinned.set(r.key, r.group);
     // empty : aucun menage non annule ce jour-la ; nothingLeft : des menages, tous faits.
     const empty = has && !m.jobs.some((j) => j.date === sel && !j.cancelled);
     const nothingLeft = has && !empty && !(rows.todo.length + rows.assigned.length + rows.elite.length);
@@ -198,7 +208,6 @@ export async function renderAssign(ctx) {
     // prev : liste locale juste avant l'ecriture (la meme que celle que write garde).
     let prev;
     try {
-      if (!st.pinned.has(key)) st.pinned.set(key, t.row.group);
       if (reading || staleOn(t.date)) {
         paint();
         await reread();
@@ -224,7 +233,9 @@ export async function renderAssign(ctx) {
 
   // Ecriture : la liste voulue (after) s'affiche tout de suite. Reussite : toast avec Undo (le geste
   // inverse, par le meme chemin, cle neuve). 409 avec current : un collegue a change la liste, la
-  // ligne la prend. Autre refus : la ligne revient a l'etat d'avant, le message tel quel.
+  // ligne la prend. Echec incertain (delai, reseau, 5xx, cle encore en cours) : l'ecriture a peut-etre
+  // eu lieu, le message s'affiche et la semaine est relue tout de suite ; la ligne montre ensuite la
+  // liste du serveur. Autre refus : la ligne revient a l'etat d'avant, le message tel quel.
   async function write(key, place, start, op) {
     const body = op.body;
     const prev = local.get(key);
@@ -245,6 +256,19 @@ export async function renderAssign(ctx) {
         local.set(key, { ids: current, tick: ++tick, start });
         paint();
         toast('Someone else changed ' + place + '. Check and tap again.');
+        return;
+      }
+      if (uncertain(err)) {
+        // La ligne reste occupee sur la liste voulue le temps de la relecture ; partie apres ce tick,
+        // elle remplace cette liste par celle du serveur (une relecture en echec met le jour en
+        // lecture seule, Retry la relance).
+        local.set(key, { ids: op.after.slice(), tick: ++tick, start });
+        st.busy.add(key);
+        paint();
+        toast(err.message);
+        await readAfter();
+        st.busy.delete(key);
+        paint();
         return;
       }
       if (prev) local.set(key, prev); else local.delete(key);

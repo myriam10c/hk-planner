@@ -57,6 +57,18 @@ export function firstDay(merged, today, wanted) {
   return days.find(open) || today;
 }
 
+// Initiales distinctes : celles du nom ; deux personnes affectables ou plus sur les memes (Aisha
+// et Annet : A) prennent les deux premieres lettres de leur prenom (Ai, An). Le sous-traitant
+// garde les siennes (EC).
+function distinctInitials(list) {
+  const base = list.map((p) => initials(p.name));
+  return list.map((p, i) => {
+    if (p.role === 'subcontractor' || base.indexOf(base[i]) === base.lastIndexOf(base[i])) return base[i];
+    const first = String(p.name || '').trim().split(/\s+/)[0] || '?';
+    return first.charAt(0).toUpperCase() + first.charAt(1).toLowerCase();
+  });
+}
+
 // Personnes affectables d'un jour : cleaners par nom, puis le sous-traitant. off : conge
 // ou repos du jour (days[].off du proxy) ; load : menages non annules du jour sur elle.
 export function peopleOn(merged, date) {
@@ -66,8 +78,9 @@ export function peopleOn(merged, date) {
   const team = merged.people.filter((p) => p.assignable);
   const list = team.filter((p) => p.role === 'cleaner').sort(byName)
     .concat(team.filter((p) => p.role === 'subcontractor').sort(byName));
-  return list.map((p) => ({
-    id: p.id, name: p.name, ini: initials(p.name), slot: p.slot, off: off.includes(p.id),
+  const ini = distinctInitials(list);
+  return list.map((p, i) => ({
+    id: p.id, name: p.name, ini: ini[i], slot: p.slot, off: off.includes(p.id),
     load: jobs.filter((j) => (j.assigned || []).includes(p.id)).length,
   }));
 }
