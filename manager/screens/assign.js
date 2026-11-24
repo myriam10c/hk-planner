@@ -14,6 +14,8 @@ import { assignHtml } from '/manager/screens/assign-view.js';
 
 const RO_LINE = 'Reconnect to make changes.';
 const BUSY = 'Saving, wait a second.';
+// Relecture qui montre un autre etat du menage que celui du geste.
+const changedLine = (place) => place + ' changed. Check and tap again.';
 const LOADING = '<div class="qa"><header class="qa-head"><a class="qa-back" href="#/today">Today</a><h1>Assign</h1></header>'
   + '<p class="qa-empty" role="status">Loading…</p></div>';
 // Liste d'ids comparee comme un ensemble : nombres uniques, tries.
@@ -122,17 +124,19 @@ export async function renderAssign(ctx) {
   // Jour d'arrivee (une fois, sur des donnees lues) : firstDay (d s'il est dans la bande, sauf
   // aujourd'hui a 0 dans la bande ; sinon le premier jour que la bande compte ; sinon aujourd'hui).
   // Un jour de la bande choisi a la main avant la premiere lecture reussie reste tel quel. Sans
-  // aucune donnee : d ou aujourd'hui.
+  // aucune donnee : d ou aujourd'hui. Passage de minuit : un jour sorti de la bande laisse place a d
+  // ou a aujourd'hui. Jour change : les epingles sont videes, comme pickDay (une cle de menage
+  // reporte garde sa date d'origine, son epingle d'hier ne vaut rien sur le nouveau jour).
   function settleDay() {
     const m = merged();
     const today = m.today || st.clock;
     const days = Array.from({ length: 7 }, (_, i) => addDays(today, i));
+    const was = st.sel;
     if (!st.chosen && m.today) {
       st.sel = st.picked && days.includes(st.sel) ? st.sel : firstDay(m, m.today, wanted);
       st.chosen = true;
-      return;
-    }
-    if (!days.includes(st.sel)) st.sel = wanted && days.includes(wanted) ? wanted : today;
+    } else if (!days.includes(st.sel)) st.sel = wanted && days.includes(wanted) ? wanted : today;
+    if (st.sel !== was) st.pinned.clear();
   }
 
   // ---------- Rendu ----------
@@ -214,7 +218,7 @@ export async function renderAssign(ctx) {
         if (!ctx.isCurrent() || left) return;
         if (roOn(t.date)) { drop(key, RO_LINE); return; }
         const now = rowOf(key);
-        if (!now || !sameSet(now.row.ids, op.body.expect_ids)) { drop(key, t.row.place + ' changed. Check and tap again.'); return; }
+        if (!now || !sameSet(now.row.ids, op.body.expect_ids)) { drop(key, changedLine(t.row.place)); return; }
       }
       prev = local.get(key);
       await write(key, t.row.place, weekStartOf(t.date), op);
@@ -235,7 +239,8 @@ export async function renderAssign(ctx) {
   // inverse, par le meme chemin, cle neuve). 409 avec current : un collegue a change la liste, la
   // ligne la prend. Echec incertain (delai, reseau, 5xx, cle encore en cours) : l'ecriture a peut-etre
   // eu lieu, le message s'affiche et la semaine est relue tout de suite ; la ligne montre ensuite la
-  // liste du serveur. Autre refus : la ligne revient a l'etat d'avant, le message tel quel.
+  // liste du serveur, et le toast dit ce qu'elle montre (uncertainEnd). Autre refus : la ligne revient
+  // a l'etat d'avant, le message tel quel.
   async function write(key, place, start, op) {
     const body = op.body;
     const prev = local.get(key);
@@ -268,7 +273,9 @@ export async function renderAssign(ctx) {
         toast(err.message);
         await readAfter();
         st.busy.delete(key);
+        if (!ctx.isCurrent() || left) return;
         paint();
+        uncertainEnd(key, place, start, op, err);
         return;
       }
       if (prev) local.set(key, prev); else local.delete(key);
@@ -278,9 +285,26 @@ export async function renderAssign(ctx) {
     }
     local.set(key, { ids: op.after.slice(), tick: ++tick, start });
     paint();
+    done(key, place, op);
+  }
+  // Toast d'une reussite, avec Undo : le geste inverse, par le meme chemin, cle neuve.
+  function done(key, place, op) {
+    const body = op.body;
     const name = nameOf(body.cleaner_id);
     const back = { body: op.undo, after: idSet(body.expect_ids), undo: body };
     toast(body.mode === 'add' ? place + ' assigned to ' + name : name + ' removed from ' + place, () => gesture(key, back));
+  }
+  // Fin d'un echec incertain, apres la relecture. Relecture en echec : lecture seule, le message
+  // reste (Retry). Sinon, d'apres la liste que la ligne montre : la liste voulue = l'ecriture est
+  // passee (toast de reussite, sinon toucher a nouveau la defait) ; celle d'avant = rien d'ecrit (le
+  // message : toucher a nouveau rejoue le meme geste, meme cle) ; une autre (ou ligne partie) = un
+  // collegue a change le menage.
+  function uncertainEnd(key, place, start, op, err) {
+    if (!(weeks[start] && weeks[start].ok)) return;
+    const now = rowOf(key);
+    if (now && sameSet(now.row.ids, op.after)) done(key, place, op);
+    else if (now && sameSet(now.row.ids, op.body.expect_ids)) toast(err.message);
+    else toast(changedLine(place));
   }
 
   function tap(key, id) {

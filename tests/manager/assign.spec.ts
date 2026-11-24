@@ -365,41 +365,100 @@ test('after a re-read, rows shown but not touched keep their group while on that
   await expect(group(page, 'No cleaner yet').locator('[data-qa-row="' + DF + '"]')).toBeVisible();
 });
 
-test('5xx on a write re-reads the week at once and shows the server list', async ({ page }) => {
-  // Erreur 5xx : l'ecriture a peut-etre eu lieu. La semaine est relue tout de suite ; le serveur
-  // a bien Faiza sur Ka Lu : la ligne la garde (et ne revient pas a la liste d'avant).
+test('past midnight the screen moves to the new day and rows take their group again', async ({ page }) => {
+  // Vendredi 9 a l'ecran, Bo Ray dans No cleaner yet (epingle). Samedi 00:30 a Dubai, plus de 60 s :
+  // le toucher relit ; Bo Ray, reporte au samedi (meme cle) et pris par Pionah, a change : rien
+  // d'ecrit. L'ecran passe a samedi, et Bo Ray y prend son groupe (Already assigned), pas celui de
+  // vendredi.
+  const night = assignBody({ today: '2026-10-10' });
+  Object.assign((night.jobs as any[]).find((j) => j.key === BR), { date: '2026-10-10', postponedFrom: '2026-10-09', checkout: null, assigned: [10] });
+  await boot(page, [AW(), W1(assignBody(), { once: true }), W1(night), W2()]);
+  await expect(group(page, 'No cleaner yet').locator('[data-qa-row="' + BR + '"]')).toBeVisible();
+  await page.clock.setFixedTime(new Date('2026-10-09T20:30:00Z'));
+  await btn(page, BR, 4).click();
+  await expect(toastBox(page)).toHaveText('Apt 103 · Damac Reva changed. Check and tap again.');
+  await expect(page.locator('.qa-date')).toHaveText('Sat 10 · today');
+  await expect(day(page, '2026-10-10')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('h2.qa-gh')).toHaveText(['Already assigned (2)']);
+  await expect(group(page, 'Already assigned').locator('[data-qa-row="' + BR + '"]')).toBeVisible();
+  await expect(btn(page, BR, 10)).toHaveAttribute('aria-pressed', 'true');
+  expect(await writes(page, 'assignCleaner')).toEqual([]);
+});
+
+// Echec incertain (delai depasse, reseau, 5xx) : le message s'affiche, la semaine est relue tout
+// de suite, puis le toast dit ce que la relecture montre pour la ligne : liste voulue = reussite
+// (avec Undo), liste d'avant = le message, autre liste = changed.
+test('5xx on a write, re-read shows the write done: success toast with Undo', async ({ page }) => {
   const written = assignBody();
   (written.jobs as any[]).find((j) => j.key === KL).assigned = [4];
   await boot(page, [AW({ status: 503, body: { error: 'Service unavailable' }, once: true }), AW(),
     W1(assignBody(), { once: true }), W1(written), W2()]);
   await expect(row(page, KL)).toBeVisible();
   await btn(page, KL, 4).click();
-  await expect(toastBox(page)).toHaveText('Service unavailable');
   await expect.poll(() => order(page)).toEqual(['week', 'week', 'write', 'week', 'week']);
   await expect(row(page, KL)).not.toHaveAttribute('aria-busy', 'true');
+  await expect(toastBox(page)).toContainText('Apt 1602 · The Grand Emaar assigned to Faiza');
   await expect(btn(page, KL, 4)).toHaveAttribute('aria-pressed', 'true');
   await expect(load(page, 'Faiza')).toHaveText('1 job');
-  await expect(toastBox(page)).toHaveText('Service unavailable');
-  // Le toucher suivant part de la liste du serveur : il retire Faiza.
+  // Undo : le geste inverse, cle neuve.
+  await undoBtn(page).click();
+  await expect(toastBox(page)).toContainText('Faiza removed from Apt 1602 · The Grand Emaar');
+  const w = await writes(page, 'assignCleaner');
+  expect(noIdem(w)).toEqual([ADD_KL, { reservation_key: KL, cleaner_id: 4, mode: 'remove', expect_ids: [4] }]);
+  expect(w[1].idem).not.toBe(w[0].idem);
+});
+
+test('timed-out write, re-read shows the write done: success toast, next tap removes', async ({ page }) => {
+  // Le proxy a fini l'ecriture apres l'abandon du client : la ligne montre Faiza, le toast dit la
+  // reussite (pas « Try again ») ; le toucher suivant sur Faiza la retire, sans renvoyer l'ajout.
+  const written = assignBody();
+  (written.jobs as any[]).find((j) => j.key === KL).assigned = [4];
+  await boot(page, [AW({ delay: 5000, once: true }), AW(), W1(assignBody(), { once: true }), W1(written), W2()], HASH, { timeoutMs: 1000 });
+  await expect(row(page, KL)).toBeVisible();
+  await btn(page, KL, 4).click();
+  await expect.poll(() => order(page)).toEqual(['week', 'week', 'write', 'week', 'week']);
+  await expect(row(page, KL)).not.toHaveAttribute('aria-busy', 'true');
+  await expect(toastBox(page)).toContainText('Apt 1602 · The Grand Emaar assigned to Faiza');
+  await expect(undoBtn(page)).toHaveText('Undo');
+  await expect(btn(page, KL, 4)).toHaveAttribute('aria-pressed', 'true');
   await btn(page, KL, 4).click();
   await expect(toastBox(page)).toContainText('Faiza removed from Apt 1602 · The Grand Emaar');
+  await expect(btn(page, KL, 4)).toHaveAttribute('aria-pressed', 'false');
   expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([ADD_KL, { reservation_key: KL, cleaner_id: 4, mode: 'remove', expect_ids: [4] }]);
 });
 
-test('timed-out write re-reads the week at once and shows the server list', async ({ page }) => {
-  // Delai depasse : l'ecriture n'a pas eu lieu, mais un collegue a mis Pionah entre-temps. La ligne
-  // montre Pionah (le serveur), ni Faiza (le geste) ni la ligne vide d'avant.
+test('timed-out write, re-read shows the list from before: error message, tap again replays', async ({ page }) => {
+  // Rien d'ecrit : la ligne revient vide, le message reste ; toucher a nouveau rejoue le meme geste
+  // avec la meme cle.
+  await boot(page, [AW({ delay: 5000, once: true }), AW(), W1(assignBody(), { once: true }), W1(assignBody()), W2()], HASH, { timeoutMs: 1000 });
+  await expect(row(page, KL)).toBeVisible();
+  await btn(page, KL, 4).click();
+  await expect.poll(() => order(page)).toEqual(['week', 'week', 'write', 'week', 'week']);
+  await expect(row(page, KL)).not.toHaveAttribute('aria-busy', 'true');
+  await expect(btn(page, KL, 4)).toHaveAttribute('aria-pressed', 'false');
+  await expect(toastBox(page)).toHaveText('HK Planner is taking too long to answer. Try again.');
+  await btn(page, KL, 4).click();
+  await expect(toastBox(page)).toContainText('Apt 1602 · The Grand Emaar assigned to Faiza');
+  const w = await writes(page, 'assignCleaner');
+  expect(noIdem(w)).toEqual([ADD_KL, ADD_KL]);
+  expect(w[1].idem).toBe(w[0].idem);
+});
+
+test('timed-out write, re-read shows another list: changed, check and tap again', async ({ page }) => {
+  // L'ecriture n'a pas eu lieu, mais un collegue a mis Pionah entre-temps. La ligne montre Pionah
+  // (le serveur), ni Faiza (le geste) ni la ligne vide d'avant.
   const other = assignBody();
   (other.jobs as any[]).find((j) => j.key === KL).assigned = [10];
   await boot(page, [AW({ delay: 5000, once: true }), W1(assignBody(), { once: true }), W1(other), W2()], HASH, { timeoutMs: 1000 });
   await expect(row(page, KL)).toBeVisible();
   await btn(page, KL, 4).click();
-  await expect(toastBox(page)).toHaveText('HK Planner is taking too long to answer. Try again.');
   await expect.poll(() => order(page)).toEqual(['week', 'week', 'write', 'week', 'week']);
   await expect(row(page, KL)).not.toHaveAttribute('aria-busy', 'true');
+  await expect(toastBox(page)).toHaveText('Apt 1602 · The Grand Emaar changed. Check and tap again.');
   await expect(btn(page, KL, 10)).toHaveAttribute('aria-pressed', 'true');
   await expect(btn(page, KL, 4)).toHaveAttribute('aria-pressed', 'false');
   await expect(group(page, 'No cleaner yet').locator('[data-qa-row="' + KL + '"]')).toBeVisible();
+  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([ADD_KL]);
 });
 
 test('a re-read that starts during a write does not undo it', async ({ page }) => {
