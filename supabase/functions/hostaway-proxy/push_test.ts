@@ -4,6 +4,7 @@ import {
   ASSIGN_PUSH_DELAY_MS,
   assignmentPushPayload,
   getApplicationServerKey,
+  installShutdownWake,
   isDuplicatePush,
   isQuietHoursDubai,
   pushPruneReason,
@@ -11,6 +12,8 @@ import {
   sendPush,
   stillAssignedTargets,
   taskPushPayload,
+  waitUnlessShutdown,
+  wakeAssignWaitsOnShutdown,
 } from "./push.ts";
 
 const b64u = (b: ArrayBuffer) =>
@@ -580,4 +583,167 @@ Deno.test("assignCleaner (source) : push retarde dans keepAlive, relecture par c
   assert(!bloc.includes("priority"), "aucune priorite sur une affectation");
   // Aucun envoi direct ailleurs dans le handler.
   assertEquals(b.split("sendPush(").length - 1, 1, "un seul appel a sendPush, dans la tache retardee");
+});
+
+// Arret de l'instance pendant l'attente (revue, Mineur 2) : le runtime Supabase emet
+// `beforeunload` (ev.detail.reason) ; les attentes en cours sont reveillees tout de
+// suite et la tache enchaine relecture puis envoi.
+
+// Horloge injectee : rien ne part tant que le test ne declenche pas le minuteur.
+function fakeTimers() {
+  const scheduled: Array<{ id: number; ms: number; fn: () => void; cleared: boolean }> = [];
+  return {
+    scheduled,
+    timers: {
+      setTimeout: (fn: () => void, ms: number) => {
+        const t = { id: scheduled.length + 1, ms, fn, cleared: false };
+        scheduled.push(t);
+        return t.id;
+      },
+      clearTimeout: (id: unknown) => {
+        const t = scheduled.find((x) => x.id === id);
+        if (t) t.cleared = true;
+      },
+    },
+    fire(i: number) {
+      if (!scheduled[i].cleared) scheduled[i].fn();
+    },
+  };
+}
+
+// Laisse tourner les microtaches en attente (aucun minuteur reel).
+async function flush() {
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+}
+
+Deno.test("attente d'Undo : sans arret, elle dure son delai", async () => {
+  const ft = fakeTimers();
+  let done = false;
+  const p = waitUnlessShutdown(ASSIGN_PUSH_DELAY_MS, ft.timers).then(() => { done = true; });
+  await flush();
+  assertEquals(ft.scheduled.map((t) => t.ms), [8000]);
+  assertEquals(done, false);
+  ft.fire(0);
+  await p;
+  assertEquals(done, true);
+  // Finie, elle n'est plus en cours : un arret ensuite ne reveille rien.
+  const warn = captureConsole("warn");
+  try {
+    assertEquals(wakeAssignWaitsOnShutdown("WallClockTime"), 0);
+    assertEquals(warn.lines, []);
+  } finally {
+    warn.restore();
+  }
+});
+
+Deno.test("attente d'Undo : l'arret la reveille avant son delai, relecture et envoi aussitot", async () => {
+  const ft = fakeTimers();
+  const f = fakeAssignDeps({ data: [{ cleaner_id: 5 }], error: null });
+  const warn = captureConsole("warn");
+  try {
+    const run = sendAssignmentPushesAfterUndoWindow([5], {
+      read: f.deps.read,
+      send: f.deps.send,
+      wait: (ms) => waitUnlessShutdown(ms, ft.timers),
+    });
+    await flush();
+    assertEquals(ft.scheduled.map((t) => t.ms), [8000]);
+    assertEquals(f.events, []);
+    assertEquals(wakeAssignWaitsOnShutdown("WallClockTime"), 1);
+    assertEquals(await run, [5]);
+    assertEquals(f.events, ["read", "send:5"]);
+    assertEquals(ft.scheduled[0].cleared, true);
+    assertEquals(warn.lines, ["[assignCleaner] push sent early: shutdown WallClockTime"]);
+  } finally {
+    warn.restore();
+  }
+});
+
+Deno.test("attente d'Undo : l'arret reveille toutes les attentes en cours", async () => {
+  const ft = fakeTimers();
+  const sent: number[] = [];
+  const run = (cid: number) =>
+    sendAssignmentPushesAfterUndoWindow([cid], {
+      read: async () => ({ data: [{ cleaner_id: cid }], error: null }),
+      send: async (id) => { sent.push(id); },
+      wait: (ms) => waitUnlessShutdown(ms, ft.timers),
+    });
+  const warn = captureConsole("warn");
+  try {
+    const runs = [run(5), run(7), run(9)];
+    await flush();
+    assertEquals(ft.scheduled.length, 3);
+    assertEquals(sent, []);
+    assertEquals(wakeAssignWaitsOnShutdown("EarlyDrop"), 3);
+    assertEquals(await Promise.all(runs), [[5], [7], [9]]);
+    assertEquals(sent.sort(), [5, 7, 9]);
+    assertEquals(ft.scheduled.every((t) => t.cleared), true);
+    assertEquals(warn.lines.length, 3);
+    assert(warn.lines.every((l) => l === "[assignCleaner] push sent early: shutdown EarlyDrop"), warn.lines.join("|"));
+  } finally {
+    warn.restore();
+  }
+});
+
+Deno.test("attente d'Undo : un arret sans attente en cours ne fait rien", () => {
+  const warn = captureConsole("warn");
+  try {
+    assertEquals(wakeAssignWaitsOnShutdown("WallClockTime"), 0);
+    assertEquals(warn.lines, []);
+  } finally {
+    warn.restore();
+  }
+});
+
+Deno.test("installShutdownWake : un seul ecouteur beforeunload, rien sans addEventListener", async () => {
+  assertEquals(installShutdownWake({}), false);
+  assertEquals(installShutdownWake(null), false);
+  const listeners: Array<{ type: string; fn: (ev: any) => void }> = [];
+  const target = { addEventListener: (type: string, fn: (ev: any) => void) => { listeners.push({ type, fn }); } };
+  assertEquals(installShutdownWake(target), true);
+  assertEquals(listeners.map((l) => l.type), ["beforeunload"]);
+  const warn = captureConsole("warn");
+  try {
+    // A vide (evenement sans detail) : rien.
+    listeners[0].fn({});
+    assertEquals(warn.lines, []);
+    // Une attente en cours : reveillee, avec la raison donnee par le runtime.
+    const ft = fakeTimers();
+    const p = waitUnlessShutdown(ASSIGN_PUSH_DELAY_MS, ft.timers);
+    listeners[0].fn({ detail: { reason: "WallClockTime" } });
+    await p;
+    assertEquals(ft.scheduled[0].cleared, true);
+    assertEquals(warn.lines, ["[assignCleaner] push sent early: shutdown WallClockTime"]);
+  } finally {
+    warn.restore();
+  }
+});
+
+Deno.test("push.ts pose l'ecouteur beforeunload au chargement : l'arret reveille une vraie attente", async () => {
+  // Minuteur reel de 60 s : si le reveil ne l'annulait pas, le test resterait bloque
+  // et le controle des operations de Deno signalerait un minuteur laisse en vol.
+  const p = waitUnlessShutdown(60_000);
+  const warn = captureConsole("warn");
+  try {
+    globalThis.dispatchEvent(new CustomEvent("beforeunload", { detail: { reason: "WallClockTime" } }));
+    await p;
+    assertEquals(warn.lines, ["[assignCleaner] push sent early: shutdown WallClockTime"]);
+  } finally {
+    warn.restore();
+  }
+});
+
+Deno.test("affectation retardee : par defaut (prod), l'attente est celle que l'arret interrompt", async () => {
+  const f = fakeAssignDeps({ data: [{ cleaner_id: 5 }], error: null });
+  const warn = captureConsole("warn");
+  try {
+    const run = sendAssignmentPushesAfterUndoWindow([5], { read: f.deps.read, send: f.deps.send });
+    await flush();
+    assertEquals(f.events, []);
+    assertEquals(wakeAssignWaitsOnShutdown("WallClockTime"), 1);
+    assertEquals(await run, [5]);
+    assertEquals(f.events, ["read", "send:5"]);
+  } finally {
+    warn.restore();
+  }
 });

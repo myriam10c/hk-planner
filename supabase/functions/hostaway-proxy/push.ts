@@ -87,9 +87,61 @@ export function stillAssignedTargets(
   return unique.filter((id) => present.has(id));
 }
 
+// Attentes d'Undo en cours dans cette instance : chaque entrée réveille la sienne.
+const pendingAssignWaits = new Set<() => void>();
+
+// Attente du délai d'Undo, coupée net à l'arrêt de l'instance (voir
+// wakeAssignWaitsOnShutdown). `timers` est une couture de test : la prod prend les
+// minuteurs du runtime.
+export function waitUnlessShutdown(
+  ms: number,
+  timers: {
+    setTimeout: (fn: () => void, ms: number) => unknown;
+    clearTimeout: (id: any) => void;
+  } = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id) },
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const wake = () => {
+      timers.clearTimeout(timer);
+      pendingAssignWaits.delete(wake);
+      resolve();
+    };
+    const timer = timers.setTimeout(wake, ms);
+    pendingAssignWaits.add(wake);
+  });
+}
+
+// Arrêt de l'instance (limite de durée atteinte, recyclage) : sans réveil, une tâche
+// en attente serait coupée sans envoi ni trace. Toutes les attentes en cours sont
+// réveillées tout de suite ; chaque tâche enchaîne relecture puis envoi, au mieux
+// du temps restant. Une ligne de journal par attente réveillée. Sans attente : rien.
+// Rend le nombre d'attentes réveillées.
+export function wakeAssignWaitsOnShutdown(reason: unknown): number {
+  const wakes = [...pendingAssignWaits];
+  for (const wake of wakes) {
+    console.warn("[assignCleaner] push sent early: shutdown", reason);
+    wake();
+  }
+  return wakes.length;
+}
+
+// Le runtime Supabase émet `beforeunload` avant d'arrêter l'instance, la raison dans
+// ev.detail.reason. Sans addEventListener (autre runtime) : rien ne change.
+export function installShutdownWake(target: any): boolean {
+  if (typeof target?.addEventListener !== "function") return false;
+  target.addEventListener("beforeunload", (ev: any) => {
+    wakeAssignWaitsOnShutdown(ev?.detail?.reason);
+  });
+  return true;
+}
+
+// Écouteur unique, posé au chargement du module.
+installShutdownWake(globalThis);
+
 // Tâche de fond d'assignCleaner (lancée dans keepAlive, la réponse n'attend pas) :
-// attend la fenêtre d'Undo, relit les affectés du ménage, puis n'envoie qu'aux
-// cibles encore affectées. Les branchements sont injectés pour rester testable :
+// attend la fenêtre d'Undo (écourtée si l'instance s'arrête), relit les affectés du
+// ménage, puis n'envoie qu'aux cibles encore affectées. Les branchements sont
+// injectés pour rester testable :
 // `read` relit cleaning_assignments (forme supabase-js { data, error }), `send`
 // envoie un push, `wait` est une couture de test (la prod ne le passe jamais).
 // NE LEVE JAMAIS : relecture ou envoi en échec sont journalisés.
@@ -102,7 +154,7 @@ export async function sendAssignmentPushesAfterUndoWindow(
   },
 ): Promise<number[]> {
   if (targets.length === 0) return [];
-  const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const wait = deps.wait ?? ((ms: number) => waitUnlessShutdown(ms));
   await wait(ASSIGN_PUSH_DELAY_MS);
   let rows: Array<{ cleaner_id: unknown }> | null = null;
   try {
