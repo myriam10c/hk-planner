@@ -61,6 +61,9 @@
 .qa-p{position:relative;flex:none;width:44px;height:44px;padding:0;border:0;border-radius:50%;display:inline-grid;place-items:center;background:transparent;color:var(--ink-2);box-shadow:inset 0 0 0 1.5px var(--ring);font-size:14px;font-weight:700;letter-spacing:.01em;line-height:1;cursor:pointer;touch-action:manipulation}
 .qa-p[aria-pressed="true"]{background:var(--qa-bg);color:var(--qa-fg);box-shadow:none}
 .qa-p[aria-disabled="true"]{cursor:not-allowed}
+/* Lecture seule : les initiales refusees s'estompent, libres ou pleines (le curseur ne se voit
+   pas au doigt) ; une personne off pas sur le menage garde son aspect barre, ci-dessous. */
+.qa-p[aria-disabled="true"]:not(.qa-off[aria-pressed="false"]){opacity:.55}
 /* Off ce jour-la : grisee et barree, refusee ; reste pleine si elle est deja sur le menage. */
 .qa-p.qa-off{background:var(--sunk);color:var(--ink-3);box-shadow:none}
 .qa-p.qa-off[aria-pressed="true"]{background:var(--qa-bg);color:var(--qa-fg)}

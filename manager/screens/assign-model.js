@@ -46,16 +46,15 @@ export function stripDays(merged, today) {
   }));
 }
 
-// Jour d'arrivee : wanted s'il est dans la bande, sinon le premier jour qui a un menage
-// sans personne (Usually Elite compris), sinon today.
+// Jour d'arrivee : wanted s'il est dans la bande, sauf aujourd'hui quand la bande n'y compte
+// rien (le lien de Today porte toujours le jour selectionne) ; sinon le premier jour que la
+// bande compte (countNone : un menage attendu chez Elite, « Not logged yet », n'y est pas),
+// sinon today.
 export function firstDay(merged, today, wanted) {
   const days = stripOf(today);
-  if (wanted && days.includes(wanted)) return wanted;
-  const hit = days.find((d) => {
-    const r = buildRows(merged, d, new Map());
-    return r.todo.length + r.elite.length > 0;
-  });
-  return hit || today;
+  const open = (d) => countNone(merged, d) > 0;
+  if (wanted && days.includes(wanted) && (wanted !== today || open(today))) return wanted;
+  return days.find(open) || today;
 }
 
 // Personnes affectables d'un jour : cleaners par nom, puis le sous-traitant. off : conge
@@ -73,14 +72,15 @@ export function peopleOn(merged, date) {
   }));
 }
 
-// Seconde ligne d'un menage : depart (ou report, ou libelle de l'extra), puis le guest suivant
-// (Guest arrives first : il arrive avant ce menage reporte). mgr.planning ne cherche jamais le
-// guest suivant d'un extra : rien a en dire.
+// Seconde ligne d'un menage : depart (ou report, ou libelle de l'extra, suivi de son heure
+// dediee quand il en a une), puis le guest suivant (Guest arrives first : il arrive avant ce
+// menage reporte). mgr.planning ne cherche jamais le guest suivant d'un extra : rien a en dire.
 export function rowLine(job) {
   const extra = job.kind === 'extra';
+  const x = job.extra || {};
   const out = job.checkout ? 'Out ' + job.checkout
     : job.postponedFrom ? 'Postponed from ' + ddmm(job.postponedFrom)
-      : extra ? (job.extra && job.extra.label) || 'Extra cleaning'
+      : extra ? (x.label || 'Extra cleaning') + (x.cleaningTime ? ' at ' + x.cleaningTime : '')
         : 'Out time not set';
   const n = job.next;
   const next = !n ? (extra ? '' : 'No next guest')

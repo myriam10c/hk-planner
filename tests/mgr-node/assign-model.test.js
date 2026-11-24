@@ -116,6 +116,65 @@ test('firstDay prefers wanted, then first day with rows, then today', () => {
   assert.equal(firstDay(full, THU, null), THU);
 });
 
+// Soir du jeudi 26 : aujourd'hui tout est affecte sauf un menage attendu chez Elite, qui ne le
+// note que le lendemain (« Not logged yet ») ; demain, quatre menages de l'equipe sans personne.
+const EVENING = mergeWeeks([week('2026-11-23', [
+  PJ({ key: '2026-11-26_Io Pe', listingId: 'L10', apt: '210', bld: 'Tower B', date: THU, assigned: [3], serviceType: 'CHC',
+    tone: 'idle', word: 'Scheduled' }),
+  PJ({ key: '2026-11-26_Mo Ra', listingId: 'L9', apt: '909', bld: 'Bloom Height', date: THU, usuallyElite: true,
+    tone: 'warn', word: 'Not logged yet' }),
+  PJ({ key: '2026-11-27_Na Ve', listingId: 'L1', apt: '101', bld: 'Tower A' }),
+  PJ({ key: '2026-11-27_Ol Pa', listingId: 'L2', apt: '102', bld: 'Tower A' }),
+  PJ({ key: '2026-11-27_Qu Ri', listingId: 'L3', apt: '103', bld: 'Tower A' }),
+  PJ({ key: '2026-11-27_Sa Ti', listingId: 'L4', apt: '104', bld: 'Tower A' }),
+])]);
+
+test('firstDay skips today when its strip count is 0 even if wanted', () => {
+  // Le lien de Today porte toujours le jour selectionne : aujourd'hui a 0 dans la bande ne retient pas.
+  const m = mergeWeeks([WEEK_A]);
+  assert.equal(stripDays(m, THU)[0].count, 0);
+  assert.equal(firstDay(m, THU, THU), FRI);
+  assert.equal(firstDay(EVENING, THU, THU), FRI);
+  // Un menage sans personne aujourd'hui : aujourd'hui voulu reste aujourd'hui.
+  const open = mergeWeeks([week('2026-11-23', [...WEEK_A.jobs,
+    PJ({ key: '2026-11-26_Lu Ma', listingId: 'L14', apt: '402', bld: 'Tower D', date: THU })])]);
+  assert.equal(stripDays(open, THU)[0].count, 1);
+  assert.equal(firstDay(open, THU, THU), THU);
+  // Rien a affecter nulle part : aujourd'hui.
+  const full = mergeWeeks([week('2026-11-23', [PJ({ key: 'K1', date: THU, assigned: [4], word: 'Scheduled' })])]);
+  assert.equal(firstDay(full, THU, THU), THU);
+});
+
+test('firstDay ignores a day whose only open cleanings are expected with Elite (Not logged yet)', () => {
+  // Meme compte que la bande (countNone) : 0 aujourd'hui, 4 demain.
+  assert.deepEqual(stripDays(EVENING, THU).slice(0, 2).map((d) => d.count), [0, 4]);
+  assert.equal(firstDay(EVENING, THU, null), FRI);
+  // Un menage Usually Elite encore « Unassigned » (jour a venir) compte, comme dans la bande.
+  const later = mergeWeeks([week('2026-11-23', [
+    PJ({ key: '2026-11-26_Mo Ra', listingId: 'L9', apt: '909', bld: 'Bloom Height', date: THU, usuallyElite: true,
+      tone: 'warn', word: 'Not logged yet' }),
+    PJ({ key: '2026-11-28_Jo Ku', listingId: 'L11', apt: '311', bld: 'Tower C', date: SAT, usuallyElite: true }),
+  ])]);
+  assert.equal(firstDay(later, THU, null), SAT);
+});
+
+test('firstDay keeps a wanted future day', () => {
+  const m = mergeWeeks([WEEK_A]);
+  assert.equal(firstDay(m, THU, SAT), SAT);
+  // Meme a 0 dans la bande, ou dans une semaine pas encore lue : ce jour-la a ete choisi.
+  assert.equal(firstDay(m, THU, '2026-11-29'), '2026-11-29');
+  assert.equal(firstDay(m, THU, '2026-12-02'), '2026-12-02');
+  assert.equal(firstDay(EVENING, THU, SAT), SAT);
+});
+
+test('firstDay falls back from a past wanted day', () => {
+  // Lien de Planning sur ordinateur : le lundi de la semaine en cours, passe, hors de la bande.
+  assert.equal(firstDay(mergeWeeks([WEEK_A]), THU, '2026-11-23'), FRI);
+  assert.equal(firstDay(EVENING, THU, '2026-11-23'), FRI);
+  const full = mergeWeeks([week('2026-11-23', [PJ({ key: 'K1', assigned: [4], word: 'Scheduled' })])]);
+  assert.equal(firstDay(full, THU, '2026-11-23'), THU);
+});
+
 test('off person is disabled', () => {
   assert.deepEqual(peopleOn(mergeWeeks([WEEK_A]), FRI), [
     { id: 10, name: 'Annet', ini: 'A', slot: 'p1', off: true, load: 1 },
@@ -134,6 +193,10 @@ test('rowLine pinned copy', () => {
   assert.equal(rowLine(PJ({ checkout: null, postponedFrom: '2026-11-19' })), 'Postponed from 19/11 · No next guest');
   assert.equal(rowLine(FRI_JOBS.find((j) => j.key === '2026-11-19_Gi Lo')), 'Postponed from 19/11 · Guest arrives first');
   assert.equal(rowLine(FRI_JOBS.find((j) => j.kind === 'extra')), 'Deep clean');
+  // Extra avec son heure dediee : libelle puis l'heure.
+  assert.equal(rowLine(PJ({ key: 'extra_2026-11-27_mxyz', kind: 'extra', checkout: null, guest: null,
+    extra: { id: 32, label: 'Deep clean', guestName: null, priceBilled: null, cleanerPrice: null, notes: null, cleaningDate: FRI, cleaningTime: '14:00' } })),
+  'Deep clean at 14:00');
 });
 
 test('buildRows groups, order and exclusions', () => {

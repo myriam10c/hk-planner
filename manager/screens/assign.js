@@ -112,14 +112,16 @@ export async function renderAssign(ctx) {
     return reading;
   }
 
-  // Jour d'arrivee (une fois, sur des donnees lues) : d s'il est dans la bande, sinon le premier
-  // jour qui a un menage sans personne, sinon aujourd'hui. Sans aucune donnee : d ou aujourd'hui.
+  // Jour d'arrivee (une fois, sur des donnees lues) : firstDay (d s'il est dans la bande, sauf
+  // aujourd'hui a 0 dans la bande ; sinon le premier jour que la bande compte ; sinon aujourd'hui).
+  // Un jour de la bande choisi a la main avant la premiere lecture reussie reste tel quel. Sans
+  // aucune donnee : d ou aujourd'hui.
   function settleDay() {
     const m = merged();
     const today = m.today || st.clock;
     const days = Array.from({ length: 7 }, (_, i) => addDays(today, i));
     if (!st.chosen && m.today) {
-      st.sel = firstDay(m, m.today, st.picked ? st.sel : wanted);
+      st.sel = st.picked && days.includes(st.sel) ? st.sel : firstDay(m, m.today, wanted);
       st.chosen = true;
       return;
     }
@@ -193,16 +195,31 @@ export async function renderAssign(ctx) {
     if (!t) return;
     if (roOn(t.date)) { toast(RO_LINE); return; }
     st.busy.add(key);
-    if (!st.pinned.has(key)) st.pinned.set(key, t.row.group);
-    if (reading || staleOn(t.date)) {
-      paint();
-      await reread();
-      if (!ctx.isCurrent() || left) return;
-      if (roOn(t.date)) { drop(key, RO_LINE); return; }
-      const now = rowOf(key);
-      if (!now || !sameSet(now.row.ids, op.body.expect_ids)) { drop(key, t.row.place + ' changed. Check and tap again.'); return; }
+    // prev : liste locale juste avant l'ecriture (la meme que celle que write garde).
+    let prev;
+    try {
+      if (!st.pinned.has(key)) st.pinned.set(key, t.row.group);
+      if (reading || staleOn(t.date)) {
+        paint();
+        await reread();
+        if (!ctx.isCurrent() || left) return;
+        if (roOn(t.date)) { drop(key, RO_LINE); return; }
+        const now = rowOf(key);
+        if (!now || !sameSet(now.row.ids, op.body.expect_ids)) { drop(key, t.row.place + ' changed. Check and tap again.'); return; }
+      }
+      prev = local.get(key);
+      await write(key, t.row.place, weekStartOf(t.date), op);
+    } catch (e) {
+      // Exception imprevue (les refus de l'API sont traites par write) : une ecriture encore en vol
+      // (tick Infinity : une seule par menage) revient a la liste d'avant ; une ecriture tranchee
+      // garde la sienne. Le message s'affiche.
+      const cur = local.get(key);
+      if (cur && cur.tick === Infinity) { if (prev) local.set(key, prev); else local.delete(key); }
+      if (ctx.isCurrent() && !left) drop(key, (e && e.message) || 'Something went wrong. Try again.');
+    } finally {
+      // Jamais de ligne laissee sur « Saving ».
+      st.busy.delete(key);
     }
-    await write(key, t.row.place, weekStartOf(t.date), op);
   }
 
   // Ecriture : la liste voulue (after) s'affiche tout de suite. Reussite : toast avec Undo (le geste
@@ -268,7 +285,9 @@ export async function renderAssign(ctx) {
     if (document.activeElement !== el) el.focus({ preventScroll: true });
     if (el.hasAttribute('data-qa-day')) { pickDay(el.getAttribute('data-qa-day')); return; }
     if (el.hasAttribute('data-qa-elite')) { st.eliteOpen = !st.eliteOpen; paint(); return; }
-    if (el.getAttribute('aria-disabled') === 'true') return;
+    // Initiale refusee : en lecture seule, le toucher le dit (le bandeau est souvent hors de
+    // l'ecran) ; une personne off, barree, reste muette.
+    if (el.getAttribute('aria-disabled') === 'true') { if (roOn(st.sel)) toast(RO_LINE); return; }
     tap(el.getAttribute('data-qa-key'), el.getAttribute('data-qa-id'));
   }
 
