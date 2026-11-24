@@ -27,6 +27,17 @@ const TD_FOCUS = ['data-td-open', 'data-td-who', 'data-td-pick', 'data-td-wpick'
 
 function shellHtml(inner) { return '<header class="top"><div><h1>Today</h1></div></header>' + inner; }
 
+// Garde « un collegue a change » (meme logique et memes textes que l'ecran Assign) : liste d'ids
+// comparee comme un ensemble (nombres uniques, tries, comme assignConflict du proxy).
+const idSet = (ids) => [...new Set((ids || []).map(Number))].sort((a, b) => a - b);
+const sameSet = (a, b) => { const x = idSet(a), y = idSet(b); return x.length === y.length && x.every((v, i) => v === y[i]); };
+// Refus de la garde expect_ids de assignCleaner (409 avec current) : la liste actuelle du menage ;
+// sinon null (autre refus, ou ancien proxy sans garde).
+function conflictOf(e) { return e && e.status === 409 && e.data && Array.isArray(e.data.current) ? idSet(e.data.current) : null; }
+// Relecture d'avant le geste qui montre un changement ; refus 409 du serveur.
+const changedLine = (place) => place + ' changed. Check and tap again.';
+const someoneLine = (place) => 'Someone else changed ' + place + '. Check and tap again.';
+
 export async function renderToday(ctx) {
   const main = ctx.main;
   // day : jour choisi dans la bande des sept jours (null = le jour des donnees). triedOn : jour de Dubai
@@ -38,8 +49,9 @@ export async function renderToday(ctx) {
   // Autre jour de la bande : arrive = jour qui vient d'etre choisi (son premier menage sans
   // cleaner s'ouvre des que sa semaine est lue fraiche) ; wchain = { day, from }, l'enchainement
   // de chain sur ce jour, apres la relecture de sa semaine.
+  // seen : { id, ids }, liste du menage du choix ouvert vue a son ouverture (garde d'un collegue).
   const st = { data: null, savedAt: 0, fresh: false, loading: true, error: null, busy: false, sheetKey: null, day: null, triedOn: null,
-    pending: null, ui: { filter: null, collapsed: { more: true }, pick: null }, pickErr: null, chain: null, arrive: null, wchain: null };
+    pending: null, ui: { filter: null, collapsed: { more: true }, pick: null }, pickErr: null, chain: null, arrive: null, wchain: null, seen: null };
   // Journee du modele, calculee une fois par reponse mgr.today.
   let memo = { data: null, day: null };
   function model() {
@@ -412,9 +424,11 @@ export async function renderToday(ctx) {
   // Tuile d'une personne sur un autre jour (calquee sur pickPerson) : semaine de plus d'une
   // minute, ou en cours de lecture, relue d'abord (verrou opening) ; l'ecriture part sur la
   // semaine relue (Undo compris). Relecture en echec : refus. Abandon si le choix a ete ferme ou
-  // a change, si le jour a change, ou si le menage n'est plus a affecter.
+  // a change, si le jour a change, ou si le menage n'est plus a affecter. Liste du menage autre
+  // que celle vue a l'ouverture du choix (un collegue est passe) : rien n'est ecrit, le toast le dit.
   async function pickAhead(key, pid) {
     const id = st.ui.pick;
+    const seen = seenOf(id);
     const d = otherDay();
     if (!d) return;
     const start = weekStartOf(d);
@@ -430,8 +444,10 @@ export async function renderToday(ctx) {
       if (!w.fresh) { refuseRo(); return; }
     }
     if (id == null || st.ui.pick !== id) return;
-    const u = aheadDayOf(w, d).units.find((x) => x.id === id);
+    const day = aheadDayOf(w, d);
+    const u = day.units.find((x) => x.id === id);
     if (!u || !u.canAssign || u.key !== key) return;
+    if (!sameSet(u.assigned, seen)) { reseen(day, key); toast(changedLine(placeLabel(u))); return; }
     aheadAssign(key, pid, aheadPlace(id, isNone(u), d));
   }
   // Choix dans une carte d'un autre jour : meme compte rendu que pickPlace ; l'enchainement
@@ -446,25 +462,41 @@ export async function renderToday(ctx) {
   }
   // Ecriture sur un autre jour : semaine fraiche obligatoire, cle d'idempotence par geste,
   // jamais d'auteur, puis rechargement de cette semaine (le jour choisi reste). at : le choix
-  // ouvert (aheadPlace), absent pour Undo.
-  async function aheadWrite(start, body, okMsg, undoFn, at) {
+  // ouvert (aheadPlace), absent pour Undo. g : { key, before, after, place }, liste vue (envoyee
+  // en expect_ids) et liste voulue. 409 avec current : la liste voulue, c'est le rejeu d'une
+  // ecriture deja faite dont la reponse s'est perdue (reussite) ; sinon un collegue est passe.
+  async function aheadWrite(start, body, okMsg, undoFn, at, g) {
     if (st.busy) { busyToast(); return; }
     const w = weeks[start];
     if (!w || !w.fresh || !w.data) { refuseRo(); return; }
     st.busy = true;
     if (at) at.busy(true);
+    let err = null;
     try {
       await gestures.run('assignCleaner|' + JSON.stringify(body), (idem) => post('assignCleaner', { ...body, idem }));
-    } catch (e) {
-      st.busy = false;
+    } catch (e) { err = e; }
+    st.busy = false;
+    const current = conflictOf(err);
+    if (err && !(current && sameSet(current, g.after))) {
       if (at) at.busy(false);
-      if (handleAccess(e)) return;
-      if (at && at.held()) at.error(e.message); else toast(e.message);
+      if (handleAccess(err)) return;
+      if (current) { tookWeek(start, g, current); return; }
+      if (at && at.held()) at.error(err.message); else toast(err.message);
       return;
     }
-    st.busy = false;
     if (at && at.held()) at.done();
     toast(okMsg, undoFn);
+    loadWeek(start);
+  }
+  // 409 de la garde sur un autre jour : la liste du serveur s'affiche tout de suite, devient la liste
+  // vue du choix ouvert sur ce menage, le toast le dit ; la semaine est relue.
+  function tookWeek(start, g, ids) {
+    const w = weeks[start];
+    w.data = { ...w.data, jobs: w.data.jobs.map((j) => (j.key === g.key ? { ...j, assigned: ids.slice() } : j)) };
+    const d = otherDay();
+    if (d && weekStartOf(d) === start) reseen(aheadDayOf(w, d), g.key);
+    paint();
+    toast(someoneLine(g.place));
     loadWeek(start);
   }
   function aheadAssign(key, id, at) {
@@ -476,9 +508,26 @@ export async function renderToday(ctx) {
     const service = j.serviceType || 'CHC';
     const where = placeLabel(j);
     const label = (list) => (list.length ? namesOf(w.data, list) : 'nobody');
-    const body = (list) => ({ reservation_key: key, cleaner_ids: list, mode: 'set', service_type: service });
-    aheadWrite(start, body(ids), where + ' assigned to ' + label(ids),
-      () => aheadWrite(start, body(prev), where + ' back to ' + label(prev)), at);
+    const body = (list, expect) => ({ reservation_key: key, cleaner_ids: list, mode: 'set', service_type: service, expect_ids: expect });
+    aheadWrite(start, body(ids, prev), where + ' assigned to ' + label(ids),
+      () => aheadUndo(start, body(prev, ids), where + ' back to ' + label(prev), { key, before: ids, after: prev, place: where }),
+      at, { key, before: prev, after: ids, place: where });
+  }
+  // Undo sur un autre jour (meme garde que la tuile) : semaine relue d'abord quand une lecture est
+  // en cours (celle d'apres l'ecriture) ou qu'elle a plus d'une minute ; liste du menage autre que
+  // celle laissee par le geste (un collegue est passe) : rien n'est ecrit, le toast le dit.
+  async function aheadUndo(start, body, okMsg, g) {
+    if (st.busy) { busyToast(); return; }
+    const w0 = weeks[start];
+    if (w0 && (w0.loading || isStale(w0.at, Date.now()))) {
+      await weekRead(start);
+      if (!ctx.isCurrent()) return;
+    }
+    const w = weeks[start];
+    if (!w || !w.fresh || !w.data) { refuseRo(); return; }
+    const j = w.data.jobs.find((x) => x.key === g.key);
+    if (j && !sameSet(j.assigned, g.before)) { toast(changedLine(g.place)); return; }
+    aheadWrite(start, body, okMsg, null, null, g);
   }
 
   // Cible d'une ecriture : un menage du jour, ou le menage precedent d'une arrivee.
@@ -510,13 +559,26 @@ export async function renderToday(ctx) {
   }
   function heldHere(key) { return sheetIsOpen() && st.sheetKey === key; }
   function busyToast() { toast('Saving, wait a second.'); }
-  async function undo(fn) {
+  // Undo d'une ecriture du jour, derriere la garde de fraicheur. Affectation (g, inverse du geste :
+  // before = la liste laissee par le geste, after = la liste d'avant) : liste du menage relue autre
+  // que before (un collegue est passe) : rien n'est ecrit, le toast le dit ; sinon expect_ids =
+  // before, et le 409 se traite comme pour le geste (write).
+  async function undo(fn, g) {
     if (st.busy) { busyToast(); return; }
     if (!(await gate())) return;
     if (st.busy) { busyToast(); return; }
+    const t = g ? targetFor(g.key) : null;
+    if (t && !sameSet(t.assigned, g.before)) { toast(changedLine(g.place)); return; }
     st.busy = true;
-    try { await fn(); } catch (e) { if (!handleAccess(e)) toast(e.message); }
+    let err = null;
+    try { await fn(); } catch (e) { err = e; }
     st.busy = false;
+    const current = g ? conflictOf(err) : null;
+    if (err && !(current && sameSet(current, g.after))) {
+      if (handleAccess(err)) return;
+      if (current) { took(g, current); return; }
+      toast(err.message);
+    }
     refresh();
   }
   // Ecriture du jour : cle d'idempotence par geste (reprise au reessai incertain), jamais d'auteur.
@@ -541,37 +603,56 @@ export async function renderToday(ctx) {
     };
   }
 
-  async function write(t, call, okMsg, undoCall, at) {
+  // g (affectation seulement) : { key, before, after, place }, liste vue (envoyee en expect_ids) et
+  // liste voulue du menage. 409 avec current : la liste voulue, c'est le rejeu d'une ecriture deja
+  // faite dont la reponse s'est perdue (reussite) ; sinon un collegue est passe (took).
+  async function write(t, call, okMsg, undoCall, at, g) {
     if (st.busy) { busyToast(); return; }
     if (readOnly()) { refuseRo(); return; }
     const place = at || sheetPlace(t.key);
     st.busy = true;
     place.busy(true);
-    try {
-      await call();
-    } catch (e) {
-      st.busy = false;
+    let err = null;
+    try { await call(); } catch (e) { err = e; }
+    st.busy = false;
+    const current = g ? conflictOf(err) : null;
+    if (err && !(current && sameSet(current, g.after))) {
       place.busy(false);
-      if (handleAccess(e)) return;
-      if (place.held()) place.error(e.message); else toast(e.message);
+      if (handleAccess(err)) return;
+      if (current) { took(g, current); return; }
+      if (place.held()) place.error(err.message); else toast(err.message);
       return;
     }
-    st.busy = false;
     if (place.held()) place.done();
-    toast(okMsg, () => undo(undoCall));
+    toast(okMsg, () => undo(undoCall, g && { key: g.key, before: g.after, after: g.before, place: g.place }));
+    refresh();
+  }
+  // 409 de la garde : un collegue a change la liste du menage. Elle s'affiche tout de suite (menage
+  // et arrivee qui le designe), devient la liste vue du choix ouvert sur ce menage, le toast le
+  // dit ; Today est relu.
+  function took(g, ids) {
+    const d = st.data;
+    const put = (x) => ({ ...x, assigned: ids.slice() });
+    st.data = { ...d, who: { ...d.who, jobs: d.who.jobs.map((j) => (j.key === g.key ? put(j) : j)) },
+      arrivals: { ...d.arrivals, rows: d.arrivals.rows.map((a) => (a.prevKey === g.key ? put(a) : a)) } };
+    if (!otherDay()) reseen(model(), g.key);
+    paint();
+    toast(someoneLine(g.place));
     refresh();
   }
 
+  // Affectation du jour (mode set) : expect_ids = la liste vue, la garde du serveur refuse
+  // d'ecraser le choix d'un collegue ; l'Undo passe par la meme garde.
   function assign(key, id, at) {
     const t = targetFor(key);
     if (!t) return;
     const prev = t.assigned.slice();
+    const ids = [Number(id)];
     const service = t.serviceType || 'CHC';
-    return write(t,
-      send('assignCleaner', { reservation_key: key, cleaner_ids: [Number(id)], mode: 'set', service_type: service }),
-      placeLabel(t) + ' assigned to ' + nameOf(id),
-      send('assignCleaner', { reservation_key: key, cleaner_ids: prev, mode: 'set', service_type: service }),
-      at);
+    const where = placeLabel(t);
+    const body = (list, expect) => ({ reservation_key: key, cleaner_ids: list, mode: 'set', service_type: service, expect_ids: expect });
+    return write(t, send('assignCleaner', body(ids, prev)), where + ' assigned to ' + nameOf(id),
+      send('assignCleaner', body(prev, ids)), at, { key, before: prev, after: ids, place: where });
   }
 
   function setDone(key, val) {
@@ -613,6 +694,8 @@ export async function renderToday(ctx) {
     st.ui.pick = id;
     st.pickErr = null;
     const day = shownDay();
+    const u = day ? day.units.find((x) => x.id === id) : null;
+    st.seen = { id, ids: u ? u.assigned.slice() : [] };
     const m = day ? day.moments.find((x) => x.unitIds.indexOf(id) >= 0) : null;
     if (m) delete st.ui.collapsed[m.id];
     paint();
@@ -646,14 +729,27 @@ export async function renderToday(ctx) {
     if (!u || !u.canAssign || readOnly()) return;
     showPick(id);
   }
+  // Liste vue du choix ouvert id (showPick), null pour un autre choix. reseen : apres un changement
+  // dit a l'ecran, la liste affichee du menage key devient la liste vue du choix ouvert sur lui
+  // (un second toucher ecrit alors sur elle).
+  function seenOf(id) { return st.seen && st.seen.id === id ? st.seen.ids : null; }
+  function reseen(day, key) {
+    const id = st.ui.pick;
+    const u = id != null && day ? day.units.find((x) => x.id === id) : null;
+    if (u && u.key === key) st.seen = { id, ids: u.assigned.slice() };
+  }
   // Tuile d'une personne : l'ecriture de assign() derriere la meme garde ; abandonnee si le
-  // choix a ete ferme (ou a change) pendant la relecture.
+  // choix a ete ferme (ou a change) pendant la relecture. Liste du menage relue autre que celle
+  // vue a l'ouverture du choix (un collegue est passe) : rien n'est ecrit, le toast le dit.
   async function pickPerson(key, pid) {
     const id = st.ui.pick;
+    const seen = seenOf(id);
     if (!(await gate())) return;
     if (id == null || st.ui.pick !== id) return;
-    const u = model().units.find((x) => x.id === id);
+    const day = model();
+    const u = day.units.find((x) => x.id === id);
     if (!u || u.key !== key) return;
+    if (!sameSet(u.assigned, seen)) { reseen(day, key); toast(changedLine(placeLabel(u))); return; }
     assign(key, pid, pickPlace(id, isNone(u)));
   }
 

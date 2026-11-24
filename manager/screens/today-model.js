@@ -117,16 +117,23 @@ function timesLine(u, date, today) {
 
 // Etat d'un menage dit sur la ligne Cleaner d'une carte Blocked (page de test, blocked()).
 const JOB_WORD = { done: 'Done', in_progress: 'In progress' };
+// Debut des causes du proxy (arrivalStatus, mgr_rules.ts) quand personne n'est sur le menage
+// d'avant : « No cleaner assigned. … », « No cleaner assigned, and urgent ticket open: … ».
+const NO_CLEANER = 'No cleaner assigned';
 // Raisons d'une carte Blocked : tickets urgents, menage sans personne, sinon la cause du proxy ;
-// puis, quand le menage du jour a deja une personne, la ligne Cleaner (son etat). La ligne cause
-// porte Assign someone (assign) quand le logement est affectable et que personne n'est sur son
-// menage (menage d'avant fait un autre jour : aucune ligne « No cleaner assigned »).
+// puis, quand le menage du jour a deja une personne, la ligne Cleaner (son etat). Menage d'avant
+// un autre jour (aucune ligne cleaning) : la cause porte Assign someone (assign) seulement quand
+// elle dit que personne n'est dessus et que le logement est affectable (le proxy ne rend pas
+// encore l'etat du menage d'avant : annule, reporte, cause vide ou inconnue, aucun bouton). Cette
+// cause cachee par un ticket urgent laisse sa ligne « No cleaner assigned. » apres les tickets.
 function reasonsOf(u) {
   if (u.k !== 'blocked') return [];
   const out = u.tickets.filter((t) => t.priority === 'urgent')
     .map((t) => ({ type: 'ticket', ref: t.ref, title: t.title, since: t.since, tech: t.tech }));
   if (u.job && u.job.state !== 'done' && !u.assigned.length) out.push({ type: 'cleaning', elite: u.job.elite });
-  if (!out.length) out.push({ type: 'cause', text: u.cause, assign: u.canAssign && !u.assigned.length });
+  const nobody = !u.assigned.length && u.cause.indexOf(NO_CLEANER) === 0;
+  if (!out.length) out.push({ type: 'cause', text: u.cause, assign: nobody && u.canAssign });
+  else if (nobody && !out.some((r) => r.type === 'cleaning')) out.push({ type: 'cause', text: NO_CLEANER + '.', assign: u.canAssign });
   if (u.job && u.assigned.length) out.push({ type: 'cleaner', word: JOB_WORD[u.job.state] || 'Not started' });
   return out;
 }

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { bootMgr, fetchLog, MANAGER, me } from './helpers';
+import { bootMgr, fetchDone, fetchLog, MANAGER, me } from './helpers';
 import { lookMetrics } from './look';
 import { NOW, todayBody } from './fixtures';
 import { IDEM, noIdem } from './planning-fixtures';
@@ -43,6 +43,7 @@ const filterBtn = (page: Page, v: string) => page.locator('[data-td-filter="' + 
 const writes = async (page: Page, action: string) =>
   (await fetchLog(page)).filter((l) => l.url.includes('action=' + action)).map((l) => JSON.parse(l.body));
 const todayCalls = async (page: Page) => (await fetchLog(page)).filter((l) => l.url.includes('action=mgr.today')).length;
+const frame = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
 // Chaque ecriture de Today porte sa cle d'idempotence (createGestures), jamais d'auteur.
 const keyed = (rows: any[]) => {
   for (const r of rows) { expect(r.idem).toMatch(IDEM); expect(r).not.toHaveProperty('actor'); expect(r).not.toHaveProperty('author'); }
@@ -64,7 +65,7 @@ test('Assign depuis Today : assignCleaner en mode set, sans actor, Today recharg
   await pick.locator('[data-td-pick="4"]').click();
   await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender assigned to Faiza');
   expect(keyed(await writes(page, 'assignCleaner'))).toEqual([
-    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [4], mode: 'set', service_type: 'CHC' },
+    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [4], mode: 'set', service_type: 'CHC', expect_ids: [] },
   ]);
   await expect(page.locator('.td-blocked')).toContainText('Apt 308');
   await expect(page.locator('.td-blocked')).not.toContainText('No cleaner assigned');
@@ -97,7 +98,7 @@ test('carte bloquee, menage d un autre jour sans personne : Assign someone sur l
   await pick.locator('[data-td-pick="12"]').click();
   await expect(page.locator('#toast')).toContainText('Apt 805 · Azizi Riviera 39 assigned to Elite Cleaning');
   expect(keyed(await writes(page, 'assignCleaner'))).toEqual([
-    { reservation_key: '2026-10-08_Ed Gu', cleaner_ids: [12], mode: 'set', service_type: 'CHC' },
+    { reservation_key: '2026-10-08_Ed Gu', cleaner_ids: [12], mode: 'set', service_type: 'CHC', expect_ids: [] },
   ]);
 });
 
@@ -133,7 +134,7 @@ test('Reassign depuis une fiche d arrivee garde le type de service', async ({ pa
   await pick.locator('[data-td-pick="10"]').click();
   await expect(page.locator('#toast')).toContainText('assigned to Pionah');
   expect(keyed(await writes(page, 'assignCleaner'))).toEqual([
-    { reservation_key: '2026-10-09_Cy Doe', cleaner_ids: [10], mode: 'set', service_type: 'CHC' },
+    { reservation_key: '2026-10-09_Cy Doe', cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [4] },
   ]);
 });
 
@@ -207,8 +208,11 @@ test('tap pendant une ecriture : toast Saving, wait a second', async ({ page }) 
   expect((await writes(page, 'assignCleaner')).length).toBe(1);
 });
 
-test('Assign du jour, Undo : cle neuve pour l Undo, liste d avant remise', async ({ page }) => {
-  await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
+// Undo : passe par la meme garde, expect_ids = la liste d'apres (Today relu apres l'ecriture la montre).
+test('Assign du jour, Undo : cle neuve pour l Undo, liste d avant remise, expect_ids = la liste d apres', async ({ page }) => {
+  const after = withAssigned(todayBody({ generatedAt: '2026-10-09T07:00:30.000Z' }), ANN, [10]);
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { match: 'action=assignCleaner', status: 200, body: OK }, TODAY(after)],
+    { email: true, clock: NOW });
   await assign308(page).click();
   await tile(page, '10').click();
   await expect(page.locator('#toast')).toContainText('assigned to Pionah');
@@ -216,10 +220,130 @@ test('Assign du jour, Undo : cle neuve pour l Undo, liste d avant remise', async
   await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
   const w = await writes(page, 'assignCleaner');
   expect(keyed(w)).toEqual([
-    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [10], mode: 'set', service_type: 'CHC' },
-    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [], mode: 'set', service_type: 'CHC' },
+    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] },
+    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [], mode: 'set', service_type: 'CHC', expect_ids: [10] },
   ]);
   expect(w[0].idem).not.toBe(w[1].idem);
+});
+
+// ---------- Garde « un collegue a change » (seconde lecture Fable, I2) ----------
+// Le serveur refuse (409 avec current) : la carte prend la liste du serveur tout de suite, avant
+// meme la relecture qui suit ; le toast le dit, rien n'est renvoye. Le choix reste ouvert, sans
+// erreur, et un second toucher ecrit sur cette liste.
+test('409 avec current : la carte prend la liste du serveur, Someone else changed, aucun second envoi', async ({ page }) => {
+  const later = withAssigned(todayBody({ generatedAt: '2026-10-09T07:00:30.000Z' }), ANN, [12]);
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true },
+    { match: 'action=assignCleaner', status: 409, body: { error: 'Changed by someone else.', current: [12] }, once: true },
+    { match: 'action=assignCleaner', status: 200, body: OK }, { ...TODAY(later), delay: 1500 }], { email: true, clock: NOW });
+  await assign308(page).click();
+  await tile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Someone else changed Apt 308 · Binghatti Lavender. Check and tap again.');
+  await expect(page.locator('#toast [data-undo]')).toHaveCount(0);
+  // Relecture encore en cours : la carte montre deja Elite Cleaning (liste du 409).
+  const blocked = page.locator('.td-blocked');
+  await expect(blocked).toContainText('Cleaner: Elite Cleaning');
+  expect((await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(1);
+  await expect(cardOf(page, ANN).locator('.td-pick')).toBeVisible();
+  await expect(choice(page).getByRole('alert')).toHaveCount(0);
+  await expect(tile(page, '12')).toHaveAttribute('aria-current', 'true');
+  await expect.poll(async () => (await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(2);
+  await expect(blocked).toContainText('Cleaner: Elite Cleaning');
+  expect(keyed(await writes(page, 'assignCleaner'))).toEqual([
+    { reservation_key: ANN, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] },
+  ]);
+  // Second toucher : sur la liste du serveur.
+  await tile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender assigned to Pionah');
+  expect(noIdem(await writes(page, 'assignCleaner'))[1]).toEqual(
+    { reservation_key: ANN, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [12] });
+});
+
+// Rejeu apres une reponse perdue : meme geste, meme cle ; l'ecriture avait eu lieu, le serveur
+// repond 409 avec la liste voulue. C'est une reussite (comme l'ecran Assign).
+test('rejeu apres une reponse perdue : meme cle, 409 avec la liste voulue, compte comme une reussite', async ({ page }) => {
+  await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 0, body: {}, fail: true, once: true },
+    { match: 'action=assignCleaner', status: 409, body: { error: 'Changed by someone else.', current: [10] } }], { email: true, clock: NOW });
+  await assign308(page).click();
+  await tile(page, '10').click();
+  await expect(choice(page).getByRole('alert')).toHaveText('No connection. Try again.');
+  await tile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender assigned to Pionah');
+  await expect(page.locator('#toast').getByRole('button', { name: 'Undo' })).toBeVisible();
+  await expect(page.locator('#toast')).not.toContainText('Someone else');
+  const w = await writes(page, 'assignCleaner');
+  expect(w.length).toBe(2);
+  expect(w[1].idem).toBe(w[0].idem);
+  expect(noIdem(w)).toEqual([
+    { reservation_key: ANN, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] },
+    { reservation_key: ANN, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] },
+  ]);
+});
+
+// Undo refuse par le serveur (un collegue est passe entre l'ecriture et l'Undo) : meme traitement.
+test('Undo, 409 avec current : la carte prend la liste du serveur, Someone else changed', async ({ page }) => {
+  const after = withAssigned(todayBody({ generatedAt: '2026-10-09T07:00:30.000Z' }), ANN, [10]);
+  const later = withAssigned(todayBody({ generatedAt: '2026-10-09T07:00:40.000Z' }), ANN, [4]);
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { ...TODAY(after), once: true },
+    { match: 'action=assignCleaner', status: 200, body: OK, once: true },
+    { match: 'action=assignCleaner', status: 409, body: { error: 'Changed by someone else.', current: [4] } }, TODAY(later)],
+    { email: true, clock: NOW });
+  await assign308(page).click();
+  await tile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('assigned to Pionah');
+  await expect(page.locator('.td-blocked')).toContainText('Cleaner: Pionah');
+  await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
+  await expect(page.locator('#toast')).toContainText('Someone else changed Apt 308 · Binghatti Lavender. Check and tap again.');
+  await expect(page.locator('.td-blocked')).toContainText('Cleaner: Faiza');
+  await expect.poll(() => todayCalls(page)).toBe(3);
+  await frame(page);
+  expect(keyed(await writes(page, 'assignCleaner'))).toEqual([
+    { reservation_key: ANN, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] },
+    { reservation_key: ANN, cleaner_ids: [], mode: 'set', service_type: 'CHC', expect_ids: [10] },
+  ]);
+});
+
+// Ancien proxy (sans garde) : il ignore expect_ids et repond 200 meme quand la liste a change ;
+// l'ecriture se passe comme avant (toast, Today relu, Undo).
+test('ancien proxy : expect_ids ignore, 200, l ecriture se passe comme avant', async ({ page }) => {
+  const after = withAssigned(todayBody({ generatedAt: '2026-10-09T07:00:30.000Z' }), CY, [10]);
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { match: 'action=assignCleaner', status: 200, body: OK }, TODAY(after)],
+    { email: true, clock: NOW });
+  await who(page, CY).click();
+  await tile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Apt 103 · Damac Reva assigned to Pionah');
+  await expect(choice(page)).toHaveCount(0);
+  await expect.poll(() => todayCalls(page)).toBe(2);
+  await expect(cardOf(page, CY)).toContainText('Pionah');
+  await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
+  expect(keyed(await writes(page, 'assignCleaner'))).toEqual([
+    { reservation_key: CY, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [4] },
+    { reservation_key: CY, cleaner_ids: [4], mode: 'set', service_type: 'CHC', expect_ids: [10] },
+  ]);
+});
+
+// Raisons d'une carte bloquee (I1, I3) : Assign someone seulement quand la cause du proxy dit que
+// personne n'est sur le menage d'avant ; un ticket urgent ne cache plus cette raison.
+test('carte bloquee : Assign someone seulement sur No cleaner assigned, la raison reste sous un ticket urgent', async ({ page }) => {
+  const body = todayBody();
+  body.ticketsByListing.L3 = [{ id: 431, title: 'Leak under sink', priority: 'urgent', since: '08/10', tech: null }];
+  body.arrivals.rows[3] = { ...body.arrivals.rows[3], tone: 'bad', word: 'Blocked',
+    cause: 'No cleaner assigned, and urgent ticket open: Leak under sink (MNT-431).' };
+  body.arrivals.rows[1] = { ...body.arrivals.rows[1], prevKey: '2026-10-07_Po St', assigned: [], cleaners: [], tone: 'bad', word: 'Blocked',
+    cause: 'Cleaning postponed to 10/10.' };
+  await bootMgr(page, [me(MANAGER), TODAY(body)], { email: true, clock: NOW });
+  await expect(page.locator('#main > [data-loc-pill]')).toBeVisible();
+  const b805 = page.locator('.td-blocked', { hasText: 'Apt 805' });
+  const lines = b805.locator('.td-why li');
+  await expect(lines).toHaveCount(2);
+  await expect(lines.nth(0)).toContainText('Urgent ticket open since 08/10, nobody on it');
+  await expect(lines.nth(1)).toContainText('No cleaner assigned.');
+  await expect(lines.nth(1).getByRole('button', { name: 'Assign someone' })).toHaveAttribute('data-td-who', 'arr:6');
+  const b103 = page.locator('.td-blocked', { hasText: 'Apt 103' });
+  await expect(b103.locator('.td-why li')).toHaveCount(1);
+  await expect(b103).toContainText('Cleaning postponed to 10/10.');
+  await expect(b103.getByRole('button', { name: 'Assign someone' })).toHaveCount(0);
+  await expect(b103.locator('[data-td-who]')).toHaveCount(0);
 });
 
 test('Assign du jour, reseau coupe puis meme geste : la meme cle est reprise', async ({ page }) => {
@@ -253,7 +377,7 @@ test('enchaînement : après une affectation, la carte suivante sans cleaner s o
   await expect(next).toBeInViewport();
   await expect(page.locator('.td-blocked')).toContainText('Cleaner: Faiza');
   expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([
-    { reservation_key: ANN, cleaner_ids: [4], mode: 'set', service_type: 'CHC' },
+    { reservation_key: ANN, cleaner_ids: [4], mode: 'set', service_type: 'CHC', expect_ids: [] },
   ]);
 });
 
@@ -295,8 +419,8 @@ test('filtre sans cleaner : la carte affectée sort, la suivante s ouvre, puis l
   await expect(page.locator('[data-td-open]')).toHaveCount(5);
   await expect(choice(page)).toHaveCount(0);
   expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([
-    { reservation_key: ANN, cleaner_ids: [4], mode: 'set', service_type: 'CHC' },
-    { reservation_key: LU, cleaner_ids: [10], mode: 'set', service_type: 'CHC' },
+    { reservation_key: ANN, cleaner_ids: [4], mode: 'set', service_type: 'CHC', expect_ids: [] },
+    { reservation_key: LU, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] },
   ]);
 });
 

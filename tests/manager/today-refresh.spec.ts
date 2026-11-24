@@ -167,27 +167,75 @@ test.describe('minuit a Dubai', () => {
   });
 });
 
-test('geste apres plus de 60 s : Today relu avant l ecriture, Undo vers la liste relue', async ({ page }) => {
-  // Entre-temps, quelqu'un a mis Elite Cleaning sur Apt 308.
-  const later = LATER();
-  later.who.jobs[0] = { ...later.who.jobs[0], assigned: [12], serviceType: 'CHC' };
-  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { match: 'action=assignCleaner', status: 200, body: OK }, TODAY(later)],
-    { email: true, clock: NOW });
+// Apt 308 relu avec ids sur son menage (et sur l'arrivee qui le designe), cause du proxy en accord.
+function ann(b: any, ids: number[], names: string[]) {
+  b.who.jobs[0] = { ...b.who.jobs[0], assigned: ids, serviceType: 'CHC', tone: 'idle', word: 'Not started' };
+  b.arrivals.rows[0] = { ...b.arrivals.rows[0], assigned: ids, cleaners: names, serviceType: 'CHC',
+    cause: 'Urgent ticket open: Gas not working (MNT-429).' };
+  return b;
+}
+
+// Seconde lecture Fable (I2) : la relecture d'avant le geste montre qu'un collegue a mis quelqu'un.
+// Rien n'est ecrit, la carte montre sa personne, le toast le dit ; le choix reste ouvert et un
+// second toucher ecrit sur la liste relue (expect_ids). L'Undo, relu d'abord, y revient.
+test('geste apres plus de 60 s, un collegue a mis quelqu un : rien n est ecrit, la carte le montre, un second toucher ecrit', async ({ page }) => {
+  // Entre-temps, quelqu'un a mis Elite Cleaning sur Apt 308 ; apres l'ecriture, Pionah.
+  const later = ann(LATER(), [12], ['Elite Cleaning']);
+  const after = ann(todayBody({ generatedAt: '2026-10-09T07:01:30.000Z' }), [10], ['Pionah']);
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { ...TODAY(later), once: true },
+    { match: 'action=assignCleaner', status: 200, body: OK }, TODAY(after)], { email: true, clock: NOW });
   await assignBtn(page, ANN).click();
   await expect(tile(page, '10')).toBeVisible();
   await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
   await tile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender changed. Check and tap again.');
+  await expect(page.locator('#toast [data-undo]')).toHaveCount(0);
+  expect(await sequence(page)).toEqual(['today', 'today']);
+  // La carte montre la personne du collegue ; le choix reste ouvert sur elle.
+  const blocked = page.locator('.td-blocked');
+  await expect(blocked).toContainText('Cleaner: Elite Cleaning');
+  await expect(blocked).not.toContainText('No cleaner assigned');
+  await expect(cardOf(page, ANN).locator('.td-pick')).toBeVisible();
+  await expect(tile(page, '12')).toHaveAttribute('aria-current', 'true');
+  await frame(page);
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+  // Second toucher, sur la liste relue : l'ecriture part avec expect_ids = [12].
+  await tile(page, '10').click();
   await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender assigned to Pionah');
-  expect((await sequence(page)).slice(0, 3)).toEqual(['today', 'today', 'write']);
-  // Relecture d'apres l'ecriture rendue, puis Undo plus d'une minute apres : relu d'abord.
+  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([
+    { reservation_key: ANN, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [12] },
+  ]);
+  // Relecture d'apres l'ecriture rendue, puis Undo plus d'une minute apres : relu d'abord, puis
+  // l'ecriture vers la liste relue avant le geste, expect_ids = la liste d'apres.
   await expect.poll(async () => (await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(3);
+  await expect(blocked).toContainText('Cleaner: Pionah');
   await page.clock.setFixedTime(new Date(NOW.getTime() + 122_000));
   await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
   await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
   expect((await sequence(page)).slice(0, 6)).toEqual(['today', 'today', 'write', 'today', 'today', 'write']);
+  expect(noIdem(await writes(page, 'assignCleaner'))[1]).toEqual(
+    { reservation_key: ANN, cleaner_ids: [12], mode: 'set', service_type: 'CHC', expect_ids: [10] });
+});
+
+// Undo apres un changement d'un collegue : la relecture d'avant l'Undo montre une autre liste que
+// celle que le geste a laissee. Rien n'est ecrit, la carte montre sa personne, le toast le dit.
+test('Undo apres plus de 60 s, un collegue a change la liste entre-temps : aucune ecriture', async ({ page }) => {
+  const after = ann(todayBody({ generatedAt: '2026-10-09T07:00:30.000Z' }), [10], ['Pionah']);
+  const later = ann(todayBody({ generatedAt: '2026-10-09T07:02:00.000Z' }), [4], ['Faiza']);
+  await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { ...TODAY(after), once: true },
+    { match: 'action=assignCleaner', status: 200, body: OK }, TODAY(later)], { email: true, clock: NOW });
+  await assignBtn(page, ANN).click();
+  await tile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender assigned to Pionah');
+  await expect.poll(async () => (await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(2);
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 122_000));
+  await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
+  await expect(page.locator('#toast')).toContainText('Apt 308 · Binghatti Lavender changed. Check and tap again.');
+  expect(await sequence(page)).toEqual(['today', 'write', 'today', 'today']);
+  await expect(page.locator('.td-blocked')).toContainText('Cleaner: Faiza');
+  await frame(page);
   expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([
-    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [10], mode: 'set', service_type: 'CHC' },
-    { reservation_key: '2026-10-09_Ann Lee', cleaner_ids: [12], mode: 'set', service_type: 'CHC' },
+    { reservation_key: ANN, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] },
   ]);
 });
 

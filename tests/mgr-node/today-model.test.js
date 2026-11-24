@@ -422,8 +422,9 @@ test('reasons : ticket urgent sans technicien, menage Elite, repli sur la cause'
     { type: 'ticket', ref: 'MNT-600', title: 'AC leaking', since: '01/11', tech: 'Semax' },
     { type: 'cleaner', word: 'Not started' },
   ]);
-  // Menage d'avant un autre jour, personne dessus : la cause porte Assign someone (revue finale, M1).
-  assert.deepEqual(unit(d, 'arr:4').reasons, [{ type: 'cause', text: 'Cleaning postponed to 22/11.', assign: true }]);
+  // Menage d'avant reporte : la cause seule, sans bouton (seconde lecture Fable, I1 : le proxy
+  // accepterait l'ecriture et previendrait la cleaner d'un menage reporte).
+  assert.deepEqual(unit(d, 'arr:4').reasons, [{ type: 'cause', text: 'Cleaning postponed to 22/11.', assign: false }]);
   assert.deepEqual(unit(d, 'K5').reasons, []); // pas bloque
   // Tous les tickets ouverts du logement restent sur l'unite, urgents ou non.
   assert.deepEqual(unit(d, 'K1').tickets, [
@@ -700,4 +701,64 @@ test('heure d arrivee non fixee : Arrival time not set., rangee a 15:00, pas en 
     arrivals: [A({ id: '1', prevKey: 'K1', tone: 'warn', word: 'At risk', cause: 'Not started yet, Faiza. Guest in 4 h.', assigned: [4] })],
   }));
   assert.equal(unit(set, 'K1').timesLine, 'Out 12:00.');
+});
+
+// 24 (seconde lecture Fable, I1) : Assign someone seulement quand la cause du proxy dit que
+// personne n'est sur le menage d'avant (« No cleaner assigned… »). Menage annule ou reporte,
+// cause vide ou inconnue : la cause seule, sans bouton (le proxy ne rend pas encore l'etat du
+// menage d'avant, sa phrase est le seul signal).
+test('reasons : Assign someone seulement sur une cause No cleaner assigned', () => {
+  const blocked = (cause, o = {}) => unit(buildToday(today({
+    arrivals: [A({ id: '4', listingId: 'L4', prevKey: '2026-11-18_Ed Gu', tone: 'bad', word: 'Blocked', cause, ...o })],
+  })), 'arr:4');
+  const reason = (cause, o) => blocked(cause, o).reasons;
+  assert.deepEqual(reason('Cleaning postponed to 22/11.'), [{ type: 'cause', text: 'Cleaning postponed to 22/11.', assign: false }]);
+  assert.deepEqual(reason('Cleaning postponed to 22/11. Urgent ticket open: AC leaking (MNT-600).'),
+    [{ type: 'cause', text: 'Cleaning postponed to 22/11. Urgent ticket open: AC leaking (MNT-600).', assign: false }]);
+  assert.deepEqual(reason('Cleaning cancelled in HK Planner after the 18/11 checkout.'),
+    [{ type: 'cause', text: 'Cleaning cancelled in HK Planner after the 18/11 checkout.', assign: false }]);
+  const none = 'No cleaner assigned. The 18/11 checkout.';
+  assert.deepEqual(reason(none), [{ type: 'cause', text: none, assign: true }]);
+  assert.deepEqual(reason('No cleaner assigned. Checkout time not set.'),
+    [{ type: 'cause', text: 'No cleaner assigned. Checkout time not set.', assign: true }]);
+  // Logement pas affectable (sans cle d'ecriture) : la meme cause, sans bouton.
+  assert.deepEqual(reason(none, { prevKey: null }), [{ type: 'cause', text: none, assign: false }]);
+  // Cause vide ou inconnue : aucun bouton.
+  assert.deepEqual(reason(''), [{ type: 'cause', text: '', assign: false }]);
+  assert.deepEqual(reason(undefined), [{ type: 'cause', text: '', assign: false }]);
+  assert.deepEqual(reason('Something new from the proxy.'), [{ type: 'cause', text: 'Something new from the proxy.', assign: false }]);
+  // Seul le debut de la phrase compte.
+  assert.deepEqual(reason('Cleaning postponed to 22/11. No cleaner assigned.'),
+    [{ type: 'cause', text: 'Cleaning postponed to 22/11. No cleaner assigned.', assign: false }]);
+  // Statut et cause du proxy inchanges.
+  const u = blocked('Cleaning postponed to 22/11.');
+  assert.deepEqual([u.k, u.tone, u.word, u.cause, u.canAssign], ['blocked', 'bad', 'Blocked', 'Cleaning postponed to 22/11.', true]);
+});
+
+// 25 (seconde lecture Fable, I3) : arrivee bloquee par un ticket urgent dont le menage d'avant
+// (un autre jour, aucune ligne cleaning) n'a personne. La cause du proxy (« No cleaner assigned,
+// and urgent ticket open: … ») n'est pas affichee (les tickets la disent) : la raison « personne »
+// reste, apres les tickets, avec Assign someone quand le logement est affectable.
+test('reasons : ticket urgent et personne sur le menage d avant, la raison personne reste', () => {
+  const tickets = { L4: [{ id: 585, title: 'Gas not working', priority: 'urgent', since: '31/10', tech: null }] };
+  const cause = 'No cleaner assigned, and urgent ticket open: Gas not working (MNT-585).';
+  const blocked = (o = {}) => unit(buildToday(today({
+    tickets,
+    arrivals: [A({ id: '4', listingId: 'L4', prevKey: '2026-11-18_Ed Gu', tone: 'bad', word: 'Blocked', cause, ...o })],
+  })), 'arr:4');
+  const ticket = { type: 'ticket', ref: 'MNT-585', title: 'Gas not working', since: '31/10', tech: null };
+  assert.deepEqual(blocked().reasons, [ticket, { type: 'cause', text: 'No cleaner assigned.', assign: true }]);
+  // Pas affectable : la ligne reste, sans bouton.
+  assert.deepEqual(blocked({ prevKey: null }).reasons, [ticket, { type: 'cause', text: 'No cleaner assigned.', assign: false }]);
+  // Ticket urgent et menage d'avant reporte : les tickets seuls, comme avant.
+  assert.deepEqual(blocked({ cause: 'Cleaning postponed to 22/11. Urgent ticket open: Gas not working (MNT-585).' }).reasons, [ticket]);
+  // Ticket urgent et menage d'avant fait : les tickets seuls.
+  assert.deepEqual(blocked({ cause: 'Clean, but urgent ticket open: Gas not working (MNT-585).', done: true }).reasons, [ticket]);
+  // Menage du jour sans personne (ligne cleaning) : jamais de ligne de plus.
+  const merged = buildToday(today({
+    tickets: { L1: tickets.L4 },
+    jobs: [J({ key: 'K1', listingId: 'L1', next: nextOn(DAY) })],
+    arrivals: [A({ prevKey: 'K1', listingId: 'L1', tone: 'bad', word: 'Blocked', cause })],
+  }));
+  assert.deepEqual(unit(merged, 'K1').reasons, [ticket, { type: 'cleaning', elite: false }]);
 });

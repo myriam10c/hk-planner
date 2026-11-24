@@ -233,8 +233,13 @@ test('Tomorrow dans la semaine suivante : start du lundi suivant', async ({ page
   expect(await plCalls(page)).toEqual([expect.stringContaining('start=2026-10-12')]);
 });
 
+// Ancien proxy compris : une reponse 200 (expect_ids ignore) se passe comme avant.
 test('Assign sur un autre jour : conge grise, assignCleaner avec idem et sans auteur, toast, Undo remet la liste', async ({ page }) => {
-  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, WEEK1(), WEEK2()], { email: true, clock: NOW });
+  // Semaine relue apres l'ecriture : Pionah sur Apt 707.
+  const after = weekBody();
+  Object.assign(after.jobs.find((j: any) => j.key === JK), { assigned: [10], serviceType: 'CHC', tone: 'idle', word: 'Scheduled' });
+  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, { ...WEEK1(), once: true }, WEEK1(after), WEEK2()],
+    { email: true, clock: NOW });
   await expect(counts(page).nth(1)).toHaveText('1');
   await chip(page, '2026-10-10').click();
   const pick = card(page, 'Apt 707').locator('.td-pick');
@@ -250,7 +255,7 @@ test('Assign sur un autre jour : conge grise, assignCleaner avec idem et sans au
   expect(w1.length).toBe(1);
   expect(w1[0].idem).toMatch(IDEM);
   const { idem, ...body } = w1[0];
-  expect(body).toEqual({ reservation_key: JK, cleaner_ids: [10], mode: 'set', service_type: 'CHC' });
+  expect(body).toEqual({ reservation_key: JK, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] });
   // Rechargement de la semaine, le jour choisi reste.
   await expect.poll(() => weekCalls(page, '2026-10-05')).toBe(2);
   await expect(h1(page)).toHaveText('Saturday');
@@ -260,7 +265,7 @@ test('Assign sur un autre jour : conge grise, assignCleaner avec idem et sans au
   expect(w2.idem).toMatch(IDEM);
   expect(w2.idem).not.toBe(idem);
   const { idem: _i, ...body2 } = w2;
-  expect(body2).toEqual({ reservation_key: JK, cleaner_ids: [], mode: 'set', service_type: 'CHC' });
+  expect(body2).toEqual({ reservation_key: JK, cleaner_ids: [], mode: 'set', service_type: 'CHC', expect_ids: [10] });
   for (const w of await writes(page, 'assignCleaner')) { expect(w).not.toHaveProperty('actor'); expect(w).not.toHaveProperty('author'); }
   await expect(page.locator('#toast')).toContainText('Apt 707 · Marina Gate back to nobody');
 });
@@ -356,7 +361,10 @@ test('Reassign sur un autre jour : disque de la carte (pas pour un menage fait),
   const body = weekBody();
   body.jobs.push(PJ({ key: '2026-10-10_Ze Ta', listingId: 'L14', apt: '141', bld: 'Zeta Tower', date: '2026-10-10', guest: 'Ze Ta',
     assigned: [10], serviceType: 'CHC', state: 'done', tone: 'ok', word: 'Done' }));
-  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, WEEK1(body), WEEK2()], { email: true, clock: NOW });
+  const after = JSON.parse(JSON.stringify(body));
+  after.jobs.find((j: any) => j.key === FH).assigned = [10];
+  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, { ...WEEK1(body), once: true }, WEEK1(after), WEEK2()],
+    { email: true, clock: NOW });
   await expect(counts(page).nth(1)).toHaveText('1');
   await chip(page, '2026-10-10').click();
   await expect(disc(page, FH)).toHaveAttribute('aria-label', 'Change the cleaner of Apt 505 · Tower E');
@@ -374,11 +382,11 @@ test('Reassign sur un autre jour : disque de la carte (pas pour un menage fait),
   expect(w.length).toBe(1);
   expect(w[0].idem).toMatch(IDEM);
   const { idem, ...b } = w[0];
-  expect(b).toEqual({ reservation_key: FH, cleaner_ids: [10], mode: 'set', service_type: 'CHC' });
+  expect(b).toEqual({ reservation_key: FH, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [12] });
   await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
   await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
   const { idem: _i, ...b2 } = (await writes(page, 'assignCleaner'))[1];
-  expect(b2).toEqual({ reservation_key: FH, cleaner_ids: [12], mode: 'set', service_type: 'CHC' });
+  expect(b2).toEqual({ reservation_key: FH, cleaner_ids: [12], mode: 'set', service_type: 'CHC', expect_ids: [10] });
 });
 
 test('apres minuit : les puces partent du jour des donnees, le bloc d hier n est jamais appele Today', async ({ page }) => {
@@ -457,29 +465,66 @@ test('semaine de plus de 60 s, relecture en echec : pas de choix, Reconnect, anc
   expect((await writes(page, 'assignCleaner')).length).toBe(0);
 });
 
-// Tuile d'un autre jour (revue finale, Important 1) : le choix ouvert d'office peut rester ouvert
-// longtemps ; une tuile touchee sur une semaine de plus de 60 s la relit d'abord (meme regle que
-// la tuile de Today). L'Undo remet la liste relue, pas celle de la vieille semaine.
-test('tuile d un autre jour touchee apres plus de 60 s : semaine relue avant l ecriture, Undo vers la liste relue', async ({ page }) => {
-  // Entre-temps, quelqu'un a mis Elite Cleaning sur Apt 707 dans le Planning.
+// Tuile d'un autre jour (revue finale, Important 1, puis seconde lecture Fable, I2) : le choix
+// ouvert d'office peut rester ouvert longtemps ; une tuile touchee sur une semaine de plus de 60 s
+// la relit d'abord. Un collegue a mis quelqu'un entre-temps : rien n'est ecrit, la carte montre sa
+// personne, le toast le dit ; un second toucher ecrit sur la liste relue, l'Undo y revient.
+test('tuile d un autre jour touchee apres plus de 60 s, un collegue a mis quelqu un : rien n est ecrit, la carte le montre', async ({ page }) => {
+  // Entre-temps, quelqu'un a mis Elite Cleaning sur Apt 707 dans le Planning ; apres l'ecriture, Pionah.
   const later = weekBody();
   Object.assign(later.jobs.find((j: any) => j.key === JK), { assigned: [12], serviceType: 'CHC', tone: 'idle', word: 'Scheduled' });
-  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, { ...WEEK1(), once: true }, WEEK1(later), WEEK2()],
-    { email: true, clock: NOW });
+  const after = weekBody();
+  Object.assign(after.jobs.find((j: any) => j.key === JK), { assigned: [10], serviceType: 'CHC', tone: 'idle', word: 'Scheduled' });
+  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 200, body: OK }, { ...WEEK1(), once: true },
+    { ...WEEK1(later), once: true }, WEEK1(after), WEEK2()], { email: true, clock: NOW });
   await expect(counts(page).nth(1)).toHaveText('1');
   await chip(page, '2026-10-10').click();
   // Choix ouvert d'office sur Apt 707, laisse ouvert plus d'une minute.
   await expect(card(page, 'Apt 707').locator('.td-pick')).toBeVisible();
   await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
   await wtile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Apt 707 · Marina Gate changed. Check and tap again.');
+  await expect(page.locator('#toast [data-undo]')).toHaveCount(0);
+  expect(await weekAndWrites(page)).toEqual(['week', 'week']);
+  // La carte montre la personne du collegue ; le choix reste ouvert sur elle.
+  await expect(card(page, 'Apt 707')).toContainText('Elite Cleaning');
+  await expect(card(page, 'Apt 707').locator('.td-pick')).toBeVisible();
+  await expect(wtile(page, '12')).toHaveAttribute('aria-current', 'true');
+  await frame(page);
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+  // Second toucher, sur la liste relue : expect_ids = [12].
+  await wtile(page, '10').click();
   await expect(page.locator('#toast')).toContainText('Apt 707 · Marina Gate assigned to Pionah');
-  expect((await weekAndWrites(page)).slice(0, 3)).toEqual(['week', 'week', 'write']);
-  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([{ reservation_key: JK, cleaner_ids: [10], mode: 'set', service_type: 'CHC' }]);
-  // Undo : la liste lue dans la semaine relue (Elite Cleaning), jamais « nobody ».
+  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([{ reservation_key: JK, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [12] }]);
+  await expect.poll(() => weekDone(page, '2026-10-05')).toBe(3);
+  // Undo : la liste relue avant le geste (Elite Cleaning), jamais « nobody » ; expect_ids = la liste d'apres.
   await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
   await expect.poll(async () => (await writes(page, 'assignCleaner')).length).toBe(2);
-  expect(noIdem(await writes(page, 'assignCleaner'))[1]).toEqual({ reservation_key: JK, cleaner_ids: [12], mode: 'set', service_type: 'CHC' });
+  expect(noIdem(await writes(page, 'assignCleaner'))[1]).toEqual({ reservation_key: JK, cleaner_ids: [12], mode: 'set', service_type: 'CHC', expect_ids: [10] });
   await expect(page.locator('#toast')).toContainText('Apt 707 · Marina Gate back to Elite Cleaning');
+});
+
+// Autre jour, refus du serveur (409 avec current) : la carte prend la liste du serveur avant meme
+// la relecture de la semaine, le toast le dit, rien n'est renvoye.
+test('tuile d un autre jour, 409 avec current : la carte prend la liste du serveur, Someone else changed', async ({ page }) => {
+  const later = weekBody();
+  Object.assign(later.jobs.find((j: any) => j.key === JK), { assigned: [12], serviceType: 'CHC', tone: 'idle', word: 'Scheduled' });
+  await boot(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 409, body: { error: 'Changed by someone else.', current: [12] } },
+    { ...WEEK1(), once: true }, WEEK1(later, { delay: 1500 }), WEEK2()], { email: true, clock: NOW });
+  await expect(counts(page).nth(1)).toHaveText('1');
+  await chip(page, '2026-10-10').click();
+  await expect(card(page, 'Apt 707').locator('.td-pick')).toBeVisible();
+  await wtile(page, '10').click();
+  await expect(page.locator('#toast')).toContainText('Someone else changed Apt 707 · Marina Gate. Check and tap again.');
+  await expect(card(page, 'Apt 707')).toContainText('Elite Cleaning');
+  expect(await weekDone(page, '2026-10-05')).toBe(1);
+  await expect(card(page, 'Apt 707').locator('.td-pick')).toBeVisible();
+  await expect(choice(page).getByRole('alert')).toHaveCount(0);
+  await expect(wtile(page, '12')).toHaveAttribute('aria-current', 'true');
+  await expect.poll(() => weekDone(page, '2026-10-05')).toBe(2);
+  await expect(card(page, 'Apt 707')).toContainText('Elite Cleaning');
+  await frame(page);
+  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([{ reservation_key: JK, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] }]);
 });
 
 test('tuile d un autre jour touchee apres plus de 60 s, relecture en echec : Reconnect, aucune ecriture', async ({ page }) => {
@@ -546,7 +591,7 @@ test('enchainement sur un autre jour : apres une affectation, le menage suivant 
   // Faiza est en conge : le focus va a Pionah, premiere personne disponible.
   await expect(next.locator('[data-td-wpick="10"]')).toBeFocused();
   expect(await weekCalls(page, '2026-10-05')).toBe(2);
-  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([{ reservation_key: JK, cleaner_ids: [10], mode: 'set', service_type: 'CHC' }]);
+  expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([{ reservation_key: JK, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] }]);
 });
 
 test('Heure d un extra sur un autre jour : Extra cleaning at 09:30, sans heure Extra cleaning', async ({ page }) => {
