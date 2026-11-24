@@ -498,3 +498,104 @@ test('fresh.js : une relecture en exception ne bloque pas les gestes suivants', 
   });
   expect(r).toEqual({ first: 'threw: paint failed', second: true, reads: 2 });
 });
+
+// Revue finale (F1), vieux DOM : la carte ou la fiche a ete dessinee quand personne n'etait sur le
+// menage d'avant (Apt 805, menage du 08/10) ; la relecture d'avant le geste le montre annule ou
+// reporte. Aucun choix ne s'ouvre (un choix deja ouvert se ferme), aucune ecriture.
+function r805(b: any, cause: string) {
+  b.arrivals.rows[3] = { ...b.arrivals.rows[3], tone: 'bad', word: 'Blocked', cause };
+  return b;
+}
+const NOBODY_805 = 'No cleaner assigned. Checkout 08/10.';
+const b805 = (page: Page) => page.locator('.td-blocked', { hasText: 'Apt 805' });
+
+test('fiche ouverte, menage d avant annule entre-temps : Assign cleaner touche apres plus de 60 s, aucun choix, aucune ecriture', async ({ page }) => {
+  const cancelled = 'Cleaning cancelled in HK Planner after the 08/10 checkout.';
+  await bootMgr(page, [me(MANAGER), { ...TODAY(r805(todayBody(), NOBODY_805)), once: true }, TODAY(r805(LATER(), cancelled)),
+    { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
+  await cardOpen(page, 'arr:6').click();
+  const sheet = page.locator('#sheet');
+  await expect(sheet.getByRole('button', { name: 'Assign cleaner' })).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await sheet.getByRole('button', { name: 'Assign cleaner' }).click();
+  await expect(b805(page)).toContainText(cancelled);
+  await expect(sheet).toHaveAttribute('aria-hidden', 'true');
+  expect(await todayCalls(page)).toBe(2);
+  await frame(page);
+  expect(await choice(page).count()).toBe(0);
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+});
+
+test('choix ouvert, menage d avant reporte entre-temps : tuile touchee apres plus de 60 s, le choix se ferme, aucune ecriture', async ({ page }) => {
+  const postponed = 'Cleaning postponed to 10/10.';
+  await bootMgr(page, [me(MANAGER), { ...TODAY(r805(todayBody(), NOBODY_805)), once: true }, TODAY(r805(LATER(), postponed)),
+    { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
+  await assignBtn(page, 'arr:6').click();
+  await expect(tile(page, '10')).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await tile(page, '10').click();
+  await expect(b805(page)).toContainText(postponed);
+  await expect(choice(page)).toHaveCount(0);
+  expect(await b805(page).locator('[data-td-who]').count()).toBe(0);
+  expect(await todayCalls(page)).toBe(2);
+  await frame(page);
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+});
+
+test('Assign someone touche apres plus de 60 s, menage d avant annule entre-temps : aucun choix', async ({ page }) => {
+  const cancelled = 'Cleaning cancelled in HK Planner after the 08/10 checkout.';
+  await bootMgr(page, [me(MANAGER), { ...TODAY(r805(todayBody(), NOBODY_805)), once: true }, TODAY(r805(LATER(), cancelled)),
+    { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
+  await expect(assignBtn(page, 'arr:6')).toBeVisible();
+  await page.clock.setFixedTime(new Date(NOW.getTime() + 61_000));
+  await assignBtn(page, 'arr:6').click();
+  await expect(b805(page)).toContainText(cancelled);
+  expect(await todayCalls(page)).toBe(2);
+  await frame(page);
+  expect(await choice(page).count()).toBe(0);
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+});
+
+// Revue finale (F3) : Undo du jour plus d'une minute apres le geste. La relecture ne montre plus le
+// menage (annule : absent des menages du jour ; l'arrivee qui le designait dit Cleaning cancelled),
+// ou le montre fait alors qu'il ne l'etait pas au geste. Rien n'est ecrit (la cleaner d'avant
+// serait prevenue), le toast le dit.
+function lu(b: any, o: any) {
+  b.who.jobs[1] = { ...b.who.jobs[1], ...o };
+  return b;
+}
+const F3 = [
+  { name: 'absent', key: LU, place: 'Apt 909 · Bloom Height',
+    later: (b: any) => { b.who.jobs = b.who.jobs.filter((j: any) => j.key !== LU); return b; } },
+  { name: 'fait', key: LU, place: 'Apt 909 · Bloom Height',
+    later: (b: any) => lu(b, { assigned: [10], serviceType: 'CHC', state: 'done', tone: 'ok', word: 'Done' }) },
+  { name: 'annule, l arrivee dit Cleaning cancelled', key: ANN, place: 'Apt 308 · Binghatti Lavender',
+    later: (b: any) => {
+      ann(b, [10], ['Pionah']);
+      b.who.jobs = b.who.jobs.filter((j: any) => j.key !== ANN);
+      b.arrivals.rows[0].cause = 'Cleaning cancelled in HK Planner after the 12:00 checkout. Urgent ticket open: Gas not working (MNT-429).';
+      return b;
+    } },
+];
+for (const c of F3) {
+  test('Undo du jour apres plus de 60 s, menage relu ' + c.name + ' : aucune ecriture, changed', async ({ page }) => {
+    const after = todayBody({ generatedAt: '2026-10-09T07:00:30.000Z' });
+    if (c.key === LU) lu(after, { assigned: [10], serviceType: 'CHC', tone: 'idle', word: 'Not started' }); else ann(after, [10], ['Pionah']);
+    const later = c.later(todayBody({ generatedAt: '2026-10-09T07:02:00.000Z' }));
+    await bootMgr(page, [me(MANAGER), { ...TODAY(), once: true }, { ...TODAY(after), once: true },
+      { match: 'action=assignCleaner', status: 200, body: OK }, TODAY(later)], { email: true, clock: NOW });
+    await assignBtn(page, c.key).click();
+    await tile(page, '10').click();
+    await expect(page.locator('#toast')).toContainText(c.place + ' assigned to Pionah');
+    await expect.poll(async () => (await fetchDone(page)).filter((u) => u.includes('action=mgr.today')).length).toBe(2);
+    await page.clock.setFixedTime(new Date(NOW.getTime() + 122_000));
+    await page.locator('#toast').getByRole('button', { name: 'Undo' }).click();
+    await expect(page.locator('#toast')).toContainText(c.place + ' changed. Check and tap again.');
+    expect(await sequence(page)).toEqual(['today', 'write', 'today', 'today']);
+    await frame(page);
+    expect(noIdem(await writes(page, 'assignCleaner'))).toEqual([
+      { reservation_key: c.key, cleaner_ids: [10], mode: 'set', service_type: 'CHC', expect_ids: [] },
+    ]);
+  });
+}
+

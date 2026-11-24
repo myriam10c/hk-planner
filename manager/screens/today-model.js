@@ -120,6 +120,14 @@ const JOB_WORD = { done: 'Done', in_progress: 'In progress' };
 // Debut des causes du proxy (arrivalStatus, mgr_rules.ts) quand personne n'est sur le menage
 // d'avant : « No cleaner assigned. … », « No cleaner assigned, and urgent ticket open: … ».
 const NO_CLEANER = 'No cleaner assigned';
+// Debut des causes du proxy (arrivalStatus, mgr_rules.ts) quand le menage d'avant est annule ou
+// reporte a un autre jour. Today n'y affecte personne (le proxy accepterait et previendrait la
+// cleaner) : ni Assign cleaner ni Reassign dans la fiche, logement pas affectable (revue finale, F1).
+const STOPPED = ['Cleaning cancelled', 'Cleaning postponed'];
+export function prevStopped(cause) {
+  const c = typeof cause === 'string' ? cause : '';
+  return STOPPED.some((s) => c.indexOf(s) === 0);
+}
 // Raisons d'une carte Blocked : tickets urgents, menage sans personne, sinon la cause du proxy ;
 // puis, quand le menage du jour a deja une personne, la ligne Cleaner (son etat). Menage d'avant
 // un autre jour (aucune ligne cleaning) : la cause porte Assign someone (assign) seulement quand
@@ -143,6 +151,8 @@ function unitOf(a, j, date, today, tickets) {
   const src = j || a;
   const key = j ? j.key : (a.prevKey || null);
   const k = kOf(a, j, today);
+  // Menage d'avant annule ou reporte : jamais un menage du jour (mgr_today.ts les ecarte).
+  const stopped = !j && !!a && prevStopped(a.cause);
   const u = {
     id: j ? j.key : 'arr:' + a.id, key,
     listingId: String(src.listingId == null ? '' : src.listingId), apt: src.apt || '', bld: src.bld || '',
@@ -151,7 +161,7 @@ function unitOf(a, j, date, today, tickets) {
     job: j ? jobPart(j) : null,
     next: j ? nextPart(j.next) : null,
     assigned: (src.assigned || []).slice(),
-    canAssign: !!key && (j ? j.state !== 'done' : !a.done),
+    canAssign: !!key && !stopped && (j ? j.state !== 'done' : !a.done), stopped,
     opens: a ? { type: 'arr', ref: a.id } : { type: 'job', ref: j.key },
     timesLine: '', tickets, reasons: [],
   };

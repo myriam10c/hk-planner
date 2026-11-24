@@ -346,6 +346,34 @@ test('carte bloquee : Assign someone seulement sur No cleaner assigned, la raiso
   await expect(b103.locator('[data-td-who]')).toHaveCount(0);
 });
 
+// Revue finale (F1) : menage d'avant annule (Faiza gardee dessus, setCancelled ne retire personne)
+// ou reporte a un autre jour. La fiche de l'arrivee ne propose ni Assign cleaner ni Reassign (le
+// proxy accepterait et previendrait la cleaner) ; Mark done et Close restent. Aucun assignCleaner.
+test('fiche d une arrivee au menage d avant annule, puis reporte : ni Assign cleaner ni Reassign, aucun assignCleaner', async ({ page }) => {
+  const cancelled = 'Cleaning cancelled in HK Planner after the 08/10 checkout.';
+  const postponed = 'Cleaning postponed to 10/10.';
+  const body = todayBody();
+  body.arrivals.rows[3] = { ...body.arrivals.rows[3], tone: 'bad', word: 'Blocked', assigned: [4], cleaners: ['Faiza'], serviceType: 'CHC', cause: cancelled };
+  body.arrivals.rows[1] = { ...body.arrivals.rows[1], prevKey: '2026-10-07_Po St', assigned: [], cleaners: [], tone: 'bad', word: 'Blocked', cause: postponed };
+  await bootMgr(page, [me(MANAGER), TODAY(body), { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });
+  await expect(page.locator('#main > [data-loc-pill]')).toBeVisible();
+  const sheet = page.locator('#sheet');
+  for (const [id, apt, cause] of [['arr:6', 'Apt 805', cancelled], ['arr:4', 'Apt 103', postponed]]) {
+    await cardOpen(page, id).click();
+    await expect(sheet.getByRole('heading', { name: new RegExp(apt) })).toBeVisible();
+    await expect(sheet.locator('.statusbox')).toContainText(cause);
+    await expect(sheet.getByRole('button', { name: 'Mark done' })).toBeVisible();
+    await expect(sheet.locator('.sheet-f').getByRole('button', { name: 'Close' })).toBeVisible();
+    expect(await sheet.locator('[data-assign]').count()).toBe(0);
+    expect(await sheet.getByRole('button', { name: /Assign cleaner|Reassign/ }).count()).toBe(0);
+    await sheet.locator('.sheet-f').getByRole('button', { name: 'Close' }).click();
+    await expect(sheet).toHaveAttribute('aria-hidden', 'true');
+  }
+  await frame(page);
+  await expect(choice(page)).toHaveCount(0);
+  expect(await writes(page, 'assignCleaner')).toHaveLength(0);
+});
+
 test('Assign du jour, reseau coupe puis meme geste : la meme cle est reprise', async ({ page }) => {
   await bootMgr(page, [me(MANAGER), TODAY(), { match: 'action=assignCleaner', status: 0, body: {}, fail: true, once: true },
     { match: 'action=assignCleaner', status: 200, body: OK }], { email: true, clock: NOW });

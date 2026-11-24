@@ -5,7 +5,7 @@
 import { addDays, dubaiTime, dubaiToday, esc, I, placeLabel } from '/manager/ui/dom.js';
 import { photosBlk } from '/manager/ui/job-photos.js';
 import { isStale, locLine } from '/manager/ui/location-text.js';
-import { emptyLine, momentLabel, sentence } from '/manager/screens/today-model.js';
+import { emptyLine, momentLabel, prevStopped, sentence } from '/manager/screens/today-model.js';
 import { dayShort } from '/manager/screens/planning-rules.js';
 
 export function fmtDur(ms) {
@@ -27,11 +27,12 @@ function listNames(n) { return n.length <= 1 ? (n[0] || '') : n.slice(0, -1).joi
 function namesOf(data, ids) { return listNames(ids.map((id) => nameOf(data, id))); }
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
 
-// Actions reelles (assignCleaner, setDone) : branchees dans today.js.
+// Actions reelles (assignCleaner, setDone) : branchees dans today.js. canAssign faux (menage d'avant
+// annule ou reporte, prevStopped) : ni Assign cleaner ni Reassign, les autres boutons restent.
 const RO_LINE = 'Reconnect to make changes.';
-function actionsFoot(key, assigned, done, ro) {
+function actionsFoot(key, assigned, done, ro, canAssign = true) {
   if (ro) return '<div class="sheet-f"><p class="ro-note" role="status">' + RO_LINE + '</p><button class="btn" type="button" data-close>Close</button></div>';
-  return '<div class="sheet-f"><button class="btn primary" type="button" data-assign="' + esc(key) + '">' + (assigned.length ? 'Reassign' : 'Assign cleaner') + '</button>'
+  return '<div class="sheet-f">' + (canAssign ? '<button class="btn primary" type="button" data-assign="' + esc(key) + '">' + (assigned.length ? 'Reassign' : 'Assign cleaner') + '</button>' : '')
     + '<button class="btn" type="button" data-done="' + esc(key) + '" data-val="' + (done ? '0' : '1') + '">' + (done ? 'Undo done' : 'Mark done') + '</button>'
     + '<button class="btn" type="button" data-close>Close</button></div>';
 }
@@ -483,5 +484,5 @@ export function arrivalSheet(data, a, nowMs, ro) {
     + '<div class="blk"><h3>Cleaner</h3><div>' + (a.cleaners.length ? esc(a.cleaners.join(' and ')) : '<span class="st bad">Nobody</span>') + '</div></div>'
     + (a.prevKey ? photosBlk(a.prevKey) : '')
     + ticketsBlk(data.ticketsByListing[a.listingId]) + '</div>'
-    + (a.prevKey ? actionsFoot(a.prevKey, a.assigned, a.done, ro) : '<div class="sheet-f"><button class="btn" type="button" data-close>Close</button></div>');
+    + (a.prevKey ? actionsFoot(a.prevKey, a.assigned, a.done, ro, !prevStopped(a.cause)) : '<div class="sheet-f"><button class="btn" type="button" data-close>Close</button></div>');
 }

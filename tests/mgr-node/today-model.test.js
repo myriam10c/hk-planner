@@ -3,7 +3,7 @@
 // et de mgr.planning (tests/manager/planning-fixtures.ts). Aucun vrai nom de guest.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAhead, buildToday, countNone, emptyLine, isNone, momentLabel, nextNone, sentence, slotsOf, visible } from '../../manager/screens/today-model.js';
+import { buildAhead, buildToday, countNone, emptyLine, isNone, momentLabel, nextNone, prevStopped, sentence, slotsOf, visible } from '../../manager/screens/today-model.js';
 
 const DAY = '2026-11-20'; // vendredi
 const SAT = '2026-11-21';
@@ -730,9 +730,9 @@ test('reasons : Assign someone seulement sur une cause No cleaner assigned', () 
   // Seul le debut de la phrase compte.
   assert.deepEqual(reason('Cleaning postponed to 22/11. No cleaner assigned.'),
     [{ type: 'cause', text: 'Cleaning postponed to 22/11. No cleaner assigned.', assign: false }]);
-  // Statut et cause du proxy inchanges.
+  // Statut et cause du proxy inchanges ; menage d'avant reporte : logement pas affectable (revue finale, F1).
   const u = blocked('Cleaning postponed to 22/11.');
-  assert.deepEqual([u.k, u.tone, u.word, u.cause, u.canAssign], ['blocked', 'bad', 'Blocked', 'Cleaning postponed to 22/11.', true]);
+  assert.deepEqual([u.k, u.tone, u.word, u.cause, u.canAssign], ['blocked', 'bad', 'Blocked', 'Cleaning postponed to 22/11.', false]);
 });
 
 // 25 (seconde lecture Fable, I3) : arrivee bloquee par un ticket urgent dont le menage d'avant
@@ -761,4 +761,31 @@ test('reasons : ticket urgent et personne sur le menage d avant, la raison perso
     arrivals: [A({ prevKey: 'K1', listingId: 'L1', tone: 'bad', word: 'Blocked', cause })],
   }));
   assert.deepEqual(unit(merged, 'K1').reasons, [ticket, { type: 'cleaning', elite: false }]);
+});
+
+// 26 (revue finale, F1) : menage d'avant annule ou reporte (debut de la cause du proxy,
+// arrivalStatus de mgr_rules.ts). Le logement n'est plus affectable depuis Today (stopped,
+// canAssign faux) ; les autres causes gardent leur etat d'avant.
+test('prevStopped : menage d avant annule ou reporte, sur le debut de la cause seulement', () => {
+  assert.equal(prevStopped('Cleaning cancelled in HK Planner after the 18/11 checkout.'), true);
+  assert.equal(prevStopped('Cleaning cancelled in HK Planner after the 12:00 checkout. Urgent ticket open: AC leaking (MNT-600).'), true);
+  assert.equal(prevStopped('Cleaning postponed to 22/11.'), true);
+  assert.equal(prevStopped('Cleaning postponed to 22/11. Urgent ticket open: AC leaking (MNT-600).'), true);
+  for (const c of ['No cleaner assigned. Checkout 18/11.', 'Urgent ticket open: Cleaning postponed to 22/11.', 'Not started yet, Faiza. Guest in 4 h.',
+    'Cleaned by Faiza after the 18/11 checkout.', '', undefined, null]) assert.equal(prevStopped(c), false, String(c));
+  const on = (cause, o = {}) => unit(buildToday(today({
+    arrivals: [A({ id: '4', listingId: 'L4', prevKey: '2026-11-18_Ed Gu', tone: 'bad', word: 'Blocked', cause, ...o })],
+  })), 'arr:4');
+  const cancelled = on('Cleaning cancelled in HK Planner after the 18/11 checkout.', { assigned: [4], cleaners: ['Faiza'] });
+  assert.deepEqual([cancelled.stopped, cancelled.canAssign, cancelled.assigned], [true, false, [4]]);
+  const postponed = on('Cleaning postponed to 22/11.');
+  assert.deepEqual([postponed.stopped, postponed.canAssign], [true, false]);
+  const none = on('No cleaner assigned. Checkout 18/11.');
+  assert.deepEqual([none.stopped, none.canAssign], [false, true]);
+  // Menage du jour (un menage annule ou reporte n'est jamais dans les menages du jour) : jamais stopped.
+  const merged = buildToday(today({
+    jobs: [J({ key: 'K1', next: nextOn(DAY) })],
+    arrivals: [A({ prevKey: 'K1', tone: 'bad', word: 'Blocked', cause: 'No cleaner assigned. Checkout 11:00, 4 h turnaround.' })],
+  }));
+  assert.deepEqual([unit(merged, 'K1').stopped, unit(merged, 'K1').canAssign], [false, true]);
 });
