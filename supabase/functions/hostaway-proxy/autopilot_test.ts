@@ -1,6 +1,8 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fakeDb } from "./v3_fakedb.ts";
-import { runAutopilot } from "./autopilot.ts";
+import { autopilotDepartures, runAutopilot } from "./autopilot.ts";
+import { checkoutKeys, normalizeMgrReservations, reservationKeys } from "./mgr_rules.ts";
+import { INSP_VALID_STATUSES } from "./insp_rules.ts";
 
 // Jour Dubai passe a la fonction : le 11 alors qu'a 01:00 Dubai la date UTC est encore le 10.
 const DAY = "2026-10-11";
@@ -69,4 +71,44 @@ Deno.test("runAutopilot: statuts hors reservation ignores, config absente = auto
   const out = await runAutopilot(db, DAY, async () => [{ ...R("Zed", "x", 9), status: "inquiry" }, R("Bo Ray", "103", 2)]);
   assertEquals(out.checkouts, 1);
   assertEquals(out.autoSendEnabled, true);
+});
+
+// Lot 1, tache 7 (seconde lecture Fable, M2) : memes cles que Today, Planning et
+// la journee de la cleaner. Meme voyageur dans deux logements le meme jour.
+const RAW = [
+  { id: 502, departureDate: DAY, arrivalDate: "2026-10-08", guestName: "Ann Lee", listingName: "622 - Bloom Height", listingMapId: 22, status: "confirmed" },
+  { id: 501, departureDate: DAY, arrivalDate: "2026-10-07", guestName: "Ann Lee", listingName: "611 - Damac Reva", listingMapId: 11, status: "confirmed" },
+  { id: 503, departureDate: DAY, arrivalDate: "2026-10-09", guestName: "", guestFirstName: "Bo", guestLastName: "Ray", listingName: "633 - Neva", listingMapId: 33, status: "ownerStay" },
+  { id: 504, departureDate: DAY, arrivalDate: "2026-10-10", listingName: "644 - Neva", listingMapId: 44, status: "new" },
+  // Annulee et plus ancienne : ecartee, elle ne prend la cle nue a personne.
+  { id: 400, departureDate: DAY, arrivalDate: "2026-10-01", guestName: "Ann Lee", listingName: "655 - Neva", listingMapId: 55, status: "cancelled" },
+];
+
+Deno.test("autopilotDepartures: cles de checkoutKeys, texte voyageur de Today (normalizeMgrReservations)", () => {
+  const deps = autopilotDepartures(RAW);
+  assertEquals(deps.map((d) => d.key), [DAY + "_Ann Lee~22", DAY + "_Ann Lee", DAY + "_Bo Ray", DAY + "_Guest"]);
+  assertEquals(deps.map((d) => d.listingId), ["22", "11", "33", "44"]);
+  assertEquals(deps.map((d) => d.listing), ["622 - Bloom Height", "611 - Damac Reva", "633 - Neva", "644 - Neva"]);
+  // Today : reservations normalisees, statuts valides, reservationKeys.
+  const today = normalizeMgrReservations(RAW).filter((r) => INSP_VALID_STATUSES.includes(r.status));
+  const todayKeys = reservationKeys(today);
+  const byId = Object.fromEntries(today.map((r, i) => [r.id, { key: todayKeys[i], guest: r.guest }]));
+  assertEquals(deps.map((d) => ({ key: d.key, guest: d.guest })), ["502", "501", "503", "504"].map((id) => byId[id]));
+  // Planning et la journee de la cleaner : checkoutKeys sur les memes reservations.
+  const rows = RAW.map((r: any) => ({ id: r.id, listingId: String(r.listingMapId), checkOut: r.departureDate,
+    guest: r.guestName || ((r.guestFirstName || "") + " " + (r.guestLastName || "")).trim(), status: r.status }));
+  assertEquals(deps.map((d) => d.key), checkoutKeys(rows).slice(0, 4));
+});
+
+Deno.test("runAutopilot: collision, chaque logement lu et ecrit sous sa propre cle", async () => {
+  const db = seed();
+  // La reservation gardienne (501, plus ancienne) a deja Faiza sous la cle nue.
+  db.tables.cleaning_assignments.push({ reservation_key: DAY + "_Ann Lee", cleaner_id: 4 });
+  const out = await runAutopilot(db, DAY, async () => RAW.slice(0, 2));
+  assertEquals(out.checkouts, 2);
+  assertEquals(out.alreadyAssigned, 1);
+  assertEquals(out.newlyAssigned, 1);
+  assertEquals(db.tables.cleaning_assignments.map((a: any) => [a.reservation_key, a.cleaner_id]),
+    [[DAY + "_Ann Lee", 4], [DAY + "_Ann Lee~22", 10]]);
+  assertEquals(out.notified.map((n) => [n.cleaner, n.tasks]).sort(), [["Faiza", 1], ["Pionah", 1]]);
 });

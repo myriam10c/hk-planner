@@ -33,7 +33,7 @@ import {
 } from "./insp_write.ts";
 import { getSecurityContacts, setSecurityContacts } from "./security_contacts.ts";
 import { sessionActor } from "./actor.ts";
-import { assignConflict, checkoutKeys, mgrAccess, MGR_LOOKBACK_DAYS, MGR_PLANNING_ROLES, planningAccess, normalizeMgrReservations, splitListing, withBareKeys, type MgrReservation } from "./mgr_rules.ts";
+import { assignConflict, checkoutKeys, guestOfKey, mgrAccess, MGR_LOOKBACK_DAYS, MGR_PLANNING_ROLES, planningAccess, normalizeMgrReservations, splitListing, withBareKeys, type MgrReservation } from "./mgr_rules.ts";
 import { mgrToday } from "./mgr_api.ts";
 import { parseInboxQuery } from "./mgr_inbox.ts";
 import { mgrProblems } from "./mgr_problems.ts";
@@ -4017,7 +4017,8 @@ Deno.serve(async (req: Request) => {
       const rows = timerRows.map((t: any) => {
         const parts = t.reservation_key.split('_');
         const date = parts[0] || '';
-        const guest = parts.slice(1).join(' ') || '';
+        // Sans le suffixe « ~logement » d'une cle en collision (guestOfKey).
+        const guest = guestOfKey(t.reservation_key);
         return {
           checkout_date: date,
           guest_name: guest,

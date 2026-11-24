@@ -39,6 +39,13 @@ const heure = (v: unknown): number | null => {
   return Number.isFinite(n) && n > 0 && n < 24 ? Math.floor(n) : null;
 };
 
+// Texte voyageur d'une reservation Hostaway brute. Meme calcul que
+// buildCheckoutsPayload (index.ts) : la cle de menage en depend. Today
+// (normalizeMgrReservations) et l'autopilote (autopilot.ts) passent par ici.
+export function hostawayGuest(r: any): string {
+  return String(r?.guestName || ((r?.guestFirstName || "") + " " + (r?.guestLastName || "")).trim() || "");
+}
+
 export function normalizeMgrReservations(raw: any[]): MgrReservation[] {
   const seen = new Set<string>();
   const out: MgrReservation[] = [];
@@ -48,8 +55,7 @@ export function normalizeMgrReservations(raw: any[]): MgrReservation[] {
     const id = r?.id != null ? String(r.id) : listingId + "|" + r.arrivalDate + "|" + r.departureDate;
     if (seen.has(id)) continue;
     seen.add(id);
-    // Meme calcul que buildCheckoutsPayload (index.ts) : la cle de menage en depend.
-    const guest = String(r?.guestName || ((r?.guestFirstName || "") + " " + (r?.guestLastName || "")).trim() || "");
+    const guest = hostawayGuest(r);
     out.push({
       id, listingId, guest, arrival: String(r.arrivalDate), departure: String(r.departureDate),
       status: String(r.status ?? ""), checkInTime: heure(r.checkInTime), checkOutTime: heure(r.checkOutTime),
@@ -94,7 +100,10 @@ const plusAncienne = (a: KeyedStay, b: KeyedStay): boolean => {
 // Today, Planning et la journee de la cleaner passent tous par ici, sur des listes
 // prises AVANT tout filtre par logement ou par personne, statuts valides seulement :
 // chaque lecture voit alors toutes les reservations qui partent le jour d'une cle,
-// et rend la meme cle quel que soit l'ordre de sa liste.
+// et rend la meme cle quel que soit l'ordre de sa liste. Alignes depuis la seconde
+// lecture Fable (24/11) : l'API des agents (readonly-api, copie dans ro_rules.ts),
+// l'autopilote (autopilot.ts, autopilotDepartures) et l'export CSV des chronos
+// (index.ts, colonne voyageur par guestOfKey).
 // Limites :
 //   - l'ancienne app (app.js, keyFor) et le serveur Python du VPS (saisie d'Elite)
 //     ecrivent toujours sous la cle nue, donc sur le menage de la reservation la
@@ -146,6 +155,19 @@ export function withBareKeys(keys: string[]): Set<string> {
     if (i > 0) out.add(s.slice(0, i));
   }
   return out;
+}
+
+// Voyageur d'une cle de menage « date_voyageur » ou « date_voyageur~logement » :
+// tout ce qui suit le premier « _ » (un « _ » du nom reste tel quel), sans le
+// suffixe du logement, coupe au dernier « ~ » comme withBareKeys. Sert a la
+// colonne voyageur de l'export CSV des chronos (exportCleaningsCsv, index.ts).
+export function guestOfKey(key: string): string {
+  const s = String(key ?? "");
+  const i = s.indexOf("_");
+  if (i < 0) return "";
+  const rest = s.slice(i + 1);
+  const j = rest.lastIndexOf(KEY_LISTING_SEP);
+  return j > 0 ? rest.slice(0, j) : rest;
 }
 
 export function keyDate(key: string): string | null {

@@ -3,6 +3,7 @@
 // partage avec mgr.autopilot.run et teste sans Hostaway. Les liens wa.me sont
 // rendus, jamais ouverts ici : c'est le manager qui tape dessus.
 import { CLEANER_PUBLIC_SELECT } from "./auth.ts";
+import { checkoutKeys, hostawayGuest } from "./mgr_rules.ts";
 
 // ========== Date effective d'un ménage ==========
 // Une prestation reportée garde VOLONTAIREMENT sa reservation_key figée sur la date
@@ -43,6 +44,25 @@ export type AutopilotResult = {
   message?: string; assigned?: number;
 };
 
+const AUTOPILOT_STATUSES = ['new','modified','confirmed','ownerStay','reserved'];
+
+export type AutopilotDeparture = { key: string; listing: string; listingId: string; guest: string };
+
+// Departs valides du jour, chacun avec sa cle de menage. Memes cles que Today,
+// Planning et la journee de la cleaner (checkoutKeys, lot 1 tache 7), calculees
+// sur toute la liste du jour avant le filtre des statuts ; meme texte voyageur que
+// Today (hostawayGuest). Avant, la cle etait recomposee ici, sans le suffixe du
+// logement en cas de collision ni le « Guest » par defaut d'un voyageur sans nom.
+export function autopilotDepartures(raw: any[]): AutopilotDeparture[] {
+  const rows = (raw ?? []).map((r: any) => ({
+    id: r?.id, listingId: String(r?.listingMapId || r?.listingId || ''), checkOut: String(r?.departureDate ?? ''),
+    guest: hostawayGuest(r), status: String(r?.status ?? ''), listing: String(r?.listingName || ''),
+  }));
+  const keys = checkoutKeys(rows);
+  return rows.flatMap((x, i) => AUTOPILOT_STATUSES.includes(x.status)
+    ? [{ key: keys[i], listing: x.listing, listingId: x.listingId, guest: x.guest }] : []);
+}
+
 // loadDepartures(day) rend les reservations Hostaway brutes qui partent ce jour-la
 // (l'appel reseau et le jeton restent dans index.ts ; il leve en cas d'erreur API).
 export async function runAutopilot(
@@ -52,14 +72,9 @@ export async function runAutopilot(
   const { data: configData } = await sb.from("app_config").select("value").eq("key", "auto_send_cleaners").single();
   const autoSendEnabled = configData ? configData.value === 'true' : true;
 
-  // 2-3. Departs du jour Dubai passe par l'appelant
-  const validStatuses = ['new','modified','confirmed','ownerStay','reserved'];
-  const reservations = (await loadDepartures(day)).filter((r: any) => validStatuses.includes(r.status)).map((r: any) => ({
-    key: r.departureDate + '_' + (r.guestName || ((r.guestFirstName || '') + ' ' + (r.guestLastName || '')).trim()),
-    listing: r.listingName || '',
-    listingId: String(r.listingMapId || r.listingId || ''),
-    guest: r.guestName || ((r.guestFirstName || '') + ' ' + (r.guestLastName || '')).trim(),
-  }));
+  // 2-3. Departs du jour Dubai passe par l'appelant, sous leur cle finale : la
+  // lecture des affectations existantes et l'ecriture se font sur cette cle.
+  const reservations = autopilotDepartures(await loadDepartures(day));
 
   if (reservations.length === 0) {
     return {

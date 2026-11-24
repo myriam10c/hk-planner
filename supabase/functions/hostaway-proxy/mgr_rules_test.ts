@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   arrivalStatus, byRoleThenName, checkoutKeys, dubaiMs, eliteLogDeadlineMs, fmtDur, hhmm, joinNames, keyDate,
-  normalizeMgrReservations, plural, reservationKey, reservationKeys, splitListing, usuallyEliteListings,
+  guestOfKey, normalizeMgrReservations, plural, reservationKey, reservationKeys, splitListing, usuallyEliteListings,
   withBareKeys, type PrevCleaning,
 } from "./mgr_rules.ts";
 import { dateFromKey } from "./autopilot.ts";
@@ -100,6 +100,16 @@ Deno.test("cle suffixee : date lue partout, cles nues des reports", () => {
   assertEquals(dateDeLaCle("2026-10-09_Ann Lee~L2"), "2026-10-09");
   assertEquals([...withBareKeys(["2026-10-07_Jo La", "2026-10-07_Ann~L2", "extra_2026-10-01_x"])].sort(),
     ["2026-10-07_Ann", "2026-10-07_Ann~L2", "2026-10-07_Jo La", "extra_2026-10-01_x"]);
+});
+
+Deno.test("guestOfKey : voyageur d'une cle, sans le suffixe du logement (export CSV des chronos)", () => {
+  assertEquals(guestOfKey("2026-12-01_Ann Lee~621030"), "Ann Lee");
+  assertEquals(guestOfKey("2026-12-01_Ann Lee"), "Ann Lee");
+  // Un « _ » dans le nom du voyageur reste tel quel.
+  assertEquals(guestOfKey("2026-12-01_Ann_Lee"), "Ann_Lee");
+  assertEquals(guestOfKey("2026-12-01_Ann_Lee~L2"), "Ann_Lee");
+  assertEquals(guestOfKey("2026-12-01_Guest"), "Guest");
+  assertEquals(guestOfKey("nope"), "");
 });
 
 Deno.test("formats : heures, durees, noms, pluriels, heure Dubai", () => {

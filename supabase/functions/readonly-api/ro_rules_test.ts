@@ -1,5 +1,10 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { cleaningOut, cleaningRange, type CleaningCtx, isBad, keyOk, listParam, proposalOut, redact, scrub, sha256Hex, ticketOut, ticketStatuses } from "./ro_rules.ts";
+import {
+  checkoutKeys, cleaningOut, cleaningRange, cleaningRows, type CleaningCtx, isBad, keyedCheckouts, keyOk, listParam, pickCleaning,
+  proposalOut, redact, scrub, sha256Hex, ticketOut, ticketStatuses,
+} from "./ro_rules.ts";
+// Le test peut lire le proxy : la fonction, elle, reste autonome (voir ro_rules.ts).
+import { checkoutKeys as proxyCheckoutKeys } from "../hostaway-proxy/mgr_rules.ts";
 
 const qs = (s: string) => new URLSearchParams(s);
 
@@ -94,4 +99,65 @@ Deno.test("actorsFrom : ouvreur, fermeur, reouverture", async () => {
   ]);
   assertEquals(r.openedBy, { "5": "Ismaël" });
   assertEquals(r.closedBy, { "5": { by: "Walter", at: "2026-10-02" } });
+});
+
+// Lot 1, tache 7 (seconde lecture Fable, I1) : memes cles de menage que le proxy.
+// Meme voyageur dans deux logements le meme jour, plus une reservation simple.
+const D = "2026-12-01";
+const COLLISION = [
+  { id: 9001, guest: "Ann Lee", listingId: "621030", checkOut: D, checkOutTime: 11, status: "confirmed", nextGuest: null },
+  { id: 9000, guest: "Ann Lee", listingId: "621031", checkOut: D, checkOutTime: 10, status: "confirmed", nextGuest: null },
+  { id: 9002, guest: "Bo Ray", listingId: "621032", checkOut: D, checkOutTime: null, status: "confirmed", nextGuest: null },
+];
+
+Deno.test("checkoutKeys mirrors the proxy on a collision", () => {
+  assertEquals(checkoutKeys(COLLISION), proxyCheckoutKeys(COLLISION));
+  assertEquals(checkoutKeys(COLLISION), [D + "_Ann Lee~621030", D + "_Ann Lee", D + "_Bo Ray"]);
+  // Autres cas du proxy : statut non valide, logement absent, guest vide, meme logement en double, ordre.
+  const cases: any[][] = [
+    [{ id: 8, listingId: "L9", checkOut: D, guest: "Ann", status: "cancelled" }, { id: 9, listingId: "L2", checkOut: D, guest: "Ann", status: "confirmed" },
+      { id: 10, listingId: "L1", checkOut: D, guest: "Ann", status: "ownerStay" }],
+    [{ id: 1, listingId: "", checkOut: D, guest: "Ann" }, { id: 5, listingId: "L1", checkOut: D, guest: "Ann" }, { id: 6, listingId: "L2", checkOut: D, guest: "Ann" }],
+    [{ id: 101, listingId: "L2", checkOut: D, guest: null }, { id: 100, listingId: "L1", checkOut: D, guest: "" }],
+    [{ id: 8, listingId: "L1", checkOut: D, guest: "Ann" }, { id: 3, listingId: "L1", checkOut: D, guest: "Ann" }, { id: 5, listingId: "L2", checkOut: D, guest: "Ann" }],
+    [{ id: null, listingId: "L1", checkOut: D, guest: "Ann" }, { id: "12", listingId: "L2", checkOut: D, guest: "Ann" }],
+    [...COLLISION].reverse(),
+    [],
+  ];
+  for (const rows of cases) assertEquals(checkoutKeys(rows), proxyCheckoutKeys(rows), JSON.stringify(rows));
+});
+
+Deno.test("cleanings: en collision, deux menages publies, chacun lu et ecrit sous sa cle finale", () => {
+  const raw = [
+    ...COLLISION,
+    // Meme logement, meme voyageur, meme jour : un seul menage.
+    { id: 9003, guest: "Bo Ray", listingId: "621032", checkOut: D, checkOutTime: null, status: "confirmed", nextGuest: null },
+    // Annulee et plus ancienne : ni publiee ni gardienne de la cle nue.
+    { id: 8999, guest: "Ann Lee", listingId: "621033", checkOut: D, checkOutTime: null, status: "cancelled", nextGuest: null },
+  ];
+  const deps = keyedCheckouts(raw);
+  assertEquals(deps.map((d) => [d.r.id, d.key]), [
+    [9001, D + "_Ann Lee~621030"], [9000, D + "_Ann Lee"], [9002, D + "_Bo Ray"], [9003, D + "_Bo Ray"],
+  ]);
+  const c: CleaningCtx = {
+    from: D, to: D, place: {}, people: { "4": "Faiza", "10": "Pionah" }, post: {}, done: new Set([D + "_Ann Lee~621030"]), canc: {}, timer: {},
+    asg: { [D + "_Ann Lee"]: [{ id: 4, st: "CHC" }], [D + "_Ann Lee~621030"]: [{ id: 10, st: "CHC" }] },
+  };
+  const rows = cleaningRows(deps, [], c);
+  assertEquals(rows.map((j) => [j.id, j._key, j.listingId]), [
+    ["9001", D + "_Ann Lee~621030", "621030"], ["9000", D + "_Ann Lee", "621031"], ["9002", D + "_Bo Ray", "621032"],
+  ]);
+  // Etat lu sous la cle finale de chaque logement.
+  assertEquals(pickCleaning(rows, "9001")!.assigned, [{ id: 10, name: "Pionah" }]);
+  assertEquals(pickCleaning(rows, "9001")!.status, "done");
+  assertEquals(pickCleaning(rows, "9000")!.assigned, [{ id: 4, name: "Faiza" }]);
+  assertEquals(pickCleaning(rows, "9000")!.status, "not_started");
+  // Les ecritures partent de _key : chaque menage retrouve par son id porte sa cle finale.
+  assertEquals(pickCleaning(rows, "9001")!._key, D + "_Ann Lee~621030");
+  assertEquals(pickCleaning(rows, "9000")!._key, D + "_Ann Lee");
+  // La cle nue ne designe que la reservation gardienne (la plus ancienne).
+  assertEquals(rows.filter((j) => j._key === D + "_Ann Lee").map((j) => j.id), ["9000"]);
+  assertEquals(pickCleaning(rows, "8999"), null);
+  // Rien ne sort qui porte le nom du voyageur, hors _key retiree avant la sortie.
+  assert(!JSON.stringify(rows.map(({ _key, _orig, ...row }) => row)).includes("Ann"));
 });

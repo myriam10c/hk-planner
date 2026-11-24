@@ -13,9 +13,50 @@ export function plusDays(date: string, n: number): string {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
-// = mgr_rules.ts reservationKey (miroir de keyFor() dans app.js)
+// = mgr_rules.ts reservationKey (miroir de keyFor() dans app.js). Cle NUE : la cle
+// d'un menage se calcule avec checkoutKeys.
 export function reservationKey(r: { departure: string; guest: string }): string {
   return r.departure + "_" + (r.guest || "Guest");
+}
+// = insp_rules.ts INSP_VALID_STATUSES (statuts de reservation qui donnent un menage)
+export const RO_VALID_RES = ["new", "modified", "confirmed", "ownerStay", "reserved"];
+// = mgr_rules.ts KEY_LISTING_SEP
+export const KEY_LISTING_SEP = "~";
+type KeyedStay = { id?: unknown; listingId: string; departure: string; guest: string };
+// = mgr_rules.ts anciennete, plusAncienne
+const anciennete = (id: unknown): number => {
+  const n = Number(id);
+  return id === null || id === undefined || id === "" || !Number.isFinite(n) ? Infinity : n;
+};
+const plusAncienne = (a: KeyedStay, b: KeyedStay): boolean => {
+  const ra = anciennete(a.id), rb = anciennete(b.id);
+  return ra !== rb ? ra < rb : a.listingId <= b.listingId;
+};
+// = mgr_rules.ts reservationKeys (lot 1, tache 7 ; regle et limites decrites la-bas).
+// Quand des reservations de logements differents partagent la cle nue, la plus
+// ancienne (identifiant Hostaway le plus petit, puis le logement) la garde ; chaque
+// autre logement recoit « cleNue~listingId ». Sans collision, la cle d'avant.
+export function reservationKeys(list: KeyedStay[]): string[] {
+  const out = (list ?? []).map(reservationKey);
+  const groupes = new Map<string, number[]>();
+  out.forEach((k, i) => { if (list[i].listingId) (groupes.get(k) ?? groupes.set(k, []).get(k)!).push(i); });
+  for (const [nue, idx] of groupes) {
+    const aine = idx.reduce((a, b) => (plusAncienne(list[a], list[b]) ? a : b));
+    for (const i of idx) {
+      if (list[i].listingId !== list[aine].listingId) out[i] = nue + KEY_LISTING_SEP + list[i].listingId;
+    }
+  }
+  return out;
+}
+// = mgr_rules.ts checkoutKeys : meme regle sur les lignes du payload checkouts du
+// proxy, celui que lisent Planning, la journee de la cleaner et cette API.
+export function checkoutKeys(
+  rows: Array<{ id?: unknown; listingId?: unknown; checkOut?: unknown; guest?: unknown; status?: unknown }>,
+): string[] {
+  return reservationKeys((rows ?? []).map((r) => ({
+    id: r?.id, departure: String(r?.checkOut ?? ""), guest: String(r?.guest ?? ""),
+    listingId: r?.status === undefined || RO_VALID_RES.includes(String(r.status)) ? String(r?.listingId ?? "") : "",
+  })));
 }
 // = mgr_rules.ts hhmm
 function hhmm(h: number | null): string | null {
@@ -240,6 +281,50 @@ export function cleaningOut(
     durationMinutes: tm?.duration_minutes ?? null,
     cancelReason: cancelled ? redact(c.canc[key]) : null,
   };
+}
+
+// Departs du payload checkouts avec leur cle de menage (seconde lecture Fable, I1).
+// Cles calculees sur le payload entier, avant tout filtre, comme mgr.planning qui
+// lit le meme payload : en collision, chaque logement a sa cle finale, et la cle
+// nue reste a la reservation la plus ancienne. Puis departs valides seulement.
+export function keyedCheckouts(raw: CheckoutIn[]): Array<{ r: CheckoutIn; key: string }> {
+  const list = raw ?? [];
+  const keys = checkoutKeys(list);
+  return list.map((r, i) => ({ r, key: keys[i] }))
+    .filter(({ r }) => r && r.listingId && r.checkOut && RO_VALID_RES.includes(String(r.status ?? "")));
+}
+
+// Menages de la plage, un par cle finale (deux reservations du meme logement et du
+// meme voyageur le meme jour restent un menage), chacun avec sa cle interne (_key,
+// nom du guest compris) et sa date d'origine (_orig) : utiles aux ecritures,
+// retires avant toute sortie.
+export function cleaningRows(
+  deps: Array<{ r: CheckoutIn; key: string }>,
+  extras: Array<{ id?: unknown; reservation_key?: unknown; listing_id?: unknown; cleaning_date?: unknown; label?: string | null }>,
+  c: CleaningCtx,
+): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  const push = (key: string, base: string, row: any) => {
+    if (row && !seen.has(key)) { seen.add(key); out.push({ ...row, _key: key, _orig: c.post[key]?.from ?? base }); }
+  };
+  for (const { r, key } of deps) {
+    const ng = r.nextGuest?.date ? { date: String(r.nextGuest.date), hour: hourOrNull(r.nextGuest.checkInTime) } : null;
+    push(key, String(r.checkOut),
+      cleaningOut(key, "checkout", String(r.id ?? key.slice(0, 10)), String(r.listingId), String(r.checkOut), hourOrNull(r.checkOutTime), ng, null, c));
+  }
+  for (const e of extras) {
+    const k = String(e.reservation_key);
+    push(k, String(e.cleaning_date),
+      cleaningOut(k, "extra", "extra-" + e.id, String(e.listing_id ?? ""), String(e.cleaning_date), null, null, e.label ?? "Extra cleaning", c));
+  }
+  return out;
+}
+
+// Le menage que designe un id publie par GET /cleanings : ses ecritures partent
+// de sa cle finale (_key), jamais d'une cle nue recomposee.
+export function pickCleaning(rows: any[], id: string): any | null {
+  return rows.find((j) => j.id === id) ?? null;
 }
 
 // Proposition : citations des guests en texte masque, jamais leur nom.

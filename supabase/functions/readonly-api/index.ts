@@ -9,15 +9,14 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
-  scrub, cleaningOut, cleaningRange, type CheckoutIn, type CleaningCtx, dateParam, hourOrNull, intParam, isBad, keyOk,
-  listingOut, listParam, placeMap, plusDays, RO_CATEGORIES, RO_CLEANING_STATUSES, RO_LIMIT_DEFAULT, RO_LIMIT_MAX,
-  actorsFrom, eventOut, proposalOut, RO_TICKET_EVENTS, reservationKey, RO_OPEN, RO_TECH_ROLES, TICKET_COLS, ticketOut, ticketStatuses,
+  scrub, cleaningRange, cleaningRows, type CheckoutIn, type CleaningCtx, dateParam, intParam, isBad, keyedCheckouts, keyOk,
+  listingOut, listParam, pickCleaning, placeMap, plusDays, RO_CATEGORIES, RO_CLEANING_STATUSES, RO_LIMIT_DEFAULT, RO_LIMIT_MAX,
+  actorsFrom, eventOut, proposalOut, RO_TICKET_EVENTS, RO_OPEN, RO_TECH_ROLES, TICKET_COLS, ticketOut, ticketStatuses,
 } from "./ro_rules.ts";
 
 const KEY_SHA = Deno.env.get("READONLY_API_KEY_SHA256") ?? "";
 const SB_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const APP_SECRET = Deno.env.get("APP_SHARED_SECRET") ?? "";
-const VALID_RES = ["new", "modified", "confirmed", "ownerStay", "reserved"];
 const PAGE = 1000;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -208,10 +207,12 @@ async function loadCheckouts(from: string, to: string): Promise<CheckoutIn[]> {
 class Unavailable extends Error {}
 // Menages de la plage, chacun avec sa cle interne (_key, nom du guest compris)
 // et sa date d'origine (_orig) : utiles aux ecritures, retires avant toute sortie.
+// Cles de menage (keyedCheckouts) : celles de Today, Planning et de la journee de
+// la cleaner, calculees sur le payload entier avant tout filtre.
 async function buildCleanings(from: string, to: string): Promise<any[]> {
-  let res: CheckoutIn[];
+  let res: Array<{ r: CheckoutIn; key: string }>;
   try {
-    res = (await loadCheckouts(from, to)).filter((r) => r && r.listingId && r.checkOut && VALID_RES.includes(String(r.status ?? "")));
+    res = keyedCheckouts(await loadCheckouts(from, to));
   } catch (e) {
     console.error("[readonly-api] checkouts failed:", e);
     throw new Unavailable();
@@ -226,8 +227,7 @@ async function buildCleanings(from: string, to: string): Promise<any[]> {
   const extras = [...extrasWin, ...(missing.length ? await byKeys("extra_cleanings", EXTRA, missing) : [])]
     .filter((e: any) => e.reservation_key && e.status !== "cancelled");
 
-  const keyOf = (r: CheckoutIn) => reservationKey({ departure: String(r.checkOut), guest: String(r.guest ?? "") });
-  const keys = [...new Set([...res.map(keyOf), ...extras.map((e: any) => String(e.reservation_key))])];
+  const keys = [...new Set([...res.map((x) => x.key), ...extras.map((e: any) => String(e.reservation_key))])];
   const [post, asg, done, timers, canc, lst, people] = await Promise.all([
     byKeys("cleaning_postponed", "reservation_key, original_date, new_date", keys),
     byKeys("cleaning_assignments", "reservation_key, cleaner_id, service_type", keys),
@@ -242,24 +242,7 @@ async function buildCleanings(from: string, to: string): Promise<any[]> {
   for (const d of done) if (d.done === true) c.done.add(String(d.reservation_key));
   for (const t of timers) c.timer[String(t.reservation_key)] = t;
   for (const x of canc) c.canc[String(x.reservation_key)] = String(x.reason ?? "");
-
-  const seen = new Set<string>();
-  const out: any[] = [];
-  const push = (key: string, base: string, row: any) => {
-    if (row && !seen.has(key)) { seen.add(key); out.push({ ...row, _key: key, _orig: c.post[key]?.from ?? base }); }
-  };
-  for (const r of res) {
-    const k = keyOf(r);
-    const ng = r.nextGuest?.date ? { date: String(r.nextGuest.date), hour: hourOrNull(r.nextGuest.checkInTime) } : null;
-    push(k, String(r.checkOut),
-      cleaningOut(k, "checkout", String(r.id ?? k.slice(0, 10)), String(r.listingId), String(r.checkOut), hourOrNull(r.checkOutTime), ng, null, c));
-  }
-  for (const e of extras) {
-    const k = String(e.reservation_key);
-    push(k, String(e.cleaning_date),
-      cleaningOut(k, "extra", "extra-" + e.id, String(e.listing_id ?? ""), String(e.cleaning_date), null, null, e.label ?? "Extra cleaning", c));
-  }
-  return out;
+  return cleaningRows(res, extras, c);
 }
 const publicRow = ({ _key, _orig, ...row }: any) => row;
 
@@ -309,12 +292,13 @@ async function readBody(req: Request): Promise<Body | Response> {
 }
 
 // Retrouve la cle interne d'un menage a partir de ce que l'API publie : son id
-// et sa date (celle rendue par GET /cleanings).
+// et sa date (celle rendue par GET /cleanings). Toutes les ecritures partent de
+// cette cle finale (_key), suffixee en cas de collision.
 async function findCleaning(b: Body): Promise<any | Response> {
   const id = String(b.id ?? "").trim();
   const date = String(b.date ?? "");
   if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ error: "id and date (YYYY-MM-DD, as returned by GET /cleanings) required" }, 400);
-  const job = (await buildCleanings(date, date)).find((j) => j.id === id);
+  const job = pickCleaning(await buildCleanings(date, date), id);
   return job ?? json({ error: "No cleaning " + id + " on " + date + "." }, 404);
 }
 
