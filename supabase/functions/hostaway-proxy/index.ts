@@ -1,7 +1,14 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
-import { APP_URL, assignmentPushPayload, getApplicationServerKey, sendPush, taskPushPayload } from "./push.ts";
+import {
+  APP_URL,
+  assignmentPushPayload,
+  getApplicationServerKey,
+  sendAssignmentPushesAfterUndoWindow,
+  sendPush,
+  taskPushPayload,
+} from "./push.ts";
 import {
   applyInvite, applyLinkEmail, bearerToken, CLEANER_PUBLIC_SELECT, currentUser, currentUserDetailed,
   deleteCleanerAuthAccount, findCleanerByEmail, normalizeEmail, parseInviteInput,
@@ -2738,23 +2745,22 @@ Deno.serve(async (req: Request) => {
       } else {
         return jsonResp({ error: "unknown mode: " + op }, 400);
       }
-      // Push aux nouveaux affectés. Aucune priorité passée : une affectation de
-      // ménage n'est jamais `urgent`, elle respecte donc les heures de silence
-      // (22:00 à 08:30 Dubai). sendPush ne lève jamais, mais on double la garde :
-      // une notification ratée ne doit pas annuler une affectation déjà écrite.
-      // Hors du chemin de réponse (keepAlive) : l'affectation est déjà écrite,
-      // l'écran n'a pas à attendre les appels au push service.
-      keepAlive((async () => {
-        for (const cid of pushTargets) {
-          try {
-            await sendPush(sb, cid, assignmentPushPayload(String(reservation_key), stype), {
-              dedupeKey: "cleaning-assignment:" + String(reservation_key) + ":" + String(cid),
-            });
-          } catch (e) {
-            console.warn("[assignCleaner] push failed for cleaner " + String(cid) + ":", e);
-          }
-        }
-      })());
+      // Push aux nouveaux affectés, envoyé après la fenêtre d'Undo du manager
+      // (ASSIGN_PUSH_DELAY_MS, 8 s) : une affectation annulée à temps ne prévient
+      // personne. La tâche relit alors cleaning_assignments du ménage et n'envoie
+      // qu'aux cibles encore affectées ; relecture en échec = envoi quand même.
+      // Aucune priorité passée : une affectation de ménage n'est jamais `urgent`,
+      // elle respecte donc les heures de silence (22:00 à 08:30 Dubai). La tâche ne
+      // lève jamais : une notification ratée n'annule pas une affectation écrite.
+      // Hors du chemin de réponse (keepAlive) : l'écran n'attend ni le délai ni le
+      // push service.
+      keepAlive(sendAssignmentPushesAfterUndoWindow(pushTargets, {
+        read: async () => await sb.from("cleaning_assignments")
+          .select("cleaner_id").eq("reservation_key", reservation_key),
+        send: (cid) => sendPush(sb, cid, assignmentPushPayload(String(reservation_key), stype), {
+          dedupeKey: "cleaning-assignment:" + String(reservation_key) + ":" + String(cid),
+        }),
+      }));
       return jsonResp({ status: "success" });
     }
     if (action === "autoAssign" && req.method === "POST") {

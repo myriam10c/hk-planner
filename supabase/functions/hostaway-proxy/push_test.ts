@@ -1,12 +1,15 @@
-import { assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 import {
+  ASSIGN_PUSH_DELAY_MS,
   assignmentPushPayload,
   getApplicationServerKey,
   isDuplicatePush,
   isQuietHoursDubai,
   pushPruneReason,
+  sendAssignmentPushesAfterUndoWindow,
   sendPush,
+  stillAssignedTargets,
   taskPushPayload,
 } from "./push.ts";
 
@@ -421,4 +424,160 @@ Deno.test("sendPush quietHandled ignore la fenetre fixe et transporte les champs
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+// Notification d'affectation retardee (24/11) : assignCleaner attend la fin de la
+// fenetre d'Undo du manager, relit cleaning_assignments, puis ne notifie que les
+// cibles encore affectees.
+Deno.test("ASSIGN_PUSH_DELAY_MS vaut 8 s (toast Undo de 6 s + marge)", () => {
+  assertEquals(ASSIGN_PUSH_DELAY_MS, 8000);
+});
+
+Deno.test("stillAssignedTargets garde les cibles encore affectees, dans l'ordre, sans doublon", () => {
+  assertEquals(stillAssignedTargets([5, 7], [{ cleaner_id: 7 }]), [7]);
+  assertEquals(stillAssignedTargets([5], []), []);
+  assertEquals(stillAssignedTargets([5, 5], [{ cleaner_id: "5" }]), [5]);
+  assertEquals(stillAssignedTargets([7, 5], [{ cleaner_id: 5 }, { cleaner_id: 7 }]), [7, 5]);
+});
+
+Deno.test("stillAssignedTargets rend toutes les cibles si la relecture a echoue", () => {
+  assertEquals(stillAssignedTargets([5, 7], null), [5, 7]);
+});
+
+// Faux branchements de la tache de fond : `events` journalise l'ordre attente,
+// relecture, envois. `readResult` est la reponse de la relecture (forme supabase-js),
+// ou une fonction qui leve.
+function fakeAssignDeps(readResult: any) {
+  const events: string[] = [];
+  return {
+    events,
+    deps: {
+      wait: async (ms: number) => { events.push("wait:" + String(ms)); },
+      read: async () => {
+        events.push("read");
+        if (typeof readResult === "function") return readResult();
+        return readResult;
+      },
+      send: async (cid: number) => { events.push("send:" + String(cid)); },
+    },
+  };
+}
+
+function captureConsole(method: "warn" | "log"): { lines: string[]; restore: () => void } {
+  const lines: string[] = [];
+  const real = console[method];
+  console[method] = (...args: any[]) => { lines.push(args.map(String).join(" ")); };
+  return { lines, restore: () => { console[method] = real; } };
+}
+
+Deno.test("affectation retardee : aucune cible, ni attente ni relecture ni envoi", async () => {
+  const f = fakeAssignDeps({ data: [], error: null });
+  const r = await sendAssignmentPushesAfterUndoWindow([], f.deps);
+  assertEquals(r, []);
+  assertEquals(f.events, []);
+});
+
+Deno.test("affectation retardee : annulee pendant le delai (relecture vide), aucun envoi", async () => {
+  const f = fakeAssignDeps({ data: [], error: null });
+  const log = captureConsole("log");
+  try {
+    const r = await sendAssignmentPushesAfterUndoWindow([5], f.deps);
+    assertEquals(r, []);
+    assertEquals(f.events, ["wait:8000", "read"]);
+  } finally {
+    log.restore();
+  }
+});
+
+Deno.test("affectation retardee : toujours affectee, un envoi apres l'attente et la relecture", async () => {
+  const f = fakeAssignDeps({ data: [{ cleaner_id: 5 }], error: null });
+  const r = await sendAssignmentPushesAfterUndoWindow([5], f.deps);
+  assertEquals(r, [5]);
+  assertEquals(f.events, ["wait:8000", "read", "send:5"]);
+});
+
+Deno.test("affectation retardee : remplacement annule en partie, seule la cible restante est notifiee", async () => {
+  const f = fakeAssignDeps({ data: [{ cleaner_id: "7" }, { cleaner_id: 9 }], error: null });
+  const log = captureConsole("log");
+  try {
+    const r = await sendAssignmentPushesAfterUndoWindow([5, 7], f.deps);
+    assertEquals(r, [7]);
+    assertEquals(f.events, ["wait:8000", "read", "send:7"]);
+  } finally {
+    log.restore();
+  }
+});
+
+Deno.test("affectation retardee : relecture en erreur, la notification part et l'echec est journalise", async () => {
+  const f = fakeAssignDeps({ data: null, error: { message: "db down" } });
+  const warn = captureConsole("warn");
+  try {
+    const r = await sendAssignmentPushesAfterUndoWindow([5, 7], f.deps);
+    assertEquals(r, [5, 7]);
+    assertEquals(f.events, ["wait:8000", "read", "send:5", "send:7"]);
+    assertEquals(warn.lines.length, 1);
+    assert(warn.lines[0].includes("re-read failed"), warn.lines[0]);
+  } finally {
+    warn.restore();
+  }
+});
+
+Deno.test("affectation retardee : relecture qui leve, la notification part et l'echec est journalise", async () => {
+  const f = fakeAssignDeps(() => { throw new Error("network"); });
+  const warn = captureConsole("warn");
+  try {
+    const r = await sendAssignmentPushesAfterUndoWindow([5], f.deps);
+    assertEquals(r, [5]);
+    assertEquals(f.events, ["wait:8000", "read", "send:5"]);
+    assertEquals(warn.lines.length, 1);
+    assert(warn.lines[0].includes("re-read failed"), warn.lines[0]);
+  } finally {
+    warn.restore();
+  }
+});
+
+Deno.test("affectation retardee : un envoi qui leve n'empeche pas les suivants", async () => {
+  const f = fakeAssignDeps({ data: [{ cleaner_id: 5 }, { cleaner_id: 7 }], error: null });
+  const send = f.deps.send;
+  f.deps.send = async (cid: number) => {
+    await send(cid);
+    if (cid === 5) throw new Error("push service down");
+  };
+  const warn = captureConsole("warn");
+  try {
+    const r = await sendAssignmentPushesAfterUndoWindow([5, 7], f.deps);
+    assertEquals(r, [5, 7]);
+    assertEquals(f.events, ["wait:8000", "read", "send:5", "send:7"]);
+    assertEquals(warn.lines.length, 1);
+    assert(warn.lines[0].includes("push failed for cleaner 5"), warn.lines[0]);
+  } finally {
+    warn.restore();
+  }
+});
+
+// index.ts n'est pas importable en test (Deno.serve au chargement) : le branchement
+// de la tache de fond d'assignCleaner est verifie sur la source.
+Deno.test("assignCleaner (source) : push retarde dans keepAlive, relecture par cle, envoi inchange", async () => {
+  const src = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  const debut = src.indexOf('if (action === "assignCleaner"');
+  assert(debut >= 0, "handler assignCleaner absent");
+  const b = src.slice(debut, src.indexOf("if (action ===", debut + 10));
+  // Hors du chemin de reponse : la reponse n'attend pas le delai.
+  const appel = b.indexOf("keepAlive(sendAssignmentPushesAfterUndoWindow(pushTargets, {");
+  assert(appel >= 0, "tache de fond retardee absente de keepAlive");
+  const reponse = b.indexOf('return jsonResp({ status: "success" });', appel);
+  assert(reponse > appel, "la reponse suit le lancement de la tache de fond");
+  const bloc = b.slice(appel, reponse);
+  // Relecture de cleaning_assignments pour la meme cle de reservation.
+  const lecture = bloc.indexOf('sb.from("cleaning_assignments")');
+  assert(lecture >= 0, "relecture absente");
+  assert(bloc.indexOf('.select("cleaner_id").eq("reservation_key", reservation_key)', lecture) > lecture,
+    "relecture par reservation_key");
+  // Envoi inchange : meme contenu, meme cle de dedupe, aucune priorite (heures de silence).
+  assert(bloc.includes("sendPush(sb, cid, assignmentPushPayload(String(reservation_key), stype), {"), "envoi absent");
+  assert(bloc.includes('dedupeKey: "cleaning-assignment:" + String(reservation_key) + ":" + String(cid),'),
+    "cle de dedupe changee");
+  assert(!bloc.includes("priority"), "aucune priorite sur une affectation");
+  // Aucun envoi direct ailleurs dans le handler.
+  assertEquals(b.split("sendPush(").length - 1, 1, "un seul appel a sendPush, dans la tache retardee");
 });

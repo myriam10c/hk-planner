@@ -69,6 +69,67 @@ export function assignmentPushPayload(
   };
 }
 
+// Délai de la notification d'affectation (assignCleaner) : le toast Undo du manager
+// reste 6 s à l'écran (manager/ui/dom.js), la requête d'Undo doit encore arriver au
+// serveur. Une affectation annulée pendant ce délai ne notifie personne.
+export const ASSIGN_PUSH_DELAY_MS = 8000;
+
+// Cibles (dans leur ordre, sans doublon) encore présentes dans les lignes relues de
+// cleaning_assignments. rows === null = relecture en échec : toutes les cibles, mieux
+// vaut prévenir à tort que pas du tout.
+export function stillAssignedTargets(
+  targets: number[],
+  rows: Array<{ cleaner_id: unknown }> | null,
+): number[] {
+  const unique = [...new Set(targets.map(Number))];
+  if (rows === null) return unique;
+  const present = new Set(rows.map((r) => Number(r?.cleaner_id)));
+  return unique.filter((id) => present.has(id));
+}
+
+// Tâche de fond d'assignCleaner (lancée dans keepAlive, la réponse n'attend pas) :
+// attend la fenêtre d'Undo, relit les affectés du ménage, puis n'envoie qu'aux
+// cibles encore affectées. Les branchements sont injectés pour rester testable :
+// `read` relit cleaning_assignments (forme supabase-js { data, error }), `send`
+// envoie un push, `wait` est une couture de test (la prod ne le passe jamais).
+// NE LEVE JAMAIS : relecture ou envoi en échec sont journalisés.
+export async function sendAssignmentPushesAfterUndoWindow(
+  targets: number[],
+  deps: {
+    read: () => Promise<{ data: Array<{ cleaner_id: unknown }> | null; error: unknown }>;
+    send: (cleanerId: number) => Promise<unknown>;
+    wait?: (ms: number) => Promise<void>;
+  },
+): Promise<number[]> {
+  if (targets.length === 0) return [];
+  const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  await wait(ASSIGN_PUSH_DELAY_MS);
+  let rows: Array<{ cleaner_id: unknown }> | null = null;
+  try {
+    const { data, error } = await deps.read();
+    if (error || !Array.isArray(data)) {
+      console.warn("[assignCleaner] assignment re-read failed, notifying anyway:", error ?? "no data");
+    } else {
+      rows = data;
+    }
+  } catch (e) {
+    console.warn("[assignCleaner] assignment re-read failed, notifying anyway:", e);
+  }
+  const still = stillAssignedTargets(targets, rows);
+  const undone = stillAssignedTargets(targets, null).filter((id) => !still.includes(id));
+  if (undone.length) {
+    console.log("[assignCleaner] push skipped, no longer assigned: " + undone.join(", "));
+  }
+  for (const cid of still) {
+    try {
+      await deps.send(cid);
+    } catch (e) {
+      console.warn("[assignCleaner] push failed for cleaner " + String(cid) + ":", e);
+    }
+  }
+  return still;
+}
+
 // Heures de silence Dubai : 22:00 inclus à 08:30 exclu (ruling Q3).
 // Seules les priorités `urgent` traversent cette fenêtre.
 export function isQuietHoursDubai(nowMs: number): boolean {
